@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+.surname-bg {
+  bottom: {{SURNAME_BOTTOM}}px;
+  left: {{SURNAME_LEFT}}px;
+  right: {{SURNAME_RIGHT}}px;
+  font-size: {{SURNAME_FONT_SIZE}}px;
+}
+.athlete-wrap { bottom: 86px; right: -30px; width: {{ATHLETE_W}}px; height: {{ATHLETE_H}}px; }
+.fg-text { bottom: 250px; }
+.fg-firstname { font-size: {{FIRSTNAME_FONT_SIZE}}px; }
+.fg-event { font-size: {{EVENT_FONT_SIZE}}px; }
+.label-ribbon { font-size: {{RIBBON_FONT_SIZE}}px; }
+.result-chip .value { font-size: {{RESULT_FONT_SIZE}}px; }
+.brand-corner { bottom: 130px; left: 56px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vignette"></div>
+
+  {{PHOTO_ONLY_OPEN}}
+  <div class="surname-bg outlined">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  <div class="athlete-wrap">{{ATHLETE_IMG_BLOCK}}</div>
+  {{PHOTO_ONLY_CLOSE}}
+
+  {{TEXT_LED_FILL_BLOCK}}
+
+  <div class="label-ribbon">{{ACHIEVEMENT_LABEL}}</div>
+  {{RESULT_CHIP_BLOCK}}
+
+  <div class="fg-text">
+    <div class="fg-firstname">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="fg-event">{{EVENT_NAME}}</div>
+  </div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  <div class="sponsor-strip">
+    <div>
+      <div class="label">Performance supported by</div>
+      <div class="name">{{SPONSOR_NAME}}</div>
+    </div>
+    <div class="name" style="opacity:0.4">{{MEET_NAME_SHORT}}</div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,96 @@
+{% extends "_layout_v3.html" %}
+{% set active_stage = 'output' %}
+{% block title %}Output · {{ run.meet_name }}{% endblock %}
+
+{% block content %}
+<section class="dhead">
+  <div>
+    <span class="kicker">Stage 4 of 4 · Output</span>
+    <h1>Copy-ready captions</h1>
+    <p class="lede">{{ run.meet_name }} · {{ run.club_display }}</p>
+  </div>
+  <div class="dhead-actions">
+    <a class="btn" href="{{ url_for('dashboard_v3', run_id=run_id) }}">← Dashboard</a>
+    <a class="btn" href="{{ url_for('output_download', run_id=run_id, fmt='txt') }}">Download .txt</a>
+    <a class="btn" href="{{ url_for('output_download', run_id=run_id, fmt='json') }}">Download .json</a>
+    <a class="btn primary" href="{{ url_for('output_download', run_id=run_id, fmt='zip') }}">Download zip</a>
+  </div>
+</section>
+
+<section class="osummary">
+  <div class="vstats">
+    <div class="vcard">
+      <h3>Ready to post</h3>
+      <p class="big-number">{{ pack.ready_to_post|length }}</p>
+      <p class="muted">includes everything in the queue plus anything you approved</p>
+    </div>
+    <div class="vcard">
+      <h3>Needs confirmation</h3>
+      <p class="big-number">{{ pack.needs_confirmation|length }}</p>
+      <p class="muted">notable but lacks pre-meet evidence</p>
+    </div>
+    <div class="vcard">
+      <h3>Recap mentions</h3>
+      <p class="big-number">{{ pack.recap|length }}</p>
+      <p class="muted">good for end-of-meet roundups, not standalone posts</p>
+    </div>
+    <div class="vcard">
+      <h3>Archive</h3>
+      <p class="big-number">{{ pack.archive|length }}</p>
+      <p class="muted">filtered out by ranker or rejected by you</p>
+    </div>
+  </div>
+</section>
+
+{% macro render_section(label, items) %}
+  {% if items %}
+  <section class="osection">
+    <h2>{{ label }} ({{ items|length }})</h2>
+    <div class="card-grid">
+      {% for c in items %}
+        <article class="ocard">
+          <header>
+            <span class="badge type">{{ c.card_type|card_type_label }}</span>
+            <h3>{{ c.headline }}</h3>
+            {% if c.subhead %}<p class="muted">{{ c.subhead }}</p>{% endif %}
+          </header>
+
+          <div class="ocaption-block">
+            <h4>Caption</h4>
+            <pre class="ocaption-text">{{ c.user_caption or c.captions.team or c.captions.clean }}</pre>
+            {% if not c.user_caption %}
+            <details class="alt-voices">
+              <summary>Other voices</summary>
+              {% if c.captions.clean %}<p><strong>Clean:</strong> {{ c.captions.clean }}</p>{% endif %}
+              {% if c.captions.hype %}<p><strong>Hype:</strong> {{ c.captions.hype }}</p>{% endif %}
+            </details>
+            {% endif %}
+          </div>
+
+          {% if c.evidence %}
+          <details class="ocard-evidence">
+            <summary>Evidence ({{ c.evidence|length }})</summary>
+            <ul>
+              {% for e in c.evidence %}
+                <li>
+                  <strong>{{ e.source }}</strong>
+                  {% if e.source_url %} · <a href="{{ e.source_url }}" target="_blank" rel="noopener">link</a>{% endif %}
+                  {% if e.retrieved_at %} · <span class="muted">checked {{ e.retrieved_at[:10] }}</span>{% endif %}
+                  <div class="muted">{{ e.claim }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+          </details>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+{% endmacro %}
+
+{{ render_section("Ready to post", pack.ready_to_post) }}
+{{ render_section("Needs confirmation", pack.needs_confirmation) }}
+{{ render_section("Recap mentions", pack.recap) }}
+
+{% endblock %}

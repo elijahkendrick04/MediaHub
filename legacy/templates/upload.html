@@ -1,0 +1,31 @@
+{% extends "_layout.html" %}
+{% block title %}Upload meet{% endblock %}
+{% block content %}
+<section class="upload">
+  <h1>Upload a meet file</h1>
+  <p class="lede">CSV or Hytek-style text export. Course matters &mdash; we never
+  compare long-course and short-course times.</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" enctype="multipart/form-data" class="card">
+    <label>Meet name
+      <input name="meet_name" placeholder="e.g. BUCS Long Course Championships 2026" required>
+    </label>
+    <label>Venue
+      <input name="venue" placeholder="e.g. Ponds Forge, Sheffield">
+    </label>
+    <label>Date
+      <input name="meet_date" type="date">
+    </label>
+    <label>Course
+      <select name="course">
+        <option value="LC">Long Course (50m)</option>
+        <option value="SC">Short Course (25m)</option>
+      </select>
+    </label>
+    <label>Results file
+      <input name="file" type="file" accept=".csv,.txt,.cl2,.hy3" required>
+    </label>
+    <button class="btn primary" type="submit">Process meet</button>
+  </form>
+</section>
+{% endblock %}

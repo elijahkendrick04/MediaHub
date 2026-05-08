@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{MEET_NAME}} — Weekend in numbers</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+.recap-headline {
+  font-size: {{HEADLINE_FONT_SIZE}}px;
+  top: {{HEADLINE_TOP}}px;
+}
+
+.recap-headline .accent {
+  color: var(--accent);
+}
+
+.subhead {
+  position: absolute;
+  top: {{SUBHEAD_TOP}}px;
+  left: 56px;
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  z-index: 5;
+}
+
+.stat-grid {
+  inset: {{GRID_TOP}}px 56px {{GRID_BOTTOM}}px 56px;
+}
+.stat-tile .num { font-size: {{NUM_FONT_SIZE}}px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+
+  <div class="subhead">{{SUBHEAD_TEXT}}</div>
+  <div class="recap-headline">
+    {{HEADLINE_LINE1}}<br/><span class="accent">{{HEADLINE_LINE2}}</span>
+  </div>
+
+  <div class="stat-grid">
+    {{STAT_TILES}}
+  </div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{SPONSOR_BLOCK}}
+</div>
+</body>
+</html>

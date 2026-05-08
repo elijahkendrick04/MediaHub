@@ -1,0 +1,15 @@
+{
+  "meet_name": "City of Sheffield Winter Level 1 Meet 2026",
+  "host_club": "City of Sheffield Swim Squad (COSSS)",
+  "host_url": "http://www.cosss.uk",
+  "results_url": "http://www.cosss.uk/WebResults/WebPagesWM2026/",
+  "level": 1,
+  "course": "SC",
+  "dates": "2026-01-10",
+  "source_format": "html",
+  "files": [
+    "before.htm",
+    "RG*.HTM (15 event files)"
+  ],
+  "notes": "SPORTSYSTEMS HTML results service; COSSS Sheffield Winter L1 Meet Jan 2026"
+}

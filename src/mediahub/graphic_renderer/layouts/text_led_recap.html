@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{MEET_NAME}} — Recap</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+.kicker {
+  position: absolute;
+  top: 80px; left: 56px;
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  z-index: 5;
+}
+.recap-headline {
+  font-size: {{HEADLINE_FONT_SIZE}}px;
+  top: 130px;
+}
+.recap-bullets { bottom: 200px; }
+
+.recap-stats {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 56px; right: 56px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+.recap-stats .cell {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  text-align: left;
+}
+.recap-stats .cell .num {
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-size: 64px;
+  line-height: 0.92;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+.recap-stats .cell .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  margin-top: 6px;
+}
+
+.recap-divider {
+  position: absolute;
+  top: 39%;
+  left: 56px; right: 56px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent) 0%, transparent 80%);
+  z-index: 4;
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+
+  <div class="kicker">{{KICKER}}</div>
+  <div class="recap-headline">{{HEADLINE_LINE1}}<br/>{{HEADLINE_LINE2}}</div>
+
+  <div class="recap-divider"></div>
+  {{RECAP_STATS_BLOCK}}
+
+  <div class="recap-bullets">{{BULLETS_HTML}}</div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{SPONSOR_BLOCK}}
+</div>
+</body>
+</html>

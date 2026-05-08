@@ -1,0 +1,31 @@
+{% extends "_layout.html" %}
+{% block title %}Home — Swim Content{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Upload the results. We'll find the moments worth celebrating.</h1>
+  <p class="lede">
+    Drop in a meet file. The engine will detect personal bests, medals,
+    finals, club records, qualifying times and breakthroughs &mdash; then
+    write captions in your club's voice. You approve. Done in minutes.
+  </p>
+  <a class="btn primary big" href="{{ url_for('upload') }}">Upload a meet file</a>
+</section>
+
+<section class="meets">
+  <h2>Recent meets</h2>
+  {% if not meets %}
+    <p class="muted">No meets yet. Upload your first results file to begin.</p>
+  {% else %}
+    <ul class="meet-list">
+      {% for m in meets %}
+        <li>
+          <a href="{{ url_for('review', meet_id=m['id']) }}">
+            <strong>{{ m['name'] }}</strong>
+            <span class="muted">{{ m['venue'] }} · {{ m['course'] }} · {{ m['start_date'] }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+{% endblock %}

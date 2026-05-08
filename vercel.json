@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "echo 'static-only frontend; backend deploys elsewhere'",
+  "outputDirectory": "dist/public",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "routes": [
+    { "src": "/(.*)", "dest": "/$1" }
+  ],
+  "_comment": "MediaHub backend is a Flask app (Gunicorn) and cannot run on Vercel's serverless runtime as-is. Use Render, Fly, or Docker for the backend; use Vercel only for the static landing page in dist/public/."
+}

@@ -1,0 +1,37 @@
+{% extends "_layout.html" %}
+{% block content %}
+<section class="upload">
+  <h1>Upload a meet</h1>
+  <p class="lede">Provide the Hytek meet file plus your latest PB PDFs.
+     The PDFs should ideally be exported BEFORE the meet, otherwise PB
+     detection won't work and we'll flag every PB candidate as needing
+     manual confirmation.</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+  <form method="post" enctype="multipart/form-data" class="card">
+    <h3>Meet file</h3>
+    <label>Hytek meet zip <small>(preferred &mdash; contains .hy3 + .cl2)</small>
+      <input name="meet_zip" type="file" accept=".zip">
+    </label>
+    <label>OR raw .hy3 file
+      <input name="meet_hy3" type="file" accept=".hy3">
+    </label>
+
+    <h3>PB store &mdash; SPORTSYSTEMS Club Rankings PDFs</h3>
+    <label>Female Long Course
+      <input name="pb_female_lc" type="file" accept=".pdf">
+    </label>
+    <label>Female Short Course
+      <input name="pb_female_sc" type="file" accept=".pdf">
+    </label>
+    <label>Male Long Course
+      <input name="pb_male_lc" type="file" accept=".pdf">
+    </label>
+    <label>Male Short Course
+      <input name="pb_male_sc" type="file" accept=".pdf">
+    </label>
+
+    <button class="btn primary" type="submit">Process meet</button>
+  </form>
+</section>
+{% endblock %}

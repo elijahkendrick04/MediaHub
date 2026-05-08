@@ -1,0 +1,161 @@
+{% extends "_layout_v3.html" %}
+{% set active_stage = 'dashboard' %}
+{% block title %}Dashboard · {{ run.meet_name }}{% endblock %}
+
+{% block content %}
+<section class="dhead">
+  <div>
+    <span class="kicker">Stage 3 of 4 · Dashboard</span>
+    <h1>{{ run.meet_name }}</h1>
+    <p class="lede">{{ run.club_display }} · {{ run.course }} · {{ run.our_swim_count }} swims · {{ run.n_swimmers_ours }} swimmers</p>
+  </div>
+  <div class="dhead-actions">
+    <a class="btn" href="{{ url_for('verification_v3', run_id=run_id) }}">← Verification</a>
+    <a class="btn primary" href="{{ url_for('output_v3', run_id=run_id) }}">Continue to output →</a>
+  </div>
+</section>
+
+<nav class="bucket-tabs">
+  <a class="btab {% if bucket=='queue' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='queue') }}">
+    Queue <span class="bcount">{{ counts.queue }}</span>
+  </a>
+  <a class="btab {% if bucket=='needs_confirmation' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='needs_confirmation') }}">
+    Needs confirmation <span class="bcount">{{ counts.needs_confirmation }}</span>
+  </a>
+  <a class="btab {% if bucket=='recap' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='recap') }}">
+    Recap mentions <span class="bcount">{{ counts.recap }}</span>
+  </a>
+  <a class="btab {% if bucket=='archive' %}active{% endif %}" href="{{ url_for('dashboard_v3', run_id=run_id, bucket='archive') }}">
+    Archive <span class="bcount">{{ counts.archive }}</span>
+  </a>
+</nav>
+
+{% if not cards %}
+<div class="empty">
+  <h2>Nothing in this bucket.</h2>
+  <p class="muted">Try a different tab above.</p>
+</div>
+{% endif %}
+
+<section class="card-grid">
+  {% for card in cards %}
+    <article class="ccard" data-card-id="{{ card.card_id }}" data-approved="{{ card.approved if card.approved is not none else '' }}">
+      <header class="ccard-head">
+        <div class="ccard-meta">
+          <span class="badge type">{{ card.card_type|card_type_label }}</span>
+          <span class="badge fmt">{{ card.suggested_format|replace('_',' ') }}</span>
+          <span class="badge conf conf-{{ card.confidence }}">{{ card.confidence|confidence_label }}</span>
+          <span class="score-pill">Score {{ card.score }}</span>
+        </div>
+        <h2>{{ card.headline }}</h2>
+        {% if card.subhead %}<p class="ccard-sub">{{ card.subhead }}</p>{% endif %}
+      </header>
+
+      <div class="ccard-why">
+        <h3>Why this matters</h3>
+        <ul class="reasons-list">
+          {% for r in card.score_reasons %}<li>{{ r }}</li>{% endfor %}
+        </ul>
+      </div>
+
+      <div class="ccard-claims">
+        <h3>Claims</h3>
+        <ul class="claim-list">
+          {% for cl in card.claims[:6] %}
+            <li>
+              <span class="claim-kind kind-{{ cl.kind }}">{{ cl.kind|replace('_',' ') }}</span>
+              <span class="claim-body">{{ cl.swimmer_name }} — {{ cl.event_label }} · <span class="time">{{ cl.time_str }}</span>{% if cl.place %} · {{ cl.place }}{% if cl.place==1 %}st{% elif cl.place==2 %}nd{% elif cl.place==3 %}rd{% else %}th{% endif %}{% endif %}</span>
+            </li>
+          {% endfor %}
+          {% if card.claims|length > 6 %}
+            <li class="muted">…and {{ card.claims|length - 6 }} more.</li>
+          {% endif %}
+        </ul>
+      </div>
+
+      <div class="ccard-captions">
+        <h3>Captions <span class="muted small">— pick one or edit</span></h3>
+        <div class="voice-tabs" role="tablist">
+          <button class="vtab active" data-voice="clean">Clean</button>
+          <button class="vtab" data-voice="team">Team</button>
+          <button class="vtab" data-voice="hype">Hype</button>
+        </div>
+        <textarea class="caption-text" rows="4" data-clean="{{ card.captions.clean }}" data-team="{{ card.captions.team }}" data-hype="{{ card.captions.hype }}">{{ card.user_caption or card.captions.clean }}</textarea>
+      </div>
+
+      {% if card.evidence %}
+      <details class="ccard-evidence">
+        <summary>Evidence ({{ card.evidence|length }})</summary>
+        <ul>
+          {% for e in card.evidence %}
+            <li>
+              <strong>{{ e.source }}</strong>
+              {% if e.source_url %} · <a href="{{ e.source_url }}" target="_blank" rel="noopener">link</a>{% endif %}
+              {% if e.retrieved_at %} · <span class="muted">checked {{ e.retrieved_at[:10] }}</span>{% endif %}
+              <div class="muted">{{ e.claim }}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+
+      <footer class="ccard-actions">
+        <span class="status-pill" data-state="{{ 'approved' if card.approved is true else ('rejected' if card.approved is false else 'pending') }}">
+          {% if card.approved is true %}Approved{% elif card.approved is false %}Rejected{% else %}Pending{% endif %}
+        </span>
+        <button class="btn approve js-approve">Approve</button>
+        <button class="btn danger js-reject">Reject</button>
+        <button class="btn ghost js-reset">Reset</button>
+      </footer>
+    </article>
+  {% endfor %}
+</section>
+
+<script>
+(function() {
+  // Voice switching
+  document.querySelectorAll('.ccard').forEach(card => {
+    const ta = card.querySelector('.caption-text');
+    card.querySelectorAll('.vtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        card.querySelectorAll('.vtab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        ta.value = ta.dataset[btn.dataset.voice] || '';
+      });
+    });
+  });
+
+  // Approve / reject / reset
+  function decide(cardEl, action) {
+    const cardId = cardEl.dataset.cardId;
+    const ta = cardEl.querySelector('.caption-text');
+    const activeVoice = (cardEl.querySelector('.vtab.active') || {}).dataset?.voice;
+    const body = { action };
+    if (action === 'approve') {
+      body.caption = ta.value;
+      body.voice = activeVoice;
+    }
+    return fetch(`/api/{{ run_id }}/cards/${encodeURIComponent(cardId)}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    .then(r => r.json())
+    .then(j => {
+      if (!j.ok) throw new Error(j.error || 'unknown');
+      const pill = cardEl.querySelector('.status-pill');
+      if (j.approved === true) { pill.dataset.state = 'approved'; pill.textContent = 'Approved'; }
+      else if (j.approved === false) { pill.dataset.state = 'rejected'; pill.textContent = 'Rejected'; }
+      else { pill.dataset.state = 'pending'; pill.textContent = 'Pending'; }
+    })
+    .catch(err => alert('Error: ' + err));
+  }
+
+  document.querySelectorAll('.ccard').forEach(card => {
+    card.querySelector('.js-approve').addEventListener('click', () => decide(card, 'approve'));
+    card.querySelector('.js-reject').addEventListener('click', () => decide(card, 'reject'));
+    card.querySelector('.js-reset').addEventListener('click', () => decide(card, 'reset'));
+  });
+})();
+</script>
+{% endblock %}

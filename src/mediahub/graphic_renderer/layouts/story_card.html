@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — Story</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+.story-tag {
+  position: absolute;
+  top: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  background: var(--accent);
+  color: var(--secondary);
+  padding: 14px 28px;
+  border-radius: 6px;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-size: {{RIBBON_FONT_SIZE}}px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* Centered editorial composition.
+   Hero name -> mega-watermark surname behind -> event line -> result chip
+   -> divider -> meta. Spacing uses fixed pixel anchors keyed off canvas
+   height so the layout never has dead vertical space. */
+.surname-bg.story {
+  position: absolute;
+  top: 380px;
+  left: -8%; right: -8%;
+  font-size: {{SURNAME_FONT_SIZE}}px;
+  text-align: center;
+  color: rgba(255,255,255,0.06);
+  -webkit-text-stroke: 2px rgba(255,255,255,0.20);
+  line-height: 0.85;
+  letter-spacing: -0.02em;
+}
+
+.athlete-wrap {
+  top: 360px;
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  width: {{ATHLETE_W}}px;
+  height: {{ATHLETE_H}}px;
+}
+
+.story-headline {
+  position: absolute;
+  top: 200px;
+  left: 56px; right: 56px;
+  text-align: center;
+  z-index: 7;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+
+.story-name {
+  position: absolute;
+  bottom: 470px;
+  left: 56px; right: 56px;
+  text-align: center;
+  z-index: 7;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: {{FIRSTNAME_FONT_SIZE}}px;
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 6px 30px rgba(0,0,0,0.45);
+}
+.story-event {
+  position: absolute;
+  bottom: 410px;
+  left: 56px; right: 56px;
+  text-align: center;
+  z-index: 7;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: {{EVENT_FONT_SIZE}}px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.92);
+}
+.story-divider {
+  position: absolute;
+  bottom: 380px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  width: 56px;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.78;
+}
+
+.story-result {
+  position: absolute;
+  bottom: 230px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  padding: 22px 38px 18px;
+  border-radius: 16px;
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: {{RESULT_FONT_SIZE}}px;
+  text-align: center;
+  min-width: 280px;
+}
+.story-result .lab {
+  display: block;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  margin-bottom: 8px;
+  color: var(--accent);
+}
+
+.brand-corner {
+  bottom: 5%; left: 50%; transform: translateX(-50%);
+}
+</style>
+</head>
+<body>
+<div class="canvas has-photo-{{HAS_PHOTO}}">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vignette"></div>
+
+  <div class="story-tag">{{ACHIEVEMENT_LABEL}}</div>
+  <div class="story-headline">{{STORY_HEADLINE}}</div>
+  <div class="surname-bg story">{{ATHLETE_SURNAME_DISPLAY}}</div>
+
+  {{PHOTO_ONLY_OPEN}}
+  <div class="athlete-wrap">{{ATHLETE_IMG_BLOCK}}</div>
+  {{PHOTO_ONLY_CLOSE}}
+
+  <div class="story-name">{{ATHLETE_FULL_NAME}}</div>
+  <div class="story-event">{{EVENT_NAME}}</div>
+  <div class="story-divider"></div>
+
+  <div class="story-result">
+    <span class="lab">Time</span>{{RESULT_VALUE_RAW}}
+  </div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

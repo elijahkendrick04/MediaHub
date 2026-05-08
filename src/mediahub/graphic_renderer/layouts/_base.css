@@ -1,0 +1,385 @@
+/* Shared styles for all layouts. Loaded inline. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  color: #fff;
+  overflow: hidden;
+}
+
+.canvas {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* ------------------------------------------------------------------
+   Backgrounds
+   ------------------------------------------------------------------ */
+
+.bg-primary {
+  background: var(--primary);
+}
+
+.bg-gradient {
+  background:
+    radial-gradient(ellipse 100% 80% at 30% 20%, rgba(255,255,255,0.10), transparent 60%),
+    linear-gradient(160deg, var(--primary) 0%, var(--primary-deep) 65%, var(--secondary) 100%);
+}
+
+.bg-water-pattern {
+  position: absolute; inset: 0;
+  background-image: var(--water-pattern);
+  background-size: 600px 600px;
+  background-position: center;
+  opacity: 0.10;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.bg-noise {
+  position: absolute; inset: 0;
+  background-image: var(--noise-pattern);
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bg-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 70% 60% at 50% 55%, transparent 0%, rgba(0,0,0,0.55) 95%);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ------------------------------------------------------------------
+   Surname / oversized BG type
+   ------------------------------------------------------------------ */
+
+.surname-bg {
+  position: absolute;
+  font-family: 'Anton', 'Bebas Neue', 'Oswald', Impact, sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.04em;
+  line-height: 0.78;
+  color: rgba(255,255,255,0.88);
+  -webkit-text-stroke: 0;
+  white-space: nowrap;
+  z-index: 4;
+  text-shadow: 0 4px 30px rgba(0,0,0,0.25);
+  user-select: none;
+}
+
+.surname-bg.outlined {
+  color: rgba(255,255,255,0.05);
+  -webkit-text-stroke: 3px rgba(255,255,255,0.55);
+}
+
+/* ------------------------------------------------------------------
+   Athlete cutout
+   ------------------------------------------------------------------ */
+
+.athlete-wrap {
+  position: absolute;
+  z-index: 5;
+  filter: drop-shadow(0 30px 50px rgba(0,0,0,0.45));
+}
+
+.athlete-cutout {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+}
+
+/* fallback silhouette tile if no real photo */
+.athlete-fallback {
+  width: 100%; height: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.30));
+  border: 2px dashed rgba(255,255,255,0.35);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  color: rgba(255,255,255,0.70);
+  text-align: center;
+  padding: 24px;
+}
+
+/* ------------------------------------------------------------------
+   Achievement ribbon (top-left) and result chip (top-right)
+   ------------------------------------------------------------------ */
+
+.label-ribbon {
+  position: absolute;
+  top: 56px; left: 56px;
+  z-index: 8;
+  display: inline-flex; align-items: center; gap: 14px;
+  background: var(--accent);
+  color: var(--secondary);
+  padding: 14px 22px 12px;
+  border-radius: 4px;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-size: 38px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+}
+.label-ribbon::before {
+  content: '';
+  width: 12px; height: 12px;
+  background: var(--secondary);
+  border-radius: 50%;
+}
+
+.result-chip {
+  position: absolute;
+  top: 56px; right: 56px;
+  z-index: 8;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.15);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  padding: 16px 26px 14px;
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  text-align: right;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.30);
+}
+.result-chip .label {
+  font-size: 12px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-bottom: 4px;
+  font-family: 'Inter', sans-serif;
+}
+.result-chip .value {
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------
+   Foreground text (athlete first name + event)
+   ------------------------------------------------------------------ */
+
+.fg-text {
+  position: absolute;
+  z-index: 7;
+  bottom: 200px;
+  left: 56px;
+  right: 56px;
+  text-align: left;
+}
+
+.fg-firstname {
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-weight: 700;
+  font-size: 80px;
+  line-height: 0.95;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0,0,0,0.40);
+}
+
+.fg-event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.85);
+  margin-top: 6px;
+}
+
+/* ------------------------------------------------------------------
+   Brand corner (bottom-left)
+   ------------------------------------------------------------------ */
+
+.brand-corner {
+  position: absolute;
+  z-index: 9;
+  bottom: 56px; left: 56px;
+  display: flex; align-items: center; gap: 16px;
+  color: #fff;
+}
+.brand-corner .logo-mark {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.10);
+  border: 1.5px solid rgba(255,255,255,0.35);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 26px;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+.brand-corner .logo-mark img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.brand-corner .text-block {
+  display: flex; flex-direction: column; line-height: 1.1;
+}
+.brand-corner .club-line {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+}
+.brand-corner .meet-line {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  opacity: 0.72;
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------------
+   Bottom sponsor strip
+   ------------------------------------------------------------------ */
+
+.sponsor-strip {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  background: rgba(255,255,255,0.94);
+  color: #111;
+  padding: 16px 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: 'Inter', sans-serif;
+}
+.sponsor-strip .label { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.55; }
+.sponsor-strip .name { font-size: 22px; font-weight: 700; }
+
+/* ------------------------------------------------------------------
+   Stat grid (weekend in numbers)
+   ------------------------------------------------------------------ */
+
+.stat-grid {
+  position: absolute; inset: 120px 56px 180px 56px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  z-index: 5;
+}
+.stat-tile {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  padding: 28px 24px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+.stat-tile::after {
+  content: ''; position: absolute; right: -40px; bottom: -40px;
+  width: 140px; height: 140px;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+.stat-tile .num {
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-size: 130px;
+  line-height: 0.85;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+.stat-tile .label {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.78;
+  margin-top: 6px;
+}
+
+/* ------------------------------------------------------------------
+   Medal badge (medal_card layout)
+   ------------------------------------------------------------------ */
+
+.medal-badge {
+  position: absolute;
+  z-index: 7;
+  top: 50%;
+  right: 56px;
+  transform: translateY(-50%);
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--medal-light), var(--medal-dark));
+  box-shadow: 0 30px 60px rgba(0,0,0,0.45), inset -20px -20px 40px rgba(0,0,0,0.35), inset 10px 10px 20px rgba(255,255,255,0.25);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #1a1208;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  text-align: center;
+  border: 6px solid rgba(255,255,255,0.18);
+}
+.medal-badge .medal-text {
+  font-size: 86px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.medal-badge .medal-place {
+  font-size: 18px;
+  letter-spacing: 0.30em;
+  margin-top: 10px;
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------------
+   Recap layout (text-led)
+   ------------------------------------------------------------------ */
+
+.recap-headline {
+  position: absolute; top: 120px; left: 56px; right: 56px;
+  z-index: 5;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: 160px;
+  line-height: 0.85;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+.recap-bullets {
+  position: absolute;
+  bottom: 140px; left: 56px; right: 56px;
+  z-index: 5;
+  display: flex; flex-direction: column; gap: 12px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.35;
+}
+.recap-bullets .row { display: flex; gap: 14px; align-items: baseline; }
+.recap-bullets .row .num {
+  color: var(--accent);
+  font-family: 'Anton', sans-serif;
+  font-weight: 900;
+  font-size: 34px;
+}
+
+/* ------------------------------------------------------------------
+   Story (1080x1920) safe zones
+   ------------------------------------------------------------------ */
+
+.story-safe-top { position: absolute; inset: 0 0 auto 0; height: 22%; pointer-events: none; z-index: 2; }
+.story-safe-bot { position: absolute; inset: auto 0 0 0; height: 16%; pointer-events: none; z-index: 2; }

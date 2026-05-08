@@ -1,0 +1,16 @@
+{
+  "meet_name": "North District Open Championships 2025",
+  "host_club": "SASA North District",
+  "host_url": "https://www.sasanorth.org.uk",
+  "results_url": "https://www.sasanorth.org.uk/Meets/2025/District/Open/",
+  "level": 1,
+  "course": "SC",
+  "dates": "2025-11-01",
+  "source_format": "pdf+zip",
+  "files": [
+    "results.pdf",
+    "results.zip",
+    "results_hy3.zip"
+  ],
+  "notes": "SASA North District Open Championships; PDF results + HY3 ZIP meet file"
+}

@@ -1,0 +1,58 @@
+{
+  "asa_id": "841565",
+  "hy3_name": "BRADLEY, MATHEW",
+  "sr_name": "Mathew Bradley",
+  "identity": {
+    "method": "asa_id_verified",
+    "canonical_hy3_name": "BRADLEY MATHEW",
+    "canonical_sr_name": "BRADLEY MATHEW",
+    "confidence": 1.0,
+    "safe_to_use": true,
+    "notes": [
+      "HY3 name 'BRADLEY, MATHEW' \u2192 canonical 'BRADLEY MATHEW'",
+      "SR name 'Mathew Bradley' \u2192 canonical 'BRADLEY MATHEW'",
+      "Canonical names match."
+    ]
+  },
+  "events_fetched_count": 35,
+  "pb_decisions_count": 6,
+  "fetch_ok": true,
+  "pb_decisions_sample": [
+    {
+      "status": "NOT_PB",
+      "event": "800m free (LC)",
+      "course": "LC",
+      "current_time_display": "8:57.25",
+      "previous_pb": "PreviousPB(swimmer_asa_id='841565', swimmer_name='Mathew Bradley', event_distance=800, event_stroke='free', course='LC', time_seconds=534.12, time_display='8:54.12', pb_date_iso='2026-04-03', pb_meet_name='Swim Wales National Championships 2026', source_url='https://www.swimmingresults.org/individualbest/personal_best.php?mode=A&tiref=841565', fetched_at='2026-05-05T16:34:49.162239+00:00', excluded_swims=[], confidence='high', notes=['Only one historical entry after same-meet exclusion.'])",
+      "audit_trail": [
+        "swim_id=841565:800FRLC:final:pb",
+        "swimmer=Mathew Bradley (ASA=841565)",
+        "event=800m free (LC)"
+      ]
+    },
+    {
+      "status": "NOT_PB",
+      "event": "400m im (LC)",
+      "course": "LC",
+      "current_time_display": "4:50.23",
+      "previous_pb": "PreviousPB(swimmer_asa_id='841565', swimmer_name='Mathew Bradley', event_distance=400, event_stroke='im', course='LC', time_seconds=287.72, time_display='4:47.72', pb_date_iso='2025-12-18', pb_meet_name='Swim Wales Winter Championships 2025', source_url='https://www.swimmingresults.org/individualbest/personal_best.php?mode=A&tiref=841565', fetched_at='2026-05-05T16:34:49.162239+00:00', excluded_swims=[], confidence='high', notes=['Only one historical entry after same-meet exclusion.'])",
+      "audit_trail": [
+        "swim_id=841565:400IMLC:final:pb",
+        "swimmer=Mathew Bradley (ASA=841565)",
+        "event=400m im (LC)"
+      ]
+    },
+    {
+      "status": "LIKELY_PB",
+      "event": "200m fly (LC)",
+      "course": "LC",
+      "current_time_display": "2:07.69",
+      "previous_pb": null,
+      "audit_trail": [
+        "swim_id=841565:200FLLC:final:pb",
+        "swimmer=Mathew Bradley (ASA=841565)",
+        "event=200m fly (LC)"
+      ]
+    }
+  ]
+}

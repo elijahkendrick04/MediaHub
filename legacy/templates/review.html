@@ -1,0 +1,138 @@
+{% extends "_layout.html" %}
+{% block title %}Review — {{ meet.name }}{% endblock %}
+{% block content %}
+<section class="review">
+  <header class="review-head">
+    <div>
+      <h1>{{ meet.name }}</h1>
+      <p class="muted">{{ meet.venue }} · {{ meet.course }} · {{ meet.start_date }}</p>
+    </div>
+    <div class="review-actions">
+      <a class="btn" href="{{ url_for('api_export', meet_id=meet.id) }}">Export approved</a>
+    </div>
+  </header>
+
+  <div class="three-pane">
+    <!-- QUEUE -->
+    <aside class="queue">
+      <h2>Queue <span class="count">{{ achievements|length }}</span></h2>
+      <ul id="queue-list">
+        {% for a in achievements %}
+          <li class="queue-item" data-id="{{ a.id }}" data-index="{{ loop.index0 }}"
+              {% if loop.first %}aria-current="true"{% endif %}>
+            <div class="qi-top">
+              <span class="badge {{ a.type|lower }}">{{ a.type.replace('_', ' ') }}</span>
+              <span class="stars" title="confidence">{{ a.confidence_stars }}</span>
+            </div>
+            <div class="qi-name">{{ a.swimmer_name }}</div>
+            <div class="qi-event muted">{{ a.event_human }}</div>
+            <div class="qi-score">priority {{ a.content_worthiness }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    </aside>
+
+    <!-- ITEM -->
+    <section class="item">
+      {% for a in achievements %}
+      <article class="item-card" data-id="{{ a.id }}"
+               {% if not loop.first %}hidden{% endif %}>
+        <header>
+          <span class="badge {{ a.type|lower }}">{{ a.type.replace('_', ' ') }}</span>
+          <h2>{{ a.swimmer_name }}</h2>
+          <div class="muted">{{ a.event_human }}</div>
+        </header>
+
+        <div class="why">
+          <h3>Why this was flagged</h3>
+          <p>{{ a.explanation }}</p>
+          <div class="confidence">Confidence: {{ a.confidence_stars }}
+            <span class="muted">({{ '%.0f'|format(a.confidence * 100) }}%)</span>
+          </div>
+        </div>
+
+        {% if a.evidence %}
+        <details class="evidence">
+          <summary>Show data</summary>
+          <pre>{{ a.evidence | tojson(indent=2) }}</pre>
+        </details>
+        {% endif %}
+
+        <div class="content-items">
+          {% for ci in a.content_items %}
+            <div class="ci" data-ci-id="{{ ci.id }}">
+              <h3>{{ ci.format.replace('_', ' ').title() }}</h3>
+              {% for cap in ci.captions %}
+                <label class="caption-option">
+                  <input type="radio" name="cap-{{ ci.id }}" value="{{ loop.index0 }}"
+                         {% if loop.first %}checked{% endif %}>
+                  <textarea rows="4">{{ cap }}</textarea>
+                </label>
+              {% endfor %}
+              <div class="ci-actions">
+                <button class="btn approve" data-action="approved">Approve</button>
+                <button class="btn ghost" data-action="edited">Save edit</button>
+                <button class="btn ghost danger" data-action="rejected">Reject</button>
+                <span class="status-pill" data-status></span>
+              </div>
+            </div>
+          {% else %}
+            <p class="muted">No content variants generated for this item (worthiness too low).</p>
+          {% endfor %}
+        </div>
+
+        <nav class="nav-keys muted">
+          <kbd>J</kbd> next &nbsp; <kbd>K</kbd> previous &nbsp;
+          <kbd>A</kbd> approve all in this item
+        </nav>
+      </article>
+      {% endfor %}
+
+      {% if recap_items %}
+      <article class="item-card recap" hidden>
+        <header><h2>Weekend in numbers</h2></header>
+        {% for ci in recap_items %}
+          <div class="ci" data-ci-id="{{ ci.id }}">
+            {% set caps = ci.captions_json | fromjson if ci.captions_json else [] %}
+            {% for cap in caps %}
+              <label class="caption-option">
+                <input type="radio" name="recap-{{ ci.id }}" value="{{ loop.index0 }}"
+                       {% if loop.first %}checked{% endif %}>
+                <textarea rows="6">{{ cap }}</textarea>
+              </label>
+            {% endfor %}
+            <div class="ci-actions">
+              <button class="btn approve" data-action="approved">Approve recap</button>
+            </div>
+          </div>
+        {% endfor %}
+      </article>
+      {% endif %}
+
+      {% if not achievements %}
+        <div class="empty">
+          <h2>No achievements detected.</h2>
+          <p>Upload more historical PB data so the engine has a comparison baseline.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <!-- APPROVE PANEL -->
+    <aside class="approve-panel">
+      <h2>Progress</h2>
+      <div class="progress">
+        <div id="progress-bar"></div>
+      </div>
+      <div id="progress-text" class="muted">0 of {{ achievements|length }} reviewed</div>
+      <hr>
+      <p class="muted">Tip: focus on the top of the queue — it's already ranked by content-worthiness.</p>
+    </aside>
+  </div>
+</section>
+
+<script>
+window.MEET_ID = {{ meet.id }};
+window.ACH_COUNT = {{ achievements|length }};
+</script>
+<script src="{{ url_for('static', filename='review.js') }}"></script>
+{% endblock %}

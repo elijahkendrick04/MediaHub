@@ -1,0 +1,26 @@
+{
+  "comment": "Hy-Tek Meet Manager file-format code mappings. Used by interpreter/hytek_parser.py and interpreter/sdif_parser.py to canonicalise stroke and course codes from .hy3 / .cl2 (SDIF) files into the strokes.json / courses.json canonical names.",
+  "hy3_stroke_codes": {
+    "A": "Freestyle",
+    "B": "Backstroke",
+    "C": "Breaststroke",
+    "D": "Butterfly",
+    "E": "Individual Medley",
+    "F": "Freestyle Relay",
+    "G": "Medley Relay"
+  },
+  "sdif_stroke_codes": {
+    "1": "Freestyle",
+    "2": "Backstroke",
+    "3": "Breaststroke",
+    "4": "Butterfly",
+    "5": "Individual Medley",
+    "6": "Freestyle Relay",
+    "7": "Medley Relay"
+  },
+  "hytek_course_codes": {
+    "S": "SC",
+    "Y": "SC",
+    "L": "LC"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "M": ["Male", "Men", "Men's", "Boy", "Boys", "Boys'", "M"],
+  "F": ["Female", "Women", "Women's", "Girl", "Girls", "Girls'", "F", "W"],
+  "X": ["Mixed", "Open", "X"]
+}

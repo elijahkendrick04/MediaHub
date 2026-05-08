@@ -1,0 +1,46 @@
+{% extends "_layout.html" %}
+{% block content %}
+<section class="queue">
+  <h1>Content queue &mdash; {{ r.meet.name }}</h1>
+  <p class="lede">{{ cards|length }} review-ready cards. One swim = one card.</p>
+  <p><a href="{{ url_for('report', rid=rid) }}">&larr; Back to report</a></p>
+
+  <div class="cards">
+  {% for c in cards %}
+    <div class="card queue-card">
+      <div class="hdr">
+        <div class="who">
+          <strong>{{ c.swimmer }}</strong>
+          <span class="event">&middot; {{ c.event }} ({{ c.course }})</span>
+        </div>
+        <div class="meta">
+          {% if c.place == 1 %}<span class="badge gold">1st</span>
+          {% elif c.place == 2 %}<span class="badge silver">2nd</span>
+          {% elif c.place == 3 %}<span class="badge bronze">3rd</span>
+          {% elif c.place %}<span class="badge">{{ c.place }}</span>{% endif %}
+          <span class="time">{{ c.time }}</span>
+          <span class="score">score {{ c.score }}</span>
+        </div>
+      </div>
+
+      <div class="reasons">
+        {% for rn in c.reasons %}<span class="reason">{{ rn }}</span>{% endfor %}
+      </div>
+
+      <div class="captions">
+        {% for cap in c.captions %}
+          <div class="caption">
+            <textarea rows="2">{{ cap }}</textarea>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Weekend in numbers</h3>
+    <pre style="white-space: pre-wrap; font-family: inherit;">{{ recap_text }}</pre>
+  </div>
+</section>
+{% endblock %}

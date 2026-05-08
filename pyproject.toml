@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mediahub"
+version = "9.0.0"
+description = "Sport content automation: upload meet results, get social-ready captions, cards, and graphics."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Sweep / MediaHub team" }
+]
+keywords = ["sport", "swimming", "content-automation", "social-media", "ai"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics",
+  "Framework :: Flask",
+]
+dependencies = [
+  "flask>=3.0",
+  "markupsafe>=2.1",
+  "requests>=2.31",
+  "pdfplumber>=0.10",
+  "pypdf>=4.0",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0",
+  "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+ai = [
+  "anthropic>=0.30",
+  "replicate>=0.25",
+]
+render = [
+  "playwright>=1.40",
+  "weasyprint>=60",
+]
+dev = [
+  "pytest>=7.4",
+  "pytest-xdist>=3.5",
+]
+
+[project.scripts]
+mediahub-web = "mediahub.web.__main__:main"
+
+[project.urls]
+Documentation = "https://github.com/your-org/mediahub#readme"
+Repository    = "https://github.com/your-org/mediahub"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mediahub*"]
+
+[tool.setuptools.package-data]
+"mediahub.graphic_renderer" = ["layouts/*.html", "layouts/*.css"]
+"mediahub" = ["**/*.json"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::SyntaxWarning",
+]

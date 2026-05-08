@@ -1,0 +1,72 @@
+{
+  "voice_id": "warm_club",
+  "display_name": "Warm Club Voice",
+  "description": "Supportive, community-focused club voice with warmth and encouragement. Generic exemplars; the renderer substitutes the user's hashtag and club name at render time.",
+  "exemplars": [
+    "Huge well done to Emily on her stunning PB in the 100m Butterfly last night at the Spring Open! 🦋\nEmily touched the wall in 1:02.45 — knocking nearly two seconds off her previous best.\nSo proud of the hard work she has put in this season!\nWell done Emily — the whole club is behind you 💙\n#YourClub #ButterflyGirl #ClubProud",
+    "Congratulations to our Junior Boys relay team for a brilliant performance at the Regional Age Groups! 🏊\nThe lads went 3:34.12 in the 4×100 Medley — a new club record!\nMassive effort from the team — you all deserve this result 🙌\nSo proud of every single one of you!\n#YourClub #TeamSwim #ClubRecord",
+    "A huge shout-out to Sophie who claimed a fantastic silver medal in the 200m Breaststroke at the Regional Championships today! 🥈\nSophie swam 2:41.76 — another PB to add to her growing collection!\nWe love watching you race, Sophie — keep it going! 💙\n#YourClub #RegionalChamps #Breaststroke",
+    "What a night at the club gala! 🌟\nSpecial mention to young Ollie, 11 years old, who smashed his PB in the 50m Freestyle with a time of 29.88 — breaking the 30-second barrier for the first time!\nBig things ahead for this lad 💪\nProud of all our swimmers tonight — every single one of you worked hard and it showed!\n#YourClub #YoungSwimmers #FutureStars",
+    "Brilliant results for our masters swimmers at the Short Course Open last weekend!\nSpecial mention to Margaret, who set three personal bests and won gold in the W55 100m Backstroke in 1:24.33! 🥇\nProof that hard work pays off at any age — incredible stuff Margaret!\n#YourClub #MastersSwimming #NeverStopSwimming"
+  ],
+  "features": {
+    "avg_sentence_len": 14.05,
+    "capitalisation_style": "sentence",
+    "emoji_density": 0.5573,
+    "emoji_palette": [
+      "💙",
+      "🦋",
+      "🏊",
+      "🙌",
+      "🥈",
+      "🌟",
+      "💪",
+      "🥇"
+    ],
+    "hashtag_density": 0.9288,
+    "common_hashtags": [
+      "#yourclub",
+      "#butterflygirl",
+      "#clubproud",
+      "#teamswim",
+      "#clubrecord",
+      "#regionalchamps",
+      "#breaststroke",
+      "#youngswimmers",
+      "#futurestars",
+      "#mastersswimming"
+    ],
+    "starting_phrases": [
+      "Huge well done to Emily",
+      "Congratulations to our Junior Boys relay",
+      "A huge shout-out to Sophie",
+      "What a night at the club",
+      "Brilliant results for our masters swimmers"
+    ],
+    "sign_offs": [
+      "So proud of every single one of you!"
+    ],
+    "name_format": "first",
+    "time_format": "m:ss.cc",
+    "achievement_words": [
+      "pb",
+      "huge",
+      "brilliant",
+      "stunning",
+      "best",
+      "record",
+      "massive",
+      "fantastic",
+      "silver",
+      "smashed",
+      "first",
+      "big",
+      "gold",
+      "incredible"
+    ],
+    "exclamation_density": 0.7,
+    "second_person_density": 1.7794
+  },
+  "created_at": "2026-05-05T23:13:31.277528+00:00",
+  "updated_at": "2026-05-05T23:13:31.277528+00:00"
+}

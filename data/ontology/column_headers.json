@@ -1,0 +1,8 @@
+{
+  "place": ["Place", "Pl", "Pos", "Position", "Rank", "#"],
+  "name": ["Name", "Athlete", "Swimmer", "Competitor"],
+  "yob": ["YoB", "YOB", "Year", "Born", "DOB", "Date of Birth"],
+  "club": ["Club", "Team", "School", "Affiliation"],
+  "time": ["Time", "Result", "Final Time", "Swim Time", "Mark"],
+  "reaction": ["RT", "Reaction", "React", "Start"]
+}

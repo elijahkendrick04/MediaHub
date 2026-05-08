@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Swim Content Intelligence{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="dot"></span>
+      <span>Swim Content Intelligence</span>
+    </a>
+    {% if run_id %}
+    <nav class="stage-nav">
+      {% set stage = active_stage|default('upload') %}
+      <a class="stage {% if stage=='upload' %}done{% endif %}" href="{{ url_for('upload_v3') }}"><span class="num">1</span>Upload</a>
+      <span class="sep">›</span>
+      <a class="stage {% if stage=='verification' %}current{% elif stage in ['dashboard','output'] %}done{% endif %}"
+         href="{{ url_for('verification_v3', run_id=run_id) }}"><span class="num">2</span>Verification</a>
+      <span class="sep">›</span>
+      <a class="stage {% if stage=='dashboard' %}current{% elif stage=='output' %}done{% endif %}"
+         href="{{ url_for('dashboard_v3', run_id=run_id) }}"><span class="num">3</span>Dashboard</a>
+      <span class="sep">›</span>
+      <a class="stage {% if stage=='output' %}current{% endif %}"
+         href="{{ url_for('output_v3', run_id=run_id) }}"><span class="num">4</span>Output</a>
+    </nav>
+    {% endif %}
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

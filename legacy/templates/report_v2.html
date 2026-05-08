@@ -1,0 +1,89 @@
+{% extends "_layout.html" %}
+{% block content %}
+<section class="report">
+  <h1>{{ r.meet.name }}</h1>
+  <p class="lede">
+    {{ r.meet.start_date }} &rarr; {{ r.meet.end_date }} &middot; {{ r.meet.venue or 'Venue unknown' }}
+    {% if r.report.pb_store_generated %}&middot; PB store generated {{ r.report.pb_store_generated }}{% endif %}
+  </p>
+
+  {% if r.report.warnings %}
+  <div class="warnings">
+    <h3>Warnings</h3>
+    <ul>
+      {% for w in r.report.warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="grid">
+    <div class="card">
+      <h3>Parser</h3>
+      <ul>
+        <li>Clubs in file: <strong>{{ r.report.n_clubs }}</strong></li>
+        <li>Swimmers total: <strong>{{ r.report.n_swimmers_total }}</strong></li>
+        <li>Swims total: <strong>{{ r.report.n_swims_total }}</strong></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Roster filter</h3>
+      <ul>
+        <li>Your swimmers: <strong>{{ r.report.our_swimmers }}</strong></li>
+        <li>Your swims: <strong>{{ r.report.our_swims }}</strong></li>
+        <li>Host club excluded: <strong>{{ r.report.excluded_host_swimmers }}</strong></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Detection</h3>
+      <ul>
+        <li>Total cards: <strong>{{ r.report.cards_total }}</strong></li>
+        <li>Queue (&ge;70): <strong>{{ r.report.queue_size }}</strong></li>
+        <li>Recap (40-69): <strong>{{ r.report.recap_size }}</strong></li>
+        <li>Archive (&lt;40): <strong>{{ r.report.archive_size }}</strong></li>
+        <li>No PB match: <strong>{{ r.report.swims_no_pb_match }}</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  {% if r.report.swimmers_missing_from_pb_store %}
+  <div class="card">
+    <h3>Swimmers not in PB store ({{ r.report.swimmers_missing_from_pb_store|length }})</h3>
+    <p class="lede">These swimmers will fall through to manual confirmation when they podium or appear to PB.</p>
+    <ul class="cols">
+      {% for s in r.report.swimmers_missing_from_pb_store %}
+        <li>{{ s }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if r.report.needs_confirmation %}
+  <div class="card">
+    <h3>Needs human confirmation ({{ r.report.needs_confirmation|length }})</h3>
+    <p class="lede">These swims look content-worthy but we lack PB-store evidence to be sure. Confirm against your own records before publishing.</p>
+    <table>
+      <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Seed</th><th>Place</th><th>Why</th></tr></thead>
+      <tbody>
+      {% for n in r.report.needs_confirmation %}
+        <tr>
+          <td>{{ n.swimmer }}</td>
+          <td>{{ n.event }}</td>
+          <td>{{ n.time }}</td>
+          <td>{{ n.seed }}</td>
+          <td>{{ n.place }}</td>
+          <td>{{ n.reason }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <p>
+    <a class="btn primary" href="{{ url_for('queue', rid=rid) }}">Open content queue &rarr;</a>
+    <a class="btn" href="{{ url_for('export_json', rid=rid) }}">Export JSON</a>
+  </p>
+</section>
+{% endblock %}

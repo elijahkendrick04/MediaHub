@@ -1,0 +1,34 @@
+# Render.com one-click deploy
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: mediahub
+    runtime: python
+    plan: starter
+    pythonVersion: "3.12"
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install gunicorn
+      pip install -e .
+    startCommand: gunicorn mediahub.web:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: PYTHONPATH
+        value: src
+      - key: FLASK_ENV
+        value: production
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: PHOTOROOM_API_KEY
+        sync: false
+      - key: MEDIAHUB_CUTOUT_PROVIDER
+        value: rembg
+    disk:
+      name: mediahub-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

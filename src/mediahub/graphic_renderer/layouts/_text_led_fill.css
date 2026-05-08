@@ -1,0 +1,144 @@
+/* Text-led fill — applied when no athlete photo asset is available.
+   Adds an oversized initials watermark + a 3-up stat strip + accent shapes
+   so the canvas reads as a polished text-led editorial graphic, not a half-empty card.
+   Loaded inline via {{TEXT_LED_FILL_CSS}}.
+*/
+
+.txl-watermark {
+  position: absolute;
+  z-index: 3;
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  line-height: 0.78;
+  color: rgba(255,255,255,0.06);
+  -webkit-text-stroke: 2px rgba(255,255,255,0.18);
+  user-select: none;
+  pointer-events: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.txl-stat-strip {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  bottom: 165px;
+  left: 56px;
+  right: 56px;
+}
+/* Compact stat strip — narrow, top-right placed for layouts whose bottom
+   is already occupied by fg-text + result-chip (individual_hero, sponsor_branded). */
+.txl-stat-strip.compact-tr {
+  top: 220px;
+  right: 56px;
+  left: auto;
+  bottom: auto;
+  width: 380px;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+}
+.txl-stat-strip.compact-tr .cell {
+  flex: 0 0 auto;        /* don't stretch — size by content */
+  padding: 16px 20px 16px;
+}
+.txl-stat-strip.compact-tr .cell .lab {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  opacity: 0.62;
+}
+.txl-stat-strip.compact-tr .cell .val {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 6px;
+  line-height: 1.1;
+}
+.txl-stat-strip .cell {
+  flex: 1 1 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 14px;
+  padding: 18px 18px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.txl-stat-strip .cell::after {
+  content: ''; position: absolute; right: -30px; bottom: -30px;
+  width: 110px; height: 110px;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+.txl-stat-strip .cell .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+.txl-stat-strip .cell .val {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-feature-settings: "tnum";
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.05;
+  margin-top: 8px;
+  color: #fff;
+}
+
+/* Geometric accent (slim diagonal line) — adds energy to large empty areas */
+.txl-accent-bar {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+}
+.txl-accent-bar.diagonal {
+  top: 18%; right: -10%;
+  width: 60%; height: 6px;
+  background: var(--accent);
+  opacity: 0.45;
+  transform: rotate(-32deg);
+  filter: blur(0.4px);
+}
+.txl-accent-bar.dot-grid {
+  top: 26%; right: 6%;
+  width: 220px; height: 220px;
+  background-image: radial-gradient(rgba(255,255,255,0.35) 1.5px, transparent 1.5px);
+  background-size: 18px 18px;
+  opacity: 0.45;
+  border-radius: 6px;
+}
+
+/* Surname mega-letter occupying the empty half of the canvas.
+   Subtle outlined treatment so it reads as architectural, not as overlap. */
+.txl-mega-initial {
+  position: absolute;
+  z-index: 3;
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 900;
+  font-size: 1100px;     /* clamped via inline style */
+  line-height: 0.82;
+  letter-spacing: -0.07em;
+  color: transparent;
+  -webkit-text-stroke: 3px rgba(255,255,255,0.10);
+  user-select: none;
+  pointer-events: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 92%;
+}
+
+/* Soft background spotlight where the photo would be — keeps the empty
+   area from feeling dead. */
+.txl-photo-glow {
+  position: absolute;
+  z-index: 2;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.05) 35%, transparent 70%);
+  pointer-events: none;
+}

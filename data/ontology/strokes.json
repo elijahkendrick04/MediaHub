@@ -1,0 +1,7 @@
+{
+  "Freestyle": ["Freestyle", "FR", "Free", "FREE"],
+  "Backstroke": ["Backstroke", "BK", "Back", "BACK"],
+  "Breaststroke": ["Breaststroke", "BR", "Breast", "BREAST"],
+  "Butterfly": ["Butterfly", "FLY", "Fly", "BUTTERFLY", "BFLY"],
+  "Individual Medley": ["Individual Medley", "IM", "Medley", "I.M.", "Ind. Medley"]
+}

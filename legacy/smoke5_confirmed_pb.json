@@ -1,0 +1,37 @@
+{
+  "asa_id": "841565",
+  "hy3_name": "BRADLEY, MATHEW",
+  "sr_name": "Mathew Bradley",
+  "verdict": "CONFIRMED_PB",
+  "event": "100m fly (LC)",
+  "course": "LC",
+  "current_time_display": "57.95",
+  "previous_pb": "PreviousPB(swimmer_asa_id='841565', swimmer_name='Mathew Bradley', event_distance=100, event_stroke='fly', course='LC', time_seconds=57.95, time_display='57.95', pb_date_iso='2026-05-03', pb_meet_name='City of Swansea Aquatics May Long Course Open Meet', source_url='https://www.swimmingresults.org/individualbest/personal_best.php?mode=A&tiref=841565', fetched_at='2026-05-05T16:34:49.162239+00:00', excluded_swims=[], confidence='high', notes=['Only one historical entry after same-meet exclusion.'])",
+  "delta_seconds": 0.0,
+  "improvement_percentage": 0.0,
+  "confidence": "high",
+  "safe_to_post": true,
+  "reason": "Matched previous PB of 57.95.",
+  "evidence": [
+    {
+      "source": "swimmingresults.org",
+      "url": "https://www.swimmingresults.org/individualbest/personal_best.php?mode=A&tiref=841565",
+      "fetched_at": "2026-05-05T16:34:49.162239+00:00",
+      "previous_pb_time": "57.95",
+      "previous_pb_date": "2026-05-03",
+      "previous_pb_meet": "City of Swansea Aquatics May Long Course Open Meet"
+    }
+  ],
+  "audit_trail": [
+    "swim_id=841565:100FLLC:final:pb",
+    "swimmer=Mathew Bradley (ASA=841565)",
+    "event=100m fly (LC)",
+    "current_time=57.95 (57.95s)",
+    "identity.method=asa_id_verified, safe_to_use=True",
+    "Snapshot OK: 35 entries, fetched at 2026-05-05T16:34:49.162239+00:00",
+    "Building PreviousPB for event 100m fly (LC), meet='Swansea Aquatics May Long Course 2026', date=2026-05-02",
+    "Previous PB: 57.95 (57.95s) from 2026-05-03, meet='City of Swansea Aquatics May Long Course Open Meet'",
+    "current=57.950s vs previous=57.950s \u2192 delta=0.000s (within tolerance 0.005s) \u2192 matched PB",
+    "DECISION: CONFIRMED_PB (matched PB \u2014 equalled previous best)"
+  ]
+}

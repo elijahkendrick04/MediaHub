@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    image: mediahub:latest
+    container_name: mediahub-web
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - PORT=5000
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN:-}
+      - PHOTOROOM_API_KEY=${PHOTOROOM_API_KEY:-}
+      - MEDIAHUB_CUTOUT_PROVIDER=${MEDIAHUB_CUTOUT_PROVIDER:-rembg}
+    volumes:
+      # Persist user-supplied data and runtime artefacts across restarts.
+      - ./data:/app/data
+      - ./runs_v4:/app/runs_v4
+      - ./uploads_v4:/app/uploads_v4
+      - ./.cache:/app/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

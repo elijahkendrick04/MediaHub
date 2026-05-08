@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/*.tar.gz
+dist/*.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and runtime
+.env
+.env.*
+!.env.example
+.secret_key
+data/secrets.json
+data/discovered/clubs/*.json
+data/discovered/swimmers/*.json
+data/discovered/meets/*.json
+data/discovered/pbs/*.json
+data/discovered/search_cache/
+!data/discovered/**/.gitkeep
+data/cache/
+.cache/
+
+# Runtime artefacts
+runs_v4/
+uploads_v4/
+smoke_v8_output/
+*.db
+data.db
+
+# Node (legacy frontend tooling)
+node_modules/
+
+# Coverage
+.coverage
+htmlcov/

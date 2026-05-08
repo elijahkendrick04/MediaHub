@@ -1,0 +1,70 @@
+{
+  "voice_id": "hype",
+  "display_name": "Hype Voice",
+  "description": "High-energy, exclamation-heavy voice celebrating every swim loudly.",
+  "exemplars": [
+    "🔥🔥 YESSS!! BIG PB ALERT 🚨\nJosh Carpenter absolutely DESTROYS his 100m Freestyle time at the National Age Groups!!\nNEW PB: 51.34 — DOWN FROM 53.01 💥\nTHIS LAD IS UNSTOPPABLE RIGHT NOW 🤯\nBeen building all season and today he DELIVERED. Elite performance, elite swimmer 👑\n#NationalAgeGroups #100mFree #PBSzn #SwimHard #SwimFast",
+    "GOLD GOLD GOLD 🥇🥇🥇\nMia Torres WINS the 200m IM at South of England Champs AND goes UNDER 2:20 FOR THE FIRST TIME 🔥\n2:19.81 — WHAT A SWIM 🏊💨\nThis girl is on another level right now. Put some RESPECT on her name 👏👏👏\n#SOE #200IM #GoldMedal #SheGoesOff",
+    "TEAM RELAY GOES OFF 🚀🚀\n4×100 Mixed Medley → NEW CLUB RECORD 3:52.44 💥💥\nFour of our best doing what they do. That last leg was INSANE — the comeback was REAL 😤\nTags on the squad who WENT FOR IT today 🙌\n#RelayNation #ClubRecord #MixedMedley #LFG",
+    "POV: you just watched your swimmer drop THREE seconds in the 200m Fly 🦋🔥\nZara Ahmed → 2:17.08 🤯 (was 2:20.31)\nTHE HARD WORK IS PAYING OFF. NOTHING STOPPING HER NOW 💪💪\nLoud for Zara in the comments 👇👇\n#200Fly #DropTime #ButterflyQueen #SwimSeason",
+    "NATIONALS PODIUM 🏅🏅🏅\nThree of our swimmers on the medal table this weekend — WE ARE THAT CLUB 🔥\nResults are IN, and they are ELITE:\n🥇 Leo Carter — 50m Back — 27.11 (NR!)\n🥈 Nina Walsh — 400m Free — 4:22.06 (PB)\n🥉 Josh Carpenter — 100m Free — 51.34 (PB)\nINCREDIBLE stuff from these three. FIRED UP for the rest of the season 🚀🚀\n#Nationals #PodiumAlert #SwimClub #ProudCoach"
+  ],
+  "features": {
+    "avg_sentence_len": 21.83,
+    "capitalisation_style": "all_caps_emphasis",
+    "emoji_density": 2.5874,
+    "emoji_palette": [
+      "🔥",
+      "🥇",
+      "🚀",
+      "💥",
+      "👏",
+      "🏅",
+      "🤯",
+      "💪",
+      "👇",
+      "🚨"
+    ],
+    "hashtag_density": 1.4685,
+    "common_hashtags": [
+      "#nationalagegroups",
+      "#100mfree",
+      "#pbszn",
+      "#swimhard",
+      "#swimfast",
+      "#soe",
+      "#200im",
+      "#goldmedal",
+      "#shegoesoff",
+      "#relaynation"
+    ],
+    "starting_phrases": [
+      "🔥🔥 YESSS!! BIG PB ALERT 🚨",
+      "GOLD GOLD GOLD 🥇🥇🥇",
+      "TEAM RELAY GOES OFF 🚀🚀",
+      "POV: you just watched your swimmer",
+      "NATIONALS PODIUM 🏅🏅🏅"
+    ],
+    "sign_offs": [
+      "Tags on the squad who WENT FOR IT today 🙌",
+      "Loud for Zara in the comments 👇👇"
+    ],
+    "name_format": "full",
+    "time_format": "m:ss.cc",
+    "achievement_words": [
+      "pb",
+      "gold",
+      "goes",
+      "big",
+      "first",
+      "record",
+      "best",
+      "podium",
+      "incredible"
+    ],
+    "exclamation_density": 0.4167,
+    "second_person_density": 0.7634
+  },
+  "created_at": "2026-05-05T23:13:31.281613+00:00",
+  "updated_at": "2026-05-05T23:13:31.281613+00:00"
+}

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{MEET_NAME}} — Preview</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+.venue-bg {
+  position: absolute; inset: 0; z-index: 1;
+  background-image: {{VENUE_BG_URL}};
+  background-size: cover; background-position: center;
+  filter: saturate(0.7) contrast(1.05) brightness(0.6);
+}
+.venue-overlay {
+  position: absolute; inset: 0; z-index: 2;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.25) 30%, var(--primary-deep) 95%),
+    linear-gradient(180deg, transparent 30%, var(--primary) 80%);
+  mix-blend-mode: multiply;
+}
+
+.preview-eyebrow {
+  position: absolute;
+  top: 64px; left: 56px;
+  z-index: 5;
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--accent);
+  color: var(--secondary);
+  padding: 10px 16px;
+  border-radius: 4px;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-size: 26px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.preview-headline {
+  position: absolute;
+  bottom: 380px; left: 56px; right: 56px;
+  z-index: 5;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: {{HEADLINE_FONT_SIZE}}px;
+  line-height: 0.86;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.preview-stripe {
+  position: absolute;
+  top: 28%;
+  left: 56px; right: 56px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+.preview-stripe .cell {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 14px;
+  padding: 16px 18px 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.preview-stripe .cell .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+.preview-stripe .cell .val {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.18;
+  margin-top: 6px;
+  color: #fff;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.preview-meta {
+  position: absolute;
+  bottom: 200px; left: 56px; right: 56px;
+  z-index: 5;
+  display: flex; gap: 32px; flex-wrap: wrap;
+}
+.preview-meta .col { display: flex; flex-direction: column; line-height: 1.1; }
+.preview-meta .lab {
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  opacity: 0.65; font-family: 'Inter', sans-serif;
+}
+.preview-meta .val {
+  font-size: 28px; font-weight: 700;
+  font-family: 'Inter', sans-serif; margin-top: 4px;
+}
+
+.attribution {
+  position: absolute;
+  bottom: 8px; right: 12px;
+  z-index: 11;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.55);
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="venue-bg"></div>
+  <div class="venue-overlay"></div>
+  <div class="bg-noise"></div>
+
+  <div class="preview-eyebrow">UPCOMING MEET</div>
+  {{PREVIEW_STRIPE_BLOCK}}
+
+  <div class="preview-headline">{{HEADLINE}}</div>
+  <div class="preview-meta">
+    <div class="col">
+      <div class="lab">DATES</div>
+      <div class="val">{{DATES}}</div>
+    </div>
+    <div class="col">
+      <div class="lab">VENUE</div>
+      <div class="val">{{VENUE_NAME}}</div>
+    </div>
+  </div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  <div class="attribution">{{VENUE_ATTRIBUTION}}</div>
+</div>
+</body>
+</html>

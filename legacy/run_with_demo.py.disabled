@@ -1,0 +1,22 @@
+"""Server entry that pre-loads the Swansea pilot meet for screenshot demos."""
+from swim_content.app_v2 import create_app, _RUN_CACHE
+from swim_content.pipeline import process_meet
+from swim_content.club_filter import swansea_uni_roster
+
+print("Pre-loading demo run...")
+result = process_meet(
+    meet_zip_path='/home/user/workspace/Meet-Results-Swansea-Aquatics-May-Long-Course-2026-02May2026-001.zip',
+    pb_pdf_paths={
+        'female_lc': '/home/user/workspace/Current-Best-Times-Female.pdf',
+        'female_sc': '/home/user/workspace/Current-Best-Times-Female-SC.pdf',
+        'male_lc':   '/home/user/workspace/Current-Best-Times-Male.pdf',
+        'male_sc':   '/home/user/workspace/Current-Best-Times-Male-SC.pdf',
+    },
+    roster=swansea_uni_roster(),
+    pb_store_generated_iso='2026-05-04',
+)
+_RUN_CACHE['demo'] = result
+print(f"Loaded: {result.meet.name} | {result.report.queue_size} review cards")
+
+app = create_app()
+app.run(host='0.0.0.0', port=5050, debug=False)

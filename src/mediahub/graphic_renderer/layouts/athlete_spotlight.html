@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — Spotlight</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+.athlete-wrap {
+  bottom: 0; left: -20px;
+  width: {{ATHLETE_W}}px;
+  height: {{ATHLETE_H}}px;
+}
+
+/* Spotlight side panel — full-bleed when no photo, narrow when photo is present.
+   When there's no photo, we shrink the spot-side height so the support-grid
+   sits just below it (not at the canvas bottom), avoiding a huge dead zone. */
+.spot-side {
+  position: absolute;
+  top: 64px; right: 56px;
+  width: {{SIDE_WIDTH}}px;
+  bottom: 240px;
+  z-index: 6;
+  display: flex; flex-direction: column;
+}
+.canvas.has-photo-0 .spot-side {
+  left: 56px;
+  right: 56px;
+  width: auto;
+  bottom: auto;
+  height: auto;       /* size to content */
+}
+.spot-name {
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-size: {{NAME_FONT_SIZE}}px;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.spot-tag {
+  display: inline-block;
+  background: var(--accent);
+  color: var(--secondary);
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 0.10em;
+  font-size: 22px;
+  margin-bottom: 24px;
+  align-self: flex-start;
+}
+.spot-meta {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  margin-bottom: 24px;
+}
+.career-best {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 22px;
+}
+.career-best .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-bottom: 6px;
+}
+.career-best .val {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: 44px;
+  line-height: 1;
+  color: var(--accent);
+}
+.career-best .delta {
+  display: inline-block;
+  margin-top: 8px;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+
+.stat-rows {
+  display: flex; flex-direction: column;
+  margin-top: 8px;
+}
+.stat-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 18px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.18);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-row .ev {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 19px;
+  color: rgba(255,255,255,0.92);
+  flex: 1;
+}
+.stat-row .rs {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: 26px;
+  color: var(--accent);
+}
+.stat-row .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-left: 12px;
+}
+
+.support-grid {
+  position: absolute;
+  bottom: 130px;
+  left: 56px;
+  width: {{SUPPORT_WIDTH}}px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  z-index: 6;
+}
+.support-grid.full-row {
+  left: 56px;
+  right: 56px;
+  width: auto;
+  /* sit immediately above brand-corner */
+  bottom: 180px;
+  top: auto;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.support-grid .cell {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+}
+.support-grid .cell .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  margin-bottom: 4px;
+}
+.support-grid .cell .val {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: #fff;
+  line-height: 1.18;
+  word-break: break-word;
+}
+</style>
+</head>
+<body>
+<div class="canvas has-photo-{{HAS_PHOTO}}">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+
+  {{PHOTO_ONLY_OPEN}}
+  <div class="athlete-wrap">{{ATHLETE_IMG_BLOCK}}</div>
+  {{PHOTO_ONLY_CLOSE}}
+
+  {{TEXT_LED_FILL_BLOCK}}
+
+  <div class="spot-side">
+    <div class="spot-tag">{{SPOTLIGHT_TAG}}</div>
+    <div class="spot-name">{{ATHLETE_FULL_NAME}}</div>
+    <div class="spot-meta">{{MEET_NAME}}</div>
+    {{CAREER_BEST_BLOCK}}
+    <div class="stat-rows">{{STAT_ROWS}}</div>
+  </div>
+
+  {{SUPPORT_GRID_BLOCK}}
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

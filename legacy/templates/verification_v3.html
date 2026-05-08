@@ -1,0 +1,83 @@
+{% extends "_layout_v3.html" %}
+{% set active_stage = 'verification' %}
+{% block title %}Verification · {{ run.meet_name }}{% endblock %}
+
+{% block content %}
+<section class="vhead">
+  <span class="kicker">Stage 2 of 4 · Verification</span>
+  <h1>Before you see the dashboard, here's what we found.</h1>
+  <p class="lede">{{ run.meet_name }} · {{ run.course }} · {{ run.club_display }}</p>
+</section>
+
+<section class="vstats">
+  <div class="vcard">
+    <h3>Parsed</h3>
+    <p class="big-number">{{ run.parsed_swim_count }}</p>
+    <p class="muted">total swims read from the file</p>
+    <p class="vline">{{ run.our_swim_count }} for {{ run.club_display }} · {{ run.other_swim_count }} excluded</p>
+    <p class="vline">{{ run.n_swimmers_ours }} swimmers in scope</p>
+  </div>
+
+  <div class="vcard">
+    <h3>PB enrichment</h3>
+    <p class="big-number">{{ run.pb_fetch_ok }}/{{ run.n_swimmers_ours }}</p>
+    <p class="muted">live histories fetched from swimmingresults.org</p>
+    <p class="vline">{{ run.detector.n_pb_confirmed }} confirmed PBs · {{ run.detector.n_pb_likely }} likely PBs</p>
+    {% if run.pb_fetch_failed %}
+      <p class="vline warn">{{ run.pb_fetch_failed }} fetch failures</p>
+    {% endif %}
+  </div>
+
+  <div class="vcard">
+    <h3>Qualifications</h3>
+    <p class="big-number">{{ run.detector.n_qual_hits }}</p>
+    <p class="muted">selection-time hits across the squad</p>
+    <p class="vline">{{ run.standards_meta.total }} active standards · {{ run.standards_meta.relevant_ids|length }} relevant</p>
+    {% if run.standards_meta.stale_ids %}
+      <p class="vline warn">{{ run.standards_meta.stale_ids|length }} stale (older than 60 days)</p>
+    {% endif %}
+  </div>
+
+  <div class="vcard">
+    <h3>Content cards</h3>
+    <p class="big-number">{{ run.cards|length }}</p>
+    <p class="muted">grouped storylines</p>
+    {% set queue_n = run.cards|selectattr('bucket','equalto','queue')|list|length %}
+    {% set recap_n = run.cards|selectattr('bucket','equalto','recap')|list|length %}
+    {% set arch_n = run.cards|selectattr('bucket','equalto','archive')|list|length %}
+    <p class="vline">{{ queue_n }} in queue · {{ recap_n }} recap · {{ arch_n }} archived</p>
+  </div>
+</section>
+
+<section class="vchecks">
+  <h2>Self-check ({{ run.self_check.pass_count }} pass · {{ run.self_check.warn_count }} warn · {{ run.self_check.fail_count }} fail)</h2>
+  <p class="muted">Each check is a guardrail against fabrication or noise. Warnings are surfaced but don't block.</p>
+  <ul class="checks">
+    {% for c in run.self_check.results %}
+      <li class="check {{ c.status|status_class }}">
+        <span class="icon">{{ c.status|status_icon }}</span>
+        <div>
+          <div class="title"><strong>{{ c.code }}</strong> {{ c.title }}</div>
+          <div class="msg">{{ c.message }}</div>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if run.pb_fetch_errors %}
+<section class="vchecks">
+  <h2>PB fetch errors</h2>
+  <ul class="checks">
+    {% for e in run.pb_fetch_errors %}
+      <li class="check warn"><span class="icon">!</span><div class="msg">{{ e }}</div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="vactions">
+  <a class="btn ghost" href="{{ url_for('upload_v3') }}">Back to upload</a>
+  <a class="btn primary big" href="{{ url_for('dashboard_v3', run_id=run_id) }}">Continue to dashboard →</a>
+</section>
+{% endblock %}
