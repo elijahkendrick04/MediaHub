@@ -5,7 +5,8 @@ services:
     name: mediahub
     runtime: python
     plan: starter
-    pythonVersion: "3.12"
+    - key: PYTHON_VERSION
+   value: "3.12"
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
