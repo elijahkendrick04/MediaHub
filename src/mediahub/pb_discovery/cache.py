@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Optional
 
 
 def _repo_root() -> Path:
+    env = os.environ.get("DATA_DIR")
+    if env:
+        return Path(env)
     return Path(__file__).resolve().parent.parent
 
 

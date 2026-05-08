@@ -118,11 +118,11 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT
-RUNS_DIR = DATA_DIR / "runs_v4"
-UPLOADS_DIR = DATA_DIR / "uploads_v4"
-DB_PATH = DATA_DIR / "data.db"          # MUST be data.db for publish snapshot
+_SRC_ROOT = Path(__file__).resolve().parents[1]   # src/mediahub/ — local dev default
+DATA_DIR   = Path(os.environ.get("DATA_DIR",   str(_SRC_ROOT)))
+RUNS_DIR   = Path(os.environ.get("RUNS_DIR",   str(DATA_DIR / "runs_v4")))
+UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
+DB_PATH    = DATA_DIR / "data.db"               # MUST be data.db for publish snapshot
 RESEARCH_DIR = DATA_DIR / "research"
 
 RUNS_DIR.mkdir(exist_ok=True)

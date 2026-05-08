@@ -11,7 +11,10 @@ services:
       pip install -r requirements.txt
       pip install gunicorn
       pip install -e .
-    startCommand: gunicorn mediahub.web:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300
+    startCommand: >-
+      mkdir -p /var/mediahub/data /var/mediahub/runs_v4 /var/mediahub/uploads_v4 &&
+      cp -rn data/. /var/mediahub/data/ &&
+      exec gunicorn mediahub.web:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
@@ -28,7 +31,13 @@ services:
         sync: false
       - key: MEDIAHUB_CUTOUT_PROVIDER
         value: rembg
+      - key: DATA_DIR
+        value: /var/mediahub
+      - key: RUNS_DIR
+        value: /var/mediahub/runs_v4
+      - key: UPLOADS_DIR
+        value: /var/mediahub/uploads_v4
     disk:
       name: mediahub-data
-      mountPath: /opt/render/project/src/data
+      mountPath: /var/mediahub
       sizeGB: 1

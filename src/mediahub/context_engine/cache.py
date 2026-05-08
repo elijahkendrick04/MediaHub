@@ -18,7 +18,9 @@ from typing import Any, Optional
 
 
 def _repo_root() -> Path:
-    """Resolve the repository root relative to this file."""
+    env = os.environ.get("DATA_DIR")
+    if env:
+        return Path(env)
     return Path(__file__).resolve().parent.parent
 
 
