@@ -708,7 +708,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='make' else '' }}">Make</a>
     <a href="{{ url_for('upload') }}" class="{{ 'active' if active=='upload' else '' }}">Meet Recap</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('research_page') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
@@ -745,7 +744,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </body>
 </html>
 """, title=title, css=BASE_CSS, body=body, active=active,
-               health_url=url_for("health"))
+               health_url=url_for("healthz"))
 
 
 # ---------------------------------------------------------------------
@@ -761,7 +760,7 @@ def create_app() -> Flask:
     # Priority: env var > persisted file > generated + saved.
     _secret = os.environ.get("SECRET_KEY", "")
     if not _secret:
-        _persistent_path = Path(os.environ.get("DATA_DIR", str(ROOT))) / ".secret_key"
+        _persistent_path = DATA_DIR / ".secret_key"
         if _persistent_path.exists():
             try:
                 _secret = _persistent_path.read_text().strip()
@@ -810,12 +809,12 @@ def create_app() -> Flask:
             _upload_url = url_for('upload')
             empty_body = f"""
 <h1>Welcome to MediaHub</h1>
-<p class="dim">Turn swimming meet results into ranked, source-grounded social content — for any UK club.</p>
+<p class="dim">Turn swimming meet results into ranked social content — every claim backed by the results file.</p>
 
 <div class="card" style="text-align:center;padding:48px 32px">
   <div style="font-size:48px;margin-bottom:16px">&#127946;</div>
   <h2 style="margin-bottom:8px">Upload your first meet</h2>
-  <p class="dim" style="margin-bottom:24px">Drop in a Hytek .hy3 / .zip or SPORTSYSTEMS PDF. <br>You'll pick your club and add branding on the next step.</p>
+  <p class="dim" style="margin-bottom:24px">Drop in a Hytek .hy3 or .zip results file. <br>You'll pick your club and add branding on the next step.</p>
   <a class="btn" href="{_upload_url}">Upload meet file →</a>
 </div>
 """
@@ -852,16 +851,16 @@ def create_app() -> Flask:
                 )
 
         body = f"""
-<h1>Club content automation</h1>
-<p class="dim">Turn structured club information into ranked, source-grounded social content.
-Every claim is sourced and labelled with a confidence and a \u201csafe to post\u201d recommendation.
-Designed to reduce manual fact-checking, not just present more data.</p>
+<h1>MediaHub</h1>
+<p class="dim">Turn swimming meet results into ranked social content.
+Every claim is drawn from the results file and labelled with a confidence score and a safe-to-post recommendation.
+Designed to cut fact-checking time, not just add more data.</p>
 
 <div class="card">
   <div class="row">
     <div>
       <h2>Start a new meet recap</h2>
-      <p>Upload your Hytek Meet Manager (.hy3 or .zip) or SPORTSYSTEMS PDF results file.</p>
+      <p>Upload a Hytek Meet Manager results file (.hy3 or .zip) to get started.</p>
       <a class="btn" href="{url_for('upload')}">Upload meet file \u2192</a>
     </div>
     <div>
@@ -875,7 +874,7 @@ Designed to reduce manual fact-checking, not just present more data.</p>
 <div class="card">
   <h2>Recent runs</h2>
   <table>
-    <thead><tr><th>Meet</th><th>Status</th><th>Club</th><th>Our swims</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>
+    <thead><tr><th>Meet</th><th>Status</th><th>Club</th><th>Club swims</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
@@ -934,8 +933,9 @@ Designed to reduce manual fact-checking, not just present more data.</p>
 <h1>Upload meet file</h1>
 <div class="card">
   <form method="post" enctype="multipart/form-data">
-    <label>Meet file (.hy3, .zip, or SPORTSYSTEMS .pdf)</label>
+    <label>Meet results file</label>
     <input type="file" name="file" accept=".hy3,.zip,.pdf" required />
+    <p class="dim" style="margin-top:4px;font-size:12px">Accepted: Hytek Meet Manager .hy3 or .zip export, or a Sportsystems PDF results file.</p>
     <p class="dim" style="margin-top:6px;font-size:12px">
       You'll choose your club, upload your logo, and add photos on the next step — after we read your file.
     </p>
@@ -1839,13 +1839,18 @@ Designed to reduce manual fact-checking, not just present more data.</p>
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
-    <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener">Download recognition JSON</a>
-    <a class="btn secondary" href="{_gt_url}">Run ground-truth check</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
     <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently?')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
+  <details style="margin-top:12px">
+    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
+      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+  </details>
 </div>
 
 {workflow_summary_card}
@@ -2928,8 +2933,8 @@ Relay team broke club record"></textarea>
         conn.close()
         n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
         n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
-        cache_dir = ROOT / ".cache" / "pb_lookup"
-        legacy_cache = ROOT / ".cache" / "swimmingresults"
+        cache_dir = DATA_DIR / ".cache" / "pb_lookup"
+        legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
         n_cache = (
             (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
             + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
@@ -2976,7 +2981,7 @@ Relay team broke club record"></textarea>
 
     @app.route("/privacy/cache/clear", methods=["POST"])
     def privacy_cache_clear():
-        for d in [ROOT / ".cache" / "pb_lookup", ROOT / ".cache" / "swimmingresults"]:
+        for d in [DATA_DIR / ".cache" / "pb_lookup", DATA_DIR / ".cache" / "swimmingresults"]:
             if d.exists():
                 for f in d.glob("*.json"):
                     try: f.unlink()
@@ -2995,18 +3000,18 @@ Relay team broke club record"></textarea>
             c = _db()
             c.execute("SELECT 1").fetchone()
             c.close()
-            checks["database"] = {"ok": True, "path": str(DB_PATH.relative_to(ROOT))}
+            checks["database"] = {"ok": True, "path": str(DB_PATH.relative_to(DATA_DIR))}
         except Exception as e:
             checks["database"] = {"ok": False, "error": str(e)}
         # writable dirs
         for label, p in [("uploads", UPLOADS_DIR), ("runs", RUNS_DIR),
-                         ("pb_cache", ROOT / ".cache" / "pb_lookup")]:
+                         ("pb_cache", DATA_DIR / ".cache" / "pb_lookup")]:
             try:
                 p.mkdir(parents=True, exist_ok=True)
                 test = p / ".write_test"
                 test.write_text("ok")
                 test.unlink()
-                checks[label] = {"ok": True, "path": str(p.relative_to(ROOT))}
+                checks[label] = {"ok": True, "path": str(p.relative_to(DATA_DIR))}
             except Exception as e:
                 checks[label] = {"ok": False, "error": str(e)}
         # V8.2: profiles UI removed; health check no longer requires any profiles.
@@ -3227,8 +3232,8 @@ Relay team broke club record"></textarea>
             "Live AI captions ENABLED" if active_key else "Live AI captions DISABLED"
         )
         source = (
-            "environment variable (ANTHROPIC_API_KEY)" if env_key else
-            ("data/secrets.json" if stored_key else "none — add a key below")
+            "environment variable" if env_key else
+            ("saved key" if stored_key else "none — add a key below")
         )
         masked = _h(mask_key(active_key)) if active_key else "<em>none</em>"
 
@@ -3245,9 +3250,8 @@ Relay team broke club record"></textarea>
         body = f"""
 <div class="card">
   <h1 style="margin-top:0">Settings</h1>
-  <p class="muted">Configure provider credentials. Keys are stored locally
-     at <code>data/secrets.json</code> with file-mode 0600 and never sent
-     anywhere except the provider you've configured.</p>
+  <p class="muted">Configure provider credentials. Keys are stored on disk with
+     restricted permissions and never sent anywhere except the provider you've configured.</p>
   {message_html}
 </div>
 
@@ -3281,9 +3285,9 @@ Relay team broke club record"></textarea>
 <div class="card" style="margin-top:16px">
   <h2 style="margin-top:0">Status check</h2>
   <ul>
-    <li><code>ANTHROPIC_API_KEY</code> environment variable: <strong>{'set' if env_key else 'not set'}</strong></li>
-    <li><code>data/secrets.json</code> Anthropic key: <strong>{'present' if stored_key else 'absent'}</strong></li>
-    <li>Active resolution: <strong>{('env' if env_key else ('disk' if stored_key else 'none'))}</strong></li>
+    <li>Anthropic key via environment: <strong>{'set' if env_key else 'not set'}</strong></li>
+    <li>Anthropic key saved on disk: <strong>{'present' if stored_key else 'absent'}</strong></li>
+    <li>Active key source: <strong>{('environment' if env_key else ('disk' if stored_key else 'none'))}</strong></li>
     <li>Photoroom key: <strong>{photoroom_state}</strong>{photoroom_masked_html}</li>
     <li>Replicate token: <strong>{replicate_state}</strong>{replicate_masked_html}</li>
     <li>Cutout provider: <strong>{cutout_provider}</strong></li>
@@ -3350,13 +3354,10 @@ Relay team broke club record"></textarea>
 .make-tile:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
 </style>
 <h1>What do you want to make?</h1>
-<p class="dim" style="margin-bottom:28px">Choose a content type. The first two are ready now; others are on the roadmap.</p>
+<p class="dim" style="margin-bottom:28px">Choose a content type to get started.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
   {tiles_html}
 </div>
-<p class="muted" style="margin-top:28px;font-size:13px">
-  Need something not listed? <a href="{url_for('research_page')}">Check the research roadmap</a> — we prioritise by real demand.
-</p>
 """
         return _layout("Make", body, active="make")
 
@@ -3609,35 +3610,71 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="make")
 
     # ---- Stub routes ---------------------------------------------------
-    @app.route("/weekend-preview")
+    @app.route("/weekend-preview", methods=["GET", "POST"])
     def stub_weekend_preview():
         try:
             from mediahub.club_platform.stubs import WeekendPreviewStub
             stub = WeekendPreviewStub()
-            body = stub.render_stub_html()
-            body += f'<p><a href="{url_for("make_page")}">← Back to Make</a></p>'
+            if request.method == "POST":
+                brief = stub.generate_brief(request.form)
+                back = url_for("stub_weekend_preview")
+                body = (
+                    f'<h1>Weekend Preview — draft brief</h1>'
+                    f'<div class="card">'
+                    f'<h2>Your draft</h2>'
+                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
+                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
+                    f'</div>'
+                )
+            else:
+                body = stub.render_stub_html()
+                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
         return _layout("Weekend Preview", body, active="make")
 
-    @app.route("/sponsor-post")
+    @app.route("/sponsor-post", methods=["GET", "POST"])
     def stub_sponsor_post():
         try:
             from mediahub.club_platform.stubs import SponsorPostStub
             stub = SponsorPostStub()
-            body = stub.render_stub_html()
-            body += f'<p><a href="{url_for("make_page")}">← Back to Make</a></p>'
+            if request.method == "POST":
+                brief = stub.generate_brief(request.form)
+                back = url_for("stub_sponsor_post")
+                body = (
+                    f'<h1>Sponsor Post — draft brief</h1>'
+                    f'<div class="card">'
+                    f'<h2>Your draft</h2>'
+                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
+                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
+                    f'</div>'
+                )
+            else:
+                body = stub.render_stub_html()
+                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
         return _layout("Sponsor Post", body, active="make")
 
-    @app.route("/session-update")
+    @app.route("/session-update", methods=["GET", "POST"])
     def stub_session_update():
         try:
             from mediahub.club_platform.stubs import SessionUpdateStub
             stub = SessionUpdateStub()
-            body = stub.render_stub_html()
-            body += f'<p><a href="{url_for("make_page")}">← Back to Make</a></p>'
+            if request.method == "POST":
+                brief = stub.generate_brief(request.form)
+                back = url_for("stub_session_update")
+                body = (
+                    f'<h1>Session Update — draft brief</h1>'
+                    f'<div class="card">'
+                    f'<h2>Your draft</h2>'
+                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
+                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
+                    f'</div>'
+                )
+            else:
+                body = stub.render_stub_html()
+                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
         return _layout("Session Update", body, active="make")
@@ -4427,8 +4464,17 @@ function copyText(btn, taId) {{
                     return jsonify(payload)
         return jsonify({"error": "not_found"}), 404
 
+    _VALID_FORMAT_NAMES = {
+        "feed_portrait", "feed_square", "feed_landscape",
+        "story_portrait", "story_square",
+        "twitter_landscape", "twitter_square",
+        "print_a4", "print_letter",
+    }
+
     @app.route("/api/visual/<vid>/png/<format_name>")
     def api_visual_png(vid: str, format_name: str):
+        if format_name not in _VALID_FORMAT_NAMES:
+            return "", 400
         if not _v8_ok:
             return "", 503
         from flask import send_file
