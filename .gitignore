@@ -42,6 +42,8 @@ uploads_v4/
 smoke_v8_output/
 *.db
 data.db
+src/mediahub/data/
+src/mediahub/club_profiles/
 
 # Node (legacy frontend tooling)
 node_modules/
