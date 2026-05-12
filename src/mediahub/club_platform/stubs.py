@@ -7,13 +7,14 @@ Classes:
   WeekendPreviewStub
   SponsorPostStub
   SessionUpdateStub
+  FreeTextStub
 """
 from __future__ import annotations
 
 import html
 from typing import Any
 
-from .content_types import ContentType, ContentTypeMeta, REGISTRY
+from .content_types import ContentType, ContentTypeMeta, REGISTRY  # noqa: F401
 
 
 def _h(s: Any) -> str:
@@ -120,6 +121,41 @@ class WeekendPreviewStub(_StubContentType):
             f"This is a draft brief. Edit the athlete list and angles before posting.\n"
             f"Once the full Weekend Preview pipeline is live, upload an entry list\n"
             f"to get ranked, source-grounded preview cards automatically."
+        )
+
+
+class FreeTextStub(_StubContentType):
+    _type = ContentType.FREE_TEXT
+
+    def render_form_html(self) -> str:
+        return """
+<div class="card">
+  <h2>Describe your moment</h2>
+  <p class="dim" style="font-size:13px">Type or paste anything — a result, a training session, an event, a milestone.
+     We'll structure it into a content brief.</p>
+  <form method="POST" style="margin-top:16px">
+    <div style="margin-bottom:14px">
+      <label style="display:block;font-weight:600;margin-bottom:4px">Your notes (anything goes)</label>
+      <textarea name="free_text" rows="7" required
+                placeholder="e.g. Last Saturday at the County Champs, Alex broke the club record in 100m backstroke by 0.4 seconds and got a standing ovation from the whole team..."
+                style="width:100%;max-width:600px;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:inherit"></textarea>
+    </div>
+    <button type="submit" class="btn">Generate draft brief →</button>
+  </form>
+</div>"""
+
+    def generate_brief(self, form_data: dict) -> str:
+        text = (form_data.get("free_text") or "").strip()
+        if not text:
+            return "No text provided."
+        preview = _h(text[:1200])
+        return (
+            f"Free Text brief\n"
+            f"{'=' * 60}\n\n"
+            f"Your notes:\n{preview}\n\n"
+            f"---\n"
+            f"Full AI content generation from free text is coming soon.\n"
+            f"Use the notes above as a starting brief for your captions."
         )
 
 
