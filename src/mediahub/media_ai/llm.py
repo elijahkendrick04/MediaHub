@@ -49,6 +49,29 @@ def _has_anthropic_key() -> bool:
     return bool(_resolve_anthropic_key())
 
 
+def _resolve_gemini_key() -> Optional[str]:
+    """Return env GEMINI_API_KEY (or GOOGLE_API_KEY), else stored secret, else None.
+
+    Google's free tier (Gemini 1.5/2.0 Flash) gives 15 RPM and 1,500 RPD with no
+    credit card — ideal for self-hosted MediaHub deployments. Get a key at
+    https://aistudio.google.com/apikey
+    """
+    for env_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        env = os.environ.get(env_name)
+        if env and env.strip():
+            return env.strip()
+    try:
+        from mediahub.web.secrets_store import get_secret
+        v = get_secret("gemini_api_key")
+        return v if v else None
+    except Exception:
+        return None
+
+
+def _has_gemini_key() -> bool:
+    return bool(_resolve_gemini_key())
+
+
 # Whether the `claude` CLI (Claude Code) is available AND we're running inside
 # an authenticated Claude Code session (signalled by the OAuth FD env var).
 # Set MEDIAHUB_DISABLE_CLAUDE_CLI=1 to force-disable (e.g. for tests).
@@ -71,15 +94,23 @@ def _has_claude_cli() -> bool:
 
 def is_available() -> bool:
     """True if a real LLM is reachable. Tests + UI use this for badges."""
-    return _has_pplx_bridge() or _has_anthropic_key() or _has_claude_cli()
+    return (_has_pplx_bridge() or _has_anthropic_key()
+            or _has_gemini_key() or _has_claude_cli())
 
 
 def active_provider() -> str:
-    """Return a short, user-friendly name of the active LLM provider."""
+    """Return a short, user-friendly name of the active LLM provider.
+
+    Priority: pplx-bridge → Anthropic API → Gemini API → Claude CLI → heuristic.
+    Anthropic is preferred for users who paid for it; Gemini is the recommended
+    free option (free tier from https://aistudio.google.com).
+    """
     if _has_pplx_bridge():
         return "pplx-bridge"
     if _has_anthropic_key():
         return "anthropic-api"
+    if _has_gemini_key():
+        return "gemini-api"
     if _has_claude_cli():
         return "claude-cli"
     return "heuristic"
@@ -158,7 +189,83 @@ def _get_anthropic():
 
 
 # ---------------------------------------------------------------------------
-# Provider 3: claude CLI (Claude Code, OAuth-authenticated)
+# Provider 3: Google Gemini (free tier from https://aistudio.google.com)
+# ---------------------------------------------------------------------------
+# Uses Google's REST API directly so we don't need to add a new Python SDK.
+# `requests` is already a project dependency. Free tier is generous:
+#   gemini-2.0-flash: 15 RPM, 1,500 RPD, 1M tokens/min, no credit card needed.
+_GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.0-flash")
+_GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
+
+
+def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
+    """Call Google Gemini generateContent endpoint. Returns text or None.
+
+    See: https://ai.google.dev/api/generate-content
+    """
+    key = _resolve_gemini_key()
+    if not key:
+        return None
+    try:
+        import requests  # already a project dependency
+    except Exception as e:
+        log.debug("gemini: requests import failed: %s", e)
+        return None
+    # Convert OpenAI/Anthropic-style messages → Gemini contents.
+    contents = []
+    for m in (messages or []):
+        role = m.get("role")
+        text = str(m.get("content", "") or "")
+        if not text:
+            continue
+        # Gemini uses "user" / "model". Map "assistant" → "model".
+        g_role = "model" if role == "assistant" else "user"
+        contents.append({"role": g_role, "parts": [{"text": text}]})
+    if not contents:
+        return None
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": int(max_tokens),
+            "temperature": 0.7,
+        },
+    }
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{_GEMINI_MODEL}:generateContent"
+    )
+    try:
+        r = requests.post(
+            url,
+            params={"key": key},
+            json=payload,
+            timeout=_GEMINI_TIMEOUT,
+            headers={"Content-Type": "application/json"},
+        )
+    except Exception as e:
+        log.debug("gemini http error: %s", e)
+        return None
+    if r.status_code != 200:
+        log.debug("gemini non-200 (%s): %s", r.status_code, r.text[:200])
+        return None
+    try:
+        data = r.json()
+    except Exception:
+        return None
+    # Walk: candidates[0].content.parts[*].text
+    candidates = data.get("candidates") or []
+    if not candidates:
+        log.debug("gemini empty candidates: %s", str(data)[:200])
+        return None
+    parts = ((candidates[0].get("content") or {}).get("parts") or [])
+    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+    return text or None
+
+
+# ---------------------------------------------------------------------------
+# Provider 4: claude CLI (Claude Code, OAuth-authenticated, dev only)
 # ---------------------------------------------------------------------------
 # Used when no Anthropic API key is configured but the host machine is running
 # inside an authenticated `claude` CLI session. Cheap-ish (defaults to Haiku)
@@ -300,11 +407,15 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
 
-    # Provider order: pplx bridge → Anthropic SDK (cheap) → claude CLI → heuristic.
+    # Provider order: pplx bridge → Anthropic SDK → Gemini (free tier)
+    # → claude CLI (Claude Code dev only) → heuristic.
     out = _call_pplx_bridge(msgs, system, max_tokens)
     if out:
         return out
     out = _call_anthropic(msgs, system, max_tokens)
+    if out:
+        return out
+    out = _call_gemini(msgs, system, max_tokens)
     if out:
         return out
     out = _call_claude_cli(msgs, system, max_tokens)

@@ -896,6 +896,204 @@ a.card:hover, .card[data-interactive]:hover {
 /* Force inputs/selects to never overflow their container, even with inline max-widths */
 input[type=text], input[type=file], textarea, select { max-width: 100%; }
 
+/* === Hero (Holo-style) === */
+.mh-hero {
+  text-align: center;
+  padding: 56px 24px 32px;
+  position: relative;
+  margin-bottom: 32px;
+}
+.mh-hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; border-radius: 999px;
+  background: rgba(34,211,238,0.08);
+  border: 1px solid rgba(34,211,238,0.2);
+  font-size: 12px; font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  margin-bottom: 22px;
+  animation: mh-fade-in 0.6s ease-out;
+}
+.mh-hero-eyebrow .mh-pulse-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 8px rgba(34,197,94,0.6);
+  animation: mh-pulse 1.6s ease-in-out infinite;
+}
+.mh-hero h1 {
+  font-size: clamp(34px, 6vw, 60px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0 0 18px;
+  max-width: 820px; margin-left: auto; margin-right: auto;
+}
+.mh-hero h1 .mh-gradient-text {
+  background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 60%, #f43f5e 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.mh-hero .mh-hero-sub {
+  font-size: clamp(15px, 1.6vw, 18px);
+  color: var(--ink-dim);
+  max-width: 640px; margin: 0 auto 28px;
+  line-height: 1.55;
+}
+.mh-hero-ctas {
+  display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.mh-hero-ctas .btn {
+  font-size: 15px; padding: 12px 22px;
+}
+.mh-hero-trust {
+  display: flex; align-items: center; justify-content: center;
+  gap: 18px; flex-wrap: wrap;
+  font-size: 12px; color: var(--ink-muted);
+  margin-top: 8px;
+}
+.mh-hero-trust > * { display: inline-flex; align-items: center; gap: 6px; }
+.mh-hero-trust svg { width: 13px; height: 13px; }
+
+/* Section heading */
+.mh-section-eyebrow {
+  display: block; text-align: center;
+  font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--accent);
+  margin: 36px 0 8px;
+}
+.mh-section-title {
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: center;
+  margin: 0 0 32px;
+  max-width: 720px; margin-left: auto; margin-right: auto;
+  line-height: 1.2;
+}
+
+/* === Numbered step cards (How it works) === */
+.mh-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-bottom: 48px;
+}
+.mh-step {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 22px;
+  position: relative;
+  transition: border-color 0.25s ease, transform 0.25s ease;
+}
+.mh-step:hover {
+  border-color: rgba(34,211,238,0.4);
+  transform: translateY(-2px);
+}
+.mh-step-num {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(124,58,237,0.18));
+  border: 1px solid rgba(34,211,238,0.35);
+  color: var(--accent);
+  font-weight: 800; font-size: 14px;
+  margin-bottom: 14px;
+}
+.mh-step h3 {
+  font-size: 16px; font-weight: 700; color: var(--ink);
+  letter-spacing: -0.01em; margin: 0 0 8px;
+  text-transform: none;
+}
+.mh-step p {
+  font-size: 13.5px; color: var(--ink-dim);
+  line-height: 1.55; margin: 0;
+}
+
+/* === Template gallery cards === */
+.mh-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 40px;
+}
+.mh-template {
+  display: flex; flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.mh-template::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(34,211,238,0.06) 0%, transparent 60%);
+  opacity: 0; transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.mh-template:hover {
+  border-color: rgba(34,211,238,0.4);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.mh-template:hover::before { opacity: 1; }
+.mh-template-icon {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  background: rgba(34,211,238,0.1);
+  border: 1px solid rgba(34,211,238,0.25);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent); flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.mh-template-icon svg { width: 22px; height: 22px; }
+.mh-template h3 {
+  font-size: 15px; font-weight: 700; color: var(--ink);
+  letter-spacing: -0.01em; margin: 0;
+  text-transform: none;
+}
+.mh-template p {
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.5; margin: 0 0 10px;
+  flex: 1;
+}
+.mh-template-cta {
+  font-size: 13px; font-weight: 600;
+  color: var(--accent);
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: auto;
+}
+
+/* === Provider badge on home === */
+.mh-provider-badge {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: rgba(34,197,94,0.06);
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 12px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.mh-provider-badge.warn {
+  background: rgba(245,158,11,0.06);
+  border-color: rgba(245,158,11,0.3);
+  color: var(--ink);
+}
+.mh-provider-badge.warn strong { color: var(--warn); }
+.mh-provider-badge .mh-provider-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--good);
+}
+.mh-provider-badge.warn .mh-provider-dot { background: var(--warn); }
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1214,35 +1412,132 @@ def create_app() -> Flask:
         ).fetchall()
         conn.close()
 
-        # V8.2: club profiles UI removed; branding lives on the configure step.
-        # If there are no runs yet, show a streamlined welcome card pointing
-        # the user straight at the upload flow.
+        # Build the Holo-style home page. Hero + how-it-works + templates
+        # are shared between empty and populated states; recent activity table
+        # only appears when there are runs.
+        _add_input_url = url_for('add_input_page')
+        _org_url = url_for('organisation_page')
+        _settings_url = url_for('settings_page')
+
+        # Detect active LLM provider for the live status pill.
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available, active_provider as _ap
+            _llm_live = _llm_available()
+            _llm_provider = _ap()
+        except Exception:
+            _llm_live = False
+            _llm_provider = "heuristic"
+        _PROVIDER_PRETTY = {
+            "anthropic-api": "Anthropic (Claude)",
+            "gemini-api":    "Google Gemini",
+            "claude-cli":    "Claude CLI",
+            "pplx-bridge":   "Computer bridge",
+        }
+        _provider_pretty = _PROVIDER_PRETTY.get(_llm_provider, "")
+        if _llm_live:
+            provider_badge_html = (
+                f'<div class="mh-provider-badge">'
+                f'<span class="mh-provider-dot"></span>'
+                f'<span><strong>Content engine live</strong> &mdash; powered by {_h(_provider_pretty)}</span>'
+                f'</div>'
+            )
+        else:
+            provider_badge_html = (
+                f'<div class="mh-provider-badge warn">'
+                f'<span class="mh-provider-dot"></span>'
+                f'<span><strong>Heuristic mode</strong> &mdash; '
+                f'<a href="{_settings_url}">add a free Gemini key</a> to enable live AI content</span>'
+                f'</div>'
+            )
+
+        hero_html = (
+            '<section class="mh-hero">'
+            '<div class="mh-hero-eyebrow"><span class="mh-pulse-dot"></span> The content engine for clubs and teams</div>'
+            '<h1>Turn every result into <span class="mh-gradient-text">ready-to-post content</span> in minutes</h1>'
+            '<p class="mh-hero-sub">Upload results, paste an update, or describe a moment. MediaHub finds the moments worth celebrating, drafts on-brand captions, and stops nothing falling through the cracks. Human approval before anything goes out.</p>'
+            f'<div class="mh-hero-ctas">'
+            f'<a class="btn" href="{_add_input_url}">Create content &rarr;</a>'
+            f'<a class="btn secondary" href="{_org_url}">Set up your club</a>'
+            f'</div>'
+            '<div class="mh-hero-trust">'
+            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Source-grounded captions</span>'
+            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Confidence scoring</span>'
+            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Human approval before posting</span>'
+            '</div>'
+            f'<div style="margin-top:24px;display:flex;justify-content:center">{provider_badge_html}</div>'
+            '</section>'
+        )
+
+        steps_html = (
+            '<div class="mh-section-eyebrow">How it works</div>'
+            '<h2 class="mh-section-title">From results to ready-to-post content, end to end</h2>'
+            '<div class="mh-steps">'
+            '<div class="mh-step"><div class="mh-step-num">1</div><h3>Add an input</h3>'
+            '<p>Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.</p></div>'
+            '<div class="mh-step"><div class="mh-step-num">2</div><h3>We detect the moments</h3>'
+            '<p>The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.</p></div>'
+            '<div class="mh-step"><div class="mh-step-num">3</div><h3>On-brand drafts appear</h3>'
+            "<p>Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.</p></div>"
+            '<div class="mh-step"><div class="mh-step-num">4</div><h3>Approve and post</h3>'
+            '<p>You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.</p></div>'
+            '</div>'
+        )
+
+        # Content template gallery (live content types only)
+        templates_html = ""
+        try:
+            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
+        except ImportError:
+            _CT_REGISTRY = {}
+        tile_html = ""
+        for _ct, _meta in (_CT_REGISTRY or {}).items():
+            if not getattr(_meta, "is_implemented", False):
+                continue
+            try:
+                _tile_url = url_for(_meta.primary_route_endpoint)
+            except Exception:
+                _tile_url = "#"
+            _icon = _meta.icon_svg.replace('width="28" height="28"', 'width="22" height="22"')
+            tile_html += (
+                f'<a class="mh-template" href="{_tile_url}">'
+                f'<div class="mh-template-icon">{_icon}</div>'
+                f'<h3>{_h(_meta.title)}</h3>'
+                f'<p>{_h(_meta.description)}</p>'
+                f'<span class="mh-template-cta">Start &rarr;</span>'
+                f'</a>'
+            )
+        if tile_html:
+            templates_html = (
+                '<div class="mh-section-eyebrow">Content templates</div>'
+                "<h2 class=\"mh-section-title\">Pick a format and we'll do the rest</h2>"
+                f'<div class="mh-template-grid">{tile_html}</div>'
+            )
+
+        # Set-up-org callout (only if no profiles yet)
+        _has_org = bool(list_profiles())
+        _org_cta = ""
+        if not _has_org:
+            _org_cta = (
+                '<div class="card" style="border-color:rgba(34,211,238,0.3);'
+                'margin-bottom:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">'
+                '<div style="flex:1;min-width:240px">'
+                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation</h2>'
+                '<p style="margin:0">Tell MediaHub about your club, tone of voice, and sponsor &mdash; '
+                'content will land in your style automatically.</p>'
+                '</div>'
+                f'<a class="btn" href="{_org_url}">Set up organisation &rarr;</a>'
+                '</div>'
+            )
+
+        # Empty state: just hero + steps + templates + org-cta. No table.
         if not rows:
-            _add_input_url = url_for('add_input_page')
-            _org_url = url_for('organisation_page')
-            empty_body = f"""
-<h1>Welcome to MediaHub</h1>
-<p class="dim">Create on-brand social content for any club, society, team or organisation — every claim is source-grounded and labelled with a confidence score.</p>
-
-<div class="card" style="text-align:center;padding:48px 32px">
-  <div style="font-size:48px;margin-bottom:16px">&#9889;</div>
-  <h2 style="margin-bottom:8px">Add your first input</h2>
-  <p class="dim" style="margin-bottom:24px">Upload results, write a preview, describe a moment — choose how you want to start.</p>
-  <a class="btn" href="{_add_input_url}">Get started →</a>
-</div>
-
-<div class="card" style="margin-top:16px">
-  <h2 style="margin-top:0">Set up your organisation</h2>
-  <p>Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
-  <a class="btn secondary" href="{_org_url}">Set up organisation →</a>
-</div>
-"""
+            empty_body = hero_html + _org_cta + steps_html + templates_html
             return _layout("Home", empty_body, active="home")
 
         rows_html = ""
         if not rows:
             rows_html = ('<tr><td colspan="7" class="muted">No runs yet. '
-                         '<a href="' + url_for('upload') + '">Upload your first meet →</a></td></tr>')
+                         '<a href="' + url_for('upload') + '">Upload your first meet &rarr;</a></td></tr>')
         else:
             for r in rows:
                 badge = {"done": "good", "running": "info", "queued": "info",
@@ -1268,46 +1563,17 @@ def create_app() -> Flask:
                     f'</form></td></tr>'
                 )
 
-        _has_org = bool(list_profiles())
-        _org_cta = ""
-        if not _has_org:
-            _org_url = url_for('organisation_page')
-            _org_cta = f"""
-<div class="card" style="border-color:rgba(34,211,238,0.3);margin-bottom:20px">
-  <h2 style="margin-top:0">Set up your organisation</h2>
-  <p>Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
-  <a class="btn secondary" href="{_org_url}">Set up organisation \u2192</a>
-</div>
-"""
-        body = f"""
-<h1>MediaHub</h1>
-<p class="dim">Create on-brand social content for any club, society, team or organisation.
-Every claim is drawn from your source material and labelled with a confidence score and a safe-to-post recommendation.
-Designed to cut production time, not just add more data.</p>
+        recent_html = (
+            '<div class="mh-section-eyebrow">Your activity</div>'
+            '<h2 class="mh-section-title">Recent runs</h2>'
+            '<div class="card"><table>'
+            '<thead><tr><th>Input</th><th>Status</th><th>Organisation</th>'
+            '<th>Matched items</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            '</table></div>'
+        )
 
-{_org_cta}<div class="card">
-  <div class="row">
-    <div>
-      <h2>Add an input</h2>
-      <p>Upload results, write a preview, describe a moment \u2014 pick how you want to start creating content.</p>
-      <a class="btn" href="{url_for('add_input_page')}">Add input \u2192</a>
-    </div>
-    <div>
-      <h2>Create content</h2>
-      <p>Choose a content type \u2014 meet recaps, athlete spotlights, sponsor posts and more.
-         <a href="{url_for('make_page')}">Browse all content types \u2192</a></p>
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <h2>Recent activity</h2>
-  <table>
-    <thead><tr><th>Input</th><th>Status</th><th>Organisation</th><th>Matched items</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>
-    <tbody>{rows_html}</tbody>
-  </table>
-</div>
-"""
+        body = hero_html + _org_cta + steps_html + templates_html + recent_html
         return _layout("Home", body, active="home")
 
     # ---- UPLOAD --------------------------------------------------------
@@ -3607,6 +3873,24 @@ Relay team broke club record"></textarea>
             elif action == "clear_replicate":
                 set_secret("replicate_api_token", None)
                 message_html = '<p class="tag good">Replicate API token cleared.</p>'
+            elif action == "clear_gemini":
+                set_secret("gemini_api_key", None)
+                message_html = '<p class="tag good">Gemini API key cleared.</p>'
+            elif action == "save_gemini":
+                key = (request.form.get("gemini_api_key") or "").strip()
+                if not key:
+                    message_html = '<p class="tag bad">No Gemini key submitted.</p>'
+                elif len(key) < 20:
+                    message_html = (
+                        '<p class="tag bad">That looks too short to be a Gemini API key. '
+                        'Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</p>'
+                    )
+                else:
+                    set_secret("gemini_api_key", key)
+                    message_html = (
+                        '<p class="tag good">Gemini API key saved. '
+                        'Live AI captions are now enabled (free tier).</p>'
+                    )
             elif action == "set_cutout_provider":
                 choice = (request.form.get("cutout_provider") or "local").strip().lower()
                 if choice not in {"local", "replicate", "photoroom"}:
@@ -3665,6 +3949,33 @@ Relay team broke club record"></textarea>
         env_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
         stored_key = get_secret("anthropic_api_key")
         active_key = get_anthropic_key()
+
+        # Gemini (free LLM) state
+        gemini_env = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+        gemini_disk = get_secret("gemini_api_key")
+        gemini_active = (
+            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            if gemini_env else gemini_disk
+        )
+        gemini_status_dot = "#2cc97f" if gemini_active else "#ffae3b"
+        gemini_status_text = "Gemini ENABLED" if gemini_active else "Gemini DISABLED"
+        if gemini_env:
+            gemini_source = "environment variable"
+        elif gemini_disk:
+            gemini_source = "saved key"
+        else:
+            gemini_source = "none — add a key below"
+        gemini_masked = _h(mask_key(gemini_active)) if gemini_active else "<em>none</em>"
+        gemini_confirm = "Remove the saved Gemini API key?"
+        gemini_clear_btn = ""
+        if gemini_disk:
+            gemini_clear_btn = (
+                '<form method="POST" style="display:inline-block;margin-left:0">'
+                '<input type="hidden" name="action" value="clear_gemini"/>'
+                '<button type="submit" class="btn secondary" '
+                f'onclick="return confirm({json.dumps(gemini_confirm)})">'
+                'Clear stored key</button></form>'
+            )
 
         # V8.1 Issue 7 — cutout provider state ----------------------------
         photoroom_env = bool(os.environ.get("PHOTOROOM_API_KEY"))
@@ -3782,6 +4093,7 @@ Relay team broke club record"></textarea>
 
         _PROVIDER_LABEL = {
             "anthropic-api": "Anthropic API key",
+            "gemini-api":    "Google Gemini (free tier)",
             "claude-cli":    "Claude CLI (Claude Code session)",
             "pplx-bridge":   "Computer LLM bridge",
             "heuristic":     "Heuristic fallback only",
@@ -3820,8 +4132,38 @@ Relay team broke club record"></textarea>
   {message_html}
 </div>
 
+<div class="card" style="margin-top:16px;border-color:rgba(34,197,94,0.25)">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+    <h2 style="margin:0">Google Gemini — free AI captions</h2>
+    <span class="tag good" style="font-size:11px">Recommended (free)</span>
+  </div>
+  <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{gemini_status_dot}"></span>
+    <strong>{gemini_status_text}</strong>
+    <span class="muted">— source: {gemini_source}</span>
+  </p>
+  <p>Current key: {gemini_masked}</p>
+  <form method="POST" style="margin-top:12px">
+    <input type="hidden" name="action" value="save_gemini"/>
+    <label for="gemini_api_key" style="display:block;font-weight:600;margin-bottom:4px">
+      Paste your Gemini API key
+    </label>
+    <input type="password" id="gemini_api_key" name="gemini_api_key"
+           placeholder="AIza…" autocomplete="off" spellcheck="false"
+           style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
+    <p class="muted" style="margin-top:6px;font-size:12px">
+      Get a <strong>free</strong> key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>
+      — no credit card required. Free tier: 15 requests/min, 1,500/day with Gemini 2.0 Flash.
+    </p>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="submit" class="btn">Save Gemini key</button>
+      {gemini_clear_btn}
+    </div>
+  </form>
+</div>
+
 <div class="card" style="margin-top:16px">
-  <h2 style="margin-top:0">Anthropic (Claude) — live AI captions</h2>
+  <h2 style="margin-top:0">Anthropic (Claude) — paid AI captions</h2>
   <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{status_dot}"></span>
     <strong>{status_text}</strong>
@@ -3836,9 +4178,8 @@ Relay team broke club record"></textarea>
            placeholder="sk-ant-…" autocomplete="off" spellcheck="false"
            style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
     <p class="muted" style="margin-top:6px;font-size:12px">
-      Get a key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-      Without a key, the AI tab on caption pickers will show as disabled
-      and the system will not generate fake "AI" output.
+      Higher-quality model, but paid. Get a key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+      Used in preference to Gemini if both are configured.
     </p>
     <div style="margin-top:10px">
       <button type="submit" class="btn">Save key</button>
@@ -3876,12 +4217,14 @@ Relay team broke club record"></textarea>
         # existing clients & tests depend on (backwards compatible).
         public_provider = {
             "anthropic-api": "anthropic",
+            "gemini-api":    "gemini",
             "claude-cli":    "claude-cli",
             "pplx-bridge":   "pplx",
             "heuristic":     None,
         }.get(provider, provider if live else None)
         provider_label = {
             "anthropic-api": "Anthropic API key",
+            "gemini-api":    "Google Gemini (free tier)",
             "claude-cli":    "Claude CLI (OAuth)",
             "pplx-bridge":   "Computer LLM bridge",
             "heuristic":     None,
