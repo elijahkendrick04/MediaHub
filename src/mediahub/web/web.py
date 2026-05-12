@@ -39,7 +39,7 @@ from typing import Any, Dict, Optional
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    jsonify, abort, send_file,
+    jsonify, abort, send_file, Response,
 )
 from markupsafe import escape as _h
 
@@ -777,6 +777,125 @@ a.card:hover, .card[data-interactive]:hover {
 .mh-card-actions button.primary { color: var(--accent); border-color: rgba(34,211,238,0.3); }
 .mh-card-actions button.primary:hover { background: rgba(34,211,238,0.08); border-color: var(--accent); }
 
+/* Disabled card / button visual state */
+[aria-disabled="true"], .is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+  pointer-events: none;
+  filter: grayscale(0.3);
+}
+[aria-disabled="true"]:hover, .is-disabled:hover {
+  transform: none !important; box-shadow: none !important;
+}
+
+/* === Upload pipeline progress UI === */
+.mh-stages {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin: 18px 0 22px;
+}
+.mh-stage {
+  flex: 1; min-width: 130px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  position: relative;
+  transition: border-color 0.25s ease, background 0.25s ease, color 0.25s ease;
+}
+.mh-stage .mh-stage-label {
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-muted); margin-bottom: 4px;
+}
+.mh-stage .mh-stage-text {
+  font-size: 13px; color: var(--ink-dim);
+  line-height: 1.4;
+}
+.mh-stage[data-state="done"] {
+  border-color: rgba(34,197,94,0.4);
+  background: rgba(34,197,94,0.05);
+}
+.mh-stage[data-state="done"] .mh-stage-label { color: var(--good); }
+.mh-stage[data-state="active"] {
+  border-color: rgba(34,211,238,0.55);
+  background: rgba(34,211,238,0.06);
+  box-shadow: 0 0 24px rgba(34,211,238,0.18);
+}
+.mh-stage[data-state="active"] .mh-stage-label { color: var(--accent); }
+.mh-stage[data-state="active"]::after {
+  content: ''; position: absolute; top: 10px; right: 10px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  animation: mh-pulse 1.1s ease-in-out infinite;
+  box-shadow: 0 0 12px var(--accent);
+}
+.mh-stage[data-state="error"] {
+  border-color: rgba(244,63,94,0.5);
+  background: rgba(244,63,94,0.06);
+}
+.mh-stage[data-state="error"] .mh-stage-label { color: var(--bad); }
+
+.mh-progress-bar {
+  position: relative; height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px; overflow: hidden;
+  margin: 14px 0 6px;
+}
+.mh-progress-bar > span {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--accent) 0%, #7c3aed 100%);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  width: 0;
+}
+.mh-progress-bar.indeterminate > span {
+  width: 30% !important;
+  animation: mh-progress-slide 1.6s cubic-bezier(0.4,0,0.2,1) infinite;
+}
+@keyframes mh-progress-slide {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(440%); }
+}
+
+/* === Mobile responsive — nav + spacing === */
+@media (max-width: 720px) {
+  main.wrap { padding: 24px 16px 80px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 15px; }
+  header.topnav { padding: 0 12px; height: auto; flex-wrap: wrap; gap: 6px; }
+  header.topnav .brand { margin-right: 10px; }
+  header.topnav nav {
+    width: 100%; gap: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 6px;
+  }
+  header.topnav nav::-webkit-scrollbar { display: none; }
+  header.topnav nav a {
+    padding: 5px 10px; font-size: 13px;
+    flex-shrink: 0;
+  }
+  #backend-pill { margin-left: auto; flex-shrink: 0; }
+  .card { padding: 18px 16px; }
+  .stat .v { font-size: 26px; }
+  table { font-size: 12.5px; }
+  table th, table td { padding: 8px 10px; }
+  .kv { grid-template-columns: 1fr; gap: 2px 8px; }
+  .kv .k { margin-top: 8px; }
+  .mh-card-confidence { position: static !important; display: block; margin-bottom: 8px; }
+  .mh-toast { min-width: 0; }
+  #mh-toast-container { left: 12px; right: 12px; max-width: none; top: 60px; }
+}
+@media (max-width: 480px) {
+  .row { gap: 12px; }
+  .grid-2, .grid-3 { gap: 12px; }
+  .stat-block { gap: 8px; }
+  .stat { padding: 10px 12px; min-width: 0; flex: 1; }
+}
+/* Force inputs/selects to never overflow their container, even with inline max-widths */
+input[type=text], input[type=file], textarea, select { max-width: 100%; }
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1143,10 +1262,9 @@ def create_app() -> Flask:
                     f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
                     f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
                     f'<td><form method="post" action="{delete_href}" '
-                    f'style="display:inline" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
-
-                    f'<button class="btn secondary" type="submit" '
-                    f'style="font-size:11px;padding:4px 10px;color:var(--bad);border-color:rgba(244,63,94,0.3)">Delete</button>'
+                    f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                    f'<button class="btn danger" type="submit" '
+                    f'style="font-size:11px;padding:4px 10px">Delete</button>'
                     f'</form></td></tr>'
                 )
 
@@ -1261,13 +1379,36 @@ Designed to cut production time, not just add more data.</p>
                           selected_club: str = "") -> str:
         clubs = meta.get("clubs") or []
         meet_name = meta.get("meet_name") or ""
+        parse_err = meta.get("parse_error") or ""
+
+        # No clubs detected \u2192 render a polished error state, NOT a broken form.
+        if not clubs:
+            upload_url = url_for("upload")
+            err_explain = (
+                f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
+                f'Reason: <code>{_h(parse_err)}</code></p>'
+                if parse_err else ""
+            )
+            body = f"""
+<h1>We couldn't read clubs from that file</h1>
+<div class="card">
+  <p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> didn't expose any clubs we can filter on.
+     This usually means the format isn't supported, the file is corrupted, or the meet had no club info.</p>
+  {err_explain}
+  <p class="dim" style="font-size:13px">Supported formats: Hytek Meet Manager <code>.hy3</code>, a <code>.zip</code> containing one, or a Sportsystems PDF results file.</p>
+  <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn" href="{upload_url}">\u2190 Try another file</a>
+    <a class="btn secondary" href="{url_for('add_input_page')}">Pick a different input type</a>
+  </div>
+</div>
+"""
+            return _layout("Couldn't read file", body, active="add_input")
+
         # V8.2 issue 4: ONLY clubs from this file are listed.
         opts = "".join(
             f'<option value="{_h(c)}"{" selected" if c == selected_club else ""}>{_h(c)}</option>'
             for c in clubs
         )
-        if not clubs:
-            opts = '<option value="">(no clubs detected in this file)</option>'
         err_html = (
             f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>' if error else ""
         )
@@ -1276,7 +1417,7 @@ Designed to cut production time, not just add more data.</p>
 <div class="card">
   <p class="dim">{_h(meet_name) or 'Meet uploaded.'} \u2014 {len(clubs)} clubs detected in this file.</p>
   {err_html}
-  <form method="post" enctype="multipart/form-data">
+  <form method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
     <input type="hidden" name="run_id" value="{_h(run_id)}" />
 
     <label>Club to feature</label>
@@ -1451,44 +1592,121 @@ Designed to cut production time, not just add more data.</p>
     def run_status(run_id):
         _status_url = url_for('api_status', run_id=run_id)
         _review_url = url_for('review', run_id=run_id)
+        # Five named stages, mapped from log message substrings.
+        # Each stage shows "queued" by default, becomes "active" when its
+        # keyword first appears in the log, "done" when the next stage's
+        # keyword appears (or the run finishes successfully).
         body = f"""
-<h1>Run progress</h1>
+<h1>Run in progress</h1>
+<p class="dim" style="margin-bottom:6px">Sit tight — we're parsing, ranking and drafting. This usually takes 20–60 seconds.</p>
+
 <div class="card">
-  <div id="status" class="stat-block">
-    <div class="stat"><div class="l">Status</div><div class="v" id="status-v">—</div></div>
-    <div class="stat"><div class="l">Steps</div><div class="v" id="step-count">0</div></div>
+  <div class="mh-stages" id="mh-stages">
+    <div class="mh-stage" data-stage="parse"    data-state="queued"><div class="mh-stage-label">1 · Parse</div><div class="mh-stage-text">Reading the file</div></div>
+    <div class="mh-stage" data-stage="filter"   data-state="queued"><div class="mh-stage-label">2 · Filter</div><div class="mh-stage-text">Finding your athletes</div></div>
+    <div class="mh-stage" data-stage="pb"       data-state="queued"><div class="mh-stage-label">3 · Personal bests</div><div class="mh-stage-text">Checking historical times</div></div>
+    <div class="mh-stage" data-stage="detect"   data-state="queued"><div class="mh-stage-label">4 · Detect</div><div class="mh-stage-text">Spotting achievements</div></div>
+    <div class="mh-stage" data-stage="generate" data-state="queued"><div class="mh-stage-label">5 · Generate</div><div class="mh-stage-text">Drafting captions</div></div>
   </div>
-  <div class="divider"></div>
-  <div class="progress-log" id="log">Starting…</div>
-  <div style="margin-top:18px"><a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue →</a></div>
+
+  <div class="mh-progress-bar indeterminate"><span></span></div>
+  <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-muted);margin-top:4px">
+    <span id="mh-current-stage">Starting…</span>
+    <span id="mh-step-count">0 steps</span>
+  </div>
+
+  <details style="margin-top:18px">
+    <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
+    <div class="progress-log" id="log" style="margin-top:10px">Starting…</div>
+  </details>
+
+  <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+    <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue →</a>
+    <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
+  </div>
 </div>
+
 <script>
-  const runId = {json.dumps(run_id)};
-  const STATUS_URL = {json.dumps(_status_url)};
-  const REVIEW_URL = {json.dumps(_review_url)};
-  let lastLen = 0;
+(function() {{
+  var STATUS_URL = {json.dumps(_status_url)};
+  var REVIEW_URL = {json.dumps(_review_url)};
+  var STAGES = ['parse','filter','pb','detect','generate'];
+  // Keyword → stage. First match wins; we scan each log line.
+  var STAGE_PATTERNS = [
+    {{re: /interpret|bridg|parse/i,                stage: 'parse'}},
+    {{re: /filter|club|swims for/i,                stage: 'filter'}},
+    {{re: /PB|personal best|cache/i,               stage: 'pb'}},
+    {{re: /detect|recogni|claim|achievement/i,     stage: 'detect'}},
+    {{re: /caption|card|generat|render|content/i,  stage: 'generate'}}
+  ];
+  function detectStage(logLines) {{
+    var idx = -1;
+    for (var i = 0; i < logLines.length; i++) {{
+      for (var k = 0; k < STAGE_PATTERNS.length; k++) {{
+        if (STAGE_PATTERNS[k].re.test(logLines[i])) {{
+          var s = STAGES.indexOf(STAGE_PATTERNS[k].stage);
+          if (s > idx) idx = s;
+        }}
+      }}
+    }}
+    return idx;
+  }}
+  function applyStages(currentIdx, status) {{
+    var stageEls = document.querySelectorAll('.mh-stage');
+    stageEls.forEach(function(el, i) {{
+      if (status === 'error') {{ el.setAttribute('data-state', i <= currentIdx ? 'error' : 'queued'); return; }}
+      if (status === 'done')  {{ el.setAttribute('data-state', 'done'); return; }}
+      if (i < currentIdx) el.setAttribute('data-state', 'done');
+      else if (i === currentIdx) el.setAttribute('data-state', 'active');
+      else el.setAttribute('data-state', 'queued');
+    }});
+    var bar = document.querySelector('.mh-progress-bar');
+    if (status === 'done')  {{
+      bar.classList.remove('indeterminate');
+      bar.firstElementChild.style.width = '100%';
+    }} else if (status === 'error') {{
+      bar.classList.remove('indeterminate');
+      bar.firstElementChild.style.background = 'linear-gradient(90deg, var(--bad), #fb7185)';
+      bar.firstElementChild.style.width = '100%';
+    }} else {{
+      bar.classList.add('indeterminate');
+    }}
+    var labelEl = document.getElementById('mh-current-stage');
+    if (status === 'error') labelEl.textContent = 'Run failed';
+    else if (status === 'done') labelEl.textContent = 'Complete';
+    else if (currentIdx < 0) labelEl.textContent = 'Starting…';
+    else {{
+      var labels = ['Reading the file…','Finding your athletes…','Checking personal bests…','Spotting achievements…','Drafting captions…'];
+      labelEl.textContent = labels[currentIdx] || 'Working…';
+    }}
+  }}
   async function poll() {{
     try {{
-      const r = await fetch(STATUS_URL);
-      const j = await r.json();
-      document.getElementById('status-v').textContent = j.status;
-      document.getElementById('step-count').textContent = (j.log || []).length;
-      const logEl = document.getElementById('log');
-      logEl.textContent = (j.log || []).join('\\n');
+      var r = await fetch(STATUS_URL, {{cache:'no-store'}});
+      var j = await r.json();
+      var log = j.log || [];
+      var logEl = document.getElementById('log');
+      logEl.textContent = log.join('\\n');
       logEl.scrollTop = logEl.scrollHeight;
+      document.getElementById('mh-step-count').textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+      var idx = detectStage(log);
+      applyStages(idx, j.status);
       if (j.status === 'done') {{
         document.getElementById('review-link').style.display = 'inline-flex';
-        location.replace(REVIEW_URL);
+        if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
+        setTimeout(function() {{ location.replace(REVIEW_URL); }}, 1200);
         return;
       }}
       if (j.status === 'error') {{
         logEl.textContent += '\\n\\nERROR: ' + (j.error || 'unknown');
+        if (window.MH) MH.toast('Run failed: ' + (j.error || 'see log'), 'error', 8000);
         return;
       }}
     }} catch (e) {{}}
     setTimeout(poll, 800);
   }}
   poll();
+}})();
 </script>
 """
         return _layout("Run progress", body, active="add_input")
@@ -3487,7 +3705,7 @@ Relay team broke club record"></textarea>
             return (
                 '<form method="POST" style="display:inline-block;margin-left:8px">'
                 f'<input type="hidden" name="action" value="{action}"/>'
-                '<button type="submit" class="btn btn-secondary" '
+                '<button type="submit" class="btn secondary" '
                 f'onclick="return confirm(\'Remove the saved {label}?\')">'
                 f'Clear {label}</button></form>'
             )
@@ -3515,7 +3733,7 @@ Relay team broke club record"></textarea>
             '<input type="hidden" name="action" value="set_cutout_provider"/>'
             '<label for="cutout_provider" style="font-weight:600">Active provider:</label>'
             f'<select id="cutout_provider" name="cutout_provider" style="padding:6px;border:1px solid var(--border);border-radius:6px">{_opt("local")}{_opt("replicate")}{_opt("photoroom")}</select>'
-            '<button type="submit" class="btn btn-primary">Save</button>'
+            '<button type="submit" class="btn">Save</button>'
             '</form>'
 
             '<h3 style="margin-top:18px">Photoroom API key</h3>'
@@ -3529,7 +3747,7 @@ Relay team broke club record"></textarea>
             'Get a key from <a href="https://www.photoroom.com/api" target="_blank" rel="noopener">photoroom.com/api</a>.'
             '</p>'
             '<div style="margin-top:8px">'
-            '<button type="submit" class="btn btn-primary">Save Photoroom key</button>'
+            '<button type="submit" class="btn">Save Photoroom key</button>'
             f'{photoroom_clear_btn}'
             '</div>'
             '</form>'
@@ -3545,7 +3763,7 @@ Relay team broke club record"></textarea>
             'Get a token from <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noopener">replicate.com</a>.'
             '</p>'
             '<div style="margin-top:8px">'
-            '<button type="submit" class="btn btn-primary">Save Replicate token</button>'
+            '<button type="submit" class="btn">Save Replicate token</button>'
             f'{replicate_clear_btn}'
             '</div>'
             '</form>'
@@ -3566,7 +3784,7 @@ Relay team broke club record"></textarea>
             clear_btn = (
                 '<form method="POST" style="display:inline-block;margin-left:8px">'
                 '<input type="hidden" name="action" value="clear_anthropic"/>'
-                '<button type="submit" class="btn btn-secondary" '
+                '<button type="submit" class="btn secondary" '
                 'onclick="return confirm(\'Remove the saved Anthropic API key?\')">'
                 'Clear stored key</button></form>'
             )
@@ -3600,7 +3818,7 @@ Relay team broke club record"></textarea>
       and the system will not generate fake "AI" output.
     </p>
     <div style="margin-top:10px">
-      <button type="submit" class="btn btn-primary">Save key</button>
+      <button type="submit" class="btn">Save key</button>
       {clear_btn}
     </div>
   </form>
@@ -3934,6 +4152,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="create")
 
     # ---- Stub routes (now functional with real LLM + fallback) ---------
+    _STUB_TYPE_BY_CLASS = {
+        "WeekendPreviewStub": "weekend_preview",
+        "SponsorPostStub":    "sponsor_post",
+        "SessionUpdateStub":  "session_update",
+        "FreeTextStub":       "free_text",
+    }
+
     def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
                      active_tab: str = "add_input"):
         """Shared handler for stub routes. GET renders form, POST renders cards."""
@@ -3953,17 +4178,50 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         stub = StubCls()
         if request.method == "POST":
+            form_data = request.form.to_dict(flat=True)
             try:
-                cards_payload = stub.generate_cards(request.form.to_dict(flat=True))
+                cards_payload = stub.generate_cards(form_data)
             except Exception:
                 app.logger.exception("stub generate_cards failed")
                 cards_payload = {"cards": []}
+            # Persist this pack so it survives refresh + is exportable.
+            saved = None
+            try:
+                from mediahub.club_platform.stub_pack_store import save_pack
+                saved = save_pack(
+                    _STUB_TYPE_BY_CLASS.get(stub_cls_name, "other"),
+                    form_data,
+                    cards_payload.get("cards") or [],
+                )
+            except Exception:
+                app.logger.exception("stub save_pack failed")
             back = url_for(route_endpoint)
+            actions_url = url_for("stub_pack_view", pack_id=saved["pack_id"]) if saved else None
             body = _stubs_mod.render_cards_html(cards_payload, back, f"{title} — drafts")
+            if saved:
+                _packs_url = url_for("stub_packs_list")
+                body = body.replace(
+                    f'<a class="btn secondary" href="{_h(back)}">← Start over</a>',
+                    (
+                        f'<a class="btn" href="{_h(actions_url)}">View & export this pack →</a>'
+                        f'<a class="btn secondary" href="{_h(back)}">← Start over</a>'
+                        f'<a class="btn secondary" href="{_h(_packs_url)}">All saved drafts</a>'
+                    ),
+                    1,
+                )
             return _layout(title, body, active=active_tab)
         # GET — render form
         body = stub.render_stub_html()
-        body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
+        try:
+            _packs_url = url_for("stub_packs_list")
+            body += (
+                f'<p style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">'
+                f'<a href="{_packs_url}">View your saved drafts →</a>'
+                f'<a href="{url_for("make_page")}">← Back to Make</a>'
+                f'</p>'
+            )
+        except Exception:
+            body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         return _layout(title, body, active=active_tab)
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
@@ -3981,6 +4239,133 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/free-text", methods=["GET", "POST"])
     def stub_free_text():
         return _render_stub("FreeTextStub", "stub_free_text", "Free Text")
+
+    # ---- Saved stub packs — list + view + export -----------------------
+    _STUB_TYPE_LABEL = {
+        "free_text":        "Free Text",
+        "weekend_preview":  "Event Preview",
+        "sponsor_post":     "Sponsor Post",
+        "session_update":   "Session Update",
+    }
+
+    @app.route("/drafts")
+    def stub_packs_list():
+        from mediahub.club_platform.stub_pack_store import list_packs
+        items = list_packs(limit=100)
+        if not items:
+            body = f"""
+<h1>Saved drafts</h1>
+<p class="dim">Content packs you generate from Free Text, Event Preview, Sponsor Post and Session Update are saved here.</p>
+<div class="card" style="text-align:center;padding:48px 28px">
+  <div style="font-size:42px;margin-bottom:12px">📝</div>
+  <h2 style="margin-bottom:6px">No drafts yet</h2>
+  <p class="dim" style="margin-bottom:18px">Generate your first content cards from the Add Input page.</p>
+  <a class="btn" href="{url_for('add_input_page')}">Add input →</a>
+</div>
+"""
+            return _layout("Saved drafts", body, active="add_input")
+
+        rows_html = ""
+        for it in items:
+            view_url = url_for("stub_pack_view", pack_id=it["pack_id"])
+            delete_url = url_for("stub_pack_delete", pack_id=it["pack_id"])
+            label = _STUB_TYPE_LABEL.get(it["stub_type"], it["stub_type"])
+            ts = (it.get("created_at") or "")[:19].replace("T", " ")
+            rows_html += (
+                f'<tr><td><a href="{view_url}">{_h(it["title"])}</a></td>'
+                f'<td><span class="tag info">{_h(label)}</span></td>'
+                f'<td>{it["n_cards"]}</td>'
+                f'<td class="muted">{_h(ts)}</td>'
+                f'<td><form method="post" action="{delete_url}" style="display:inline" '
+                f'onsubmit="return confirm(\'Delete this draft?\')">'
+                f'<button class="btn secondary" type="submit" style="font-size:11px;padding:4px 10px;color:var(--bad);border-color:rgba(244,63,94,0.3)">Delete</button>'
+                f'</form></td></tr>'
+            )
+
+        body = f"""
+<h1>Saved drafts</h1>
+<p class="dim">{len(items)} pack{'s' if len(items)!=1 else ''} saved.</p>
+<div class="card">
+  <table>
+    <thead><tr><th>Title</th><th>Type</th><th>Cards</th><th>Created</th><th></th></tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+<p style="margin-top:14px"><a class="btn secondary" href="{url_for('add_input_page')}">+ New draft</a></p>
+"""
+        return _layout("Saved drafts", body, active="add_input")
+
+    @app.route("/drafts/<pack_id>")
+    def stub_pack_view(pack_id):
+        from mediahub.club_platform.stub_pack_store import load_pack
+        from mediahub.club_platform.stubs import render_cards_html
+        rec = load_pack(pack_id)
+        if not rec:
+            body = '<div class="empty">Draft not found.</div>'
+            return _layout("Draft not found", body, active="add_input"), 404
+
+        stub_type = rec.get("stub_type", "other")
+        type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
+        # We pass back = saved-list so "Start over" goes somewhere sensible.
+        back_url = url_for("stub_packs_list")
+        cards_html = render_cards_html(
+            {"cards": rec.get("cards") or []},
+            back_url,
+            rec.get("title") or "Draft pack",
+        )
+        # Replace the renderer's default footer to add export + regenerate.
+        export_url = url_for("stub_pack_export", pack_id=pack_id)
+        regenerate_url = url_for({
+            "free_text":       "stub_free_text",
+            "weekend_preview": "stub_weekend_preview",
+            "sponsor_post":    "stub_sponsor_post",
+            "session_update":  "stub_session_update",
+        }.get(stub_type, "stub_free_text"))
+        footer = (
+            f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
+            f'<a class="btn" href="{export_url}">Export as text</a>'
+            f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
+            f'<a class="btn secondary" href="{back_url}">← All drafts</a>'
+            f'</div>'
+        )
+        # Prepend a context band showing the type + timestamp.
+        ts = (rec.get("created_at") or "")[:19].replace("T", " ")
+        header = (
+            f'<p class="dim" style="margin-bottom:14px">'
+            f'<span class="tag info">{_h(type_label)}</span> '
+            f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
+        )
+        # Replace the renderer's default action row
+        cards_html = cards_html.replace(
+            f'<div style="margin-top:24px;display:flex;gap:10px">'
+            f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
+            f'</div>',
+            footer,
+            1,
+        )
+        body = header + cards_html
+        return _layout(rec.get("title") or "Draft", body, active="add_input")
+
+    @app.route("/drafts/<pack_id>/export.txt")
+    def stub_pack_export(pack_id):
+        from mediahub.club_platform.stub_pack_store import load_pack, export_pack_text
+        rec = load_pack(pack_id)
+        if not rec:
+            return ("Pack not found", 404)
+        text = export_pack_text(rec)
+        return Response(
+            text,
+            mimetype="text/plain",
+            headers={
+                "Content-Disposition": f'attachment; filename="{pack_id}.txt"',
+            },
+        )
+
+    @app.route("/drafts/<pack_id>/delete", methods=["POST"])
+    def stub_pack_delete(pack_id):
+        from mediahub.club_platform.stub_pack_store import delete_pack
+        delete_pack(pack_id)
+        return redirect(url_for("stub_packs_list"))
 
     # ---- /add-input — multi-input landing page --------------------------
     @app.route("/add-input")
