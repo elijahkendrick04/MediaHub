@@ -54,6 +54,24 @@ class ClubProfile:
     # Keys match Achievement.type strings; "_default" is the fallback.
     achievement_priorities: dict = field(default_factory=dict)
 
+    # ---- Holo-style organisation DNA (all optional, backward-compatible) ----
+
+    # swimming_club | athletics | football | university_society | corporate_team | other
+    org_type: str = "other"
+
+    # Active social platforms: instagram | tiktok | twitter | facebook | linkedin
+    platforms: list[str] = field(default_factory=list)
+
+    # Primary sponsor info
+    sponsor_name: str = ""
+    sponsor_guidelines: str = ""
+
+    # Up to 5 past captions pasted by the user to calibrate voice
+    exemplar_captions: list[str] = field(default_factory=list)
+
+    # Freeform brand voice notes
+    tone_notes: str = ""
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -121,10 +139,12 @@ class ClubProfile:
 # ---------------------------------------------------------------------
 
 def _profiles_dir() -> Path:
-    # Allow override for tests / deployment.
+    # Priority: explicit override > DATA_DIR (persistent disk) > source-relative fallback.
     p = os.environ.get("SWIM_CONTENT_PROFILES_DIR")
     if p:
         d = Path(p)
+    elif os.environ.get("DATA_DIR"):
+        d = Path(os.environ["DATA_DIR"]) / "club_profiles"
     else:
         d = Path(__file__).resolve().parents[1] / "club_profiles"
     d.mkdir(parents=True, exist_ok=True)

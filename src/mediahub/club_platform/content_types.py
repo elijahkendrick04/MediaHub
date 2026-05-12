@@ -18,6 +18,7 @@ class ContentType(str, Enum):
     WEEKEND_PREVIEW = "weekend_preview"
     SPONSOR_POST = "sponsor_post"
     SESSION_UPDATE = "session_update"
+    FREE_TEXT = "free_text"
 
 
 @dataclass
@@ -75,6 +76,15 @@ _SESSION_SVG = (
     '<line x1="16" y1="13" x2="8" y2="13"/>'
     '<line x1="16" y1="17" x2="8" y2="17"/>'
     '<polyline points="10 9 9 9 8 9"/>'
+    '</svg>'
+)
+
+
+_PENCIL_SVG = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+    '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>'
+    '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>'
     '</svg>'
 )
 
@@ -148,5 +158,18 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         is_implemented=False,
         icon_svg=_SESSION_SVG,
         primary_route_endpoint="stub_session_update",
+    ),
+    ContentType.FREE_TEXT: ContentTypeMeta(
+        type=ContentType.FREE_TEXT,
+        title="Free Text",
+        description="Describe any moment and get content suggestions.",
+        input_contract=(
+            "Type or paste a description of anything — a result, an event, a milestone, "
+            "a training session. We'll identify the best social angles and draft content cards. "
+            "Coming soon — try the draft brief form in the meantime."
+        ),
+        is_implemented=False,
+        icon_svg=_PENCIL_SVG,
+        primary_route_endpoint="stub_free_text",
     ),
 }

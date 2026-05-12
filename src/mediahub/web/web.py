@@ -56,7 +56,7 @@ from .canonical import Meet
 try:
     from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY, ContentType as _ContentType
     from mediahub.club_platform.athlete_spotlight import build_spotlight_pack, list_swimmers_in_run
-    from mediahub.club_platform.stubs import WeekendPreviewStub, SponsorPostStub, SessionUpdateStub
+    from mediahub.club_platform.stubs import WeekendPreviewStub, SponsorPostStub, SessionUpdateStub, FreeTextStub
     _club_platform_ok = True
 except ImportError:
     _club_platform_ok = False
@@ -705,8 +705,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   </div>
   <nav>
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
-    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='make' else '' }}">Make</a>
-    <a href="{{ url_for('upload') }}" class="{{ 'active' if active=='upload' else '' }}">Meet Recap</a>
+    <a href="{{ url_for('add_input_page') }}" class="{{ 'active' if active=='add_input' else '' }}">Add Input</a>
+    <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
@@ -806,16 +807,23 @@ def create_app() -> Flask:
         # If there are no runs yet, show a streamlined welcome card pointing
         # the user straight at the upload flow.
         if not rows:
-            _upload_url = url_for('upload')
+            _add_input_url = url_for('add_input_page')
+            _org_url = url_for('organisation_page')
             empty_body = f"""
 <h1>Welcome to MediaHub</h1>
-<p class="dim">Turn swimming meet results into ranked social content — every claim backed by the results file.</p>
+<p class="dim">Create on-brand social content for any club, society, team or organisation — every claim is source-grounded and labelled with a confidence score.</p>
 
 <div class="card" style="text-align:center;padding:48px 32px">
-  <div style="font-size:48px;margin-bottom:16px">&#127946;</div>
-  <h2 style="margin-bottom:8px">Upload your first meet</h2>
-  <p class="dim" style="margin-bottom:24px">Drop in a Hytek .hy3 or .zip results file. <br>You'll pick your club and add branding on the next step.</p>
-  <a class="btn" href="{_upload_url}">Upload meet file →</a>
+  <div style="font-size:48px;margin-bottom:16px">&#9889;</div>
+  <h2 style="margin-bottom:8px">Add your first input</h2>
+  <p class="dim" style="margin-bottom:24px">Upload results, write a preview, describe a moment — choose how you want to start.</p>
+  <a class="btn" href="{_add_input_url}">Get started →</a>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0">Set up your organisation</h2>
+  <p>Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
+  <a class="btn secondary" href="{_org_url}">Set up organisation →</a>
 </div>
 """
             return _layout("Home", empty_body, active="home")
@@ -850,31 +858,42 @@ def create_app() -> Flask:
                     f'</form></td></tr>'
                 )
 
+        _has_org = bool(list_profiles())
+        _org_cta = ""
+        if not _has_org:
+            _org_url = url_for('organisation_page')
+            _org_cta = f"""
+<div class="card" style="border-color:rgba(34,211,238,0.3);margin-bottom:20px">
+  <h2 style="margin-top:0">Set up your organisation</h2>
+  <p>Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
+  <a class="btn secondary" href="{_org_url}">Set up organisation \u2192</a>
+</div>
+"""
         body = f"""
 <h1>MediaHub</h1>
-<p class="dim">Turn swimming meet results into ranked social content.
-Every claim is drawn from the results file and labelled with a confidence score and a safe-to-post recommendation.
-Designed to cut fact-checking time, not just add more data.</p>
+<p class="dim">Create on-brand social content for any club, society, team or organisation.
+Every claim is drawn from your source material and labelled with a confidence score and a safe-to-post recommendation.
+Designed to cut production time, not just add more data.</p>
 
-<div class="card">
+{_org_cta}<div class="card">
   <div class="row">
     <div>
-      <h2>Start a new meet recap</h2>
-      <p>Upload a Hytek Meet Manager results file (.hy3 or .zip) to get started.</p>
-      <a class="btn" href="{url_for('upload')}">Upload meet file \u2192</a>
+      <h2>Add an input</h2>
+      <p>Upload results, write a preview, describe a moment \u2014 pick how you want to start creating content.</p>
+      <a class="btn" href="{url_for('add_input_page')}">Add input \u2192</a>
     </div>
     <div>
-      <h2>Other content types</h2>
-      <p>Athlete spotlights, weekend previews, sponsor posts.
+      <h2>Create content</h2>
+      <p>Choose a content type \u2014 meet recaps, athlete spotlights, sponsor posts and more.
          <a href="{url_for('make_page')}">Browse all content types \u2192</a></p>
     </div>
   </div>
 </div>
 
 <div class="card">
-  <h2>Recent runs</h2>
+  <h2>Recent activity</h2>
   <table>
-    <thead><tr><th>Meet</th><th>Status</th><th>Club</th><th>Club swims</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>
+    <thead><tr><th>Input</th><th>Status</th><th>Organisation</th><th>Matched items</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
@@ -890,10 +909,10 @@ Designed to cut fact-checking time, not just add more data.</p>
         if request.method == "POST":
             f = request.files.get("file")
             if not f or not f.filename:
-                return _layout("Upload", '<div class="card"><p class="tag bad">No file selected.</p></div>', active="upload")
+                return _layout("Upload", '<div class="card"><p class="tag bad">No file selected.</p></div>', active="add_input")
             data = f.read()
             if not data:
-                return _layout("Upload", '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>', active="upload")
+                return _layout("Upload", '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>', active="add_input")
 
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
@@ -943,7 +962,7 @@ Designed to cut fact-checking time, not just add more data.</p>
   </form>
 </div>
 """
-        return _layout("Upload", body, active="upload")
+        return _layout("Upload", body, active="add_input")
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
     def _render_configure(run_id: str, meta: dict, *, error: str = "",
@@ -997,18 +1016,18 @@ Designed to cut fact-checking time, not just add more data.</p>
   </form>
 </div>
 """
-        return _layout("Configure run", body, active="upload")
+        return _layout("Configure run", body, active="add_input")
 
     @app.route("/upload/configure", methods=["GET", "POST"])
     def upload_configure():
         run_id = request.values.get("run_id", "").strip()
         if not run_id:
-            return _layout("Configure", '<div class="card"><p class="tag bad">Missing run_id.</p></div>', active="upload")
+            return _layout("Configure", '<div class="card"><p class="tag bad">Missing run_id.</p></div>', active="add_input")
         tmp_dir = RUNS_DIR / run_id
         meta_path = tmp_dir / "upload_meta.json"
         input_path = tmp_dir / "input.bin"
         if not (meta_path.exists() and input_path.exists()):
-            return _layout("Configure", '<div class="card"><p class="tag bad">Upload session not found or expired.</p></div>', active="upload")
+            return _layout("Configure", '<div class="card"><p class="tag bad">Upload session not found or expired.</p></div>', active="add_input")
         try:
             meta = json.loads(meta_path.read_text())
         except Exception:
@@ -1017,7 +1036,7 @@ Designed to cut fact-checking time, not just add more data.</p>
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
             if not club_filter:
-                return _layout("Configure", '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>', active="upload")
+                return _layout("Configure", '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>', active="add_input")
 
             # V8.2 issue 5: branding is now required. Either a logo or
             # the colour pickers must be filled in.
@@ -1180,7 +1199,7 @@ Designed to cut fact-checking time, not just add more data.</p>
   poll();
 </script>
 """
-        return _layout("Run progress", body, active="upload")
+        return _layout("Run progress", body, active="add_input")
 
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
@@ -3321,7 +3340,7 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.content_types import REGISTRY, ContentType
         except ImportError:
-            return _layout("Make", '<div class="card"><p class="muted">club_platform package not available.</p></div>', active="make")
+            return _layout("Create", '<div class="card"><p class="muted">club_platform package not available.</p></div>', active="create")
 
         tiles_html = ""
         for ct, meta in REGISTRY.items():
@@ -3353,13 +3372,13 @@ Relay team broke club record"></textarea>
 <style>
 .make-tile:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
 </style>
-<h1>What do you want to make?</h1>
+<h1>What do you want to create?</h1>
 <p class="dim" style="margin-bottom:28px">Choose a content type to get started.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
   {tiles_html}
 </div>
 """
-        return _layout("Make", body, active="make")
+        return _layout("Create", body, active="create")
 
     # ---- /spotlight — Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
@@ -3367,7 +3386,7 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import list_swimmers_in_run
         except ImportError:
-            return _layout("Athlete Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="make")
+            return _layout("Athlete Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create")
 
         # List recent runs that have a recognition report
         conn = _db()
@@ -3389,7 +3408,7 @@ Relay team broke club record"></textarea>
   Once a meet is processed, every swimmer in your club will be available here.</p>
   <a class="btn" href="{url_for('upload')}" style="margin-top:14px">Upload a meet →</a>
 </div>"""
-            return _layout("Athlete Spotlight", empty_body, active="make")
+            return _layout("Athlete Spotlight", empty_body, active="create")
 
         runs_opts = '<option value="">Select a meet…</option>'
         for r in recent_runs:
@@ -3433,7 +3452,7 @@ Relay team broke club record"></textarea>
   {swimmers_html}
 </div>
 """
-        return _layout("Athlete Spotlight", body, active="make")
+        return _layout("Athlete Spotlight", body, active="create")
 
     # ---- /spotlight/<run_id>/<swimmer_key> — spotlight view -------------
     @app.route("/spotlight/<run_id>/<path:swimmer_key>")
@@ -3441,7 +3460,7 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
         except ImportError:
-            return _layout("Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="make"), 501
+            return _layout("Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create"), 501
 
         run_data = _load_run(run_id)
         if not run_data:
@@ -3607,7 +3626,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 }}
 </script>
 """
-        return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="make")
+        return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="create")
 
     # ---- Stub routes ---------------------------------------------------
     @app.route("/weekend-preview", methods=["GET", "POST"])
@@ -3631,7 +3650,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Weekend Preview", body, active="make")
+        return _layout("Weekend Preview", body, active="add_input")
 
     @app.route("/sponsor-post", methods=["GET", "POST"])
     def stub_sponsor_post():
@@ -3654,7 +3673,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Sponsor Post", body, active="make")
+        return _layout("Sponsor Post", body, active="add_input")
 
     @app.route("/session-update", methods=["GET", "POST"])
     def stub_session_update():
@@ -3677,7 +3696,372 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
         except ImportError:
             body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Session Update", body, active="make")
+        return _layout("Session Update", body, active="add_input")
+
+    # ---- /free-text — free-text stub ------------------------------------
+    @app.route("/free-text", methods=["GET", "POST"])
+    def stub_free_text():
+        if request.method == "POST":
+            raw = _h(request.form.get("free_text", "").strip())
+            back = url_for("stub_free_text")
+            body = (
+                f'<h1>Free Text — draft brief</h1>'
+                f'<div class="card">'
+                f'<h2>Your input</h2>'
+                f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6;'
+                f'background:var(--bg);padding:16px;border-radius:6px;border:1px solid var(--border)">'
+                f'{raw}</pre>'
+                f'<p style="font-size:13px;color:var(--ink-dim);margin-top:12px">'
+                f'Full AI content generation from free text is coming soon. '
+                f'Copy your notes above and use them as a brief for now.</p>'
+                f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
+                f'</div>'
+            )
+            return _layout("Free Text", body, active="add_input")
+        if _club_platform_ok:
+            try:
+                from mediahub.club_platform.stubs import FreeTextStub
+                stub = FreeTextStub()
+                body = stub.render_stub_html()
+            except Exception:
+                body = '<div class="card"><p class="muted">Coming soon.</p></div>'
+        else:
+            body = '<div class="card"><p class="muted">Coming soon.</p></div>'
+        return _layout("Free Text", body, active="add_input")
+
+    # ---- /add-input — multi-input landing page --------------------------
+    @app.route("/add-input")
+    def add_input_page():
+        _INPUT_TYPES = [
+            {
+                "title": "Meet Results",
+                "description": "Upload results from any sport meet, gala, or competition. Ranked content cards with confidence scores.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>'
+                    '<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>'
+                    '<path d="M4 22h16"/>'
+                    '<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>'
+                    '<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>'
+                    '<path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/>'
+                    '</svg>'
+                ),
+                "status": "live",
+                "endpoint": "upload",
+            },
+            {
+                "title": "Athlete Spotlight",
+                "description": "Pick a member from a processed meet and get a single-person achievement pack.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<circle cx="12" cy="8" r="4"/>'
+                    '<path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'
+                    '</svg>'
+                ),
+                "status": "live",
+                "endpoint": "spotlight_landing",
+            },
+            {
+                "title": "Event Preview",
+                "description": "Tease an upcoming event, fixture, or competition before it starts.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>'
+                    '<line x1="16" y1="2" x2="16" y2="6"/>'
+                    '<line x1="8" y1="2" x2="8" y2="6"/>'
+                    '<line x1="3" y1="10" x2="21" y2="10"/>'
+                    '</svg>'
+                ),
+                "status": "coming_soon",
+                "endpoint": "stub_weekend_preview",
+            },
+            {
+                "title": "Sponsor Post",
+                "description": "Create brand-safe sponsor activation content with your partners.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>'
+                    '</svg>'
+                ),
+                "status": "coming_soon",
+                "endpoint": "stub_sponsor_post",
+            },
+            {
+                "title": "Session Update",
+                "description": "Share live updates from training or events as they happen.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                    '<polyline points="14 2 14 8 20 8"/>'
+                    '<line x1="16" y1="13" x2="8" y2="13"/>'
+                    '<line x1="16" y1="17" x2="8" y2="17"/>'
+                    '</svg>'
+                ),
+                "status": "coming_soon",
+                "endpoint": "stub_session_update",
+            },
+            {
+                "title": "Free Text",
+                "description": "Describe any moment in your own words and get content suggestions.",
+                "icon": (
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                    '<path d="M12 20h9"/>'
+                    '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'
+                    '</svg>'
+                ),
+                "status": "coming_soon",
+                "endpoint": "stub_free_text",
+            },
+        ]
+
+        cards_html = ""
+        for card in _INPUT_TYPES:
+            is_live = card["status"] == "live"
+            if is_live:
+                badge = '<span class="tag good" style="font-size:11px">Live</span>'
+                opacity = "1"
+                btn_extra = ""
+                disabled_attr = ""
+            else:
+                badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
+                opacity = "0.65"
+                btn_extra = "opacity:0.55;pointer-events:none;cursor:not-allowed;"
+                disabled_attr = 'tabindex="-1" aria-disabled="true"'
+            try:
+                card_url = url_for(card["endpoint"])
+                href_attr = f'href="{card_url}"'
+            except Exception:
+                href_attr = 'href="#" onclick="return false"'
+            cards_html += f"""
+<a {href_attr} class="input-type-card" style="text-decoration:none;display:flex;flex-direction:column;
+   gap:14px;padding:24px;background:var(--panel);border:1px solid var(--border);
+   border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms;opacity:{opacity}">
+  <div style="color:var(--accent)">{card['icon']}</div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="font-size:16px;font-weight:700;color:var(--ink)">{_h(card['title'])}</div>
+    {badge}
+  </div>
+  <div style="font-size:13px;color:var(--ink-dim);line-height:1.5">{_h(card['description'])}</div>
+  <div style="margin-top:auto">
+    <span class="btn" style="font-size:13px;padding:7px 14px;{btn_extra}" {disabled_attr}>
+      Start →
+    </span>
+  </div>
+</a>"""
+
+        body = f"""
+<style>
+.input-type-card:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
+</style>
+<h1>Add Input</h1>
+<p class="dim" style="margin-bottom:28px">
+  Choose the type of content you want to create. Each input type produces a different set of social-ready cards.
+</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
+  {cards_html}
+</div>
+"""
+        return _layout("Add Input", body, active="add_input")
+
+    # ---- /organisation — organisation DNA / club identity ---------------
+    @app.route("/organisation", methods=["GET", "POST"])
+    def organisation_page():
+        _ORG_TYPES = [
+            ("other", "Other / general"),
+            ("swimming_club", "Swimming club"),
+            ("athletics", "Athletics club"),
+            ("football", "Football / rugby / team sport"),
+            ("university_society", "University society or sports club"),
+            ("corporate_team", "Corporate team"),
+        ]
+        _PLATFORMS = [
+            ("instagram", "Instagram"),
+            ("tiktok", "TikTok"),
+            ("twitter", "Twitter / X"),
+            ("facebook", "Facebook"),
+            ("linkedin", "LinkedIn"),
+        ]
+        _TONES = [
+            ("warm-club", "Warm &amp; community — conversational, member-facing, first-name use"),
+            ("hype", "Energetic &amp; hype — race-day language, exclamation marks, high energy"),
+            ("data-led", "Data-led — numbers-first, precise, sponsor-friendly"),
+        ]
+
+        saved_msg = ""
+        if request.method == "POST":
+            raw_id = (request.form.get("profile_id") or "default").strip().lower()
+            profile_id = re.sub(r"[^a-z0-9_-]", "-", raw_id).strip("-") or "default"
+            existing = load_profile(profile_id) or ClubProfile(
+                profile_id=profile_id,
+                display_name=request.form.get("display_name") or profile_id,
+            )
+            existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
+            existing.short_name = (request.form.get("short_name") or "").strip()
+            existing.org_type = (request.form.get("org_type") or "other").strip()
+            existing.governing_body = (request.form.get("governing_body") or "").strip()
+            existing.country = (request.form.get("country") or "").strip()
+            # Club / result codes — comma-separated
+            codes_raw = request.form.get("club_codes") or ""
+            existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
+            # Brand colours
+            existing.brand_primary = (request.form.get("brand_primary") or existing.brand_primary or "#0A2540").strip()
+            existing.brand_secondary = (request.form.get("brand_secondary") or existing.brand_secondary or "#000000").strip()
+            # Tone
+            existing.tone = (request.form.get("tone") or "warm-club").strip()
+            existing.caption_tone = existing.tone
+            # Platforms
+            existing.platforms = [p.strip() for p in request.form.getlist("platforms") if p.strip()]
+            # Voice
+            existing.tone_notes = (request.form.get("tone_notes") or "").strip()
+            raw_exemplars = (request.form.get("exemplar_captions") or "").strip()
+            if raw_exemplars:
+                parts = [p.strip() for p in raw_exemplars.split("---") if p.strip()]
+                existing.exemplar_captions = parts[:5]
+            else:
+                existing.exemplar_captions = []
+            # Sponsor
+            existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
+            existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
+            save_profile(existing)
+            saved_msg = '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
+            profile = existing
+        else:
+            profiles = list_profiles()
+            profile = profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
+
+        # Build select/checkbox HTML helpers
+        def _opt(val, label, selected):
+            sel = " selected" if selected else ""
+            return f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
+
+        def _radio(name, val, label, checked):
+            chk = " checked" if checked else ""
+            return (f'<label style="display:block;margin-bottom:8px;cursor:pointer">'
+                    f'<input type="radio" name="{_h(name)}" value="{_h(val)}"{chk} style="margin-right:6px">'
+                    f'{label}</label>')
+
+        def _cb(name, val, label, checked):
+            chk = " checked" if checked else ""
+            return (f'<label style="display:inline-flex;align-items:center;gap:6px;'
+                    f'margin-right:16px;margin-bottom:8px;cursor:pointer">'
+                    f'<input type="checkbox" name="{_h(name)}" value="{_h(val)}"{chk}>'
+                    f'{_h(label)}</label>')
+
+        org_type_opts = "".join(_opt(v, l, v == (profile.org_type or "other")) for v, l in _ORG_TYPES)
+        tone_radios = "".join(_radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES)
+        platform_cbs = "".join(_cb("platforms", v, l, v in (profile.platforms or [])) for v, l in _PLATFORMS)
+        exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
+
+        _input_style = "width:100%;max-width:480px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px"
+        _ta_style = "width:100%;max-width:600px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-family:inherit;font-size:14px"
+
+        body = f"""
+{saved_msg}
+<h1>Organisation</h1>
+<p class="dim" style="margin-bottom:24px">Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
+
+<form method="POST">
+<input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Identity</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;max-width:700px">
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Organisation name</label>
+      <input type="text" name="display_name" value="{_h(profile.display_name)}" placeholder="e.g. City Aquatics Club"
+             style="{_input_style}" required/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Short name</label>
+      <input type="text" name="short_name" value="{_h(profile.short_name)}" placeholder="e.g. City AC"
+             style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Organisation type</label>
+      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Governing body</label>
+      <input type="text" name="governing_body" value="{_h(profile.governing_body)}" placeholder="e.g. Swim England, UKA"
+             style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Country</label>
+      <input type="text" name="country" value="{_h(profile.country)}" placeholder="e.g. United Kingdom"
+             style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Result file codes</label>
+      <input type="text" name="club_codes" value="{_h(', '.join(profile.club_codes or []))}"
+             placeholder="e.g. CMA, COMA" style="{_input_style}"/>
+      <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Comma-separated codes that identify your members in results files.</p>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Primary colour</label>
+      <input type="color" name="brand_primary" value="{_h(profile.brand_primary or '#0A2540')}"
+             style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Secondary colour</label>
+      <input type="color" name="brand_secondary" value="{_h(profile.brand_secondary or '#000000')}"
+             style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Voice &amp; Tone</h2>
+  <div style="margin-bottom:16px">
+    <label style="display:block;font-weight:600;margin-bottom:8px;font-size:14px">Caption tone</label>
+    {tone_radios}
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="display:block;font-weight:600;margin-bottom:8px;font-size:14px">Active platforms</label>
+    {platform_cbs}
+  </div>
+  <div style="margin-bottom:16px">
+    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Brand voice notes</label>
+    <textarea name="tone_notes" rows="3" placeholder="Any guidelines, phrases you use, things to avoid..."
+              style="{_ta_style}">{_h(profile.tone_notes or "")}</textarea>
+  </div>
+  <div>
+    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Example captions</label>
+    <textarea name="exemplar_captions" rows="6"
+              placeholder="Paste up to 5 past captions that represent your voice.&#10;Separate each one with --- on its own line."
+              style="{_ta_style}">{_h(exemplars_text)}</textarea>
+    <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Separate captions with <code>---</code> on its own line. Up to 5 examples.</p>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Sponsors</h2>
+  <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Primary sponsor name</label>
+      <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or '')}"
+             placeholder="e.g. Acme Sports" style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Sponsor guidelines</label>
+      <textarea name="sponsor_guidelines" rows="3"
+                placeholder="Hashtags to include, mentions required, things to avoid..."
+                style="{_ta_style}">{_h(profile.sponsor_guidelines or "")}</textarea>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:8px">
+  <button type="submit" class="btn">Save organisation</button>
+</div>
+</form>
+"""
+        return _layout("Organisation", body, active="organisation")
 
     # ---- /pack/<run_id> — content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
@@ -4100,7 +4484,7 @@ function copyText(btn, taId) {{
         rk: Dict[str, Any] = {}
         if run_id:
             try:
-                run_kit_path = Path("data") / "brand_kits" / f"{run_id}.json"
+                run_kit_path = DATA_DIR / "data" / "brand_kits" / f"{run_id}.json"
                 if run_kit_path.exists():
                     rk = json.loads(run_kit_path.read_text()) or {}
             except Exception:
