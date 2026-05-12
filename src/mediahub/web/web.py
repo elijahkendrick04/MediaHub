@@ -1572,10 +1572,11 @@ Designed to cut production time, not just add more data.</p>
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
             _wf_filter_opts = ""
+            _review_base = url_for("review", run_id=run_id)
             for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("posted", "Posted"), ("rejected", "Rejected")]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
-                _wf_opt_url = url_for("review", run_id=run_id) + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
-                _wf_filter_opts += f'<option value="{_wf_opt[0]}" {_wf_sel}>{_wf_opt[1]}</option>'
+                _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
+                _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
             workflow_summary_card = f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
@@ -1595,7 +1596,7 @@ Designed to cut production time, not just add more data.</p>
   <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
     <span class="muted" style="font-size:12px">Filter:</span>
     <select style="width:auto;font-size:13px;padding:6px 10px" onchange="location.href=this.value">
-      {_wf_filter_opts.replace('<option value="" ', f'<option value="{url_for("review", run_id=run_id)}" ')}
+      {_wf_filter_opts}
     </select>
   </div>
 </div>"""
@@ -2090,7 +2091,8 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var fallbackNote = '';
       // V8.1: explicit no-key state — do NOT masquerade voice as AI.
       if (isAi && j.live === false) {{
-        var settingsHref = (window._API_BASE || '') + (j.settings_url || '/settings');
+        // j.settings_url is server-generated and already includes any URL prefix.
+        var settingsHref = j.settings_url || ((window._API_BASE || '') + '/settings');
         if (captionDiv) {{
           captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
             + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">✦ AI captions are disabled</div>'
@@ -4556,9 +4558,10 @@ function copyText(btn, taId) {{
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
+            _file_url = url_for('api_media_library_file', asset_id=ad.get('id', ''))
             rows_html += f"""
 <tr>
-  <td><img src=\"/api/media-library/file/{ad.get('id')}\" style=\"max-height:60px;border-radius:4px;\" /></td>
+  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
   <td>{ad.get('type','')}</td>
   <td>{athlete_names}</td>
   <td>{ad.get('linked_venue') or ad.get('linked_event') or ''}</td>
@@ -4569,7 +4572,7 @@ function copyText(btn, taId) {{
 <div class=\"card\">
   <h2>Media library — {profile_id}</h2>
   <p>Upload reusable photos. Each gets parsed for athlete/venue/event metadata.</p>
-  <form method=\"POST\" action=\"/api/media-library\" enctype=\"multipart/form-data\">
+  <form method=\"POST\" action=\"{url_for('api_media_library_upload')}\" enctype=\"multipart/form-data\">
     <p><input type=\"file\" name=\"file\" accept=\"image/*\" required></p>
     <p>Description: <input type=\"text\" name=\"description\" placeholder=\"e.g. Eira Hughes at Welsh National Open\" style=\"width:60%\"></p>
     <p>Type: <select name=\"asset_type\">
@@ -4581,7 +4584,7 @@ function copyText(btn, taId) {{
       <option value=\"logo\">logo</option>
     </select></p>
     <input type=\"hidden\" name=\"profile_id\" value=\"{profile_id}\">
-    <button type=\"submit\">Upload</button>
+    <button type=\"submit\" class=\"btn\">Upload photo</button>
   </form>
 </div>
 <div class=\"card\">
@@ -4635,7 +4638,11 @@ function copyText(btn, taId) {{
             tags=meta.get("tags") or [],
         )
         asset = store.save(asset)
-        return jsonify({"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset})
+        # AJAX callers get JSON; plain form submissions redirect back to the library.
+        if (_req.headers.get("Accept", "").find("application/json") != -1
+                or _req.headers.get("X-Requested-With") == "XMLHttpRequest"):
+            return jsonify({"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset})
+        return redirect(url_for("media_library_page", profile_id=profile_id))
 
     @app.route("/api/media-library/file/<asset_id>")
     def api_media_library_file(asset_id: str):
