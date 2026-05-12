@@ -34,6 +34,8 @@ def _make_two_colour_png(path: Path, colour_a=(220, 30, 60), colour_b=(20, 30, 2
 
 def test_process_upload_persists_brand_kit(tmp_path, monkeypatch):
     """No logo, only colour pickers: the JSON kit should reflect the form."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.chdir(tmp_path)
     from mediahub.web.brand_kit_upload import process_upload
 
@@ -60,6 +62,8 @@ def test_process_upload_persists_brand_kit(tmp_path, monkeypatch):
 
 def test_extract_palette_from_synthetic_logo(tmp_path, monkeypatch):
     """ColorThief should pick up the two known dominant colours."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.chdir(tmp_path)
     from mediahub.web.brand_kit_upload import process_upload
 
@@ -114,6 +118,8 @@ def test_extract_palette_from_synthetic_logo(tmp_path, monkeypatch):
 
 def test_brand_kit_read_back_by_v8_brand_kit_for(tmp_path, monkeypatch):
     """A kit written by process_upload should be readable via the web's lookup."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
     monkeypatch.chdir(tmp_path)
     from mediahub.web.brand_kit_upload import process_upload
 
