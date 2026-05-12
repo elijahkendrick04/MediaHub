@@ -287,3 +287,330 @@ python -m mediahub.web.web
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.
 Branch model: feature branches from `dev`; never merge to `main` without approval.
+
+---
+
+# Claude Skills Configuration
+
+This section documents the full set of Claude/agent skills installed for MediaHub. Skills were
+sourced from the Composio top-10 list, the previous Antigravity/individual installs, and manual
+git-clone installs. All installation was done without creating accounts, connecting OAuth, or
+storing credentials.
+
+## Installed Skills — Full Registry
+
+| # | Skill | Location | Install Method | Status |
+|---|-------|----------|----------------|--------|
+| 1 | `composio` | `~/.claude/skills/composio` | `npx skills add composiohq/skills` | ✅ Installed |
+| 1 | `skill-creator` | `~/.agents/skills/skill-creator` | (bundled with composio) | ✅ Installed |
+| 2 | `remotion-best-practices` | `~/.claude/skills/remotion-best-practices` | Antigravity Awesome Skills | ✅ Installed |
+| 2 | `remotion` | `~/.claude/skills/remotion` | Antigravity Awesome Skills | ✅ Installed |
+| 3 | `frontend-design` | `~/.claude/skills/` + `~/.agents/skills/` | anthropics/claude-code + Antigravity | ✅ Installed |
+| 3 | `frontend-dev-guidelines` | `~/.claude/skills/` | Antigravity | ✅ Installed |
+| 3 | `design-taste-frontend` | `~/.claude/skills/` | Antigravity | ✅ Installed |
+| 4 | `agent-browser` | `/opt/node22/bin/agent-browser` | `npm install -g agent-browser` (v0.27.0) | ✅ Binary installed |
+| 4 | `browser-use` | `~/.agents/skills/browser-use` + `~/.claude/skills/` | browser-use/browser-use + Antigravity | ✅ Installed |
+| 4 | `browser-automation` | `~/.claude/skills/browser-automation` | Antigravity | ✅ Installed |
+| 5 | `supermemory` | `~/.claude/skills/supermemory/` | git clone supermemoryai/supermemory | ✅ Skill file installed |
+| 6 | `filesystem-context` | `~/.claude/skills/filesystem-context` | Antigravity | ✅ Installed |
+| 6 | `file-uploads` | `~/.claude/skills/file-uploads` | Antigravity | ✅ Installed |
+| 6 | `file-organizer` | `~/.claude/skills/file-organizer` | Antigravity | ✅ Installed |
+| 7 | Marketing suite (30+ skills) | `~/.agents/skills/` | `npx skills add coreyhaines31/marketingskills` | ✅ Installed |
+| 7 | `marketing-ideas` | `~/.claude/skills/marketing-ideas` | Antigravity | ✅ Installed |
+| 7 | `marketing-psychology` | `~/.claude/skills/marketing-psychology` | Antigravity | ✅ Installed |
+| 8 | `agent-sandbox-skill` | — | **Blocked: E2B API key required** | ⚠️ Manual setup |
+| 9 | `superpowers-lab` | `~/.claude/skills/superpowers-lab` | Antigravity | ✅ Installed |
+| 9 | `using-superpowers` | `~/.claude/skills/using-superpowers` | Antigravity | ✅ Installed |
+| 9 | Superpowers plugin | — | **Blocked: interactive /plugin command required** | ⚠️ Manual setup |
+| 10 | `web-design-guidelines` | `~/.agents/skills/web-design-guidelines` + `~/.claude/skills/` | vercel-labs/agent-skills + Antigravity | ✅ Installed |
+
+**No accounts were created. No OAuth was performed. No secrets were stored.**
+
+---
+
+## Manual Steps Still Required
+
+### agent-sandbox-skill (Skill 8)
+Requires an E2B API key and Python 3.12+.
+
+```bash
+# 1. Get your E2B API key from https://e2b.dev  (requires account)
+# 2. Add to .env:
+#    E2B_API_KEY=e2b_...
+# 3. Clone and set up the skill:
+git clone https://github.com/disler/agent-sandbox-skill
+cd agent-sandbox-skill
+uv sync
+# 4. Copy skill file:
+cp .claude/skills/agent-sandbox-skill.md ~/.claude/skills/
+```
+
+Do not upload private club/athlete data to external sandboxes without explicit permission.
+
+### Superpowers Plugin (Skill 9)
+Must be installed interactively inside Claude Code.
+
+Type these commands directly in the Claude Code CLI:
+```
+/plugin marketplace add obra/superpowers-marketplace
+/plugin install superpowers@superpowers-marketplace
+```
+
+The `superpowers-lab` and `using-superpowers` skills (from Antigravity) are already active
+as a functional equivalent for multi-agent orchestration work.
+
+### Supermemory MCP (Skill 5 — optional upgrade)
+The skill file is installed. For persistent cross-session memory via MCP, run:
+```bash
+npx -y install-mcp@latest https://mcp.supermemory.ai/mcp --client claude --oauth=yes
+```
+This requires OAuth (Supermemory account). Do not run without explicit approval.
+Rules: do not store private athlete/club/user data without consent.
+
+### agent-browser Chrome (Skill 4 — local dev)
+The `agent-browser` binary is installed (v0.27.0). To enable browser automation, Chrome must be
+downloaded separately. In a network-accessible environment:
+```bash
+agent-browser install
+# If that fails on Linux:
+agent-browser install --with-deps
+```
+
+---
+
+## Usage Rules by Skill
+
+### 1. Composio Skills
+Use for integration architecture and agent tool design — not for connecting real accounts.
+
+MediaHub future integrations where Composio is appropriate:
+- Instagram/Facebook publishing handoff (requires explicit approval before connecting)
+- Email/newsletter export workflows
+- CRM-style club/team onboarding flows
+- Content scheduling integrations
+- Storage integrations (S3, GCS)
+
+**Rules:**
+- Never connect external accounts without explicit approval
+- Never auto-publish or auto-post
+- Human approval must remain required before any external publishing
+- Use least privilege for every integration
+- Keep credentials out of source control — `.env` only
+
+### 2. Remotion / Remotion Best Practices
+Use whenever the user asks for:
+- Reels or short-form video
+- Animated result cards (stories, feed)
+- Athlete spotlight videos
+- Weekend-in-numbers animated summaries
+- Sponsor-branded video assets
+- Meet preview videos
+- Demo or product videos
+
+MediaHub Remotion direction:
+- Programmatic, data-driven — never static templates
+- Club-branded outputs (colours, logo, fonts from BrandKit)
+- Real athlete/team imagery where provided
+- Sponsor-safe layouts
+- Reusable compositions per content type
+- No synthetic AI-generated people unless explicitly requested
+- Video outputs flow from the same achievement engine as static posts
+
+### 3. Frontend Design / Claude Design
+**MANDATORY for all website work.**
+
+Before writing any UI code, define:
+- Target user and job-to-be-done
+- Primary action on this page
+- Visual direction
+- Hierarchy and empty/loading/error/success states
+- Trust indicators
+- Responsive behaviour
+
+MediaHub design principles:
+- Bold but practical — editorial/sport feel, not generic SaaS
+- Dark-first colour palette (`--bg`, `--accent`, `--ink`, `--panel`)
+- Strong hierarchy; obvious primary actions
+- Polished empty states and upload/processing screens
+- Clear recognition explanations and confidence displays
+- Strong approval workflow (queue → approved → posted)
+- Brand kit and sponsor controls that feel trustworthy
+- No over-animation — motion only for feedback and hierarchy
+- Desktop-primary, mobile-aware
+
+After coding UI, run a design review:
+- Is this distinctive?
+- Does it look like a real product?
+- Would a club committee member understand it immediately?
+- Would a performance coach trust the confidence scores?
+- Is the main workflow obvious?
+- Are actions clearly labelled?
+- Are approval/rejection/export states unambiguous?
+
+### 4. Browser Automation (agent-browser / browser-use)
+Use for:
+- Opening local app and verifying it loads
+- Testing upload flows end-to-end
+- Navigating through dashboard, recognition, and content pack screens
+- Checking edit/approve/reject/export interactions
+- Screenshot evidence of UI problems
+- Checking mobile/responsive layouts
+- Validating no blank pages, 404s, or broken routes
+
+Snapshot-first approach:
+1. Open page
+2. Snapshot interactive elements
+3. Interact using stable refs (not fragile selectors)
+4. Screenshot evidence
+5. Report failures with context
+
+### 5. Supermemory
+Use for approved project memory/context — not for storing sensitive data.
+
+Acceptable memory targets:
+- Product positioning and accepted direction
+- Rejected technical/design directions (avoid re-proposing)
+- Accepted architecture decisions (ADRs)
+- Naming conventions
+- MVP boundaries and pilot constraints
+- Previous deployment issues
+- Target customer assumptions
+
+Do NOT store:
+- Private club data
+- Individual athlete PBs, results, or personal details
+- User credentials or API keys
+- Any data without explicit consent
+
+### 6. Document Processing
+Use for all structured document parsing in MediaHub.
+
+Relevant inputs:
+- Swim meet result PDFs
+- Spreadsheets (XLS, XLSX, CSV)
+- Exported result files (HY3, SDIF, SportSystems)
+- Qualifying time documents
+- Entry lists and heat sheets
+- Historical performance files
+- Sponsor documents
+- Brand guidelines
+- Club profile documents
+
+Processing requirements:
+- Extract tables accurately; preserve source provenance
+- Validate parsed fields; detect uncertain or ambiguous rows
+- Normalise swimmer names, event names, and times
+- Preserve age group/category where available
+- Separate raw extraction from cleaned canonical data
+- Flag ambiguous results for human review
+- Never silently guess — make uncertainty explicit
+- Output machine-readable JSON for the recognition engine
+
+Pipeline: raw file → parsed structured data → validated canonical data → achievement detections → ranked content opportunities → content pack.
+
+### 7. Marketing Skills
+Use carefully. Do not turn MediaHub into generic marketing content.
+
+Apply marketing skills for:
+- Product positioning and landing page messaging
+- Customer discovery questions
+- Pricing experiments and framing
+- Outbound scripts for club/society onboarding
+- Case studies and testimonials
+- Retention loops and upgrade prompts
+- Content strategy for MediaHub's own marketing
+- Sponsor value proposition framing
+- ROI/time-saved conversion copy
+
+MediaHub messaging principles:
+- Upload the results → engine finds the moments → branded content in minutes → human approves → saves hours
+- Specific, evidence-grounded claims only (no "10x your content" without evidence)
+- Never imply full automation replaces human judgement
+- Do not sound like a social media agency
+- Do not promise instant publishing before the approval workflow is proven
+
+Available marketing skills include: `co-marketing`, `community-marketing`, `cold-email`,
+`content-strategy`, `copy-editing`, `copywriting`, `launch-strategy`, `lead-magnets`,
+`marketing-ideas`, `marketing-psychology`, `onboarding-cro`, `pricing-strategy`,
+`referral-program`, `sales-enablement`, `social-content`.
+
+### 8. agent-sandbox-skill
+Use only when E2B_API_KEY is configured. Apply for:
+- Safe isolated experiments that should not touch production or local data
+- Testing a new upload parser against sample files
+- Prototyping a new content pack UI in isolation
+- Validating a deployment config safely
+- Building a demo flow without risk to real data
+
+Rules:
+- Do not move normal development into sandbox unnecessarily
+- Do not upload private athlete, club, or user data into external sandboxes without permission
+- Commit all useful outputs back to the actual repo cleanly
+
+### 9. Superpowers / Multi-Agent Orchestration
+Use `superpowers-lab` or `using-superpowers` for large multi-step development tasks.
+
+Do NOT over-process simple tasks. Use when the task is:
+- Non-trivial, architectural, or risky
+- Touches multiple files or systems
+- Benefits from parallel subagents
+
+MediaHub cases for Superpowers:
+- New upload/parsing pipeline
+- Achievement recognition architecture redesign
+- Club/tenant multi-tenancy model
+- Approval workflow overhaul
+- Brand kit system redesign
+- Content generation pipeline changes
+- Database schema redesign
+- Image/video generation architecture
+- Major UI redesign
+- Deployment restructuring
+
+### 10. Web Design Guidelines
+Run after completing frontend changes.
+
+Review checklist after every UI build:
+- Landing page: messaging, hierarchy, trust, CTA clarity
+- Dashboard: navigation, data density, state handling
+- Upload flow: drag-and-drop, progress, error states
+- Content pack: cards, captions, confidence scores, approval states
+- Forms: labels, validation, error messages
+- Tables: sortability, empty states, pagination
+- Modals: focus management, keyboard accessibility
+- Mobile layouts: responsive behaviour, touch targets
+- Generated content preview: sponsor-safe, brand-accurate
+
+---
+
+## Mandatory Website Workflow
+
+For any website, UI, or dashboard work — regardless of task size:
+
+1. Activate `frontend-design` skill — define visual direction before coding
+2. Implement the UI
+3. Optionally run `agent-browser` / `browser-use` QA — verify the flow works
+4. Run `web-design-guidelines` review — check design/usability quality
+5. Fix major issues identified
+6. Run lint/typecheck/tests
+7. Summarise changes
+
+This four-step sequence is not optional for user-facing work.
+
+---
+
+## MediaHub Product Principles (Standing Rules)
+
+Manual work is acceptable only as a learning-stage concierge MVP. The long-term goal is a
+repeatable content automation engine. Before building anything, ask:
+
+- What is the repeatable system behind this?
+- What can be automated without losing quality or trust?
+- Would someone actually pay for this as a standalone feature?
+- Does this strengthen or weaken the scalable business?
+- Is this intelligence-layer work or manual agency work?
+
+The intelligence layer is the moat:
+- Ingest → detect → rank → brand → generate → approve → export
+- Every step should be explainable and auditable
+- Human approval before external publishing — always
