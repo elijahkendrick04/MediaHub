@@ -1572,10 +1572,11 @@ Designed to cut production time, not just add more data.</p>
         # Only show workflow card if there's any state or any achievements
         if _wf_summary or ranked_achs:
             _wf_filter_opts = ""
+            _review_base = url_for("review", run_id=run_id)
             for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("posted", "Posted"), ("rejected", "Rejected")]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
-                _wf_opt_url = url_for("review", run_id=run_id) + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
-                _wf_filter_opts += f'<option value="{_wf_opt[0]}" {_wf_sel}>{_wf_opt[1]}</option>'
+                _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
+                _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
             workflow_summary_card = f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
@@ -1595,7 +1596,7 @@ Designed to cut production time, not just add more data.</p>
   <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
     <span class="muted" style="font-size:12px">Filter:</span>
     <select style="width:auto;font-size:13px;padding:6px 10px" onchange="location.href=this.value">
-      {_wf_filter_opts.replace('<option value="" ', f'<option value="{url_for("review", run_id=run_id)}" ')}
+      {_wf_filter_opts}
     </select>
   </div>
 </div>"""
