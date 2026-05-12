@@ -595,6 +595,195 @@ select { cursor: pointer; }
 code, pre { font-family: ui-monospace, 'SF Mono', Menlo, monospace; background: rgba(255,255,255,0.05); padding: 2px 7px; border-radius: 5px; font-size: 12.5px; color: var(--accent); }
 pre { padding: 16px; overflow-x: auto; color: var(--ink-dim); border: 1px solid var(--border); border-radius: 10px; }
 pre code { background: none; padding: 0; color: inherit; }
+
+/* === Animations === */
+@keyframes mh-spin { to { transform: rotate(360deg); } }
+@keyframes mh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes mh-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes mh-shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
+@keyframes mh-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes mh-aurora { 0% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(-30px,40px) rotate(180deg); } 100% { transform: translate(0,0) rotate(360deg); } }
+
+/* Page entry */
+main.wrap { animation: mh-fade-in 0.35s ease-out; position: relative; z-index: 1; }
+main.wrap > .card { animation: mh-fade-in 0.4s ease-out backwards; }
+main.wrap > .card:nth-of-type(1) { animation-delay: 0.05s; }
+main.wrap > .card:nth-of-type(2) { animation-delay: 0.10s; }
+main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
+main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
+main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
+
+/* Background accent — subtle aurora */
+body::before {
+  content: ''; position: fixed; top: -240px; right: -240px;
+  width: 640px; height: 640px;
+  background: radial-gradient(circle, rgba(34,211,238,0.06) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+  animation: mh-aurora 28s ease-in-out infinite;
+}
+body::after {
+  content: ''; position: fixed; bottom: -320px; left: -240px;
+  width: 720px; height: 720px;
+  background: radial-gradient(circle, rgba(124,58,237,0.05) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+  animation: mh-aurora 36s ease-in-out infinite reverse;
+}
+
+/* Card hover */
+.card { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+a.card, .card[data-interactive] { cursor: pointer; }
+a.card:hover, .card[data-interactive]:hover {
+  transform: translateY(-2px);
+  border-color: rgba(34,211,238,0.3);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.5), 0 0 0 1px rgba(34,211,238,0.15);
+}
+
+/* Loading overlay */
+#mh-loader {
+  position: fixed; inset: 0;
+  background: rgba(11,18,32,0.78);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  z-index: 9999;
+  display: none; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.25s ease;
+}
+#mh-loader.show { display: flex; opacity: 1; }
+.mh-loader-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  padding: 36px 48px;
+  animation: mh-fade-in 0.4s ease-out;
+}
+.mh-spinner {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.15) 90deg, var(--accent) 270deg, transparent 360deg);
+  -webkit-mask: radial-gradient(circle at center, transparent 26px, black 28px);
+  mask: radial-gradient(circle at center, transparent 26px, black 28px);
+  animation: mh-spin 1s linear infinite;
+  position: relative;
+  box-shadow: 0 0 40px rgba(34,211,238,0.25);
+}
+.mh-spinner::after {
+  content: ''; position: absolute; inset: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(34,211,238,0.18), transparent 70%);
+  animation: mh-pulse 1.4s ease-in-out infinite;
+}
+.mh-loader-text {
+  font-size: 15px; color: var(--ink); font-weight: 600;
+  letter-spacing: -0.01em; text-align: center;
+}
+.mh-loader-sub {
+  font-size: 13px; color: var(--ink-dim);
+  max-width: 360px; text-align: center;
+  animation: mh-pulse 2.4s ease-in-out infinite;
+}
+
+/* Toast */
+#mh-toast-container {
+  position: fixed; top: 72px; right: 20px;
+  z-index: 10000;
+  display: flex; flex-direction: column; gap: 10px;
+  pointer-events: none; max-width: 380px;
+}
+.mh-toast {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; color: var(--ink);
+  font-size: 14px; line-height: 1.45;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+  pointer-events: auto;
+  animation: mh-slide-in 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
+  display: flex; align-items: flex-start; gap: 12px;
+  min-width: 280px;
+}
+.mh-toast.success { border-color: rgba(34,197,94,0.45); }
+.mh-toast.error   { border-color: rgba(244,63,94,0.45); }
+.mh-toast.info    { border-color: rgba(34,211,238,0.45); }
+.mh-toast .mh-toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+.mh-toast.success .mh-toast-icon { color: var(--good); }
+.mh-toast.error   .mh-toast-icon { color: var(--bad); }
+.mh-toast.info    .mh-toast-icon { color: var(--info); }
+.mh-toast-close {
+  background: none; border: 0; color: var(--ink-muted); cursor: pointer;
+  padding: 0; margin-left: 4px; font-size: 18px; line-height: 1;
+  transition: color var(--transition);
+}
+.mh-toast-close:hover { color: var(--ink); }
+
+/* Button loading state */
+.btn.loading { pointer-events: none; opacity: 0.72; position: relative; padding-right: 38px; }
+.btn.loading::after {
+  content: ''; position: absolute; right: 14px; top: 50%;
+  width: 14px; height: 14px; margin-top: -7px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: mh-spin 0.6s linear infinite;
+}
+
+/* Skeleton */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%);
+  background-size: 1000px 100%;
+  animation: mh-shimmer 1.6s linear infinite;
+  border-radius: 8px;
+}
+
+/* Content card (AI-generated stub output) */
+.mh-content-card {
+  background: linear-gradient(180deg, rgba(34,211,238,0.04), rgba(34,211,238,0.01));
+  border: 1px solid rgba(34,211,238,0.15);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 16px;
+  position: relative;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.mh-content-card:hover { border-color: rgba(34,211,238,0.35); transform: translateY(-1px); }
+.mh-content-card .mh-card-platform {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--accent); margin-bottom: 10px;
+}
+.mh-content-card .mh-card-caption {
+  font-size: 15px; line-height: 1.6; color: var(--ink);
+  white-space: pre-wrap; word-wrap: break-word;
+}
+.mh-content-card .mh-card-tags {
+  margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px;
+}
+.mh-content-card .mh-card-tag {
+  font-size: 12px; color: var(--accent);
+  background: rgba(34,211,238,0.08);
+  border: 1px solid rgba(34,211,238,0.2);
+  border-radius: 6px; padding: 3px 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+.mh-content-card .mh-card-confidence {
+  position: absolute; top: 22px; right: 22px;
+  font-size: 11px; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mh-card-actions {
+  margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;
+  padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);
+}
+.mh-card-actions button {
+  background: transparent; border: 1px solid rgba(255,255,255,0.1);
+  color: var(--ink-dim); font-size: 12px; padding: 5px 11px;
+  border-radius: 6px; cursor: pointer; font-family: inherit;
+  transition: all var(--transition);
+}
+.mh-card-actions button:hover { color: var(--ink); border-color: rgba(255,255,255,0.2); }
+.mh-card-actions button.primary { color: var(--accent); border-color: rgba(34,211,238,0.3); }
+.mh-card-actions button.primary:hover { background: rgba(34,211,238,0.08); border-color: var(--accent); }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 """
 
 
@@ -694,6 +883,14 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </script>
 </head>
 <body>
+<div id="mh-loader" aria-live="polite" aria-busy="true">
+  <div class="mh-loader-inner">
+    <div class="mh-spinner"></div>
+    <div class="mh-loader-text">Working on it</div>
+    <div class="mh-loader-sub">This usually takes a few seconds</div>
+  </div>
+</div>
+<div id="mh-toast-container"></div>
 <header class="topnav">
   <div class="brand">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -740,6 +937,101 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     });
   }
   check(); setInterval(check, 30000);
+})();
+</script>
+<script>
+/* === MediaHub UI Framework: loader + toast + form binding === */
+(function(){
+  var MH = window.MH = window.MH || {};
+  var loaderEl = document.getElementById('mh-loader');
+  var loaderHideTimer = null;
+
+  MH.showLoader = function(text, sub) {
+    if (!loaderEl) return;
+    if (loaderHideTimer) { clearTimeout(loaderHideTimer); loaderHideTimer = null; }
+    if (text) loaderEl.querySelector('.mh-loader-text').textContent = text;
+    if (sub !== undefined) loaderEl.querySelector('.mh-loader-sub').textContent = sub;
+    loaderEl.classList.add('show');
+  };
+  MH.hideLoader = function() {
+    if (!loaderEl) return;
+    loaderEl.classList.remove('show');
+  };
+
+  var toastContainer = document.getElementById('mh-toast-container');
+  var ICONS = {
+    success: '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    error:   '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+    info:    '<svg class="mh-toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+  };
+  MH.toast = function(message, type, ms) {
+    if (!toastContainer) return;
+    type = type || 'info';
+    var t = document.createElement('div');
+    t.className = 'mh-toast ' + type;
+    t.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    t.innerHTML = (ICONS[type] || ICONS.info) +
+      '<div style="flex:1;min-width:0">' + message + '</div>' +
+      '<button class="mh-toast-close" aria-label="Dismiss">&times;</button>';
+    toastContainer.appendChild(t);
+    var close = function(){
+      t.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+      t.style.opacity = '0'; t.style.transform = 'translateX(16px)';
+      setTimeout(function(){ if (t.parentNode) t.remove(); }, 220);
+    };
+    t.querySelector('.mh-toast-close').addEventListener('click', close);
+    setTimeout(close, ms || (type === 'error' ? 7000 : 4500));
+  };
+
+  function bindForms() {
+    document.querySelectorAll('form').forEach(function(form){
+      if (form.dataset.mhBound === '1') return;
+      form.dataset.mhBound = '1';
+      if (form.dataset.noLoader === '1') return;
+      form.addEventListener('submit', function(){
+        var method = (form.getAttribute('method') || 'get').toLowerCase();
+        if (method === 'get') return;
+        var btn = form.querySelector('button[type=submit], input[type=submit]');
+        if (btn && !btn.classList.contains('loading')) {
+          btn.classList.add('loading');
+        }
+        var msg = form.dataset.loaderText || 'Working on it';
+        var sub = form.dataset.loaderSub || 'This usually takes a few seconds';
+        MH.showLoader(msg, sub);
+      });
+    });
+  }
+  if (document.readyState !== 'loading') bindForms();
+  else document.addEventListener('DOMContentLoaded', bindForms);
+
+  // Re-bind after dynamic content (useful for SPA-like fragments)
+  MH.bindForms = bindForms;
+
+  // Wrap fetch for explicit MH usage
+  MH.fetch = function(url, options) {
+    MH.showLoader();
+    return fetch(url, options).then(function(r){
+      MH.hideLoader();
+      if (!r.ok) MH.toast('Request failed (' + r.status + ')', 'error');
+      return r;
+    }).catch(function(err){
+      MH.hideLoader();
+      MH.toast('Network error: ' + (err && err.message || 'unknown'), 'error');
+      throw err;
+    });
+  };
+
+  // Server-flashed messages: any element with data-mh-flash gets shown then removed.
+  document.querySelectorAll('[data-mh-flash]').forEach(function(el){
+    MH.toast(el.getAttribute('data-mh-message') || el.textContent || '',
+             el.getAttribute('data-mh-type') || 'info');
+    el.remove();
+  });
+
+  // Hide loader when navigating back via bfcache (Safari/Firefox)
+  window.addEventListener('pageshow', function(e){
+    if (e.persisted) MH.hideLoader();
+  });
 })();
 </script>
 </body>
@@ -3641,106 +3933,54 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 """
         return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="create")
 
-    # ---- Stub routes ---------------------------------------------------
+    # ---- Stub routes (now functional with real LLM + fallback) ---------
+    def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
+                     active_tab: str = "add_input"):
+        """Shared handler for stub routes. GET renders form, POST renders cards."""
+        try:
+            from mediahub.club_platform import stubs as _stubs_mod
+        except Exception as exc:
+            body = (
+                '<div class="card"><h2>Temporarily unavailable</h2>'
+                f'<p class="muted">Content engine failed to load: {_h(str(exc))}</p></div>'
+            )
+            return _layout(title, body, active=active_tab)
+
+        StubCls = getattr(_stubs_mod, stub_cls_name, None)
+        if StubCls is None:
+            body = '<div class="card"><p class="muted">This content type is not available.</p></div>'
+            return _layout(title, body, active=active_tab)
+
+        stub = StubCls()
+        if request.method == "POST":
+            try:
+                cards_payload = stub.generate_cards(request.form.to_dict(flat=True))
+            except Exception:
+                app.logger.exception("stub generate_cards failed")
+                cards_payload = {"cards": []}
+            back = url_for(route_endpoint)
+            body = _stubs_mod.render_cards_html(cards_payload, back, f"{title} — drafts")
+            return _layout(title, body, active=active_tab)
+        # GET — render form
+        body = stub.render_stub_html()
+        body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
+        return _layout(title, body, active=active_tab)
+
     @app.route("/weekend-preview", methods=["GET", "POST"])
     def stub_weekend_preview():
-        try:
-            from mediahub.club_platform.stubs import WeekendPreviewStub
-            stub = WeekendPreviewStub()
-            if request.method == "POST":
-                brief = stub.generate_brief(request.form)
-                back = url_for("stub_weekend_preview")
-                body = (
-                    f'<h1>Weekend Preview — draft brief</h1>'
-                    f'<div class="card">'
-                    f'<h2>Your draft</h2>'
-                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
-                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
-                    f'</div>'
-                )
-            else:
-                body = stub.render_stub_html()
-                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
-        except ImportError:
-            body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Weekend Preview", body, active="add_input")
+        return _render_stub("WeekendPreviewStub", "stub_weekend_preview", "Event Preview")
 
     @app.route("/sponsor-post", methods=["GET", "POST"])
     def stub_sponsor_post():
-        try:
-            from mediahub.club_platform.stubs import SponsorPostStub
-            stub = SponsorPostStub()
-            if request.method == "POST":
-                brief = stub.generate_brief(request.form)
-                back = url_for("stub_sponsor_post")
-                body = (
-                    f'<h1>Sponsor Post — draft brief</h1>'
-                    f'<div class="card">'
-                    f'<h2>Your draft</h2>'
-                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
-                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
-                    f'</div>'
-                )
-            else:
-                body = stub.render_stub_html()
-                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
-        except ImportError:
-            body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Sponsor Post", body, active="add_input")
+        return _render_stub("SponsorPostStub", "stub_sponsor_post", "Sponsor Post")
 
     @app.route("/session-update", methods=["GET", "POST"])
     def stub_session_update():
-        try:
-            from mediahub.club_platform.stubs import SessionUpdateStub
-            stub = SessionUpdateStub()
-            if request.method == "POST":
-                brief = stub.generate_brief(request.form)
-                back = url_for("stub_session_update")
-                body = (
-                    f'<h1>Session Update — draft brief</h1>'
-                    f'<div class="card">'
-                    f'<h2>Your draft</h2>'
-                    f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6">{_h(brief)}</pre>'
-                    f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
-                    f'</div>'
-                )
-            else:
-                body = stub.render_stub_html()
-                body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
-        except ImportError:
-            body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Session Update", body, active="add_input")
+        return _render_stub("SessionUpdateStub", "stub_session_update", "Session Update")
 
-    # ---- /free-text — free-text stub ------------------------------------
     @app.route("/free-text", methods=["GET", "POST"])
     def stub_free_text():
-        if request.method == "POST":
-            raw = _h(request.form.get("free_text", "").strip())
-            back = url_for("stub_free_text")
-            body = (
-                f'<h1>Free Text — draft brief</h1>'
-                f'<div class="card">'
-                f'<h2>Your input</h2>'
-                f'<pre style="white-space:pre-wrap;font-size:13px;line-height:1.6;'
-                f'background:var(--bg);padding:16px;border-radius:6px;border:1px solid var(--border)">'
-                f'{raw}</pre>'
-                f'<p style="font-size:13px;color:var(--ink-dim);margin-top:12px">'
-                f'Full AI content generation from free text is coming soon. '
-                f'Copy your notes above and use them as a brief for now.</p>'
-                f'<p style="margin-top:12px"><a class="btn secondary" href="{back}">← Start over</a></p>'
-                f'</div>'
-            )
-            return _layout("Free Text", body, active="add_input")
-        if _club_platform_ok:
-            try:
-                from mediahub.club_platform.stubs import FreeTextStub
-                stub = FreeTextStub()
-                body = stub.render_stub_html()
-            except Exception:
-                body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        else:
-            body = '<div class="card"><p class="muted">Coming soon.</p></div>'
-        return _layout("Free Text", body, active="add_input")
+        return _render_stub("FreeTextStub", "stub_free_text", "Free Text")
 
     # ---- /add-input — multi-input landing page --------------------------
     @app.route("/add-input")
@@ -3788,7 +4028,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<line x1="3" y1="10" x2="21" y2="10"/>'
                     '</svg>'
                 ),
-                "status": "coming_soon",
+                "status": "live",
                 "endpoint": "stub_weekend_preview",
             },
             {
@@ -3800,7 +4040,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>'
                     '</svg>'
                 ),
-                "status": "coming_soon",
+                "status": "live",
                 "endpoint": "stub_sponsor_post",
             },
             {
@@ -3815,7 +4055,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<line x1="16" y1="17" x2="8" y2="17"/>'
                     '</svg>'
                 ),
-                "status": "coming_soon",
+                "status": "live",
                 "endpoint": "stub_session_update",
             },
             {
@@ -3828,7 +4068,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'
                     '</svg>'
                 ),
-                "status": "coming_soon",
+                "status": "live",
                 "endpoint": "stub_free_text",
             },
         ]
@@ -3840,8 +4080,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 badge = '<span class="tag good" style="font-size:11px">Live</span>'
                 btn_label = "Start →"
             else:
-                badge = '<span class="tag" style="font-size:11px">Draft form</span>'
-                btn_label = "Try draft form →"
+                badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
+                btn_label = "Preview →"
             try:
                 card_url = url_for(card["endpoint"])
                 href_attr = f'href="{card_url}"'
@@ -5015,6 +5255,63 @@ function copyText(btn, taId) {{
             download_name=f"content-pack-{run_id}.zip",
             mimetype="application/zip",
         )
+
+    # ---- Global error handlers — keep tracebacks out of the UI ---------
+    @app.errorhandler(404)
+    def _not_found_page(e):
+        accepts = request.headers.get("Accept", "") if request else ""
+        if "application/json" in accepts or request.path.startswith("/api/"):
+            return jsonify({"error": "not_found", "path": request.path}), 404
+        body = f"""
+<div style="text-align:center;padding:64px 24px">
+  <div style="font-size:72px;font-weight:800;letter-spacing:-0.04em;
+              background:linear-gradient(135deg,var(--accent),#7c3aed);
+              -webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px">404</div>
+  <h1 style="margin-bottom:8px">Page not found</h1>
+  <p class="dim" style="margin-bottom:24px">The page <code>{_h(request.path)}</code> doesn't exist.</p>
+  <a class="btn" href="{url_for('home')}">← Back to home</a>
+</div>
+"""
+        return _layout("Not found", body, active="home"), 404
+
+    @app.errorhandler(500)
+    def _server_error_page(e):
+        try:
+            app.logger.exception("Unhandled server error")
+        except Exception:
+            pass
+        accepts = request.headers.get("Accept", "") if request else ""
+        if "application/json" in accepts or request.path.startswith("/api/"):
+            return jsonify({"error": "internal_error"}), 500
+        body = f"""
+<div style="text-align:center;padding:64px 24px">
+  <div style="font-size:64px;margin-bottom:12px">⚠️</div>
+  <h1 style="margin-bottom:8px">Something went wrong</h1>
+  <p class="dim" style="margin-bottom:24px;max-width:480px;margin-left:auto;margin-right:auto">
+    The page failed to load. Refresh, or try a different action. Nothing you uploaded was lost.
+  </p>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+    <a class="btn" href="{url_for('home')}">← Back to home</a>
+    <a class="btn secondary" href="javascript:history.back()">Go back</a>
+  </div>
+</div>
+"""
+        return _layout("Error", body, active="home"), 500
+
+    @app.errorhandler(413)
+    def _payload_too_large(e):
+        accepts = request.headers.get("Accept", "") if request else ""
+        if "application/json" in accepts or request.path.startswith("/api/"):
+            return jsonify({"error": "file_too_large", "max_mb": 50}), 413
+        body = f"""
+<div style="text-align:center;padding:64px 24px">
+  <div style="font-size:64px;margin-bottom:12px">📦</div>
+  <h1 style="margin-bottom:8px">File too large</h1>
+  <p class="dim" style="margin-bottom:24px">The upload exceeded 50 MB. Try compressing or trimming the file first.</p>
+  <a class="btn" href="{url_for('home')}">← Back to home</a>
+</div>
+"""
+        return _layout("File too large", body, active="home"), 413
 
     return app
 
