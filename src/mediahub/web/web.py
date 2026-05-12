@@ -3019,7 +3019,11 @@ Relay team broke club record"></textarea>
             c = _db()
             c.execute("SELECT 1").fetchone()
             c.close()
-            checks["database"] = {"ok": True, "path": str(DB_PATH.relative_to(DATA_DIR))}
+            try:
+                _db_display = str(DB_PATH.relative_to(DATA_DIR))
+            except ValueError:
+                _db_display = str(DB_PATH)
+            checks["database"] = {"ok": True, "path": _db_display}
         except Exception as e:
             checks["database"] = {"ok": False, "error": str(e)}
         # writable dirs
@@ -3030,7 +3034,14 @@ Relay team broke club record"></textarea>
                 test = p / ".write_test"
                 test.write_text("ok")
                 test.unlink()
-                checks[label] = {"ok": True, "path": str(p.relative_to(DATA_DIR))}
+                # Display path relative to DATA_DIR when possible (production layout);
+                # fall back to absolute path when RUNS_DIR / UPLOADS_DIR live outside
+                # DATA_DIR (a valid configuration in local dev and tests).
+                try:
+                    display_path = str(p.relative_to(DATA_DIR))
+                except ValueError:
+                    display_path = str(p)
+                checks[label] = {"ok": True, "path": display_path}
             except Exception as e:
                 checks[label] = {"ok": False, "error": str(e)}
         # V8.2: profiles UI removed; health check no longer requires any profiles.
@@ -3825,14 +3836,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             is_live = card["status"] == "live"
             if is_live:
                 badge = '<span class="tag good" style="font-size:11px">Live</span>'
-                opacity = "1"
-                btn_extra = ""
-                disabled_attr = ""
+                btn_label = "Start →"
             else:
-                badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
-                opacity = "0.65"
-                btn_extra = "opacity:0.55;pointer-events:none;cursor:not-allowed;"
-                disabled_attr = 'tabindex="-1" aria-disabled="true"'
+                badge = '<span class="tag" style="font-size:11px">Draft form</span>'
+                btn_label = "Try draft form →"
             try:
                 card_url = url_for(card["endpoint"])
                 href_attr = f'href="{card_url}"'
@@ -3841,7 +3848,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             cards_html += f"""
 <a {href_attr} class="input-type-card" style="text-decoration:none;display:flex;flex-direction:column;
    gap:14px;padding:24px;background:var(--panel);border:1px solid var(--border);
-   border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms;opacity:{opacity}">
+   border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms">
   <div style="color:var(--accent)">{card['icon']}</div>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <div style="font-size:16px;font-weight:700;color:var(--ink)">{_h(card['title'])}</div>
@@ -3849,9 +3856,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </div>
   <div style="font-size:13px;color:var(--ink-dim);line-height:1.5">{_h(card['description'])}</div>
   <div style="margin-top:auto">
-    <span class="btn" style="font-size:13px;padding:7px 14px;{btn_extra}" {disabled_attr}>
-      Start →
-    </span>
+    <span class="btn" style="font-size:13px;padding:7px 14px">{btn_label}</span>
   </div>
 </a>"""
 
@@ -4526,10 +4531,24 @@ function copyText(btn, taId) {{
         profile_id = _req.args.get("profile_id")
         if not profile_id:
             # Pick the first available profile as a sensible default; if no
-            # profiles exist, send the user to create one.
+            # profiles exist, show an explicit empty state pointing at the
+            # Organisation page instead of silently bouncing back to home.
             _profs = list_profiles()
             if not _profs:
-                return redirect(url_for('home'))
+                _org_url = url_for('organisation_page')
+                _add_input_url = url_for('add_input_page')
+                empty_body = f"""
+<h1>Media library</h1>
+<p class="dim">Store reusable photos for your organisation so the AI can pull them into content cards.</p>
+<div class="card" style="text-align:center;padding:48px 32px">
+  <div style="font-size:48px;margin-bottom:16px">&#128247;</div>
+  <h2 style="margin-bottom:8px">No organisation set up yet</h2>
+  <p class="dim" style="margin-bottom:24px">The media library is scoped per organisation. Set up your organisation first, or add an input to auto-create one.</p>
+  <a class="btn" href="{_org_url}">Set up organisation →</a>
+  <a class="btn secondary" href="{_add_input_url}" style="margin-left:8px">Or add an input →</a>
+</div>
+"""
+                return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
         store = _v8_get_media_store()
         assets = store.list(profile_id=profile_id)

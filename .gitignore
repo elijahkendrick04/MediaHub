@@ -44,6 +44,7 @@ smoke_v8_output/
 data.db
 src/mediahub/data/
 src/mediahub/club_profiles/
+data/brand_kits/
 
 # Node (legacy frontend tooling)
 node_modules/

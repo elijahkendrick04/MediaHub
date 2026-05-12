@@ -11,6 +11,7 @@ Concepts:
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -20,7 +21,19 @@ from typing import Optional
 from .enrichment_swimmingresults import parse_swim_time
 
 
-DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "data" / "quals.json"
+def _default_registry_path() -> Path:
+    """Resolve quals.json: DATA_DIR/data/quals.json in production,
+    repo-root/data/quals.json in local dev."""
+    env = os.environ.get("DATA_DIR")
+    if env:
+        candidate = Path(env) / "data" / "quals.json"
+        if candidate.exists():
+            return candidate
+    # Repo root: legacy/swim_content/quals_registry.py → parents[2]
+    return Path(__file__).resolve().parents[2] / "data" / "quals.json"
+
+
+DEFAULT_REGISTRY_PATH = _default_registry_path()
 FRESHNESS_DAYS = 60  # standards retrieved more than this many days ago are "stale"
 
 
