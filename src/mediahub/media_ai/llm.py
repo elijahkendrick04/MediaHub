@@ -49,9 +49,40 @@ def _has_anthropic_key() -> bool:
     return bool(_resolve_anthropic_key())
 
 
+# Whether the `claude` CLI (Claude Code) is available AND we're running inside
+# an authenticated Claude Code session (signalled by the OAuth FD env var).
+# Set MEDIAHUB_DISABLE_CLAUDE_CLI=1 to force-disable (e.g. for tests).
+def _has_claude_cli() -> bool:
+    if os.environ.get("MEDIAHUB_DISABLE_CLAUDE_CLI", "").lower() in ("1", "true", "yes"):
+        return False
+    # Need either OAuth context or an API key reachable by `claude`.
+    if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR") and not _has_anthropic_key():
+        return False
+    # Verify the binary exists. Cache the result on the module.
+    global _claude_cli_path
+    try:
+        return bool(_claude_cli_path)
+    except NameError:
+        pass
+    import shutil
+    _claude_cli_path = shutil.which("claude") or ""
+    return bool(_claude_cli_path)
+
+
 def is_available() -> bool:
     """True if a real LLM is reachable. Tests + UI use this for badges."""
-    return _has_pplx_bridge() or _has_anthropic_key()
+    return _has_pplx_bridge() or _has_anthropic_key() or _has_claude_cli()
+
+
+def active_provider() -> str:
+    """Return a short, user-friendly name of the active LLM provider."""
+    if _has_pplx_bridge():
+        return "pplx-bridge"
+    if _has_anthropic_key():
+        return "anthropic-api"
+    if _has_claude_cli():
+        return "claude-cli"
+    return "heuristic"
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +157,107 @@ def _get_anthropic():
     return _anthropic_client if _anthropic_client else None
 
 
+# ---------------------------------------------------------------------------
+# Provider 3: claude CLI (Claude Code, OAuth-authenticated)
+# ---------------------------------------------------------------------------
+# Used when no Anthropic API key is configured but the host machine is running
+# inside an authenticated `claude` CLI session. Cheap-ish (defaults to Haiku)
+# and ALWAYS one-shot (--allowedTools "" disables tool use).
+#
+# We pass --setting-sources "" and --settings (empty JSON) so user / project
+# / local settings (hooks, CLAUDE.md auto-discovery) DO NOT influence the
+# sub-process — otherwise we get hook noise mixed into the assistant reply.
+_CLAUDE_CLI_MODEL = os.environ.get("MEDIAHUB_CLAUDE_CLI_MODEL", "haiku")
+_CLAUDE_CLI_TIMEOUT = int(os.environ.get("MEDIAHUB_CLAUDE_CLI_TIMEOUT", "90"))
+
+
+def _empty_settings_file() -> str:
+    """Write (once) an empty settings JSON file in /tmp and return its path."""
+    global _empty_settings_path
+    try:
+        return _empty_settings_path  # type: ignore[name-defined]
+    except NameError:
+        pass
+    import tempfile
+    fd, path = tempfile.mkstemp(prefix="mh-claude-settings-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("{}")
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+    _empty_settings_path = path  # type: ignore[assignment]
+    return path
+
+
+def _call_claude_cli(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
+    """Invoke `claude -p` non-interactively and return the assistant text.
+
+    Returns None on any failure so callers fall through to other providers
+    or the heuristic.
+    """
+    if not _has_claude_cli():
+        return None
+    # Build a single user prompt by concatenating message contents. The CLI
+    # doesn't expose a chat-array argument in --print mode.
+    user_prompt = "\n\n".join(
+        str(m.get("content", "")) for m in (messages or []) if m.get("role") == "user"
+    ).strip()
+    if not user_prompt:
+        return None
+
+    cmd = [
+        _claude_cli_path or "claude",
+        "-p", user_prompt,
+        "--output-format", "json",
+        "--model", _CLAUDE_CLI_MODEL,
+        # Ignore user/project/local settings (hooks, CLAUDE.md) — we want
+        # a pure one-shot LLM call, not an agent acting on this project.
+        "--setting-sources", "",
+        "--settings", _empty_settings_file(),
+        # Disable every tool — one-shot text generation only.
+        "--allowedTools", "",
+        "--disallowedTools",
+        "Bash Edit Write Read Agent NotebookEdit WebFetch WebSearch TodoWrite Skill",
+        "--disable-slash-commands",
+    ]
+    if system:
+        cmd += ["--append-system-prompt", system]
+    try:
+        # Run from /tmp so CLAUDE.md auto-discovery (already disabled) can't
+        # accidentally find this project. Belt-and-braces.
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=_CLAUDE_CLI_TIMEOUT,
+            check=False, cwd="/tmp",
+        )
+        if r.returncode != 0:
+            log.debug("claude CLI non-zero (%s): %s", r.returncode, (r.stderr or "")[:200])
+            return None
+        out = (r.stdout or "").strip()
+        if not out:
+            return None
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError:
+            return out  # raw text fallback
+        if isinstance(data, dict):
+            if data.get("is_error"):
+                log.debug("claude CLI is_error: %s", str(data.get("result", ""))[:200])
+                return None
+            result = data.get("result")
+            if isinstance(result, str) and result.strip():
+                return result.strip()
+        return None
+    except subprocess.TimeoutExpired:
+        log.debug("claude CLI timed out after %ss", _CLAUDE_CLI_TIMEOUT)
+        return None
+    except Exception as e:
+        log.debug("claude CLI error: %s", e)
+        return None
+
+
 def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int,
                     model: Optional[str] = None) -> Optional[str]:
     if not _has_anthropic_key():
@@ -168,11 +300,14 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
 
-    # Try bridges
+    # Provider order: pplx bridge → Anthropic SDK (cheap) → claude CLI → heuristic.
     out = _call_pplx_bridge(msgs, system, max_tokens)
     if out:
         return out
     out = _call_anthropic(msgs, system, max_tokens)
+    if out:
+        return out
+    out = _call_claude_cli(msgs, system, max_tokens)
     if out:
         return out
 
@@ -332,4 +467,4 @@ def call_claude(
 
 
 __all__ = ["generate", "generate_json", "generate_vision", "is_available",
-           "call_claude", "ClaudeUnavailableError"]
+           "active_provider", "call_claude", "ClaudeUnavailableError"]

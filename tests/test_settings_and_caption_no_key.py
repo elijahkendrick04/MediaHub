@@ -29,6 +29,8 @@ def app(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("PPLX_TOOL_BRIDGE_LOCAL_URL", raising=False)
     monkeypatch.delenv("PPLX_TOOL_BRIDGE_TOKEN", raising=False)
+    # Disable the claude-CLI bridge (added v9.1).
+    monkeypatch.setenv("MEDIAHUB_DISABLE_CLAUDE_CLI", "1")
     # Reset cached anthropic client so the next call rebuilds.
     from mediahub.media_ai import llm as _llm
     _llm._anthropic_client = None

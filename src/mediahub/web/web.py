@@ -2893,8 +2893,8 @@ function addGraphicToPack(btn, visualId) {{
   setTimeout(function() {{ btn.textContent = '+ Add to pack'; btn.disabled = false; }}, 2000);
 }}
 
-// V8.1: poll LLM status once on page load and colour every AI status dot
-// (green = key configured, red = no key). Updates the title text too.
+// Poll LLM status once on page load and colour every AI status dot
+// (green = any provider live, red = heuristic fallback only).
 (function pollLlmStatus(){{
   try {{
     var url = (window._API_BASE || '') + '/api/settings/llm-status';
@@ -2903,9 +2903,10 @@ function addGraphicToPack(btn, visualId) {{
       .then(function(j){{
         var dots = document.querySelectorAll('.ai-status-dot');
         var color = j.live ? '#2cc97f' : '#ff5d6c';
+        var providerLabel = j.provider_label || 'Anthropic key';
         var title = j.live
-          ? 'Live AI captions enabled (Anthropic key configured)'
-          : 'Live AI captions DISABLED — add Anthropic key in Settings';
+          ? ('Live AI enabled — provider: ' + providerLabel)
+          : 'Live AI DISABLED — add Anthropic key in Settings, or use this UI inside a Claude Code session.';
         dots.forEach(function(d){{
           d.style.background = color;
           var btn = d.closest('button');
@@ -3769,14 +3770,36 @@ Relay team broke club record"></textarea>
             '</form>'
             '</div>'
         )
-        status_dot = '#2cc97f' if active_key else '#ffae3b'
+        # Detect ALL providers (not just Anthropic key) so users see the
+        # status correctly when the claude CLI bridge is the active provider.
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available, active_provider
+            llm_live = _llm_available()
+            llm_provider = active_provider()
+        except Exception:
+            llm_live = bool(active_key)
+            llm_provider = "anthropic-api" if active_key else "heuristic"
+
+        _PROVIDER_LABEL = {
+            "anthropic-api": "Anthropic API key",
+            "claude-cli":    "Claude CLI (Claude Code session)",
+            "pplx-bridge":   "Computer LLM bridge",
+            "heuristic":     "Heuristic fallback only",
+        }
+        provider_pretty = _PROVIDER_LABEL.get(llm_provider, llm_provider)
+
+        status_dot = '#2cc97f' if llm_live else '#ffae3b'
         status_text = (
-            "Live AI captions ENABLED" if active_key else "Live AI captions DISABLED"
+            "Live AI captions ENABLED" if llm_live else "Live AI captions DISABLED"
         )
-        source = (
-            "environment variable" if env_key else
-            ("saved key" if stored_key else "none — add a key below")
-        )
+        if active_key:
+            source = "environment variable" if env_key else "saved key"
+        elif llm_provider == "claude-cli":
+            source = "claude CLI session (OAuth)"
+        elif llm_provider == "pplx-bridge":
+            source = "Computer LLM bridge"
+        else:
+            source = "none — add a key below"
         masked = _h(mask_key(active_key)) if active_key else "<em>none</em>"
 
         clear_btn = ""
@@ -3827,6 +3850,7 @@ Relay team broke club record"></textarea>
 <div class="card" style="margin-top:16px">
   <h2 style="margin-top:0">Status check</h2>
   <ul>
+    <li>Active LLM provider: <strong>{_h(provider_pretty)}</strong></li>
     <li>Anthropic key via environment: <strong>{'set' if env_key else 'not set'}</strong></li>
     <li>Anthropic key saved on disk: <strong>{'present' if stored_key else 'absent'}</strong></li>
     <li>Active key source: <strong>{('environment' if env_key else ('disk' if stored_key else 'none'))}</strong></li>
@@ -3844,11 +3868,29 @@ Relay team broke club record"></textarea>
     def api_llm_status():
         """Lightweight endpoint used by caption UI to colour the AI tab dot."""
         from mediahub.web.secrets_store import has_anthropic_key, get_anthropic_key, mask_key
-        has = has_anthropic_key()
+        from mediahub.media_ai.llm import is_available as _llm_available, active_provider
+        has_key = has_anthropic_key()
+        provider = active_provider()  # 'anthropic-api' | 'claude-cli' | 'pplx-bridge' | 'heuristic'
+        live = _llm_available()  # True for any real provider
+        # Map internal provider names to the stable PUBLIC api names that
+        # existing clients & tests depend on (backwards compatible).
+        public_provider = {
+            "anthropic-api": "anthropic",
+            "claude-cli":    "claude-cli",
+            "pplx-bridge":   "pplx",
+            "heuristic":     None,
+        }.get(provider, provider if live else None)
+        provider_label = {
+            "anthropic-api": "Anthropic API key",
+            "claude-cli":    "Claude CLI (OAuth)",
+            "pplx-bridge":   "Computer LLM bridge",
+            "heuristic":     None,
+        }.get(provider)
         return jsonify({
-            "live": has,
-            "provider": "anthropic" if has else None,
-            "masked": mask_key(get_anthropic_key()) if has else "",
+            "live": live,
+            "provider": public_provider,
+            "provider_label": provider_label,
+            "masked": mask_key(get_anthropic_key()) if has_key else "",
             "settings_url": url_for("settings_page"),
         })
 

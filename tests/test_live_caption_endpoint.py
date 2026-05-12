@@ -100,6 +100,9 @@ def no_llm_env(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("PPLX_TOOL_BRIDGE_LOCAL_URL", raising=False)
     monkeypatch.delenv("PPLX_TOOL_BRIDGE_TOKEN", raising=False)
+    # Disable the claude-CLI bridge (added v9.1) — tests must run without
+    # any real LLM provider.
+    monkeypatch.setenv("MEDIAHUB_DISABLE_CLAUDE_CLI", "1")
     # Redirect on-disk secrets to a temp file that we don't populate.
     from mediahub.web import secrets_store
     monkeypatch.setattr(secrets_store, "_SECRETS_PATH", tmp_path / "secrets.json")
@@ -289,6 +292,7 @@ class TestLLMModule:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("PPLX_TOOL_BRIDGE_LOCAL_URL", raising=False)
         monkeypatch.delenv("PPLX_TOOL_BRIDGE_TOKEN", raising=False)
+        monkeypatch.setenv("MEDIAHUB_DISABLE_CLAUDE_CLI", "1")
         monkeypatch.setattr(secrets_store, "_SECRETS_PATH", tmp_path / "s.json")
         with pytest.raises(ClaudeUnavailableError):
             call_claude(system="test", user="test")
