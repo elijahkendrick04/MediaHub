@@ -1,6 +1,6 @@
 """V8.1 issue 5 — per-run brand kit upload helpers.
 
-A brand kit lives at ``data/brand_kits/<run_id>.json`` and looks like::
+A brand kit lives at ``<DATA_DIR>/data/brand_kits/<run_id>.json`` and looks like::
 
     {
       "display_name": "City of Manchester Aquatics",
@@ -17,17 +17,37 @@ in :mod:`swim_content_v4.web` reads this file when present.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Optional
 
 
 _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
-_BRAND_KITS_DIR = Path("data") / "brand_kits"
+
+
+def _data_dir() -> Path:
+    """Resolve DATA_DIR (production) or repo root (local dev)."""
+    env = os.environ.get("DATA_DIR")
+    if env:
+        return Path(env)
+    # src/mediahub/web/brand_kit_upload.py → parents[3] = repo root
+    return Path(__file__).resolve().parents[3]
+
+
+def _runs_dir() -> Path:
+    env = os.environ.get("RUNS_DIR")
+    if env:
+        return Path(env)
+    return _data_dir() / "runs_v4"
+
+
+def _brand_kits_dir() -> Path:
+    return _data_dir() / "data" / "brand_kits"
 
 
 def _brand_dir_for(run_id: str) -> Path:
-    p = Path("runs_v4") / run_id / "brand"
+    p = _runs_dir() / run_id / "brand"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -93,7 +113,8 @@ def persist_brand_kit(
     source: str = "upload",
 ) -> Path:
     """Persist a per-run brand kit JSON. Returns the path written."""
-    _BRAND_KITS_DIR.mkdir(parents=True, exist_ok=True)
+    kits_dir = _brand_kits_dir()
+    kits_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "display_name": display_name,
         "logo_path": logo_path,
@@ -102,7 +123,7 @@ def persist_brand_kit(
         "accent_colour": accent,
         "source": source,
     }
-    out = _BRAND_KITS_DIR / f"{run_id}.json"
+    out = kits_dir / f"{run_id}.json"
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return out
 

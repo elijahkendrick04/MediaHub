@@ -44,6 +44,7 @@ smoke_v8_output/
 data.db
 src/mediahub/data/
 src/mediahub/club_profiles/
+data/brand_kits/
 
 # Local-dev runtime writes (created when DATA_DIR env var is not set and the
 # app or tests run from inside the package tree)

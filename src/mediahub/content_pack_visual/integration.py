@@ -16,6 +16,7 @@ Public API
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -26,14 +27,26 @@ from typing import Any, Iterable, Optional
 # Disk layout helpers
 # ---------------------------------------------------------------------------
 
+def _runs_dir() -> Path:
+    """Resolve RUNS_DIR (production persistent disk) or repo-root/runs_v4 (local dev)."""
+    env = os.environ.get("RUNS_DIR")
+    if env:
+        return Path(env)
+    data_env = os.environ.get("DATA_DIR")
+    if data_env:
+        return Path(data_env) / "runs_v4"
+    # src/mediahub/content_pack_visual/integration.py → parents[3] = repo root
+    return Path(__file__).resolve().parents[3] / "runs_v4"
+
+
 def visuals_dir_for_run(run_id: str) -> Path:
-    p = Path("runs_v4") / run_id / "visuals"
+    p = _runs_dir() / run_id / "visuals"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def briefs_dir_for_run(run_id: str) -> Path:
-    p = Path("runs_v4") / run_id / "briefs"
+    p = _runs_dir() / run_id / "briefs"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
