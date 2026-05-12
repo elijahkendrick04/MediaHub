@@ -119,15 +119,14 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
     ),
     ContentType.WEEKEND_PREVIEW: ContentTypeMeta(
         type=ContentType.WEEKEND_PREVIEW,
-        title="Weekend Preview",
-        description="Tease upcoming athletes and story angles before a meet.",
+        title="Event Preview",
+        description="Tease upcoming athletes and story angles before an event.",
         input_contract=(
-            "Upload an upcoming meet entry list or paste an entry block. "
-            "We'll surface athletes to watch, events worth hyping, and angles "
-            "to tease on social before the meet starts. "
-            "We'll add this when the entry-list parser is in place."
+            "Tell us the event name, date / venue, athletes to watch, and any story angles. "
+            "We generate Instagram, Stories and Twitter preview captions ready to edit and post. "
+            "Full entry-list parsing is coming next — this form already produces usable cards."
         ),
-        is_implemented=False,
+        is_implemented=True,
         icon_svg=_CALENDAR_SVG,
         primary_route_endpoint="stub_weekend_preview",
     ),
@@ -136,12 +135,11 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Sponsor Post",
         description="Brand-safe highlight posts for sponsor activation.",
         input_contract=(
-            "Select a processed meet and optionally specify a sponsor name. "
-            "We'll generate sponsor-friendly, data-led captions that satisfy "
-            "activation requirements without losing the human story. "
-            "We'll add this when caption templating is extended for sponsor slots."
+            "Tell us the sponsor, the event, the key achievement, and any brand rules. "
+            "We generate sponsor-friendly captions that lead with the moment and make the partnership feel natural. "
+            "Pipeline integration with processed meets comes next."
         ),
-        is_implemented=False,
+        is_implemented=True,
         icon_svg=_STAR_SVG,
         primary_route_endpoint="stub_sponsor_post",
     ),
@@ -150,12 +148,11 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         title="Session Update",
         description="Quick in-session updates for Stories and live coverage.",
         input_contract=(
-            "Paste or upload a partial results file mid-meet. "
-            "We'll produce short-form cards suitable for Stories — "
-            "heat leaders, early PBs, race-day moments as they happen. "
-            "We'll add this when incremental parsing is supported."
+            "Type the event, what's happened so far, and the current session. "
+            "We generate short Stories + Twitter cards ready to share mid-event. "
+            "Live partial-results parsing is on the roadmap."
         ),
-        is_implemented=False,
+        is_implemented=True,
         icon_svg=_SESSION_SVG,
         primary_route_endpoint="stub_session_update",
     ),
@@ -165,10 +162,9 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         description="Describe any moment and get content suggestions.",
         input_contract=(
             "Type or paste a description of anything — a result, an event, a milestone, "
-            "a training session. We'll identify the best social angles and draft content cards. "
-            "Coming soon — try the draft brief form in the meantime."
+            "a training session. We identify the strongest social angles and draft platform-ready cards."
         ),
-        is_implemented=False,
+        is_implemented=True,
         icon_svg=_PENCIL_SVG,
         primary_route_endpoint="stub_free_text",
     ),
