@@ -361,7 +361,9 @@ class TestInterpreterStub:
 
     def test_stub_returns_pbs(self):
         """The interpreter stub should return valid PB data."""
-        import mediahub.interpreter  # Should be the stub via monkeypatch
+        # The fixture inject_interpreter_stub registers a stub module under
+        # the top-level name `interpreter` in sys.modules.
+        import interpreter  # type: ignore[import-not-found]
         result = interpreter.interpret_document(b"test content", hint='profile_page')
         assert "pbs" in result
         assert len(result["pbs"]) > 0

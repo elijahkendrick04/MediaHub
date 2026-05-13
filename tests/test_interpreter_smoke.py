@@ -211,7 +211,7 @@ FORBIDDEN_VOCAB = [
     r"\bclub level\b",
 ]
 
-INTERPRETER_DIR = PROJECT_ROOT / "interpreter"
+INTERPRETER_DIR = PROJECT_ROOT / "src" / "mediahub" / "interpreter"
 
 
 def _get_interpreter_py_files() -> list[pathlib.Path]:

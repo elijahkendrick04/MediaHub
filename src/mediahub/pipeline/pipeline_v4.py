@@ -276,7 +276,18 @@ def run_pipeline_v4(
 
     # 8. PB enrichment (live discovery — no hardcoded source)
     pb_snapshots: dict = {}
-    if fetch_pbs and our_results and effective_filter:
+    # If no LLM provider is configured, skip PB discovery entirely (it would
+    # spend 30–60 seconds making external HTTP requests that the heuristic
+    # path can't use anyway).
+    try:
+        from mediahub.media_ai.llm import active_provider as _active_provider
+        _llm_provider = _active_provider()
+    except Exception:
+        _llm_provider = "heuristic"
+    _skip_pb_discovery = (_llm_provider == "heuristic")
+    if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
+        step("Skipping PB discovery: no LLM provider configured (configure Gemini or Anthropic in Settings to enable).")
+    if fetch_pbs and our_results and effective_filter and not _skip_pb_discovery:
         try:
             pb_snapshots = _enrich_pbs_via_discovery(
                 meet=meet,

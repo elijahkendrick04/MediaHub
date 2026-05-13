@@ -296,6 +296,69 @@ def _load_run(run_id: str) -> Optional[dict]:
     return json.loads(p.read_text())
 
 
+def _run_state(run_id: str) -> str:
+    """Return one of ``unknown`` | ``in_progress`` | ``done``.
+
+    "unknown" = no DB row and no JSON file. "in_progress" = DB row says
+    queued/running OR an entry exists in the in-memory _active_runs dict.
+    "done" = JSON file is on disk.
+
+    Used by routes that depend on _load_run to render a friendly
+    "still processing" page instead of a misleading 404 while the
+    background worker is still running.
+    """
+    # JSON file present → run is fully persisted.
+    if (RUNS_DIR / f"{run_id}.json").exists():
+        return "done"
+    # In-memory active dict → worker thread is alive in THIS process.
+    with _active_lock:
+        active = _active_runs.get(run_id)
+    if active:
+        status = (active.get("status") or "").lower()
+        if status in ("queued", "running"):
+            return "in_progress"
+        if status == "error":
+            return "done"  # error is "finished" — caller can read it from DB
+    # Fall back to DB row (handles process restart between worker death
+    # and persistence — rare, but possible).
+    try:
+        conn = _db()
+        row = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+        conn.close()
+    except Exception:
+        return "unknown"
+    if not row:
+        return "unknown"
+    status = (row["status"] or "").lower()
+    if status in ("queued", "running"):
+        return "in_progress"
+    return "done"
+
+
+def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
+    """Return a friendly HTML page that auto-refreshes every 4 seconds."""
+    try:
+        retry_url = url_for(return_url_endpoint, run_id=run_id)
+    except Exception:
+        retry_url = ""
+    status_url = url_for("api_status", run_id=run_id)
+    return f"""
+<div style="text-align:center;padding:64px 24px">
+  <div class="mh-spinner" style="margin:0 auto 24px"></div>
+  <h1 style="margin-bottom:10px">Still processing your run</h1>
+  <p class="dim" style="max-width:480px;margin:0 auto 24px">
+    The pipeline is reading the file, finding your athletes, and drafting
+    captions. This usually takes 20&ndash;60 seconds. We&rsquo;ll auto-refresh
+    when it&rsquo;s ready.
+  </p>
+  <a class="btn secondary" href="{retry_url or status_url}">Refresh now</a>
+</div>
+<script>
+  setTimeout(function() {{ location.reload(); }}, 4000);
+</script>
+"""
+
+
 def _delete_run(run_id: str) -> bool:
     p = RUNS_DIR / f"{run_id}.json"
     existed = p.exists()
@@ -3598,6 +3661,9 @@ function addGraphicToPack(btn, visualId) {{
 
     @app.route("/api/runs/<run_id>/cards")
     def api_cards(run_id):
+        state = _run_state(run_id)
+        if state == "in_progress":
+            return jsonify({"error": "in_progress", "retry_after": 4}), 202
         data = _load_run(run_id)
         if not data:
             return jsonify({"error": "not found"}), 404
@@ -3612,6 +3678,9 @@ function addGraphicToPack(btn, visualId) {{
 
     @app.route("/api/runs/<run_id>/export")
     def api_export(run_id):
+        state = _run_state(run_id)
+        if state == "in_progress":
+            return jsonify({"error": "in_progress", "retry_after": 4}), 202
         data = _load_run(run_id)
         if not data:
             return jsonify({"error": "not found"}), 404
@@ -5093,6 +5162,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     def content_pack_approved_only(run_id):
         """Legacy V7 approval-only pack. Reachable via /pack/<run_id>/approved."""
+        if _run_state(run_id) == "in_progress":
+            return _layout("Still processing", _in_progress_page(run_id, "content_pack_approved_only"), active="home")
         run_data = _load_run(run_id)
         if not run_data:
             return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
@@ -5313,6 +5384,9 @@ function copyCaption(btn, spanId) {{
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
         """Grouped content pack page — 8 buckets."""
+        state = _run_state(run_id)
+        if state == "in_progress":
+            return _layout("Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home")
         run_data = _load_run(run_id)
         if not run_data:
             return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
@@ -5745,12 +5819,27 @@ function copyText(btn, taId) {{
             req_fmt = _req.args.get("format")
         formats_kw = [req_fmt] if req_fmt else None
 
-        # Optional variation seed (V8.1 issue 4). 0/missing = default behaviour.
-        seed_raw = _req.args.get("variation_seed") or "0"
-        try:
-            variation_seed = int(seed_raw)
-        except (TypeError, ValueError):
-            variation_seed = 0
+        # Variation seed. Default behaviour now: pick a UNIQUE per-card seed
+        # so every card in a pack looks visibly different (different layout
+        # family, palette permutation, headline phrasing) while still using
+        # the club's own colours, logo, and photos.
+        # Caller can override with ?variation_seed=N (explicit int).
+        # Setting variation_seed=0 explicitly restores the legacy "identity"
+        # render (no variation), useful for debugging / regression tests.
+        seed_raw = _req.args.get("variation_seed")
+        if seed_raw is None or seed_raw == "":
+            try:
+                from mediahub.creative_brief.generator import auto_variation_seed_for
+                variation_seed = auto_variation_seed_for(
+                    item.get("swim_id") or item.get("id") or card_id
+                )
+            except Exception:
+                variation_seed = 1
+        else:
+            try:
+                variation_seed = int(seed_raw)
+            except (TypeError, ValueError):
+                variation_seed = 0
 
         try:
             res = _v8_create_visual_for_item(
@@ -5762,7 +5851,8 @@ function copyText(btn, taId) {{
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
-        return jsonify({"ok": True, **res})
+        # Include the seed in the response so the UI / debugging can see it.
+        return jsonify({"ok": True, "variation_seed": variation_seed, **res})
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):

@@ -260,19 +260,28 @@ VALYU_API_KEY=vl-...          # Required for Valyu live research
 
 ## Running Tests
 
+Tests now run with **only two genuine skips** — the previous five "broken"
+test files (stale paths after the src-layout migration + a wrong mock target)
+were fixed in commit `<this commit>`:
+
 ```bash
-python -m pytest tests/ -q
-# Exclude known pre-existing failures:
-python -m pytest tests/ --ignore=tests/test_corpus_recovery.py \
-  --ignore=tests/test_interpreter_smoke.py \
-  --ignore=tests/test_no_hardcode_in_live_paths.py \
-  --ignore=tests/test_no_hardcoded_sources.py \
+# Full suite (current expectation: ~234 passed, ~39 skipped).
+python -m pytest tests/ \
   --ignore=tests/test_pb_discovery.py \
-  --ignore=tests/test_v8_render_upgrades.py \
-  --ignore=tests/test_v8_vision_brief.py -q
+  --ignore=tests/test_corpus_recovery.py -q
 ```
 
-Expected: ~181 passed, ~39 skipped (no new failures after changes).
+Why those two are still skipped:
+
+- **`tests/test_pb_discovery.py`** — surfaces six real production bugs in
+  `mediahub.pb_discovery` (trust ranking is inverted, ledger JSONL not
+  written, Laplace smoothing-constant mismatch, cache-hit flag returned on
+  first call, profile-page parser drops PB rows). Fixing requires careful
+  domain work on the PB-discovery algorithm itself; not a test-only change.
+
+- **`tests/test_corpus_recovery.py`** — requires the full V7.5 sample corpus
+  (~30 000 swims / hundreds of MB). The sandbox / repo ships only the
+  reduced 8 021-swim sample, so the size-gate assertion fails by design.
 
 ## Development Server
 

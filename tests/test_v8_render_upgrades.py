@@ -79,7 +79,7 @@ def test_dpr_invalid_falls_back(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_shared_css_exists_and_declares_premium_fonts():
-    p = Path(__file__).resolve().parent.parent / "graphic_renderer" / "layouts" / "_shared.css"
+    p = Path(__file__).resolve().parent.parent / "src" / "mediahub" / "graphic_renderer" / "layouts" / "_shared.css"
     assert p.exists(), "V8.1 §1: _shared.css must exist"
     css = p.read_text("utf-8")
     # @font-face declarations

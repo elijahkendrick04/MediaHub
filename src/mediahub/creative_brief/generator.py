@@ -443,91 +443,144 @@ def vision_creative_direction(
 # ---------------------------------------------------------------------------
 
 def _rotate_pattern_for_seed(default_pattern: dict, angle: str, seed: int) -> dict:
-    """Pick a different pattern based on ``seed``.
+    """Pick a different pattern based on ``seed`` — supports any positive int.
 
-    seed == 1 -> keep the same pattern (palette is what changes elsewhere).
-    seed == 2 -> rotate to a *different family* among compatible patterns.
-    seed == 3 -> force a text-led / no-photo family (e.g. text_led_recap or
-                 weekend_numbers) so the visual is visibly different.
+    The seed indexes into the full pattern catalog (excluding the default
+    family on seed >= 2) so every distinct positive seed reliably yields a
+    different visual layout family. Sport / club / brand colours never
+    change — only the LAYOUT family does.
+
+    seed == 1 -> keep the same family (palette/phrasing varies elsewhere).
+    seed >= 2 -> deterministically pick one of the other families using modulo.
+                 Every distinct seed in this range maps to a visible variant.
     """
     if seed == 1:
         return default_pattern
 
+    # Special-case "force text-led / no-photo" only when explicitly seed==3
+    # (legacy callers may rely on this exact mapping).
     if seed == 3:
-        # Strict no-photo families.
         text_led = next((p for p in PATTERNS if p["family"] == "text_led_recap"), None)
         wknd = next((p for p in PATTERNS if p["family"] == "weekend_numbers"), None)
-        # If default is already text_led_recap, fall back to weekend_numbers.
         if default_pattern["family"] == "text_led_recap" and wknd:
             return wknd
         if text_led:
             return text_led
-        return default_pattern
 
-    # seed == 2 (or any other): pick a different family.
     candidates = patterns_for_post_angle(angle) or list(PATTERNS)
     others = [p for p in candidates if p["family"] != default_pattern["family"]]
     if not others:
-        # Fall back to *any* other family in PATTERNS.
         others = [p for p in PATTERNS if p["family"] != default_pattern["family"]]
     if not others:
         return default_pattern
+    # seed indexes the full catalog of alternatives — every seed gets a
+    # specific other family.
     return others[seed % len(others)]
+
+
+# Six permutations of three colour roles. The club's actual brand colours
+# (primary, secondary, accent — sourced from the BrandKit / logo extraction)
+# are NEVER replaced. Only their ROLES rotate, so every visual still feels
+# unmistakably "this club".
+# Order matters: seeds 1, 2, 3 preserve the legacy V8 contract that
+# test_v8_variation_seed asserts on. Seeds 4–6 are new and offer additional
+# variety; seed 6 cycles back to identity so any seed > 6 reuses earlier
+# permutations.
+_PALETTE_PERMUTATIONS: list[tuple[int, int, int]] = [
+    (1, 0, 2),  # seed 1: swap p<->s     (legacy: "inverted colour roles")
+    (2, 0, 1),  # seed 2: rotate forward (legacy: p->accent, s->primary, a->secondary)
+    (2, 1, 0),  # seed 3: swap p<->a     (legacy: "primary <-> accent")
+    (0, 2, 1),  # seed 4: swap s<->a
+    (1, 2, 0),  # seed 5: rotate left
+    (0, 1, 2),  # seed 6: identity
+]
 
 
 def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) -> dict[str, str]:
     """Permute role assignments based on the seed.
 
-    seed 0 -> identity
-    seed 1 -> primary <-> secondary inversion ("inverted colour roles")
-    seed 2 -> rotate primary -> accent -> secondary -> primary
-    seed 3 -> primary <-> accent
+    The actual hex values come from the club's BrandKit and are NEVER
+    swapped for unrelated colours — only the role each colour plays
+    (primary fill / secondary band / accent flash) varies. There are
+    six total permutations; the seed picks one via modulo so any positive
+    integer maps to a consistent visual permutation.
+
+    seed == 0 -> identity (legacy default).
     """
-    if not seed:
+    if seed <= 0:
         return {"primary": primary, "secondary": secondary, "accent": accent}
-    if seed == 1:
-        return {"primary": secondary, "secondary": primary, "accent": accent}
-    if seed == 2:
-        return {"primary": accent, "secondary": primary, "accent": secondary}
-    if seed == 3:
-        return {"primary": accent, "secondary": secondary, "accent": primary}
-    # Fallback: identity
-    return {"primary": primary, "secondary": secondary, "accent": accent}
+    colors = (primary, secondary, accent)
+    p_idx, s_idx, a_idx = _PALETTE_PERMUTATIONS[(seed - 1) % len(_PALETTE_PERMUTATIONS)]
+    return {
+        "primary":   colors[p_idx],
+        "secondary": colors[s_idx],
+        "accent":    colors[a_idx],
+    }
+
+
+# Six phrase tables so any positive integer seed maps to a hook variant.
+_PHRASE_TABLES: list[dict[str, str]] = [
+    # Table 1 — "personal best" tone
+    {"NEW PB": "PERSONAL BEST", "LIKELY PB": "LIKELY PERSONAL BEST",
+     "GOLD": "FIRST PLACE", "SILVER": "SECOND PLACE", "BRONZE": "THIRD PLACE",
+     "STRONG SWIM": "BIG SWIM"},
+    # Table 2 — "best ever" tone
+    {"NEW PB": "BEST EVER", "LIKELY PB": "BEST EVER (PROVISIONAL)",
+     "GOLD": "GOLD MEDAL", "SILVER": "SILVER MEDAL", "BRONZE": "BRONZE MEDAL",
+     "STRONG SWIM": "STANDOUT SWIM"},
+    # Table 3 — "alert" tone
+    {"NEW PB": "PB ALERT", "LIKELY PB": "PB CONTENDER",
+     "GOLD": "TOP OF THE PODIUM", "SILVER": "PODIUM FINISH", "BRONZE": "PODIUM FINISH",
+     "STRONG SWIM": "NOTABLE PERFORMANCE"},
+    # Table 4 — "career best" / "milestone" tone
+    {"NEW PB": "CAREER BEST", "LIKELY PB": "CAREER BEST (TBC)",
+     "GOLD": "CHAMPION", "SILVER": "RUNNER-UP", "BRONZE": "BRONZE FOR THE BOOKS",
+     "STRONG SWIM": "MAJOR SWIM"},
+    # Table 5 — short / Stories-friendly tone
+    {"NEW PB": "NEW PB", "LIKELY PB": "PB INCOMING",
+     "GOLD": "GOLD", "SILVER": "SILVER", "BRONZE": "BRONZE",
+     "STRONG SWIM": "STRONG ONE"},
+    # Table 6 — celebratory tone
+    {"NEW PB": "LIFETIME BEST", "LIKELY PB": "LIFETIME BEST (PENDING)",
+     "GOLD": "FIRST ACROSS THE WALL", "SILVER": "RIGHT BEHIND IT",
+     "BRONZE": "ON THE PODIUM", "STRONG SWIM": "WHAT A SWIM"},
+]
 
 
 def _phrase_for_seed(default_hook: str, label: str, angle: str, seed: int) -> str:
-    """Tweak the headline phrasing deterministically."""
-    if not seed:
+    """Tweak the headline phrasing deterministically.
+
+    Supports any positive integer seed — picks one of six phrase tables
+    via modulo. Falls back to the default hook if the label isn't in the
+    chosen table (e.g. for one-off custom labels).
+    """
+    if seed <= 0:
         return default_hook
     label = (label or default_hook or "").upper()
-    variants_by_seed = {
-        1: {
-            "NEW PB": "PERSONAL BEST",
-            "LIKELY PB": "LIKELY PERSONAL BEST",
-            "GOLD": "FIRST PLACE",
-            "SILVER": "SECOND PLACE",
-            "BRONZE": "THIRD PLACE",
-            "STRONG SWIM": "BIG SWIM",
-        },
-        2: {
-            "NEW PB": "BEST EVER",
-            "LIKELY PB": "BEST EVER (PROVISIONAL)",
-            "GOLD": "GOLD MEDAL",
-            "SILVER": "SILVER MEDAL",
-            "BRONZE": "BRONZE MEDAL",
-            "STRONG SWIM": "STANDOUT SWIM",
-        },
-        3: {
-            "NEW PB": "PB ALERT",
-            "LIKELY PB": "PB CONTENDER",
-            "GOLD": "TOP OF THE PODIUM",
-            "SILVER": "PODIUM FINISH",
-            "BRONZE": "PODIUM FINISH",
-            "STRONG SWIM": "NOTABLE PERFORMANCE",
-        },
-    }
-    table = variants_by_seed.get(seed, {})
+    table = _PHRASE_TABLES[(seed - 1) % len(_PHRASE_TABLES)]
     return table.get(label, default_hook)
 
 
-__all__ = ["generate", "CreativeBrief", "vision_creative_direction"]
+def auto_variation_seed_for(card_id: str | None) -> int:
+    """Pick a deterministic non-zero seed for a card from its id.
+
+    Same card → same seed (so re-renders look identical to the user when
+    they reload the page). Different cards → different seeds (so visuals
+    in one content pack visibly differ from one another).
+
+    Returns 1..N where N covers the largest variation table; callers can
+    pass the returned value straight to the seed-aware helpers above.
+    """
+    if not card_id:
+        # Fall back to a time-based randomish positive seed.
+        import time as _time
+        return int(_time.time() * 1000) % 997 + 1
+    import hashlib as _hl
+    h = int(_hl.sha256(card_id.encode("utf-8")).hexdigest()[:8], 16)
+    # Keep the result well above zero so seed==0 (legacy "no variation")
+    # is reserved for callers who explicitly want the default.
+    return (h % 997) + 1
+
+
+__all__ = ["generate", "CreativeBrief", "vision_creative_direction",
+           "auto_variation_seed_for"]

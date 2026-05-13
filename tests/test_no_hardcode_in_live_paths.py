@@ -50,7 +50,10 @@ from pathlib import Path
 import pytest
 
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+# After the repo migration, all production packages moved to src/mediahub/*.
+# Walk into that subtree so the "no hardcoded paths" sweep still inspects the
+# live code (not stale paths at the repo root).
+_REPO_ROOT = Path(__file__).resolve().parent.parent / "src" / "mediahub"
 
 # ── Live package roots ────────────────────────────────────────────────────────
 _LIVE_PACKAGES = [
@@ -130,10 +133,15 @@ def _scan(py_file: Path, needle: str) -> list[tuple[int, str]]:
 
 
 def test_live_packages_actually_exist():
-    """At least the four V7.5 packages plus swim_content_v4/v5 must exist."""
+    """Core live packages (under src/mediahub) must exist.
+
+    After the v8 src-layout migration, the legacy ``swim_content_v4`` /
+    ``swim_content_v5`` packages were absorbed into ``pipeline`` and ``legacy``
+    respectively. This test now checks the modern package names.
+    """
     must_exist = [
         "interpreter", "context_engine", "pb_discovery",
-        "voice", "swim_content_v4", "swim_content_v5",
+        "voice", "pipeline", "club_platform",
     ]
     missing = [p for p in must_exist if not (_REPO_ROOT / p).exists()]
     assert not missing, f"Live packages missing from repo: {missing}"

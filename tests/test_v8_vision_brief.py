@@ -62,7 +62,7 @@ def test_returns_none_when_photo_missing(isolated_cache, tmp_path):
 def test_returns_none_when_llm_call_raises(isolated_cache, fake_photo):
     with mock.patch.object(gen_mod, "_llm_available", return_value=True):
         with mock.patch(
-            "media_ai.llm.generate_vision",
+            "mediahub.media_ai.llm.generate_vision",
             side_effect=RuntimeError("boom"),
         ):
             out = vision_creative_direction(
@@ -84,7 +84,7 @@ _DIRECTION = (
 def test_happy_path_calls_generate_vision_with_photo(isolated_cache, fake_photo):
     with mock.patch.object(gen_mod, "_llm_available", return_value=True):
         with mock.patch(
-            "media_ai.llm.generate_vision", return_value=_DIRECTION,
+            "mediahub.media_ai.llm.generate_vision", return_value=_DIRECTION,
         ) as gv:
             out = vision_creative_direction(
                 str(fake_photo),
@@ -108,7 +108,7 @@ def test_happy_path_calls_generate_vision_with_photo(isolated_cache, fake_photo)
 def test_cache_hit_skips_second_llm_call(isolated_cache, fake_photo):
     with mock.patch.object(gen_mod, "_llm_available", return_value=True):
         with mock.patch(
-            "media_ai.llm.generate_vision", return_value=_DIRECTION,
+            "mediahub.media_ai.llm.generate_vision", return_value=_DIRECTION,
         ) as gv:
             out1 = vision_creative_direction(
                 str(fake_photo), asset_id="a1", brand_id="b1",
@@ -127,7 +127,7 @@ def test_cache_busted_when_ttl_expires(isolated_cache, fake_photo, monkeypatch):
     """Spec: 24h TTL. Force the cache to look stale and confirm a re-call."""
     with mock.patch.object(gen_mod, "_llm_available", return_value=True):
         with mock.patch(
-            "media_ai.llm.generate_vision", return_value=_DIRECTION,
+            "mediahub.media_ai.llm.generate_vision", return_value=_DIRECTION,
         ) as gv:
             vision_creative_direction(
                 str(fake_photo), asset_id="a1", brand_id="b1",
@@ -158,7 +158,7 @@ def test_returns_none_for_too_short_response(isolated_cache, fake_photo):
     """If the model returns a stub or empty string, we treat that as a skip."""
     with mock.patch.object(gen_mod, "_llm_available", return_value=True):
         with mock.patch(
-            "media_ai.llm.generate_vision", return_value="ok.",
+            "mediahub.media_ai.llm.generate_vision", return_value="ok.",
         ):
             out = vision_creative_direction(
                 str(fake_photo), asset_id="a", brand_id="b",

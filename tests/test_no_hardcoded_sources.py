@@ -19,7 +19,8 @@ from pathlib import Path
 import pytest
 
 # Repo root
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+# After the repo migration, all production packages moved to src/mediahub/*.
+_REPO_ROOT = Path(__file__).resolve().parent.parent / "src" / "mediahub"
 
 # Packages to audit
 _PACKAGES = ["context_engine", "pb_discovery", "interpreter"]
