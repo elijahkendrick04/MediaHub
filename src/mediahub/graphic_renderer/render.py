@@ -557,6 +557,27 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         has_photo=has_photo,
     )
 
+    # Optional AI-generated brand-aware background. Activated only when
+    # REPLICATE_API_TOKEN is set; otherwise the water-pattern + noise
+    # overlay is used as before. Cached aggressively by content hash.
+    ai_bg_uri = None
+    try:
+        import os as _os
+        if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
+            from mediahub.visual.ai_background import (
+                is_available as _ai_bg_ok,
+                background_data_uri_for,
+            )
+            if _ai_bg_ok():
+                # Map width/height back to a format name so the cache key
+                # is stable across cards of the same shape.
+                fmt_for_bg = "feed_square" if width == height else (
+                    "story" if height > width * 1.5 else "feed_portrait"
+                )
+                ai_bg_uri = background_data_uri_for(brief, format_name=fmt_for_bg)
+    except Exception:
+        ai_bg_uri = None
+
     return {
         "WIDTH": str(width), "HEIGHT": str(height),
         "PRIMARY": primary, "PRIMARY_DEEP": primary_deep,
@@ -564,6 +585,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "BASE_CSS": base_css,
         "WATER_PATTERN": _water_pattern_data_uri(),
         "NOISE_PATTERN": _noise_pattern_data_uri(),
+        "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
         "ATHLETE_FIRST_NAME": html_escape(first.upper()),
         "ATHLETE_SURNAME_DISPLAY": html_escape(surname),
@@ -1014,6 +1036,34 @@ def _fill_reel_cover(brief, width: int, height: int, repl: dict[str, str]) -> di
     return repl
 
 
+def _fill_big_number_hero(brief, width: int, height: int, repl: dict[str, str]) -> dict[str, str]:
+    """Time/result as the dominant visual element — competitor 'numerical hero'.
+
+    The numeral fills ~55% of canvas height. Event sits above as a small
+    spaced-caps strip, athlete name sits below as a Bebas display row.
+    """
+    layers = brief.text_layers or {}
+    repl = dict(repl)
+    result_value = (layers.get("result_value") or "").strip() or "—"
+    # Numeral size scales with both axes; aim for ~55% of canvas height for
+    # a 6-char time like "2:28.21" — characters render narrower than they tax.
+    char_count = max(1, len(result_value))
+    # Cap so very long results don't overflow horizontally.
+    by_width  = (width * 0.85) / max(2, char_count) * 1.50
+    by_height = height * 0.30
+    hero_size = int(min(by_width, by_height))
+
+    repl.update({
+        "HERO_FONT_SIZE": str(hero_size),
+        "EVENT_TOP": str(int(height * 0.22)),
+        "EVENT_FONT_SIZE": str(int(min(width, height) * 0.028)),
+        "ATHLETE_BOTTOM": str(int(height * 0.20)),
+        "NAME_FONT_SIZE": str(int(min(width, height) * 0.068)),
+        "RESULT_VALUE": html_escape(result_value),
+    })
+    return repl
+
+
 # Map family → filler
 _FILLERS = {
     "individual_hero": _fill_individual_hero,
@@ -1023,6 +1073,7 @@ _FILLERS = {
     "text_led_recap": _fill_text_led_recap,
     "story_card": _fill_story_card,
     "reel_cover": _fill_reel_cover,
+    "big_number_hero": _fill_big_number_hero,
 }
 
 

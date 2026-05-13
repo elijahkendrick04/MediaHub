@@ -44,6 +44,21 @@ body {
   z-index: 1;
 }
 
+/* AI-generated brand-aware background (Replicate SDXL). Sits between the
+   solid gradient and the water-pattern. Only renders when --ai-bg is set
+   to a real data URI; otherwise this layer is invisible. */
+.bg-ai {
+  position: absolute; inset: 0;
+  background-image: var(--ai-bg, none);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.55;
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+  z-index: 1;
+  filter: saturate(1.12);
+}
+
 .bg-noise {
   position: absolute; inset: 0;
   background-image: var(--noise-pattern);

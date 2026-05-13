@@ -164,68 +164,51 @@ def turn_meet_into_pack(
     voice_profile = _resolve_voice_profile(profile_id) if profile_id else None
     brand_kit = _resolve_brand_kit(profile)
 
-    artefacts: list[dict] = []
     skipped: list[dict] = []
 
-    # 1 — Meet recap (always)
-    artefacts.append(_t.build_meet_recap(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    ))
-
-    # 2 — Swimmer spotlight series
-    spotlight = _t.build_swimmer_spotlights(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
+    # Each builder makes its own LLM calls — they're network-bound, so running
+    # them in parallel cuts a 7-artefact pack from ~3 min to ~45s with Gemini.
+    # All builders are pure functions of their inputs, so this is safe.
+    # Disable via MEDIAHUB_TURNINTO_PARALLEL=0 (e.g. for deterministic tests).
+    _parallel = (
+        os.environ.get("MEDIAHUB_TURNINTO_PARALLEL", "1") != "0"
+        and not deterministic
     )
-    artefacts.append(spotlight)
 
-    # 3 — Data-led thread (X) + LinkedIn long
-    artefacts.append(_t.build_data_thread(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    ))
+    _kw = dict(profile=profile, voice_profile=voice_profile,
+               brand_kit=brand_kit, deterministic=deterministic)
+    # (label, callable) tuples — order here is the order shown in the pack UI.
+    _jobs: list[tuple[str, callable]] = [
+        ("meet_recap",         lambda: _t.build_meet_recap(meet_summary, ranked, **_kw)),
+        ("swimmer_spotlight",  lambda: _t.build_swimmer_spotlights(meet_summary, ranked, **_kw)),
+        ("data_thread",        lambda: _t.build_data_thread(meet_summary, ranked, **_kw)),
+        ("parent_newsletter",  lambda: _t.build_parent_newsletter(meet_summary, ranked, **_kw)),
+        ("sponsor_thank_you",  lambda: _t.build_sponsor_thank_you(meet_summary, ranked, **_kw)),
+        ("coach_quote",        lambda: _t.build_coach_quote(meet_summary, ranked, **_kw)),
+        ("next_meet_preview",  lambda: _t.build_next_meet_preview(meet_summary, ranked, **_kw)),
+    ]
+    _skip_reasons = {
+        "sponsor_thank_you": "No sponsor_name set on club profile.",
+        "next_meet_preview": (
+            "No next-meet info on profile. Set a 'next_meet' dict or "
+            "add 'Next meet: <name> — <date>' to profile notes."
+        ),
+    }
 
-    # 4 — Parent newsletter
-    artefacts.append(_t.build_parent_newsletter(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    ))
-
-    # 5 — Sponsor thank-you (only if sponsor_name set)
-    sponsor_artefact = _t.build_sponsor_thank_you(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    )
-    if sponsor_artefact is not None:
-        artefacts.append(sponsor_artefact)
+    if _parallel:
+        from concurrent.futures import ThreadPoolExecutor
+        max_workers = int(os.environ.get("MEDIAHUB_TURNINTO_WORKERS", "4"))
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(_jobs))) as pool:
+            results = list(pool.map(lambda j: (j[0], j[1]()), _jobs))
     else:
-        skipped.append({
-            "type": "sponsor_thank_you",
-            "reason": "No sponsor_name set on club profile.",
-        })
+        results = [(label, fn()) for label, fn in _jobs]
 
-    # 6 — Coach quote (always, but explicitly DRAFT)
-    artefacts.append(_t.build_coach_quote(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    ))
-
-    # 7 — Next-meet preview (only if next-meet info present)
-    next_meet_artefact = _t.build_next_meet_preview(
-        meet_summary, ranked, profile, voice_profile, brand_kit,
-        deterministic=deterministic,
-    )
-    if next_meet_artefact is not None:
-        artefacts.append(next_meet_artefact)
-    else:
-        skipped.append({
-            "type": "next_meet_preview",
-            "reason": (
-                "No next-meet info on profile. Set a 'next_meet' dict or "
-                "add 'Next meet: <name> — <date>' to profile notes."
-            ),
-        })
+    artefacts: list[dict] = []
+    for label, art in results:
+        if art is None:
+            skipped.append({"type": label, "reason": _skip_reasons.get(label, "skipped")})
+        else:
+            artefacts.append(art)
 
     pack_id = uuid.uuid4().hex
     return {

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+/* The result/time is the HERO. It dominates the canvas vertically. */
+.hero-numeral {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -54%);
+  z-index: 6;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: {{HERO_FONT_SIZE}}px;
+  line-height: 0.82;
+  letter-spacing: -0.045em;
+  color: #fff;
+  text-shadow:
+    0 0 1px rgba(0,0,0,0.30),
+    0 12px 60px rgba(0,0,0,0.55);
+  white-space: nowrap;
+  font-feature-settings: "tnum";
+  text-align: center;
+}
+.hero-event {
+  position: absolute;
+  top: {{EVENT_TOP}}px;
+  left: 0; right: 0;
+  z-index: 7;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: {{EVENT_FONT_SIZE}}px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.95;
+}
+.hero-athlete {
+  position: absolute;
+  bottom: {{ATHLETE_BOTTOM}}px;
+  left: 0; right: 0;
+  z-index: 7;
+  text-align: center;
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-weight: 700;
+  font-size: {{NAME_FONT_SIZE}}px;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+/* Accent corner bracket — competitor design move */
+.corner-bracket {
+  position: absolute;
+  z-index: 5;
+  width: 220px; height: 220px;
+  border: 8px solid var(--accent);
+  opacity: 0.35;
+}
+.corner-bracket.tl {
+  top: 36px; left: 36px;
+  border-right: none; border-bottom: none;
+  border-top-left-radius: 18px;
+}
+.corner-bracket.br {
+  bottom: 36px; right: 36px;
+  border-left: none; border-top: none;
+  border-bottom-right-radius: 18px;
+}
+
+/* Override .brand-corner positioning so logo sits centered at bottom */
+.brand-corner {
+  bottom: 36px !important;
+  left: 50% !important;
+  transform: translateX(-50%);
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  text-align: center;
+}
+.brand-corner .text-block {
+  text-align: center;
+}
+.brand-corner .club-line {
+  font-size: 22px !important;
+}
+.brand-corner .meet-line {
+  font-size: 14px !important;
+}
+
+/* No label-ribbon or result-chip in this layout — the numeral IS the result.
+   The tier-badge is also suppressed because the event subtitle is already
+   rendered in the tier accent colour, so the achievement reads through
+   colour alone (cleaner editorial composition). */
+.label-ribbon, .result-chip, .tier-badge { display: none !important; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-ai"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vignette"></div>
+
+  <div class="corner-bracket tl"></div>
+  <div class="corner-bracket br"></div>
+
+  <div class="hero-event">{{EVENT_NAME}}</div>
+  <div class="hero-numeral">{{RESULT_VALUE}}</div>
+  <div class="hero-athlete">{{ATHLETE_FULL_NAME}}</div>
+
+  <div class="brand-corner">
+    <div class="logo-mark">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{MEDAL_BADGE_BLOCK}}
+  {{SPONSOR_BLOCK}}
+</div>
+</body>
+</html>

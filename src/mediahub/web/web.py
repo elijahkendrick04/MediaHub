@@ -3427,12 +3427,28 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       if (j.fallback && j.fallback_voice) {{
         fallbackNote = '<div style="margin-top:4px;font-size:10px;color:var(--warn);padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:4px">&#x26A0; AI generation unavailable, using ' + j.fallback_voice + '</div>';
       }}
-      if (captionDiv) {{
-        captionDiv.innerHTML = '<span style="white-space:pre-wrap">' + text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>' + fallbackNote;
+      // Render the caption + a variant picker if we got multiple back.
+      var variants = (j.variants && j.variants.length) ? j.variants : [text];
+      var safeText = function(t){{ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
+      function _renderActive(idx) {{
+        var active = variants[idx] || text;
+        if (captionDiv) {{
+          var pickerHtml = '';
+          if (variants.length > 1) {{
+            var pills = variants.map(function(_, i) {{
+              var sel = (i === idx);
+              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(34,211,238,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
+            }}).join('');
+            pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
+          }}
+          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {{
+            btn.addEventListener('click', function() {{ _renderActive(parseInt(btn.dataset.idx, 10) || 0); }});
+          }});
+        }}
+        if (textarea) {{ textarea.value = active; }}
       }}
-      if (textarea) {{
-        textarea.value = text;
-      }}
+      _renderActive(0);
       // Update timestamp
       var picker = panel.closest('.tone-picker');
       if (picker) {{
@@ -3440,7 +3456,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
         if (tsEl && ts) tsEl.textContent = 'regenerated just now &middot; ' + ts;
       }}
       // Cache named-tone results for this session (not the AI tab &mdash; always fresh)
-      if (!isAi) {{ _captionCache[cacheKey] = {{text: text}}; }}
+      if (!isAi) {{ _captionCache[cacheKey] = {{text: text, variants: variants}}; }}
     }})
     .catch(function(err) {{
       if (captionDiv) {{
@@ -4005,13 +4021,41 @@ function addGraphicToPack(btn, visualId) {{
                     "explanation": explanation,
                 }), 200
             try:
-                caption_text = _gen_tone(
-                    ach_dict, club_brand, tone=tone,
-                    voice_profile=_run_voice_profile,
-                    club_profile=club_profile_obj,
-                )
+                # Generate 3 variants in parallel so the user can pick one
+                # (Holo/Blaze pattern). The first is returned as `caption`
+                # for backwards-compat with existing consumers; the full list
+                # lives in `variants`.
+                from concurrent.futures import ThreadPoolExecutor
+                n_variants = int(request.args.get("n_variants") or 3)
+                n_variants = max(1, min(n_variants, 4))
+
+                def _gen_one():
+                    return _gen_tone(
+                        ach_dict, club_brand, tone=tone,
+                        voice_profile=_run_voice_profile,
+                        club_profile=club_profile_obj,
+                    )
+
+                if n_variants == 1:
+                    variants = [_gen_one()]
+                else:
+                    with ThreadPoolExecutor(max_workers=n_variants) as pool:
+                        variants = list(pool.map(lambda _: _gen_one(), range(n_variants)))
+                # Deduplicate identical outputs (Gemini occasionally returns the
+                # same caption twice on short prompts) while preserving order.
+                seen = set()
+                unique = []
+                for v in variants:
+                    if v and v not in seen:
+                        seen.add(v)
+                        unique.append(v)
+                variants = unique or variants
+
+                caption_text = variants[0] if variants else ""
                 return jsonify({
                     "caption": caption_text,
+                    "variants": variants,
+                    "n_variants": len(variants),
                     "tone": tone,
                     "live": True,
                     "generated_at": now_iso,

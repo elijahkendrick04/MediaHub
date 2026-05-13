@@ -457,8 +457,15 @@ def _rotate_pattern_for_seed(default_pattern: dict, angle: str, seed: int) -> di
     if seed == 1:
         return default_pattern
 
-    # Special-case "force text-led / no-photo" only when explicitly seed==3
-    # (legacy callers may rely on this exact mapping).
+    # Seed 2 → favour the big-number-hero layout (time/result as visual hero,
+    # the competitor-defining pattern from Holo/Predis/Blaze). Falls back to
+    # any other pattern that fits the angle if big_number_hero isn't available.
+    if seed == 2:
+        big_num = next((p for p in PATTERNS if p["family"] == "big_number_hero"), None)
+        if big_num and default_pattern["family"] != "big_number_hero":
+            return big_num
+
+    # Seed 3 → text-led / no-photo treatment (works without an athlete cutout).
     if seed == 3:
         text_led = next((p for p in PATTERNS if p["family"] == "text_led_recap"), None)
         wknd = next((p for p in PATTERNS if p["family"] == "weekend_numbers"), None)
