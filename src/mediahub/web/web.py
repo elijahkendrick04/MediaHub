@@ -3672,6 +3672,17 @@ function addGraphicToPack(btn, visualId) {{
             "meet_name": (data.get("meet") or {}).get("name", ""),
         }
 
+        # Resolve the ClubProfile so voice_profile (brand DNA voice layer)
+        # can flow into the caption prompt. Profiles with no voice_profile
+        # still work — generate_caption_for_tone treats it as a no-op.
+        club_profile_obj = None
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                club_profile_obj = load_profile(run_profile_id)
+            except Exception:
+                club_profile_obj = None
+
         now_iso = datetime.now(_tz.utc).isoformat()
 
         # V9: build the plain-English explanation once per request so every
@@ -3703,7 +3714,10 @@ function addGraphicToPack(btn, visualId) {{
                     "explanation": explanation,
                 }), 200
             try:
-                caption_text = _gen_tone(ach_dict, club_brand, tone=tone)
+                caption_text = _gen_tone(
+                    ach_dict, club_brand, tone=tone,
+                    club_profile=club_profile_obj,
+                )
                 return jsonify({
                     "caption": caption_text,
                     "tone": tone,
@@ -5393,6 +5407,46 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 profile = existing
 
             else:
+                existing.exemplar_captions = []
+            # Sponsor
+            existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
+            existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
+            # Voice imitation layer — one caption per line. Apply PII
+            # redaction before persisting so real swimmer names never
+            # land on disk.
+            from mediahub.brand.voice_imitation import (
+                analyse_examples as _analyse_voice,
+                redact_pii as _redact_pii,
+            )
+            raw_voice_examples = (request.form.get("voice_examples") or "").strip()
+            if raw_voice_examples:
+                voice_lines = [
+                    _redact_pii(line.strip())
+                    for line in raw_voice_examples.splitlines()
+                    if line.strip()
+                ]
+                existing.voice_examples = voice_lines[:20]
+            else:
+                existing.voice_examples = []
+            # "Analyse voice" button regenerates the profile from the
+            # current voice_examples. Plain save preserves the existing
+            # voice_profile so the user can edit other fields without
+            # losing the analysis.
+            if request.form.get("analyse_voice") and existing.voice_examples:
+                existing.voice_profile = _analyse_voice(existing.voice_examples)
+                saved_msg = (
+                    '<p class="tag good" style="margin-bottom:20px">'
+                    'Voice profile analysed and saved.</p>'
+                )
+            else:
+                if not existing.voice_examples:
+                    existing.voice_profile = {}
+                saved_msg = (
+                    '<p class="tag good" style="margin-bottom:20px">'
+                    'Organisation saved.</p>'
+                )
+            save_profile(existing)
+            profile = existing
                 # ---- Save organisation (existing behaviour) ----
                 existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
                 existing.short_name = (request.form.get("short_name") or "").strip()
@@ -5487,6 +5541,48 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         tone_radios = "".join(_radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES)
         platform_cbs = "".join(_cb("platforms", v, l, v in (profile.platforms or [])) for v, l in _PLATFORMS)
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
+        voice_examples_text = "\n".join(profile.voice_examples or [])
+
+        # Build the voice-profile summary panel so the user can see what
+        # the engine learned the last time they ran "Analyse voice".
+        vp = profile.voice_profile or {}
+        if vp:
+            def _list_chips(items):
+                items = items or []
+                if not items:
+                    return '<span class="muted" style="font-size:12px">—</span>'
+                return "".join(
+                    f'<span style="display:inline-block;padding:2px 8px;'
+                    f'margin:2px 4px 2px 0;border:1px solid var(--border);'
+                    f'border-radius:999px;font-size:12px">{_h(s)}</span>'
+                    for s in items
+                )
+            voice_profile_html = (
+                f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
+                f'border-radius:8px;background:var(--panel)">'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
+                f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
+                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
+                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
+                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
+                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
+                f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
+                f'</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
+                f'<div>{_list_chips(vp.get("characteristic_openers"))}</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
+                f'<div>{_list_chips(vp.get("characteristic_closers"))}</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
+                f'<div>{_list_chips(vp.get("forbidden_phrases"))}</div>'
+                f'</div>'
+            )
+        else:
+            voice_profile_html = (
+                '<p class="muted" style="font-size:12px;margin-top:8px">'
+                'No voice profile yet — paste 5-20 past captions and click '
+                '<b>Analyse voice</b>.</p>'
+            )
 
         _input_style = "width:100%;max-width:480px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px"
         _ta_style = "width:100%;max-width:600px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-family:inherit;font-size:14px"
@@ -5687,6 +5783,31 @@ function copySpotlightCaption(btn, cardIdSafe) {{
               style="{_ta_style}">{_h(exemplars_text)}</textarea>
     <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Separate captions with <code>---</code> on its own line. Up to 5 examples.</p>
   </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Voice examples</h2>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">
+    Paste 5–20 of your recent Instagram, Facebook or X captions — one per line.
+    MediaHub will learn your sentence length, emoji and hashtag habits, opener
+    and closer style, and how you refer to swimmers, then use that profile when
+    generating live AI captions. Names are stripped before storage.
+  </p>
+  <div>
+    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Past captions (one per line)</label>
+    <textarea name="voice_examples" rows="10"
+              placeholder="Massive PB from [name] in the 200 free this morning&#10;Hard work pays off — proud of every swimmer in the pool tonight 🏊&#10;..."
+              style="{_ta_style}">{_h(voice_examples_text)}</textarea>
+    <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">
+      One caption per line, up to 20. Real swimmer names will be replaced with
+      <code>[NAME]</code> before saving.
+    </p>
+  </div>
+  <div style="margin-top:12px">
+    <button type="submit" name="analyse_voice" value="1" class="btn">Analyse voice</button>
+    <span class="muted" style="font-size:12px;margin-left:8px">Re-runs the analyser on the captions above.</span>
+  </div>
+  {voice_profile_html}
 </div>
 
 <div class="card" style="margin-bottom:20px">
