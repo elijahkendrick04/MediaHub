@@ -2080,6 +2080,14 @@ def create_app() -> Flask:
         _delete_url = url_for('privacy_delete_run', run_id=run_id)
         _status_url = url_for('api_status', run_id=run_id)
         _pack_url = url_for('content_pack', run_id=run_id)
+        _turn_into_api = url_for('api_turn_into', run_id=run_id)
+
+        # Prior Turn-Into packs for this run (so the user can revisit them).
+        try:
+            from mediahub.turn_into import list_packs as _list_ti_packs
+            _ti_packs = _list_ti_packs(run_id, base_dir=DATA_DIR / "turn_into_packs")
+        except Exception:
+            _ti_packs = []
 
         # --- V7: Workflow state
         _wf_summary = {}
@@ -2416,7 +2424,88 @@ def create_app() -> Flask:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
                 _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
-            workflow_summary_card = f"""
+            # --- Turn-Into content pack card (top of content pack section) ---
+            _ti_prior_html = ""
+            if _ti_packs:
+                rows = []
+                for p in _ti_packs[:5]:
+                    _pid = p.get("pack_id", "")
+                    _gen = p.get("generated_at", "")
+                    _n = p.get("n_artefacts", 0)
+                    _skipped = p.get("n_skipped", 0)
+                    try:
+                        _view = url_for("turn_into_pack_view", run_id=run_id, pack_id=_pid)
+                    except Exception:
+                        _view = "#"
+                    rows.append(
+                        f'<li style="font-size:12px;margin-bottom:4px">'
+                        f'<a href="{_view}">{_h(_gen)}</a> '
+                        f'<span class="muted">— {_n} artefacts'
+                        + (f", {_skipped} skipped" if _skipped else "")
+                        + '</span></li>'
+                    )
+                _ti_prior_html = (
+                    '<div style="margin-top:14px">'
+                    '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
+                    'Previously generated packs</div>'
+                    f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
+                    '</div>'
+                )
+
+            turn_into_card = f"""
+<div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <h2 style="margin-bottom:6px">Content pack</h2>
+      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
+        Turn this meet into a full pack of 7 derivative artefacts —
+        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
+        sponsor thank-you, coach quote, and next-meet preview.
+      </p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none">
+        ✦ Turn meet into content pack
+      </button>
+      <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack →</a>
+    </div>
+  </div>
+  <div id="ti-status" style="margin-top:10px;font-size:12px;color:var(--ink-muted);display:none"></div>
+  {_ti_prior_html}
+</div>
+<script>
+function turnMeetIntoPack() {{
+  var btn = document.getElementById('ti-btn');
+  var status = document.getElementById('ti-status');
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  status.style.display = '';
+  status.textContent = 'Building 7 artefacts — this can take up to 60 seconds.';
+  fetch({json.dumps(_turn_into_api)}, {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{}}),
+  }}).then(function(r) {{ return r.json(); }})
+    .then(function(j) {{
+      if (j && j.pack_url) {{
+        status.textContent = 'Done — opening pack…';
+        window.location.href = j.pack_url;
+      }} else {{
+        status.textContent = 'Failed: ' + (j && j.message ? j.message : 'unknown error');
+        btn.disabled = false;
+        btn.textContent = origText;
+      }}
+    }})
+    .catch(function() {{
+      status.textContent = 'Network error generating pack. Please retry.';
+      btn.disabled = false;
+      btn.textContent = origText;
+    }});
+}}
+</script>"""
+
+            workflow_summary_card = turn_into_card + f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div>
@@ -5592,6 +5681,333 @@ function copyCaption(btn, spanId) {{
             return redirect(url_for("review", run_id=run_id))
         ws.mark_all_posted(run_id)
         return redirect(url_for("content_pack", run_id=run_id))
+
+    # ---- Turn-Into: one meet → 7 derivative artefacts -------------------
+    @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
+    def api_turn_into(run_id):
+        """Generate a Turn-Into pack (up to 7 artefacts) from this run.
+
+        Body (JSON, all optional):
+          { "deterministic": bool }   force heuristic mode (no LLM)
+        """
+        run_data = _load_run(run_id)
+        if not run_data:
+            return jsonify({"error": "run not found"}), 404
+
+        profile_id = run_data.get("profile_id", "")
+        profile = load_profile(profile_id) if profile_id else None
+        if profile is None:
+            # Fall back to a minimal profile derived from the run's display name
+            # so Turn-Into still runs even when no profile is persisted.
+            profile = ClubProfile(
+                profile_id=profile_id or "default",
+                display_name=run_data.get("profile_display", "") or "Club",
+            )
+
+        payload = request.get_json(silent=True) or {}
+        deterministic = bool(payload.get("deterministic", False))
+
+        try:
+            from mediahub.turn_into import turn_meet_into_pack, save_pack
+            pack = turn_meet_into_pack(run_data, profile, deterministic=deterministic)
+            save_pack(pack, run_id, base_dir=DATA_DIR / "turn_into_packs")
+        except Exception as e:
+            return jsonify({"error": "turn_into_failed", "message": str(e)}), 500
+
+        return jsonify({
+            "ok": True,
+            "pack_id": pack["pack_id"],
+            "n_artefacts": len(pack.get("artefacts", [])),
+            "skipped": [s.get("type") for s in pack.get("skipped", [])],
+            "pack_url": url_for("turn_into_pack_view",
+                                run_id=run_id, pack_id=pack["pack_id"]),
+        })
+
+    @app.route("/api/runs/<run_id>/turn-into/<pack_id>/caption", methods=["POST"])
+    def api_turn_into_edit_caption(run_id, pack_id):
+        """Inline-edit a caption within a saved pack.
+
+        Body (JSON):
+          {
+            "artefact_index": int,
+            "caption_key":    str,   # e.g. "default" | "instagram" | "swimmer_1"
+            "text":           str,
+            # OR for x_thread:
+            "x_thread_index": int,   # 0-based
+            "text":           str,
+          }
+        """
+        from mediahub.turn_into import load_pack, save_pack
+        base = DATA_DIR / "turn_into_packs"
+        pack = load_pack(run_id, pack_id, base_dir=base)
+        if pack is None:
+            return jsonify({"error": "pack not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        try:
+            idx = int(data.get("artefact_index"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "artefact_index required"}), 400
+        artefacts = pack.get("artefacts") or []
+        if idx < 0 or idx >= len(artefacts):
+            return jsonify({"error": "artefact_index out of range"}), 400
+        text = str(data.get("text", ""))
+
+        artefact = artefacts[idx]
+        captions = artefact.setdefault("captions", {})
+
+        if "x_thread_index" in data and data["x_thread_index"] is not None:
+            try:
+                xi = int(data["x_thread_index"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "x_thread_index must be int"}), 400
+            posts = captions.get("x_thread") or []
+            if xi < 0 or xi >= len(posts):
+                return jsonify({"error": "x_thread_index out of range"}), 400
+            posts[xi] = text
+            captions["x_thread"] = posts
+        else:
+            key = str(data.get("caption_key", "default"))
+            captions[key] = text
+
+        artefacts[idx] = artefact
+        pack["artefacts"] = artefacts
+        save_pack(pack, run_id, base_dir=base)
+        return jsonify({"ok": True})
+
+    @app.route("/runs/<run_id>/pack/<pack_id>")
+    def turn_into_pack_view(run_id, pack_id):
+        """Render a saved Turn-Into pack with the 7 artefacts."""
+        from mediahub.turn_into import load_pack
+        pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
+        if pack is None:
+            return _layout("Not found",
+                           '<div class="empty">Turn-Into pack not found.</div>'), 404
+
+        _review_url = url_for("review", run_id=run_id)
+        _api_url = url_for("api_turn_into", run_id=run_id)
+        _edit_api = url_for("api_turn_into_edit_caption",
+                            run_id=run_id, pack_id=pack_id)
+        meet_name = _h(pack.get("meet_name", ""))
+        gen_at = _h(pack.get("generated_at", ""))
+
+        artefacts = pack.get("artefacts") or []
+        skipped = pack.get("skipped") or []
+
+        # --- Skipped notice band
+        skipped_html = ""
+        if skipped:
+            items = "".join(
+                f'<li><strong>{_h(s.get("type",""))}</strong>: '
+                f'{_h(s.get("reason",""))}</li>'
+                for s in skipped
+            )
+            skipped_html = (
+                '<div class="card" style="border-color:var(--warn);background:rgba(245,158,11,0.04)">'
+                '<h2 style="margin-top:0">Skipped artefacts</h2>'
+                f'<ul style="margin:0">{items}</ul>'
+                '</div>'
+            )
+
+        # --- Artefact cards
+        cards_html = ""
+        for art_idx, art in enumerate(artefacts):
+            atype = art.get("type", "")
+            title = _h(art.get("title", atype))
+            captions = art.get("captions") or {}
+            cards = art.get("cards") or []
+            draft = art.get("draft_flag", "")
+            html_block = art.get("html") or ""
+            notes_list = art.get("notes") or []
+
+            # Draft badge
+            draft_html = ""
+            if draft:
+                draft_html = (
+                    '<div style="margin-bottom:12px;padding:10px 14px;'
+                    'background:rgba(245,158,11,0.12);border:1px solid var(--warn);'
+                    f'border-radius:8px;font-weight:600;color:var(--warn)">{_h(draft)}</div>'
+                )
+
+            # Caption editor blocks — one per key
+            caption_blocks = ""
+            for cap_key, cap_val in captions.items():
+                if cap_key == "x_thread" and isinstance(cap_val, list):
+                    # Special-case: numbered thread of posts.
+                    sub = ""
+                    for ti, post in enumerate(cap_val):
+                        post_chars = len(post or "")
+                        cls = "good" if post_chars <= 280 else "bad"
+                        sub += (
+                            f'<div style="margin-bottom:10px">'
+                            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+                            f'<span class="muted" style="font-size:11px">Post {ti+1}</span>'
+                            f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
+                            f'</div>'
+                            f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                            f'data-thread="{ti}" '
+                            f'style="width:100%;min-height:60px;font-size:13px;'
+                            f'padding:8px;border:1px solid var(--border);border-radius:6px;'
+                            f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                            f'{_h(post)}</textarea>'
+                            f'</div>'
+                        )
+                    caption_blocks += (
+                        '<div style="margin-bottom:14px">'
+                        f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
+                        f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:8px">X thread '
+                        f'({len(cap_val)} posts, ≤280 chars each)</div>'
+                        f'{sub}'
+                        '</div>'
+                    )
+                    continue
+
+                # Single string caption
+                if not isinstance(cap_val, str):
+                    continue
+                key_label = cap_key.replace("_", " ").title()
+                char_count = len(cap_val)
+                # Show Instagram cap for ig caption.
+                cap_limit_html = ""
+                if cap_key == "instagram":
+                    cls = "good" if char_count <= 2200 else "bad"
+                    cap_limit_html = f'<span class="tag {cls}" style="font-size:10px;margin-left:8px">{char_count}/2200</span>'
+                caption_blocks += (
+                    '<div style="margin-bottom:14px">'
+                    f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
+                    f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">'
+                    f'{_h(key_label)}{cap_limit_html}</div>'
+                    f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                    f'data-key="{_h(cap_key)}" '
+                    f'style="width:100%;min-height:80px;font-size:13px;'
+                    f'padding:10px;border:1px solid var(--border);border-radius:6px;'
+                    f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                    f'{_h(cap_val)}</textarea>'
+                    '</div>'
+                )
+
+            # Optional sub-cards strip (e.g. spotlight series)
+            sub_cards_html = ""
+            if cards and atype in ("swimmer_spotlight",):
+                rows = ""
+                for c in cards:
+                    rows += (
+                        '<div style="padding:10px;background:rgba(255,255,255,0.03);'
+                        'border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
+                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer",""))} '
+                        f'· {_h(c.get("event",""))}</div>'
+                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline",""))}</div>'
+                        '</div>'
+                    )
+                sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
+
+            # Newsletter HTML preview
+            html_preview_html = ""
+            if html_block:
+                # Display rendered HTML in a sandboxed-ish preview area.
+                # The templates module HTML-escapes the body, so it's safe here.
+                html_preview_html = (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--accent)">View HTML preview</summary>'
+                    f'<div style="margin-top:10px;padding:14px;border:1px dashed var(--border);'
+                    f'border-radius:8px;background:rgba(255,255,255,0.02)">{html_block}</div>'
+                    '</details>'
+                )
+
+            notes_html = ""
+            if notes_list:
+                lis = "".join(f"<li>{_h(n)}</li>" for n in notes_list)
+                notes_html = (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this artefact?</summary>'
+                    f'<ul style="margin:8px 0 0 0;font-size:12px;color:var(--ink-dim)">{lis}</ul>'
+                    '</details>'
+                )
+
+            cards_html += f"""
+<div class="card ti-artefact" data-type="{_h(atype)}" data-artefact-index="{art_idx}" style="margin-bottom:18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+    <h2 style="margin:0">{title}</h2>
+    <span class="tag info" style="font-size:11px">{_h(atype)}</span>
+  </div>
+  {draft_html}
+  {sub_cards_html}
+  {caption_blocks}
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button class="btn" style="font-size:12px;padding:6px 14px"
+            onclick="tiSaveArtefact({art_idx})">Save edits</button>
+    <span class="ti-status" data-artefact="{art_idx}" style="font-size:11px;color:var(--ink-muted)"></span>
+  </div>
+  {html_preview_html}
+  {notes_html}
+</div>"""
+
+        if not cards_html:
+            cards_html = '<div class="empty">No artefacts generated.</div>'
+
+        body = f"""
+<p class="dim"><a href="{_review_url}">← Back to review</a></p>
+<h1>Turn-Into pack — {meet_name}</h1>
+<p class="dim">{len(artefacts)} artefacts · generated {gen_at}</p>
+
+<div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <button class="btn secondary" onclick="tiRegenerate()">↺ Regenerate pack</button>
+</div>
+
+{skipped_html}
+{cards_html}
+
+<script>
+const TI_EDIT_API = {json.dumps(_edit_api)};
+const TI_REGEN_API = {json.dumps(_api_url)};
+const TI_REVIEW_URL = {json.dumps(_review_url)};
+
+function tiSaveArtefact(idx) {{
+  const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
+  if (!root) return;
+  const status = root.querySelector('.ti-status');
+  status.textContent = 'Saving…';
+  const tas = root.querySelectorAll('textarea.ti-cap');
+  const tasks = [];
+  tas.forEach(function(ta) {{
+    const payload = {{ artefact_index: idx, text: ta.value }};
+    if (ta.dataset.thread !== undefined) {{
+      payload.x_thread_index = parseInt(ta.dataset.thread, 10);
+    }} else {{
+      payload.caption_key = ta.dataset.key || 'default';
+    }}
+    tasks.push(fetch(TI_EDIT_API, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(payload),
+    }}).then(r => r.json()));
+  }});
+  Promise.all(tasks).then(function(results) {{
+    const ok = results.every(function(r) {{ return r && r.ok; }});
+    status.textContent = ok ? 'Saved.' : 'Some edits failed.';
+    setTimeout(function() {{ status.textContent = ''; }}, 2200);
+  }}).catch(function() {{ status.textContent = 'Error saving.'; }});
+}}
+
+function tiRegenerate() {{
+  if (!confirm('Generate a fresh Turn-Into pack? The current pack is preserved.')) return;
+  fetch(TI_REGEN_API, {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{}}),
+  }}).then(r => r.json()).then(function(j) {{
+    if (j && j.pack_url) {{
+      window.location.href = j.pack_url;
+    }} else {{
+      alert('Regenerate failed: ' + (j && j.message ? j.message : 'unknown error'));
+    }}
+  }}).catch(function(err) {{
+    alert('Regenerate failed.');
+  }});
+}}
+</script>
+"""
+        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
