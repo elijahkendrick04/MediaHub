@@ -26,6 +26,7 @@ const brandSchema = z.object({
   accent: z.string().default("#FFFFFF"),
   displayName: z.string().default(""),
   shortName: z.string().default(""),
+  logoDataUri: z.string().default(""),
 });
 
 export const storyCardSchema = z.object({
@@ -156,6 +157,23 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       >
         {label || "STRONG SWIM"}
       </div>
+
+      {/* Club logo — top-right corner. Falls back silently when no SVG. */}
+      {brand.logoDataUri ? (
+        <img
+          src={brand.logoDataUri}
+          alt={brand.displayName || "club logo"}
+          style={{
+            position: "absolute",
+            top: 100,
+            right: 80,
+            width: 140,
+            height: 140,
+            objectFit: "contain",
+            opacity: chipOpacity,
+          }}
+        />
+      ) : null}
 
       {/* Athlete first name */}
       <div

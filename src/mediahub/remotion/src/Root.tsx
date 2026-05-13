@@ -16,6 +16,7 @@ const defaultBrand = {
   accent: "#FFFFFF",
   displayName: "Your Club",
   shortName: "CLUB",
+  logoDataUri: "",
 };
 
 const defaultCard = {

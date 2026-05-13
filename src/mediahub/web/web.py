@@ -7427,11 +7427,14 @@ function generateReelGrouped(btn, reelUrl) {{
         primary = rk.get("primary_colour") or "#0A2540"
         secondary = rk.get("secondary_colour") or "#000000"
         accent = rk.get("accent_colour") or "#FFD86E"
+        logo_svg = rk.get("logo_svg") or None
+        short_name = rk.get("short_name") or None
         try:
             from mediahub.brand.kit import BrandKit
             bk = BrandKit(profile_id=profile_id, display_name=display_name,
                           primary_colour=primary, secondary_colour=secondary,
-                          accent_colour=accent)
+                          accent_colour=accent, logo_svg=logo_svg,
+                          short_name=short_name)
         except Exception:
             class _BK:
                 pass
@@ -7441,8 +7444,8 @@ function generateReelGrouped(btn, reelUrl) {{
             bk.primary_colour = primary
             bk.secondary_colour = secondary
             bk.accent_colour = accent
-            bk.short_name = ""
-            bk.logo_svg = None
+            bk.short_name = short_name or ""
+            bk.logo_svg = logo_svg
         if rk.get("logo_path"):
             try:
                 bk.logo_path = rk["logo_path"]  # type: ignore[attr-defined]
