@@ -2501,26 +2501,12 @@ def create_app() -> Flask:
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
             # V8: Live caption tone toggle.
-            # Always renders AI tab first; voice tabs follow from learned voices.
-            # AI captions are generated LIVE (no caching) on demand via JS.
-            voice_captions = ra.get("voice_captions") or a.get("voice_captions") or {}
-            brand_captions = ra.get("brand_captions") or a.get("brand_captions") or {}
+            # All tabs (AI, Warm, Hype, Precise) generate captions live via the
+            # LLM. No pre-filled template text — clicking a tone tab always
+            # triggers a fresh, unique generation. Results are cached per session
+            # client-side; "↺ Regenerate" forces a new fetch.
             tone_tabs_html = ""
 
-            # Build voice entries from learned voices (same as V7.5)
-            entries: list[tuple[str, str, str]] = []  # (key, label, plain_text)
-            if voice_captions:
-                for vid, payload in voice_captions.items():
-                    label = (payload or {}).get("display_name") or vid
-                    text = (payload or {}).get("caption") or ""
-                    entries.append((vid, label, text))
-            elif brand_captions:
-                for vid, payload in brand_captions.items():
-                    payload = payload or {}
-                    text = f"{payload.get('headline','')} {payload.get('body','')} {payload.get('cta','')}".strip()
-                    entries.append((vid, vid.replace("-", " ").title(), text))
-
-            # Always show the tone picker (AI tab is always present)
             card_uuid = card_id_raw.replace(":", "_").replace(",", "_")
             swim_id_safe = _h(card_id_raw)
             _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
@@ -2528,68 +2514,52 @@ def create_app() -> Flask:
             tabs_html = ""
             panels_html = ""
 
-            # --- AI tab (always first, always live) ---
-            # V8.1: status dot reflects whether an Anthropic key is configured.
-            # Initial colour is amber (unknown) and JS updates it from
-            # /api/settings/llm-status on first load.
-            tabs_html += (
-                f'<button class="tone-tab tone-tab-ai active" '
-                f'data-card="{card_uuid}" data-tone="ai" '
-                f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
-                f'title="Live AI caption (Claude). Configure key in Settings." '
-                f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-                f'cursor:pointer;background:rgba(139,92,246,0.15);color:#A78BFA;'
-                f'font-family:inherit;margin-right:4px;font-weight:600;display:inline-flex;align-items:center;gap:5px">'
-                f'<span class="ai-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ffae3b" aria-hidden="true"></span>'
-                f'✦ AI</button>'
-            )
-            panels_html += (
-                f'<div class="tone-panel" data-tone="ai" data-card="{card_uuid}" style="">'
-                f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
-                f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
-                f'Click to generate AI caption live…</span></div>'
-                f'<textarea class="caption-textarea" style="display:none"></textarea>'
-                f'</div>'
-            )
+            # Standard tones — always shown, always AI-generated on demand.
+            # Order: AI (first, active) → Warm → Hype → Precise
+            _STD_TONES = [
+                ("ai",        "✦ AI",    True,  "tone-tab-ai",
+                 "rgba(139,92,246,0.15)", "#A78BFA",
+                 "Live AI caption. Generates fresh each time."),
+                ("warm-club", "Warm",    False, "",
+                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "Warm & community — friendly, first-name, inclusive."),
+                ("hype",      "Hype",    False, "",
+                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "Energetic & hype — race-day language, high energy."),
+                ("data-led",  "Precise", False, "",
+                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "Data-led — numbers first, sponsor-friendly, no fluff."),
+            ]
 
-            # --- Voice tabs ---
-            for i, (t_key, t_label, plain_text) in enumerate(entries):
-                safe_text = _h(plain_text)
+            for t_key, t_label, is_active, extra_cls, active_bg, active_fg, title in _STD_TONES:
+                init_bg = active_bg if is_active else "transparent"
+                init_fg = active_fg if is_active else "var(--ink-dim)"
+                active_attr = "active" if is_active else ""
+                display = "" if is_active else "display:none"
+                status_dot = (
+                    '<span class="ai-status-dot" style="display:inline-block;width:7px;height:7px;'
+                    'border-radius:50%;background:#ffae3b" aria-hidden="true"></span>'
+                    if t_key == "ai" else ""
+                )
                 tabs_html += (
-                    f'<button class="tone-tab" '
-                    f'data-card="{card_uuid}" data-tone="{_h(t_key)}" '
+                    f'<button class="tone-tab {extra_cls} {active_attr}" '
+                    f'data-card="{card_uuid}" data-tone="{t_key}" '
                     f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
+                    f'title="{_h(title)}" '
                     f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-                    f'cursor:pointer;background:transparent;'
-                    f'color:var(--ink-dim);font-family:inherit;margin-right:4px">'
-                    f'{_h(t_label)}</button>'
+                    f'cursor:pointer;background:{init_bg};color:{init_fg};'
+                    f'font-family:inherit;margin-right:4px;font-weight:{"600" if is_active else "400"};'
+                    f'display:inline-flex;align-items:center;gap:5px">'
+                    f'{status_dot}{_h(t_label)}</button>'
                 )
                 panels_html += (
-                    f'<div class="tone-panel" data-tone="{_h(t_key)}" data-card="{card_uuid}" style="display:none">'
-                    f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">{safe_text}</div>'
-                    f'<textarea class="caption-textarea" style="display:none">{safe_text}</textarea>'
+                    f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
+                    f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
+                    f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
+                    f'Click to generate…</span></div>'
+                    f'<textarea class="caption-textarea" style="display:none"></textarea>'
                     f'</div>'
                 )
-
-            # If no voice entries but wf_state has edited captions, show them too
-            if not entries and wf_state and wf_state.edited_captions:
-                for ck, cv in (wf_state.edited_captions or {}).items():
-                    safe_cv = _h(cv)
-                    tabs_html += (
-                        f'<button class="tone-tab" '
-                        f'data-card="{card_uuid}" data-tone="{_h(ck)}" '
-                        f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
-                        f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-                        f'cursor:pointer;background:transparent;'
-                        f'color:var(--ink-dim);font-family:inherit;margin-right:4px">'
-                        f'{_h(ck)}</button>'
-                    )
-                    panels_html += (
-                        f'<div class="tone-panel" data-tone="{_h(ck)}" data-card="{card_uuid}" style="display:none">'
-                        f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">{safe_cv}</div>'
-                        f'<textarea class="caption-textarea" style="display:none">{safe_cv}</textarea>'
-                        f'</div>'
-                    )
 
             # V8: Create-graphic API URL (lazy visual generation)
             _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
@@ -2876,10 +2846,15 @@ function switchTone(btn) {{
 }}
 
 // V8: switchToneLive — fetches caption from API on click.
-// For voice tones, result is cached client-side for the session.
+// AI tab: always fetches fresh. Warm/Hype/Precise tabs: cached for the session.
+// "↺ Regenerate" always forces a fresh fetch via regenerateCaption().
 var _captionCache = {{}};
+var _AI_TONE_KEYS = {{'ai': true}};  // other tones are cached after first gen
+
 function switchToneLive(btn, captionUrl, cardId) {{
   var newTone = btn.dataset.tone;
+  var isAiTone = !!_AI_TONE_KEYS[newTone];
+
   // Update tab styles
   document.querySelectorAll('.tone-tab[data-card="' + cardId + '"]').forEach(function(tab) {{
     var isActive = tab.dataset.tone === newTone;
@@ -2887,12 +2862,15 @@ function switchToneLive(btn, captionUrl, cardId) {{
     if (isActive) {{
       tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(139,92,246,0.15)' : 'rgba(34,211,238,0.15)';
       tab.style.color = tab.classList.contains('tone-tab-ai') ? '#A78BFA' : 'var(--accent)';
+      tab.style.fontWeight = '600';
     }} else {{
       tab.style.background = 'transparent';
       tab.style.color = 'var(--ink-dim)';
+      tab.style.fontWeight = '400';
     }}
   }});
-  // Show active panel
+
+  // Show active panel, hide others
   document.querySelectorAll('.tone-panel[data-card="' + cardId + '"]').forEach(function(panel) {{
     panel.style.display = panel.dataset.tone === newTone ? '' : 'none';
   }});
@@ -2901,19 +2879,22 @@ function switchToneLive(btn, captionUrl, cardId) {{
   if (!panel) {{ return; }}
 
   var cacheKey = cardId + '|' + newTone;
-  // For AI tone: always fetch fresh (no caching). For voice: use session cache.
-  var isAi = (newTone === 'ai');
-  if (!isAi && _captionCache[cacheKey]) {{
+
+  // AI tab: always fetch fresh — never use cache.
+  // Named tones (warm/hype/precise): use session cache after first generation.
+  if (!isAiTone && _captionCache[cacheKey]) {{
     _renderCaption(panel, _captionCache[cacheKey]);
     return;
   }}
-  // Voice tabs with pre-rendered text: skip fetch if already populated
-  if (!isAi) {{
-    var captionDiv = panel.querySelector('.caption-text');
-    var placeholder = panel.querySelector('.caption-placeholder');
-    if (captionDiv && !placeholder) {{ return; }}  // already populated static text
+
+  // All panels start with a placeholder — fetch if placeholder still present
+  // (or if AI tone, always fetch).
+  var placeholder = panel.querySelector('.caption-placeholder');
+  if (!isAiTone && !placeholder) {{
+    return;  // already generated; cache hit handled above
   }}
-  _fetchCaption(captionUrl, newTone, panel, cacheKey, isAi, cardId);
+
+  _fetchCaption(captionUrl, newTone, panel, cacheKey, isAiTone, cardId);
 }}
 
 function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
@@ -2928,18 +2909,16 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
       var fallbackNote = '';
-      // V8.1: explicit no-key state — do NOT masquerade voice as AI.
-      if (isAi && j.live === false) {{
-        // j.settings_url is server-generated and already includes any URL prefix.
+      // No-key or LLM unavailable state — prompt to add a key.
+      if (j.live === false) {{
         var settingsHref = j.settings_url || ((window._API_BASE || '') + '/settings');
         if (captionDiv) {{
           captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
-            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">✦ AI captions are disabled</div>'
-            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Add an Anthropic API key in Settings to enable live AI captions.') + '</div>'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">✦ AI captions need an API key</div>'
+            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Add a Gemini API key (free at aistudio.google.com) or Anthropic key in Settings.') + '</div>'
             + '<div style="margin-top:8px"><a href="' + settingsHref + '" style="color:var(--accent);font-size:11px;text-decoration:underline">Open Settings →</a></div>'
             + '</div>';
         }}
-        // Update the dot to red on every AI tab on the page.
         document.querySelectorAll('.ai-status-dot').forEach(function(d){{ d.style.background='#ff5d6c'; }});
         return;
       }}
@@ -2958,8 +2937,8 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
         var tsEl = picker.querySelector('.caption-timestamp');
         if (tsEl && ts) tsEl.textContent = 'regenerated just now · ' + ts;
       }}
-      // Cache voice results (not AI)
-      if (!isAi) {{ _captionCache[cacheKey] = {{captionDiv: null, text: text}}; }}
+      // Cache named-tone results for this session (not the AI tab — always fresh)
+      if (!isAi) {{ _captionCache[cacheKey] = {{text: text}}; }}
     }})
     .catch(function(err) {{
       if (captionDiv) {{
@@ -2980,15 +2959,16 @@ function _renderCaption(panel, cached) {{
 }}
 
 function regenerateCaption(btn, captionUrl, cardId) {{
-  // Find the active panel and re-fetch its tone
+  // Find the active panel and force a fresh re-fetch (clears session cache).
   var activeToneTab = document.querySelector('.tone-tab.active[data-card="' + cardId + '"]');
   if (!activeToneTab) {{ return; }}
   var tone = activeToneTab.dataset.tone;
   var cacheKey = cardId + '|' + tone;
-  delete _captionCache[cacheKey];  // clear cache so voice re-fetches too
+  delete _captionCache[cacheKey];  // force fresh generation
   var panel = document.querySelector('.tone-panel[data-tone="' + tone + '"][data-card="' + cardId + '"]');
   if (!panel) {{ return; }}
-  _fetchCaption(captionUrl, tone, panel, cacheKey, (tone === 'ai'), cardId);
+  var isAiTone = !!_AI_TONE_KEYS[tone];
+  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
 }}
 
 function copyActiveTone(btn, cardId) {{
@@ -3350,55 +3330,58 @@ function addGraphicToPack(btn, visualId) {{
 
         now_iso = datetime.now(_tz.utc).isoformat()
 
-        if tone == "ai":
-            # LIVE generation — no caching, always fresh.
-            # V8.1: NO masquerading. If no API key configured, return
-            # an explicit no-key response with live=false so the UI can
-            # prompt the user to add a key in /settings.
-            from mediahub.media_ai.llm import is_available as _llm_available, call_claude as _call_claude, ClaudeUnavailableError as _ClaudeUE
+        from mediahub.media_ai.llm import is_available as _llm_available
+        from mediahub.web.ai_caption import (
+            generate_caption_for_tone as _gen_tone,
+            KNOWN_AI_TONES as _AI_TONES,
+            ClaudeUnavailableError as _ClaudeUE,  # type: ignore[attr-defined]
+        )
+
+        if tone in _AI_TONES:
+            # LIVE generation — fresh every call, nonce injected for uniqueness.
+            # Works with Gemini (free) or Anthropic API key.
             if not _llm_available():
                 return jsonify({
                     "caption": "",
-                    "tone": "ai",
+                    "tone": tone,
                     "live": False,
                     "generated_at": now_iso,
                     "error": "no_key",
-                    "message": "Add an Anthropic API key in Settings to generate live AI captions.",
+                    "message": (
+                        "Add a Gemini API key (free at aistudio.google.com) or "
+                        "Anthropic API key in Settings to generate live AI captions."
+                    ),
                     "settings_url": url_for("settings_page"),
                 }), 200
-            # Key present — call Claude live.
-            from mediahub.web.ai_caption import _SYSTEM_PROMPT as _SP, _build_user_message as _bum
             try:
-                caption_text = _call_claude(
-                    system=_SP,
-                    user=_bum(ach_dict, club_brand),
-                    max_tokens=400,
-                ).strip()
+                caption_text = _gen_tone(ach_dict, club_brand, tone=tone)
                 return jsonify({
                     "caption": caption_text,
-                    "tone": "ai",
+                    "tone": tone,
                     "live": True,
                     "generated_at": now_iso,
                 })
             except _ClaudeUE as e:
                 return jsonify({
                     "caption": "",
-                    "tone": "ai",
+                    "tone": tone,
                     "live": False,
                     "generated_at": now_iso,
                     "error": "llm_unavailable",
-                    "message": f"AI provider error: {e}. Check your Anthropic API key in Settings.",
+                    "message": (
+                        f"AI provider error: {e}. "
+                        "Add a Gemini API key (free) or Anthropic key in Settings."
+                    ),
                     "settings_url": url_for("settings_page"),
                 }), 200
         else:
-            # Voice render — deterministic, client may cache for session
+            # Voice render — deterministic template, may be cached by client
             try:
                 from mediahub.voice.learned.store import list_voices as _lv, load_voice as _load_v
                 from mediahub.voice.learned.render import render_caption as _rc
             except ImportError:
                 return jsonify({"error": "voice rendering unavailable"}), 503
 
-            # Try loading by voice_id
             profile = None
             try:
                 profile = _load_v(tone)
@@ -3406,7 +3389,6 @@ function addGraphicToPack(btn, visualId) {{
                 pass
 
             if profile is None:
-                # Search in seed voices
                 voices = _lv(include_seed=True)
                 for v in voices:
                     if v.voice_id == tone:
