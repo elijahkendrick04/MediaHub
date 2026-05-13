@@ -264,6 +264,7 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 # ---------------------------------------------------------------------
 
 _active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
+_turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
 _active_lock = threading.Lock()
 
 
@@ -2855,29 +2856,52 @@ function turnMeetIntoPack() {{
   var btn = document.getElementById('ti-btn');
   var status = document.getElementById('ti-status');
   var origText = btn.textContent;
+  var secs = 0;
   btn.disabled = true;
-  btn.textContent = 'Generating&hellip;';
+  btn.textContent = 'Generating…';
   status.style.display = '';
-  status.textContent = 'Building 7 artefacts &mdash; this can take up to 60 seconds.';
+  status.textContent = 'Building artefacts — starting…';
+  var ticker = setInterval(function() {{
+    secs++;
+    status.textContent = 'Building artefacts with live AI — ' + secs + 's elapsed…';
+  }}, 1000);
+  function _fail(msg) {{
+    clearInterval(ticker);
+    status.textContent = 'Failed: ' + msg;
+    btn.disabled = false;
+    btn.textContent = origText;
+  }}
+  function _poll(statusUrl) {{
+    fetch(statusUrl).then(function(r) {{ return r.json(); }}).then(function(j) {{
+      if (j.status === 'running') {{
+        setTimeout(function() {{ _poll(statusUrl); }}, 2000);
+      }} else if (j.status === 'done' && j.pack_url) {{
+        clearInterval(ticker);
+        status.textContent = 'Done — opening pack…';
+        window.location.href = j.pack_url;
+      }} else {{
+        _fail(j.error || 'unknown error');
+      }}
+    }}).catch(function() {{ _fail('poll failed'); }});
+  }}
   fetch({json.dumps(_turn_into_api)}, {{
     method: 'POST',
     headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{}}),
+    body: JSON.stringify({{ async: true }}),
   }}).then(function(r) {{ return r.json(); }})
     .then(function(j) {{
-      if (j && j.pack_url) {{
-        status.textContent = 'Done &mdash; opening pack&hellip;';
+      if (j && j.status_url) {{
+        setTimeout(function() {{ _poll(j.status_url); }}, 2000);
+      }} else if (j && j.pack_url) {{
+        clearInterval(ticker);
+        status.textContent = 'Done — opening pack…';
         window.location.href = j.pack_url;
       }} else {{
-        status.textContent = 'Failed: ' + (j && j.message ? j.message : 'unknown error');
-        btn.disabled = false;
-        btn.textContent = origText;
+        _fail(j && j.message ? j.message : 'unknown error');
       }}
     }})
     .catch(function() {{
-      status.textContent = 'Network error generating pack. Please retry.';
-      btn.disabled = false;
-      btn.textContent = origText;
+      _fail('Network error. Please retry.');
     }});
 }}
 </script>"""
@@ -4899,6 +4923,8 @@ Relay team broke club record"></textarea>
         )
         if active_key:
             source = "environment variable" if env_key else "saved key"
+        elif llm_provider == "gemini-api":
+            source = "Gemini key (" + gemini_source + ")"
         elif llm_provider == "claude-cli":
             source = "claude CLI session (OAuth)"
         elif llm_provider == "pplx-bridge":
@@ -6791,6 +6817,10 @@ function copyWhyCard(btn, taId) {{
 
         Body (JSON, all optional):
           { "deterministic": bool }   force heuristic mode (no LLM)
+          { "async": bool }           run in background, return job_id (default: sync)
+
+        With async=True, returns { job_id, status_url } immediately. Poll
+        GET /api/runs/<run_id>/turn-into-status/<job_id> for result.
         """
         run_data = _load_run(run_id)
         if not run_data:
@@ -6799,8 +6829,6 @@ function copyWhyCard(btn, taId) {{
         profile_id = run_data.get("profile_id", "")
         profile = load_profile(profile_id) if profile_id else None
         if profile is None:
-            # Fall back to a minimal profile derived from the run's display name
-            # so Turn-Into still runs even when no profile is persisted.
             profile = ClubProfile(
                 profile_id=profile_id or "default",
                 display_name=run_data.get("profile_display", "") or "Club",
@@ -6808,21 +6836,69 @@ function copyWhyCard(btn, taId) {{
 
         payload = request.get_json(silent=True) or {}
         deterministic = bool(payload.get("deterministic", False))
+        async_mode = bool(payload.get("async", False))
 
-        try:
-            from mediahub.turn_into import turn_meet_into_pack, save_pack
-            pack = turn_meet_into_pack(run_data, profile, deterministic=deterministic)
-            save_pack(pack, run_id, base_dir=DATA_DIR / "turn_into_packs")
-        except Exception as e:
-            return jsonify({"error": "turn_into_failed", "message": str(e)}), 500
+        def _do_generate(job_id: str) -> None:
+            try:
+                with app.test_request_context():
+                    from mediahub.turn_into import turn_meet_into_pack, save_pack
+                    pack = turn_meet_into_pack(run_data, profile, deterministic=deterministic)
+                    save_pack(pack, run_id, base_dir=DATA_DIR / "turn_into_packs")
+                    pack_url = url_for("turn_into_pack_view",
+                                        run_id=run_id, pack_id=pack["pack_id"])
+                _turn_into_jobs[job_id] = {
+                    "status": "done",
+                    "pack": pack,
+                    "pack_id": pack["pack_id"],
+                    "n_artefacts": len(pack.get("artefacts", [])),
+                    "skipped": [s.get("type") for s in pack.get("skipped", [])],
+                    "pack_url": pack_url,
+                }
+            except Exception as e:
+                import traceback as _tb
+                _turn_into_jobs[job_id] = {
+                    "status": "error",
+                    "error": str(e),
+                    "trace": _tb.format_exc()[-500:],
+                }
 
+        import uuid as _uuid
+        job_id = _uuid.uuid4().hex
+
+        if async_mode:
+            # Async: kick off background thread, return job_id immediately
+            _turn_into_jobs[job_id] = {"status": "running"}
+            t = threading.Thread(target=_do_generate, args=(job_id,), daemon=True)
+            t.start()
+            return jsonify({
+                "ok": True,
+                "job_id": job_id,
+                "status": "running",
+                "status_url": url_for("api_turn_into_status", run_id=run_id, job_id=job_id),
+            })
+
+        # Synchronous (default): block until pack is generated, return final payload
+        _turn_into_jobs[job_id] = {"status": "running"}
+        _do_generate(job_id)
+        job = _turn_into_jobs[job_id]
+        if job["status"] == "error":
+            return jsonify({"error": "turn_into_failed", "message": job["error"]}), 500
+        return jsonify({"ok": True, **{k: v for k, v in job.items() if k != "pack" and k != "status"}})
+
+    @app.route("/api/runs/<run_id>/turn-into-status/<job_id>", methods=["GET"])
+    def api_turn_into_status(run_id: str, job_id: str):
+        """Poll Turn-Into job status. Returns { status: running|done|error, ... }."""
+        job = _turn_into_jobs.get(job_id)
+        if job is None:
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
+        if job["status"] == "running":
+            return jsonify({"status": "running"})
+        if job["status"] == "error":
+            return jsonify({"status": "error", "error": job.get("error", "unknown")}), 500
         return jsonify({
             "ok": True,
-            "pack_id": pack["pack_id"],
-            "n_artefacts": len(pack.get("artefacts", [])),
-            "skipped": [s.get("type") for s in pack.get("skipped", [])],
-            "pack_url": url_for("turn_into_pack_view",
-                                run_id=run_id, pack_id=pack["pack_id"]),
+            "status": "done",
+            **{k: v for k, v in job.items() if k not in ("pack", "status")},
         })
 
     @app.route("/api/runs/<run_id>/turn-into/<pack_id>/caption", methods=["POST"])

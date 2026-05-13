@@ -64,3 +64,4 @@ node_modules/
 # Coverage
 .coverage
 htmlcov/
+data/stub_packs/
