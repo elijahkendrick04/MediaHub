@@ -72,6 +72,24 @@ class ClubProfile:
     # Freeform brand voice notes
     tone_notes: str = ""
 
+    # ---- Voice imitation layer (Brand DNA §4.5 Lately, §4.6 Jasper) ----
+
+    # 5-20 raw caption strings pasted by the user (Instagram/Facebook/X).
+    # Names should be redacted before storage — see brand.voice_imitation.
+    voice_examples: list[str] = field(default_factory=list)
+
+    # Structured voice profile derived from voice_examples. Schema:
+    #   sentence_length_avg: float
+    #   sentence_length_p90: float
+    #   emoji_rate_per_caption: float
+    #   hashtag_count_avg: float
+    #   characteristic_openers: list[str]
+    #   characteristic_closers: list[str]
+    #   forbidden_phrases: list[str]
+    #   preferred_swimmer_address:
+    #       first_name | last_name | surname_only | nickname
+    voice_profile: dict = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return asdict(self)
 

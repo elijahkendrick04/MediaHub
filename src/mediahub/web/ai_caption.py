@@ -91,6 +91,86 @@ _TONE_SYSTEM_PROMPTS: dict[str, str] = {
 KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_SYSTEM_PROMPTS.keys())
 
 
+_ADDRESS_INSTRUCTIONS: dict[str, str] = {
+    "first_name": "Address the swimmer by first name only.",
+    "last_name": "Address the swimmer by their full name with surname.",
+    "surname_only": "Address the swimmer by surname only (sports-broadcast style).",
+    "nickname": "Address the swimmer in a familiar, nickname-style way.",
+}
+
+
+def _voice_profile_addendum(voice_profile: Optional[dict]) -> str:
+    """Render a club's voice_profile as system-prompt guidance.
+
+    Returns "" when the profile is empty or missing — callers can safely
+    concatenate the result with no extra checks.
+    """
+    if not voice_profile:
+        return ""
+    parts: list[str] = ["", "Club voice profile — match this style:"]
+
+    avg_len = voice_profile.get("sentence_length_avg")
+    if avg_len:
+        try:
+            parts.append(
+                f"- Aim for sentences of roughly {float(avg_len):.0f} words "
+                f"on average."
+            )
+        except (TypeError, ValueError):
+            pass
+
+    hash_avg = voice_profile.get("hashtag_count_avg")
+    if hash_avg is not None:
+        try:
+            n = int(round(float(hash_avg)))
+            if n <= 0:
+                parts.append("- Do NOT use hashtags.")
+            else:
+                parts.append(f"- Use about {n} hashtag{'s' if n != 1 else ''}.")
+        except (TypeError, ValueError):
+            pass
+
+    emoji_rate = voice_profile.get("emoji_rate_per_caption")
+    if emoji_rate is not None:
+        try:
+            r = float(emoji_rate)
+            if r <= 0.1:
+                parts.append("- Avoid emoji entirely — this club doesn't use them.")
+            elif r < 1.0:
+                parts.append("- Use emoji sparingly (at most one per caption).")
+            else:
+                parts.append(
+                    f"- This club typically uses around {r:.1f} emoji per caption."
+                )
+        except (TypeError, ValueError):
+            pass
+
+    address = voice_profile.get("preferred_swimmer_address")
+    if isinstance(address, str) and address in _ADDRESS_INSTRUCTIONS:
+        parts.append(f"- {_ADDRESS_INSTRUCTIONS[address]}")
+
+    openers = voice_profile.get("characteristic_openers") or []
+    if openers:
+        sample = ", ".join(f'"{o}"' for o in openers[:5])
+        parts.append(
+            f"- Characteristic opener styles to draw from: {sample}."
+        )
+
+    closers = voice_profile.get("characteristic_closers") or []
+    if closers:
+        sample = ", ".join(f'"{c}"' for c in closers[:5])
+        parts.append(
+            f"- Characteristic closer styles to draw from: {sample}."
+        )
+
+    forbidden = voice_profile.get("forbidden_phrases") or []
+    if forbidden:
+        sample = ", ".join(f'"{p}"' for p in forbidden[:5])
+        parts.append(f"- Phrases to avoid entirely: {sample}.")
+
+    return "\n".join(parts) if len(parts) > 2 else ""
+
+
 def _build_user_message(achievement: dict, club_brand: Optional[dict],
                         nonce: Optional[int] = None) -> str:
     """Format the achievement dict as a structured user message.
@@ -110,19 +190,46 @@ def _build_user_message(achievement: dict, club_brand: Optional[dict],
     return "\n".join(parts)
 
 
+def _resolve_voice_profile(club_profile) -> Optional[dict]:
+    """Return a usable voice_profile dict from a ClubProfile-like object.
+
+    Tolerates: None, plain dicts (treated as the voice_profile itself),
+    or any object exposing a ``voice_profile`` attribute. Returns None
+    when nothing usable is present so callers can fall straight through.
+    """
+    if club_profile is None:
+        return None
+    if isinstance(club_profile, dict):
+        vp = club_profile.get("voice_profile")
+        return vp if isinstance(vp, dict) and vp else None
+    vp = getattr(club_profile, "voice_profile", None)
+    return vp if isinstance(vp, dict) and vp else None
+
+
 def generate_caption_for_tone(
     achievement_dict: dict,
     club_brand: Optional[dict] = None,
     tone: str = "ai",
+    club_profile=None,
 ) -> str:
     """Generate a unique AI caption for the given tone. Returns caption text.
 
     Always generates fresh — never uses a cache. A random nonce is injected
     so that repeated calls with the same data produce different captions.
 
+    If ``club_profile`` is provided and carries a populated
+    ``voice_profile`` dict, the system prompt is extended with that
+    club's learned voice fingerprint (openers, hashtag count, swimmer
+    address style, phrases to avoid). Profiles with no voice_profile
+    are accepted and behave exactly like the old single-arg call.
+
     Raises ClaudeUnavailableError if no LLM provider is reachable.
     """
     system = _TONE_SYSTEM_PROMPTS.get(tone, _SYSTEM_PROMPT)
+    voice_profile = _resolve_voice_profile(club_profile)
+    addendum = _voice_profile_addendum(voice_profile)
+    if addendum:
+        system = system + "\n" + addendum
     nonce = random.randint(10_000, 99_999)
     user_msg = _build_user_message(achievement_dict, club_brand, nonce=nonce)
     return call_claude(system=system, user=user_msg, max_tokens=400).strip()
@@ -179,4 +286,5 @@ __all__ = [
     "KNOWN_AI_TONES",
     "_SYSTEM_PROMPT",
     "_build_user_message",
+    "_voice_profile_addendum",
 ]
