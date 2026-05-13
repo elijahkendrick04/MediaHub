@@ -50,6 +50,8 @@ data/brand_kits/
 # app or tests run from inside the package tree)
 src/mediahub/data/
 src/mediahub/club_profiles/
+src/mediahub/motion_cache/
+src/mediahub/runs_v4/
 
 # Node (legacy frontend tooling)
 node_modules/

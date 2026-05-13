@@ -283,6 +283,51 @@ flask --app src.mediahub.web.web:create_app run --debug
 python -m mediahub.web.web
 ```
 
+## Motion-graphic / video output (Remotion)
+
+MediaHub generates branded MP4 outputs via Remotion 4.x:
+- **Story cards** — 1080×1920, 6 seconds, one card per swimmer/achievement
+- **Meet reels** — 1080×1920, 15 seconds, top-3 cards stitched with crossfades
+
+The Node + Remotion stack lives at `src/mediahub/remotion/`. It is invoked
+from Python via `src/mediahub/visual/motion.py`, which shells out to
+`render.js` and caches outputs under `DATA_DIR/motion_cache/<hash>.mp4`.
+
+### One-time setup
+
+```bash
+# 1. Install Node 18+ (Remotion 4 requirement)
+node --version    # must be >= 18
+
+# 2. Install Remotion deps inside the project
+cd src/mediahub/remotion
+npm install
+
+# 3. (Optional) Smoke-test the integration tests
+cd ../../..
+MEDIAHUB_RUN_MOTION_TESTS=1 pytest tests/test_motion.py -v
+```
+
+If Node is missing, the motion routes return HTTP 500 with a clear
+"Node is not installed" error; static graphic generation is unaffected.
+
+### Routes
+
+- `POST /api/runs/<run_id>/card/<card_id>/motion` — render a single story card MP4
+- `POST /api/runs/<run_id>/reel` — render the meet reel from the top-N cards
+  (default 3, capped at 5; pass `?n=4` to override)
+
+Both endpoints serve the rendered MP4 directly with `Content-Type: video/mp4`.
+Cache hits return the existing file (< 30s wall-clock); cold renders take
+30–90s depending on the host's CPU.
+
+### Brand consistency
+
+Motion compositions read the same `BrandKit` palette as the static graphic
+renderer and honour the per-card `variation_seed` from
+`src/mediahub/creative_brief/generator.py` (`auto_variation_seed_for`), so
+the motion render of a given card visually aligns with its still graphic.
+
 ## Deployment
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.
