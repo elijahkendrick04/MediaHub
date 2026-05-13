@@ -446,30 +446,58 @@ def generate_vision(image_paths: list[str], prompt: str, *, system: Optional[str
                     max_tokens: int = 1024) -> str:
     """Vision generation — analyses one or more local images.
 
-    Returns the model's text. Falls back to heuristic when no API.
+    Provider order: Anthropic (paid, Claude vision) → Gemini (free, Flash
+    multimodal) → heuristic. Returns the model's text. Always returns a
+    string; never raises.
     """
-    if not _has_anthropic_key():
-        return _heuristic_response(prompt, system)
+    # Provider 1: Anthropic
+    if _has_anthropic_key():
+        out = _call_anthropic_vision(image_paths, prompt, system, max_tokens)
+        if out:
+            return out
+    # Provider 2: Gemini (free)
+    if _has_gemini_key():
+        out = _call_gemini_vision(image_paths, prompt, system, max_tokens)
+        if out:
+            return out
+    return _heuristic_response(prompt, system)
+
+
+def _read_image_for_vision(path: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (base64_data, mime_type) for an image path, or (None, None)."""
+    import base64
+    try:
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        log.debug("vision image read failed: %s", e)
+        return (None, None)
+    lower = path.lower()
+    if lower.endswith((".jpg", ".jpeg")):
+        mt = "image/jpeg"
+    elif lower.endswith(".webp"):
+        mt = "image/webp"
+    elif lower.endswith(".gif"):
+        mt = "image/gif"
+    else:
+        mt = "image/png"
+    return (data, mt)
+
+
+def _call_anthropic_vision(image_paths: list[str], prompt: str,
+                           system: Optional[str], max_tokens: int) -> Optional[str]:
     client = _get_anthropic()
     if not client:
-        return _heuristic_response(prompt, system)
-    import base64
+        return None
     content_blocks: list[dict] = []
     for p in image_paths[:5]:  # cap to 5
-        try:
-            with open(p, "rb") as f:
-                data = base64.b64encode(f.read()).decode("ascii")
-            mt = "image/png"
-            if p.lower().endswith((".jpg", ".jpeg")):
-                mt = "image/jpeg"
-            elif p.lower().endswith(".webp"):
-                mt = "image/webp"
-            content_blocks.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": mt, "data": data},
-            })
-        except Exception as e:
-            log.debug("vision image read failed: %s", e)
+        data, mt = _read_image_for_vision(p)
+        if data is None:
+            continue
+        content_blocks.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": mt, "data": data},
+        })
     content_blocks.append({"type": "text", "text": prompt})
     try:
         kwargs = {
@@ -481,10 +509,59 @@ def generate_vision(image_paths: list[str], prompt: str, *, system: Optional[str
             kwargs["system"] = system
         resp = client.messages.create(**kwargs)
         parts = [b.text for b in resp.content if hasattr(b, "text")]
-        return "".join(parts).strip() or _heuristic_response(prompt, system)
+        return "".join(parts).strip() or None
     except Exception as e:
-        log.debug("vision call failed: %s", e)
-        return _heuristic_response(prompt, system)
+        log.debug("anthropic vision failed: %s", e)
+        return None
+
+
+def _call_gemini_vision(image_paths: list[str], prompt: str,
+                        system: Optional[str], max_tokens: int) -> Optional[str]:
+    """Gemini multimodal generateContent — same REST endpoint, inline_data parts."""
+    key = _resolve_gemini_key()
+    if not key:
+        return None
+    try:
+        import requests
+    except Exception:
+        return None
+    parts: list[dict] = []
+    for p in image_paths[:5]:
+        data, mt = _read_image_for_vision(p)
+        if data is None:
+            continue
+        parts.append({"inline_data": {"mime_type": mt, "data": data}})
+    parts.append({"text": prompt})
+    payload: dict[str, Any] = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"maxOutputTokens": int(max_tokens), "temperature": 0.7},
+    }
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{_GEMINI_MODEL}:generateContent"
+    )
+    try:
+        r = requests.post(url, params={"key": key}, json=payload,
+                          timeout=_GEMINI_TIMEOUT,
+                          headers={"Content-Type": "application/json"})
+    except Exception as e:
+        log.debug("gemini vision http error: %s", e)
+        return None
+    if r.status_code != 200:
+        log.debug("gemini vision non-200 (%s): %s", r.status_code, r.text[:200])
+        return None
+    try:
+        data = r.json()
+    except Exception:
+        return None
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return None
+    cparts = ((candidates[0].get("content") or {}).get("parts") or [])
+    text = "".join(p.get("text", "") for p in cparts if isinstance(p, dict)).strip()
+    return text or None
 
 
 # ---------------------------------------------------------------------------
