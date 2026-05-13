@@ -52,30 +52,56 @@ def render_all_formats(
                 wanted.append(fmt)
         formats = wanted
 
+    # Filter to known formats once, preserving order.
+    pending = [(fmt, FORMAT_SIZES[fmt]) for fmt in formats if fmt in FORMAT_SIZES]
+
+    def _one(fmt: str, size: tuple[int, int]):
+        return render_brief(
+            brief,
+            output_dir=output_dir,
+            size=size,
+            format_name=fmt,
+            athlete_path=athlete_path,
+            venue_path=venue_path,
+            logo_path=logo_path,
+            brand_kit=brand_kit,
+            sponsor_name=sponsor_name,
+            venue_attribution=venue_attribution,
+            skip_cutout=skip_cutout,
+        )
+
     out: list[RenderResult] = []
-    for fmt in formats:
-        size = FORMAT_SIZES.get(fmt)
-        if not size:
-            continue
-        try:
-            res = render_brief(
-                brief,
-                output_dir=output_dir,
-                size=size,
-                format_name=fmt,
-                athlete_path=athlete_path,
-                venue_path=venue_path,
-                logo_path=logo_path,
-                brand_kit=brand_kit,
-                sponsor_name=sponsor_name,
-                venue_attribution=venue_attribution,
-                skip_cutout=skip_cutout,
-            )
-            out.append(res)
-        except Exception as e:
-            # Don't lose the whole batch if one variant fails — log and continue
-            import sys as _sys
-            print(f"[graphic_renderer] format {fmt} failed: {e}", file=_sys.stderr)
+    # Parallel render — each format spins up its own Chromium tab. Cap at 4
+    # workers so we don't thrash the host on the free Render tier.
+    # Disable via MEDIAHUB_RENDER_PARALLEL=0 for debugging.
+    import os as _os
+    # Default to 3 concurrent format renders (square/portrait/story all at
+    # once). Each Chromium uses ~150MB so 3 fits in Render's free tier RAM.
+    # Disable via MEDIAHUB_RENDER_PARALLEL=0; cap via MEDIAHUB_RENDER_WORKERS=N.
+    parallel = _os.environ.get("MEDIAHUB_RENDER_PARALLEL", "1") != "0" and len(pending) > 1
+    max_workers = int(_os.environ.get("MEDIAHUB_RENDER_WORKERS", "3"))
+    if parallel:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        # Preserve declared order by keying futures back to their index.
+        results: list[Optional[RenderResult]] = [None] * len(pending)
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(pending))) as pool:
+            future_to_idx = {pool.submit(_one, fmt, size): i for i, (fmt, size) in enumerate(pending)}
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                fmt_name = pending[idx][0]
+                try:
+                    results[idx] = fut.result()
+                except Exception as e:
+                    import sys as _sys
+                    print(f"[graphic_renderer] format {fmt_name} failed: {e}", file=_sys.stderr)
+        out = [r for r in results if r is not None]
+    else:
+        for fmt, size in pending:
+            try:
+                out.append(_one(fmt, size))
+            except Exception as e:
+                import sys as _sys
+                print(f"[graphic_renderer] format {fmt} failed: {e}", file=_sys.stderr)
     return out
 
 

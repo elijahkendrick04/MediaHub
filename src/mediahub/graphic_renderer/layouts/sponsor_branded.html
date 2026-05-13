@@ -11,6 +11,7 @@
   --secondary: {{SECONDARY}};
   --accent: {{ACCENT}};
   --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
   --noise-pattern: {{NOISE_PATTERN}};
 }
 
@@ -33,6 +34,7 @@
 <body>
 <div class="canvas">
   <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-ai"></div>
   <div class="bg-water-pattern"></div>
   <div class="bg-noise"></div>
   <div class="bg-vignette"></div>
@@ -67,6 +69,7 @@
     </div>
     <div class="name" style="opacity:0.4">{{MEET_NAME_SHORT}}</div>
   </div>
+  {{MEDAL_BADGE_BLOCK}}
 </div>
 </body>
 </html>

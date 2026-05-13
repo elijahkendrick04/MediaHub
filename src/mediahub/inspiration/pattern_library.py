@@ -272,6 +272,43 @@ PATTERNS: list[dict] = [
 ]
 
 
+PATTERNS.append({
+    "id": "big_number_hero",
+    "label": "Hero numeral — time/result as the dominant visual",
+    "family": "big_number_hero",
+    "post_angles": ["confirmed_official_pb", "pb_improvement", "first_sub_barrier",
+                    "likely_pb", "finalist", "top_of_field", "qualifying_time",
+                    "biggest_drop", "fastest_since", "gold_medal", "silver_medal",
+                    "bronze_medal", "podium_finish"],
+    "format_priority": ["feed_portrait", "feed_square", "story"],
+    "composition": (
+        "The result/time numeral fills ~55% of canvas height, centered. "
+        "Event name sits above as a small spaced-caps strip. Athlete name "
+        "sits below in Bebas display. Brand corner is centered along the "
+        "bottom with logo + club + meet. Two accent-coloured corner brackets "
+        "(top-left, bottom-right) frame the composition."
+    ),
+    "typography": {
+        "headline_font": "Anton (heavy condensed) for the numeral",
+        "body_font": "Inter / Bebas Neue",
+        "headline_weight": "900",
+        "body_weight": "600-700",
+        "tracking": "very tight on numeral, wide on event caps",
+    },
+    "colour_treatment": (
+        "Background: brand primary gradient with vignette. Numeral in white. "
+        "Event subtitle in accent colour. Corner brackets in accent at 35% opacity."
+    ),
+    "image_treatment": "no photo required — text-led, equally strong with or without an athlete cutout",
+    "text_layers": ["event_name", "result_value", "athlete_full_name", "meet_name", "club_full"],
+    "why_use_this": (
+        "When the result is the headline (PB, qualifying time, gold-medal time), the time itself "
+        "deserves to be the visual hero — competitor pattern from Holo/Predis/Blaze. Works "
+        "perfectly when no athlete photo is available."
+    ),
+})
+
+
 def list_patterns() -> list[dict]:
     return [{"id": p["id"], "label": p["label"], "family": p["family"]} for p in PATTERNS]
 

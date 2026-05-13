@@ -13,6 +13,7 @@
   --medal-light: {{MEDAL_LIGHT}};
   --medal-dark: {{MEDAL_DARK}};
   --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
   --noise-pattern: {{NOISE_PATTERN}};
 }
 
@@ -42,6 +43,7 @@
 <body>
 <div class="canvas">
   <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-ai"></div>
   <div class="bg-water-pattern"></div>
   <div class="bg-noise"></div>
   <div class="bg-vignette"></div>
@@ -74,6 +76,7 @@
     </div>
   </div>
 
+  {{MEDAL_BADGE_BLOCK}}
   {{SPONSOR_BLOCK}}
 </div>
 </body>

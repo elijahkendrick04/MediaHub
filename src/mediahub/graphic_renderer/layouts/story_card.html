@@ -11,6 +11,7 @@
   --secondary: {{SECONDARY}};
   --accent: {{ACCENT}};
   --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
   --noise-pattern: {{NOISE_PATTERN}};
 }
 
@@ -152,6 +153,7 @@
 <body>
 <div class="canvas has-photo-{{HAS_PHOTO}}">
   <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-ai"></div>
   <div class="bg-water-pattern"></div>
   <div class="bg-noise"></div>
   <div class="bg-vignette"></div>
@@ -179,6 +181,7 @@
       <div class="meet-line">{{MEET_NAME}}</div>
     </div>
   </div>
+  {{MEDAL_BADGE_BLOCK}}
 </div>
 </body>
 </html>

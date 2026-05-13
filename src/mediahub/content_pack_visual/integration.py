@@ -28,15 +28,24 @@ from typing import Any, Iterable, Optional
 # ---------------------------------------------------------------------------
 
 def _runs_dir() -> Path:
-    """Resolve RUNS_DIR (production persistent disk) or repo-root/runs_v4 (local dev)."""
+    """Resolve RUNS_DIR. Must match `web.web.RUNS_DIR` exactly, otherwise the
+    /api/visual/<id>/png endpoint can't find PNGs written by this module.
+
+    Resolution order (matches src/mediahub/web/web.py):
+      1. RUNS_DIR env var (production / persistent disk)
+      2. DATA_DIR env var → DATA_DIR/runs_v4
+      3. Local dev default: src/mediahub/runs_v4 (same as DATA_DIR=src/mediahub)
+    """
     env = os.environ.get("RUNS_DIR")
     if env:
         return Path(env)
     data_env = os.environ.get("DATA_DIR")
     if data_env:
         return Path(data_env) / "runs_v4"
-    # src/mediahub/content_pack_visual/integration.py → parents[3] = repo root
-    return Path(__file__).resolve().parents[3] / "runs_v4"
+    # Local-dev default — same _SRC_ROOT logic as web.py:
+    # this file is at src/mediahub/content_pack_visual/integration.py
+    # so parents[1] = src/mediahub/.
+    return Path(__file__).resolve().parents[1] / "runs_v4"
 
 
 def visuals_dir_for_run(run_id: str) -> Path:
@@ -206,6 +215,18 @@ def create_visual_for_item(
                 venue_path = fp
             elif role == "logo" and not logo_path and asset.get("id") != "_brand_logo_":
                 logo_path = fp
+
+    # Fallback: pull the logo straight from the brand kit if the media-library
+    # match didn't supply one. This is the path saved by the upload flow at
+    # /upload/configure (brand_kit_upload.save_logo_bytes).
+    if not logo_path:
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                pass
 
     # 4. Render variants
     try:

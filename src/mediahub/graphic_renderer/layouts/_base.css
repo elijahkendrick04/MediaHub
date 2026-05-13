@@ -44,6 +44,21 @@ body {
   z-index: 1;
 }
 
+/* AI-generated brand-aware background (Replicate SDXL). Sits between the
+   solid gradient and the water-pattern. Only renders when --ai-bg is set
+   to a real data URI; otherwise this layer is invisible. */
+.bg-ai {
+  position: absolute; inset: 0;
+  background-image: var(--ai-bg, none);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.55;
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+  z-index: 1;
+  filter: saturate(1.12);
+}
+
 .bg-noise {
   position: absolute; inset: 0;
   background-image: var(--noise-pattern);
@@ -122,55 +137,59 @@ body {
 
 .label-ribbon {
   position: absolute;
-  top: 56px; left: 56px;
+  top: 64px; left: 64px;
   z-index: 8;
-  display: inline-flex; align-items: center; gap: 14px;
+  display: inline-flex; align-items: center; gap: 16px;
   background: var(--accent);
   color: var(--secondary);
-  padding: 14px 22px 12px;
-  border-radius: 4px;
+  padding: 18px 28px 16px;
+  border-radius: 6px;
   font-family: 'Bebas Neue', 'Anton', sans-serif;
-  font-size: 38px;
-  letter-spacing: 0.05em;
+  font-size: 44px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   font-weight: 700;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
 }
 .label-ribbon::before {
   content: '';
-  width: 12px; height: 12px;
+  width: 14px; height: 14px;
   background: var(--secondary);
   border-radius: 50%;
 }
 
+/* Result chip — the TIME is the hero element. Competitor benchmark:
+   Holo/Predis/Blaze all set the result/time numeral at ~25-30% of the
+   canvas height. For 1080x1350 that's 270-340px. We lean into this. */
 .result-chip {
   position: absolute;
   top: 56px; right: 56px;
   z-index: 8;
-  background: rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.15);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: linear-gradient(150deg, rgba(0,0,0,0.72), rgba(0,0,0,0.40));
+  border: 2px solid var(--accent);
   color: #fff;
-  padding: 16px 26px 14px;
-  border-radius: 10px;
+  padding: 22px 32px 20px;
+  border-radius: 14px;
   font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
   font-feature-settings: "tnum";
   text-align: right;
-  box-shadow: 0 8px 26px rgba(0,0,0,0.30);
+  box-shadow: 0 16px 36px rgba(0,0,0,0.45);
 }
 .result-chip .label {
-  font-size: 12px;
-  letter-spacing: 0.20em;
+  font-size: 14px;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  opacity: 0.65;
-  margin-bottom: 4px;
+  opacity: 0.78;
+  margin-bottom: 6px;
   font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  color: var(--accent);
 }
 .result-chip .value {
-  font-size: 56px;
-  font-weight: 700;
-  line-height: 1;
+  font-size: 96px;
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
 }
 
 /* ------------------------------------------------------------------
@@ -189,21 +208,22 @@ body {
 .fg-firstname {
   font-family: 'Bebas Neue', 'Anton', sans-serif;
   font-weight: 700;
-  font-size: 80px;
-  line-height: 0.95;
-  letter-spacing: 0.005em;
+  font-size: 168px;
+  line-height: 0.88;
+  letter-spacing: -0.005em;
   text-transform: uppercase;
   color: #fff;
-  text-shadow: 0 2px 18px rgba(0,0,0,0.40);
+  text-shadow: 0 4px 24px rgba(0,0,0,0.55);
 }
 
 .fg-event {
   font-family: 'Space Grotesk', 'Inter', sans-serif;
   font-weight: 600;
-  font-size: 28px;
-  letter-spacing: 0.02em;
-  color: rgba(255,255,255,0.85);
-  margin-top: 6px;
+  font-size: 38px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin-top: 14px;
+  text-transform: uppercase;
 }
 
 /* ------------------------------------------------------------------
@@ -218,36 +238,39 @@ body {
   color: #fff;
 }
 .brand-corner .logo-mark {
-  width: 56px; height: 56px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.10);
-  border: 1.5px solid rgba(255,255,255,0.35);
+  width: 96px; height: 96px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.96);
   display: flex; align-items: center; justify-content: center;
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 26px;
-  color: #fff;
+  font-size: 36px;
+  color: var(--primary-deep, var(--primary));
   letter-spacing: 0.04em;
+  padding: 8px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.30);
 }
 .brand-corner .logo-mark img {
   width: 100%; height: 100%;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 8px;
 }
 .brand-corner .text-block {
-  display: flex; flex-direction: column; line-height: 1.1;
+  display: flex; flex-direction: column; line-height: 1.15;
 }
 .brand-corner .club-line {
   font-family: 'Inter', sans-serif;
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: 800;
+  font-size: 26px;
   letter-spacing: 0.01em;
+  text-transform: uppercase;
 }
 .brand-corner .meet-line {
   font-family: 'Inter', sans-serif;
   font-weight: 500;
-  font-size: 14px;
-  opacity: 0.72;
-  margin-top: 4px;
+  font-size: 16px;
+  opacity: 0.82;
+  margin-top: 6px;
+  letter-spacing: 0.04em;
 }
 
 /* ------------------------------------------------------------------

@@ -27,12 +27,18 @@ _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def _data_dir() -> Path:
-    """Resolve DATA_DIR (production) or repo root (local dev)."""
+    """Resolve DATA_DIR. Must agree with web.web.DATA_DIR or the
+    brand-kit-load path in _v8_brand_kit_for won't find what we wrote.
+
+    Resolution order (matches src/mediahub/web/web.py):
+      1. DATA_DIR env var (production / persistent disk)
+      2. Local dev default: src/mediahub (one level up from this file)
+    """
     env = os.environ.get("DATA_DIR")
     if env:
         return Path(env)
-    # src/mediahub/web/brand_kit_upload.py → parents[3] = repo root
-    return Path(__file__).resolve().parents[3]
+    # src/mediahub/web/brand_kit_upload.py → parents[1] = src/mediahub
+    return Path(__file__).resolve().parents[1]
 
 
 def _runs_dir() -> Path:

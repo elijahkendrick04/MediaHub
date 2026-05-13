@@ -435,6 +435,42 @@ def _scale_for_format(width: int, height: int) -> dict[str, float]:
     return {"surname": 0.30, "first": 0.07, "event": 0.024, "result": 0.050, "ribbon": 0.032}
 
 
+def _detect_medal_tier(brief) -> Optional[str]:
+    """Return 'gold' | 'silver' | 'bronze' | 'pb' | None based on the brief.
+
+    Looks at achievement_label, post_angle, inspiration_pattern_id, and place
+    so any layout (not just medal_card) can colour itself appropriately.
+    A swimmer that medalled should always read as "medalled" at a glance,
+    regardless of which layout the brief picked.
+    """
+    layers = brief.text_layers or {}
+    label = (layers.get("achievement_label") or "").lower()
+    angle = (layers.get("post_angle") or "").lower()
+    pattern = (getattr(brief, "inspiration_pattern_id", "") or "").lower()
+    place = str(layers.get("place") or "").strip()
+    combined = " ".join([label, angle, pattern])
+
+    if "gold" in combined or place in ("1", "1st") or place.startswith("1"):
+        return "gold"
+    if "silver" in combined or place in ("2", "2nd") or place.startswith("2"):
+        return "silver"
+    if "bronze" in combined or place in ("3", "3rd") or place.startswith("3"):
+        return "bronze"
+    if "new pb" in combined or "personal best" in combined or "pb swim" in combined:
+        return "pb"
+    return None
+
+
+# Medal palette overrides — applied on top of the club's brand colours so
+# tier is unmistakable at a glance while the brand still dominates.
+_MEDAL_ACCENTS = {
+    "gold":   {"accent": "#FFD24A", "accent_deep": "#A77A07", "badge": "GOLD"},
+    "silver": {"accent": "#E8EAED", "accent_deep": "#6F757B", "badge": "SILVER"},
+    "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
+    "pb":     {"accent": "#22D3EE", "accent_deep": "#0E7C8F", "badge": "NEW PB"},
+}
+
+
 def _common_replacements(brief, width: int, height: int, brand_kit, *,
                          athlete_data_uri: str | None,
                          logo_block: str,
@@ -445,6 +481,34 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
     secondary = palette.get("secondary", "#000000")
     accent = palette.get("accent", "#FFFFFF")
     primary_deep = darken(primary, 0.30)
+
+    # Medal-tier override: gold/silver/bronze should be unmistakable in the
+    # accent colour without losing the club's brand identity in the primary.
+    tier = _detect_medal_tier(brief)
+    medal_badge_html = ""
+    if tier and tier in _MEDAL_ACCENTS:
+        ovr = _MEDAL_ACCENTS[tier]
+        # Override accent so result-chip border, label-ribbon, and event
+        # subtitle all pick up the tier colour automatically.
+        accent = ovr["accent"]
+        # Tier badge — placed below the result chip, top-right, so it
+        # sits next to the time (which is the hero element) and never
+        # collides with the .label-ribbon top-left achievement label.
+        # PB uses a lighter, less-shouty treatment than medal tiers.
+        badge_top = int(height * 0.20)
+        font_size = max(36, int(height * 0.038))
+        medal_badge_html = (
+            f'<div class="tier-badge" style="position:absolute;'
+            f'top:{badge_top}px;right:56px;z-index:10;'
+            f'background:linear-gradient(135deg,{ovr["accent"]} 0%,{ovr["accent_deep"]} 100%);'
+            f'color:#1a1a1a;padding:14px 28px;border-radius:999px;'
+            f'font-family:\'Bebas Neue\',\'Anton\',sans-serif;'
+            f'font-size:{font_size}px;letter-spacing:0.14em;'
+            f'font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,0.50),'
+            f'inset 0 2px 0 rgba(255,255,255,0.5);'
+            f'border:2px solid rgba(255,255,255,0.25)">'
+            f'&#9733; {ovr["badge"]}</div>'
+        )
 
     base_css = _read_text(_BASE_CSS_PATH)
     try:
@@ -493,6 +557,27 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         has_photo=has_photo,
     )
 
+    # Optional AI-generated brand-aware background. Activated only when
+    # REPLICATE_API_TOKEN is set; otherwise the water-pattern + noise
+    # overlay is used as before. Cached aggressively by content hash.
+    ai_bg_uri = None
+    try:
+        import os as _os
+        if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
+            from mediahub.visual.ai_background import (
+                is_available as _ai_bg_ok,
+                background_data_uri_for,
+            )
+            if _ai_bg_ok():
+                # Map width/height back to a format name so the cache key
+                # is stable across cards of the same shape.
+                fmt_for_bg = "feed_square" if width == height else (
+                    "story" if height > width * 1.5 else "feed_portrait"
+                )
+                ai_bg_uri = background_data_uri_for(brief, format_name=fmt_for_bg)
+    except Exception:
+        ai_bg_uri = None
+
     return {
         "WIDTH": str(width), "HEIGHT": str(height),
         "PRIMARY": primary, "PRIMARY_DEEP": primary_deep,
@@ -500,6 +585,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "BASE_CSS": base_css,
         "WATER_PATTERN": _water_pattern_data_uri(),
         "NOISE_PATTERN": _noise_pattern_data_uri(),
+        "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
         "ATHLETE_FIRST_NAME": html_escape(first.upper()),
         "ATHLETE_SURNAME_DISPLAY": html_escape(surname),
@@ -521,6 +607,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "LOGO_BLOCK": logo_block,
         "RESULT_CHIP_BLOCK": result_chip,
         "SPONSOR_BLOCK": sponsor_block,
+        "MEDAL_BADGE_BLOCK": medal_badge_html,
     }
 
 
@@ -949,6 +1036,34 @@ def _fill_reel_cover(brief, width: int, height: int, repl: dict[str, str]) -> di
     return repl
 
 
+def _fill_big_number_hero(brief, width: int, height: int, repl: dict[str, str]) -> dict[str, str]:
+    """Time/result as the dominant visual element — competitor 'numerical hero'.
+
+    The numeral fills ~55% of canvas height. Event sits above as a small
+    spaced-caps strip, athlete name sits below as a Bebas display row.
+    """
+    layers = brief.text_layers or {}
+    repl = dict(repl)
+    result_value = (layers.get("result_value") or "").strip() or "—"
+    # Numeral size scales with both axes; aim for ~55% of canvas height for
+    # a 6-char time like "2:28.21" — characters render narrower than they tax.
+    char_count = max(1, len(result_value))
+    # Cap so very long results don't overflow horizontally.
+    by_width  = (width * 0.85) / max(2, char_count) * 1.50
+    by_height = height * 0.30
+    hero_size = int(min(by_width, by_height))
+
+    repl.update({
+        "HERO_FONT_SIZE": str(hero_size),
+        "EVENT_TOP": str(int(height * 0.22)),
+        "EVENT_FONT_SIZE": str(int(min(width, height) * 0.028)),
+        "ATHLETE_BOTTOM": str(int(height * 0.20)),
+        "NAME_FONT_SIZE": str(int(min(width, height) * 0.068)),
+        "RESULT_VALUE": html_escape(result_value),
+    })
+    return repl
+
+
 # Map family → filler
 _FILLERS = {
     "individual_hero": _fill_individual_hero,
@@ -958,6 +1073,7 @@ _FILLERS = {
     "text_led_recap": _fill_text_led_recap,
     "story_card": _fill_story_card,
     "reel_cover": _fill_reel_cover,
+    "big_number_hero": _fill_big_number_hero,
 }
 
 
