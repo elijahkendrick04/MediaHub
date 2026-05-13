@@ -28,6 +28,7 @@ const brandSchema = z.object({
   accent: z.string().default("#FFFFFF"),
   displayName: z.string().default(""),
   shortName: z.string().default(""),
+  logoDataUri: z.string().default(""),
 });
 
 export const meetReelSchema = z.object({
@@ -85,6 +86,18 @@ const CoverScreen: React.FC<{
           opacity: titleOpacity,
         }}
       >
+        {brand.logoDataUri ? (
+          <img
+            src={brand.logoDataUri}
+            alt={brand.displayName || "club logo"}
+            style={{
+              width: 220,
+              height: 220,
+              objectFit: "contain",
+              marginBottom: 48,
+            }}
+          />
+        ) : null}
         <div
           style={{
             fontSize: 38,

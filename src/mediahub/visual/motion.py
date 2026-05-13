@@ -24,6 +24,7 @@ Design notes
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -64,6 +65,22 @@ def remotion_installed() -> bool:
     return (REMOTION_DIR / "node_modules" / "remotion").exists()
 
 
+def _logo_to_data_uri(logo_svg: Optional[str]) -> str:
+    """Return a base64 SVG data URI for an inline logo string, or "".
+
+    Mirrors the static graphic renderer's _build_logo_block: only accepts
+    raw SVG markup (must start with "<"), so callers can't accidentally
+    inject a stale text mark and we don't have to fetch remote logos.
+    """
+    if not logo_svg or not isinstance(logo_svg, str):
+        return ""
+    s = logo_svg.strip()
+    if not s.startswith("<"):
+        return ""
+    encoded = base64.b64encode(s.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     """Normalise a BrandKit dataclass / dict / object into the shape the
     Remotion compositions expect."""
@@ -80,6 +97,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             "primary_colour": getattr(brand_kit, "primary_colour", ""),
             "secondary_colour": getattr(brand_kit, "secondary_colour", ""),
             "accent_colour": getattr(brand_kit, "accent_colour", ""),
+            "logo_svg": getattr(brand_kit, "logo_svg", ""),
         }
     return {
         "primary": src.get("primary_colour") or src.get("primary") or "#0A2540",
@@ -87,6 +105,9 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "accent": src.get("accent_colour") or src.get("accent") or "#FFFFFF",
         "displayName": src.get("display_name") or src.get("displayName") or "",
         "shortName": src.get("short_name") or src.get("shortName") or "",
+        "logoDataUri": _logo_to_data_uri(
+            src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
+        ),
     }
 
 
@@ -384,3 +405,8 @@ __all__ = [
     "remotion_installed",
     "REMOTION_DIR",
 ]
+
+
+# Re-exported for tests; underscore-prefixed names are intentionally not in
+# __all__ but stay importable as ``from mediahub.visual.motion import _logo_to_data_uri``.
+

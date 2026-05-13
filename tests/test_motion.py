@@ -51,7 +51,39 @@ def test_brand_to_dict_from_plain_dict():
 
 def test_brand_to_dict_handles_none():
     out = motion._brand_to_dict(None)
-    assert set(out.keys()) >= {"primary", "secondary", "accent", "displayName", "shortName"}
+    assert set(out.keys()) >= {
+        "primary", "secondary", "accent", "displayName", "shortName", "logoDataUri",
+    }
+    assert out["logoDataUri"] == ""
+
+
+def test_logo_to_data_uri_encodes_inline_svg():
+    svg = "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>"
+    uri = motion._logo_to_data_uri(svg)
+    assert uri.startswith("data:image/svg+xml;base64,")
+    # Round-trip base64 to confirm the SVG payload survives intact.
+    import base64
+    payload = base64.b64decode(uri.split(",", 1)[1]).decode("utf-8")
+    assert payload == svg
+
+
+def test_logo_to_data_uri_rejects_non_svg():
+    assert motion._logo_to_data_uri(None) == ""
+    assert motion._logo_to_data_uri("") == ""
+    assert motion._logo_to_data_uri("not svg markup") == ""
+    # Tolerate leading whitespace.
+    assert motion._logo_to_data_uri("\n  <svg/>").startswith("data:image/svg+xml;base64,")
+
+
+def test_brand_to_dict_threads_logo_through():
+    from mediahub.brand.kit import BrandKit
+    svg = "<svg viewBox='0 0 100 100'><circle cx='50' cy='50' r='40'/></svg>"
+    bk = BrandKit(profile_id="x", display_name="With Logo", logo_svg=svg)
+    out = motion._brand_to_dict(bk)
+    assert out["logoDataUri"].startswith("data:image/svg+xml;base64,")
+    # Plain-dict input with the same field name works too.
+    out2 = motion._brand_to_dict({"logo_svg": svg, "display_name": "Dict"})
+    assert out2["logoDataUri"] == out["logoDataUri"]
 
 
 def test_card_to_props_pulls_from_achievement():
