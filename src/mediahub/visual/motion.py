@@ -1,0 +1,386 @@
+"""Motion-graphic + short-form video output via Remotion.
+
+Public API
+----------
+- ``render_story_card(card_payload, brand_kit, out_path, *, variation_seed=0,
+                       duration_sec=6.0) -> Path``
+- ``render_meet_reel(top_cards, brand_kit, out_path, *, meet_name="",
+                     duration_sec=15.0) -> Path``
+
+Both helpers shell out to ``src/mediahub/remotion/render.js`` via Node and
+cache the resulting MP4 by a deterministic content hash. Cached outputs
+live under ``DATA_DIR / "motion_cache" / <hash>.mp4``; cache hits avoid
+the Node bundling/rendering cost entirely.
+
+Design notes
+------------
+- Node is an optional dependency. ``node_available()`` exposes a fast
+  check so the web layer can degrade gracefully if Node is missing.
+- The variation seed from ``mediahub.creative_brief.generator`` is woven
+  into the cache key and forwarded to the Remotion composition so the
+  motion render of a given card stays visually identical across calls.
+- Brand-kit ingest accepts either a ``BrandKit`` dataclass or a plain dict
+  (so the renderer doesn't have to import the brand package).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+from dataclasses import is_dataclass, asdict
+from pathlib import Path
+from typing import Any, Optional
+
+
+REMOTION_DIR = Path(__file__).resolve().parents[1] / "remotion"
+RENDER_SCRIPT = REMOTION_DIR / "render.js"
+
+# Composition ids declared in src/mediahub/remotion/src/Root.tsx
+COMP_STORY = "StoryCard"
+COMP_REEL = "MeetReel"
+
+
+def _data_dir() -> Path:
+    """Resolve the DATA_DIR at call time so tests can monkeypatch it."""
+    src_root = Path(__file__).resolve().parents[1]
+    return Path(os.environ.get("DATA_DIR", str(src_root)))
+
+
+def _cache_dir() -> Path:
+    d = _data_dir() / "motion_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def node_available() -> bool:
+    """Return True if a `node` binary is on PATH."""
+    return shutil.which("node") is not None
+
+
+def remotion_installed() -> bool:
+    """Return True if the Remotion deps appear to be installed locally."""
+    return (REMOTION_DIR / "node_modules" / "remotion").exists()
+
+
+def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
+    """Normalise a BrandKit dataclass / dict / object into the shape the
+    Remotion compositions expect."""
+    if brand_kit is None:
+        src: dict[str, Any] = {}
+    elif isinstance(brand_kit, dict):
+        src = brand_kit
+    elif is_dataclass(brand_kit):
+        src = asdict(brand_kit)
+    else:
+        src = {
+            "display_name": getattr(brand_kit, "display_name", ""),
+            "short_name": getattr(brand_kit, "short_name", ""),
+            "primary_colour": getattr(brand_kit, "primary_colour", ""),
+            "secondary_colour": getattr(brand_kit, "secondary_colour", ""),
+            "accent_colour": getattr(brand_kit, "accent_colour", ""),
+        }
+    return {
+        "primary": src.get("primary_colour") or src.get("primary") or "#0A2540",
+        "secondary": src.get("secondary_colour") or src.get("secondary") or "#000000",
+        "accent": src.get("accent_colour") or src.get("accent") or "#FFFFFF",
+        "displayName": src.get("display_name") or src.get("displayName") or "",
+        "shortName": src.get("short_name") or src.get("shortName") or "",
+    }
+
+
+def _card_to_props(card: dict, *, variation_seed: int = 0) -> dict[str, Any]:
+    """Coerce one content-pack card payload into the StoryCard props shape.
+
+    Accepts either a flat dict ({"swimmer_name": ..., "event": ...}) or the
+    nested {"achievement": {...}} variant emitted by the recognition layer.
+    """
+    ach = card.get("achievement") if isinstance(card, dict) else None
+    if not isinstance(ach, dict):
+        ach = card or {}
+    layers = card.get("text_layers") if isinstance(card, dict) else None
+    if not isinstance(layers, dict):
+        layers = {}
+    raw_facts = ach.get("raw_facts") if isinstance(ach, dict) else None
+    if not isinstance(raw_facts, dict):
+        raw_facts = {}
+
+    athlete = (
+        layers.get("athlete_full_name")
+        or ach.get("swimmer_name")
+        or ach.get("athlete_name")
+        or card.get("swimmer_name")
+        or card.get("athlete_name")
+        or ""
+    )
+    first = (
+        layers.get("athlete_first_name")
+        or (athlete.split()[0] if athlete else "")
+    )
+    surname = (
+        layers.get("athlete_surname")
+        or (athlete.split()[-1] if athlete else "")
+    )
+    event = (
+        layers.get("event_name")
+        or ach.get("event_name")
+        or ach.get("event")
+        or card.get("event")
+        or card.get("event_name")
+        or ""
+    )
+    result = (
+        layers.get("result_value")
+        or ach.get("result_time")
+        or ach.get("time")
+        or raw_facts.get("time_str")
+        or raw_facts.get("result")
+        or card.get("result_time")
+        or card.get("time")
+        or ""
+    )
+    label = (
+        layers.get("achievement_label")
+        or ach.get("achievement_label")
+        or ach.get("type")
+        or card.get("confidence_label")
+        or "STRONG SWIM"
+    )
+    meet_name = (
+        layers.get("meet_name")
+        or card.get("meet_name")
+        or ach.get("meet_name")
+        or ""
+    )
+    place = (
+        layers.get("place")
+        or ach.get("place")
+        or raw_facts.get("place")
+        or ""
+    )
+
+    return {
+        "athleteFullName": str(athlete),
+        "athleteFirstName": str(first),
+        "athleteSurname": str(surname),
+        "eventName": str(event),
+        "resultValue": str(result),
+        "achievementLabel": str(label).upper(),
+        "meetName": str(meet_name),
+        "place": str(place),
+        "variationSeed": int(variation_seed or 0),
+    }
+
+
+def _content_hash(payload: dict, *, kind: str) -> str:
+    """Stable hash for the cache key. Serialises with sort_keys so call-site
+    ordering doesn't bust the cache."""
+    blob = json.dumps({"kind": kind, **payload}, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
+
+
+def _run_remotion(
+    *,
+    composition_id: str,
+    props: dict,
+    out_path: Path,
+    duration_sec: Optional[float] = None,
+    timeout: int = 600,
+) -> Path:
+    """Invoke the Node render script. Raises RuntimeError on failure."""
+    if not node_available():
+        raise RuntimeError(
+            "Node is not installed; install Node 18+ to render motion graphics. "
+            "See CLAUDE.md → 'Remotion / motion graphics setup'."
+        )
+    if not RENDER_SCRIPT.exists():
+        raise RuntimeError(f"Remotion render script missing at {RENDER_SCRIPT}")
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write props to a temp file alongside the cache; cheap and lets us tail
+    # the JSON if a render fails.
+    props_dir = _cache_dir() / "props"
+    props_dir.mkdir(parents=True, exist_ok=True)
+    props_path = props_dir / f"{out_path.stem}.json"
+    props_path.write_text(json.dumps(props, indent=2), encoding="utf-8")
+
+    cmd = [
+        "node",
+        str(RENDER_SCRIPT),
+        "--composition",
+        composition_id,
+        "--props",
+        str(props_path),
+        "--output",
+        str(out_path),
+    ]
+    if duration_sec is not None:
+        cmd.extend(["--duration", str(duration_sec)])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(REMOTION_DIR),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Remotion render timed out after {timeout}s") from e
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
+        raise RuntimeError(
+            f"Remotion render failed (exit {proc.returncode}):\n{tail}"
+        )
+    if not out_path.exists() or out_path.stat().st_size < 1024:
+        raise RuntimeError(
+            f"Remotion reported success but {out_path} is missing or empty"
+        )
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def render_story_card(
+    card_payload: dict,
+    brand_kit: Any,
+    out_path: Path,
+    *,
+    variation_seed: int = 0,
+    duration_sec: float = 6.0,
+) -> Path:
+    """Render a single content-pack card to a 1080x1920 MP4 story.
+
+    Returns the path to the rendered MP4. Cached by content hash so repeated
+    calls with the same card + brand + seed reuse the existing file.
+    """
+    out_path = Path(out_path)
+    brand_dict = _brand_to_dict(brand_kit)
+    card_dict = _card_to_props(card_payload, variation_seed=variation_seed)
+
+    cache_key = _content_hash(
+        {"card": card_dict, "brand": brand_dict, "duration": duration_sec},
+        kind="story",
+    )
+    cached = _cache_dir() / f"{cache_key}.mp4"
+    if cached.exists() and cached.stat().st_size > 1024:
+        # Re-publish the cached MP4 at the caller-requested path (without
+        # an expensive copy when the caller asked for the cache location).
+        if cached.resolve() != out_path.resolve():
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(cached, out_path)
+            return out_path
+        return cached
+
+    # Render into the cache first so partial failures don't leave a half-
+    # written file at the user-visible out_path.
+    _run_remotion(
+        composition_id=COMP_STORY,
+        props={"card": card_dict, "brand": brand_dict},
+        out_path=cached,
+        duration_sec=duration_sec,
+    )
+    if cached.resolve() != out_path.resolve():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cached, out_path)
+    return out_path if out_path.exists() else cached
+
+
+def render_meet_reel(
+    top_cards: list[dict],
+    brand_kit: Any,
+    out_path: Path,
+    *,
+    meet_name: str = "",
+    duration_sec: float = 15.0,
+) -> Path:
+    """Render a multi-card reel (default 15s) from the top cards for a meet.
+
+    Inputs:
+      top_cards   list of card dicts (typically the top 3 from the content
+                  pack). Each card is shaped via ``_card_to_props``.
+      brand_kit   BrandKit or dict; applies palette, club name, logo hint.
+      out_path    where the final MP4 should land. Cached results may be
+                  copied here from the motion cache.
+      meet_name   meet headline used on the reel cover. Defaults to the
+                  first card's ``meet_name`` if blank.
+      duration_sec total reel duration; default 15s.
+    """
+    out_path = Path(out_path)
+    brand_dict = _brand_to_dict(brand_kit)
+
+    cards_props: list[dict] = []
+    for c in top_cards or []:
+        # variation seed per card — caller may pass via {"variation_seed": N}
+        seed = 0
+        if isinstance(c, dict):
+            seed = int(c.get("variation_seed") or 0)
+            if not seed:
+                # Derive a stable seed from the card id so re-renders are
+                # deterministic per card without the caller having to
+                # pre-compute it.
+                cid = (
+                    c.get("id")
+                    or c.get("swim_id")
+                    or (c.get("achievement") or {}).get("swim_id")
+                    or ""
+                )
+                if cid:
+                    try:
+                        from mediahub.creative_brief.generator import (
+                            auto_variation_seed_for,
+                        )
+                        seed = auto_variation_seed_for(str(cid))
+                    except Exception:
+                        seed = 1
+        cards_props.append(_card_to_props(c, variation_seed=seed))
+
+    if not meet_name:
+        for cp in cards_props:
+            if cp.get("meetName"):
+                meet_name = cp["meetName"]
+                break
+
+    cache_key = _content_hash(
+        {
+            "cards": cards_props,
+            "brand": brand_dict,
+            "meet": meet_name,
+            "duration": duration_sec,
+        },
+        kind="reel",
+    )
+    cached = _cache_dir() / f"{cache_key}.mp4"
+    if cached.exists() and cached.stat().st_size > 1024:
+        if cached.resolve() != out_path.resolve():
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(cached, out_path)
+            return out_path
+        return cached
+
+    _run_remotion(
+        composition_id=COMP_REEL,
+        props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
+        out_path=cached,
+        duration_sec=duration_sec,
+    )
+    if cached.resolve() != out_path.resolve():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cached, out_path)
+    return out_path if out_path.exists() else cached
+
+
+__all__ = [
+    "render_story_card",
+    "render_meet_reel",
+    "node_available",
+    "remotion_installed",
+    "REMOTION_DIR",
+]

@@ -106,9 +106,16 @@ class RankFactor:
     value: float
     weight: float
     reason: str
+    plain_summary: str = ""    # one-line plain-English explanation of this factor's contribution
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "value": self.value, "weight": self.weight, "reason": self.reason}
+        return {
+            "name": self.name,
+            "value": self.value,
+            "weight": self.weight,
+            "reason": self.reason,
+            "plain_summary": self.plain_summary,
+        }
 
 
 @dataclass

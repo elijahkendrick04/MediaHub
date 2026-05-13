@@ -13,6 +13,7 @@ from .tone import Tone, TONE_META
 from .templates import CaptionTemplate, render_template
 from .store import load_brand, save_brand
 from .apply import apply_brand
+from .voice_imitation import analyse_examples, redact_pii
 
 __all__ = [
     "BrandKit",
@@ -23,4 +24,6 @@ __all__ = [
     "load_brand",
     "save_brand",
     "apply_brand",
+    "analyse_examples",
+    "redact_pii",
 ]

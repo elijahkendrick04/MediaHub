@@ -176,6 +176,68 @@ def _profile_priority_factor(a: Achievement, ctx) -> tuple[float, float, str]:
     return multiplier, _WEIGHTS["profile_priority"], reason
 
 
+def _plain_summary(name: str, value: float, a: Achievement, ctx) -> str:
+    """One-line plain-English summary of a ranking factor's contribution.
+
+    The summary is grounded in the factor name + value + the achievement type
+    so it can be surfaced in the "Why this card?" explainer without rewording
+    by an LLM. Returns "" when the factor did not contribute (value ≈ 0).
+    """
+    meet_level = (getattr(ctx, "meet_level", None) or "open") if ctx is not None else "open"
+    atype = a.type or ""
+
+    if name == "magnitude":
+        if value >= 0.85:
+            return f"Strong on-paper achievement ({atype.replace('_', ' ')})."
+        if value >= 0.5:
+            return f"Solid result for this achievement type ({atype.replace('_', ' ')})."
+        if value > 0:
+            return f"Modest result for this achievement type ({atype.replace('_', ' ')})."
+        return ""
+
+    if name == "rarity":
+        if value >= 0.7:
+            return f"Rare at this level — {meet_level} meet."
+        if value >= 0.4:
+            return f"Moderately rare at a {meet_level} meet."
+        if value > 0:
+            return f"Common at a {meet_level} meet."
+        return ""
+
+    if name == "meet_level":
+        return f"{meet_level.title()}-level competition."
+
+    if name == "narrative":
+        if value >= 0.7:
+            return "Strong story angle (e.g. multi-PB weekend, biggest drop, return to form)."
+        if value >= 0.3:
+            return "Has a narrative angle that adds interest."
+        return ""
+
+    if name == "barrier":
+        if value >= 0.5:
+            return "First-time sub-barrier crossing."
+        return ""
+
+    if name == "certainty":
+        if value >= 0.85:
+            return f"High confidence in the underlying data ({value:.2f})."
+        if value >= 0.5:
+            return f"Moderate confidence in the underlying data ({value:.2f})."
+        if value > 0:
+            return f"Low confidence in the underlying data ({value:.2f})."
+        return ""
+
+    if name == "profile_priority":
+        if value > 1.05:
+            return f"Club has flagged {atype.replace('_', ' ')} as a priority (×{value:.2f})."
+        if value < 0.95:
+            return f"Club has down-weighted {atype.replace('_', ' ')} (×{value:.2f})."
+        return "No club priority override."
+
+    return ""
+
+
 def _compute_priority(a: Achievement, ctx) -> tuple[float, list[RankFactor]]:
     factors = []
     weighted_sum = 0.0
@@ -192,7 +254,14 @@ def _compute_priority(a: Achievement, ctx) -> tuple[float, list[RankFactor]]:
         ("profile_priority", _profile_priority_factor),
     ]:
         value, weight, reason = fn(a, ctx)
-        factors.append(RankFactor(name=name, value=round(value, 4), weight=weight, reason=reason))
+        rounded_value = round(value, 4)
+        factors.append(RankFactor(
+            name=name,
+            value=rounded_value,
+            weight=weight,
+            reason=reason,
+            plain_summary=_plain_summary(name, rounded_value, a, ctx),
+        ))
 
         if name == "profile_priority":
             # Store multiplier to apply after weighted sum; don't add to denominator

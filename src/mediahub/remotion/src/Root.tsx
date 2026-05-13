@@ -1,0 +1,62 @@
+import React from "react";
+import { Composition } from "remotion";
+import { StoryCard, storyCardSchema } from "./compositions/StoryCard";
+import { MeetReel, meetReelSchema } from "./compositions/MeetReel";
+
+const FPS = 30;
+const STORY_W = 1080;
+const STORY_H = 1920;
+
+const STORY_DURATION_FRAMES = FPS * 6;
+const REEL_DURATION_FRAMES = FPS * 15;
+
+const defaultBrand = {
+  primary: "#0A2540",
+  secondary: "#000000",
+  accent: "#FFFFFF",
+  displayName: "Your Club",
+  shortName: "CLUB",
+};
+
+const defaultCard = {
+  athleteFullName: "Sample Swimmer",
+  athleteFirstName: "Sample",
+  athleteSurname: "Swimmer",
+  eventName: "100m Freestyle LC",
+  resultValue: "00:54.32",
+  achievementLabel: "NEW PB",
+  meetName: "MediaHub Open",
+  place: "1",
+  variationSeed: 1,
+};
+
+export const RemotionRoot: React.FC = () => {
+  return (
+    <>
+      <Composition
+        id="StoryCard"
+        component={StoryCard}
+        durationInFrames={STORY_DURATION_FRAMES}
+        fps={FPS}
+        width={STORY_W}
+        height={STORY_H}
+        schema={storyCardSchema}
+        defaultProps={{ card: defaultCard, brand: defaultBrand }}
+      />
+      <Composition
+        id="MeetReel"
+        component={MeetReel}
+        durationInFrames={REEL_DURATION_FRAMES}
+        fps={FPS}
+        width={STORY_W}
+        height={STORY_H}
+        schema={meetReelSchema}
+        defaultProps={{
+          cards: [defaultCard, defaultCard, defaultCard],
+          brand: defaultBrand,
+          meetName: "MediaHub Open",
+        }}
+      />
+    </>
+  );
+};

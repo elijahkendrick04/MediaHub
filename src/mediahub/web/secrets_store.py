@@ -86,6 +86,28 @@ def has_anthropic_key() -> bool:
     return bool(get_anthropic_key())
 
 
+def get_buffer_access_token() -> Optional[str]:
+    """Return the user's Buffer access token, from env or on-disk store.
+
+    Precedence: BUFFER_ACCESS_TOKEN env > data/secrets.json key.
+    Used by the publishing layer (src/mediahub/publishing/buffer.py) to
+    schedule approved content cards to the user's connected social channels.
+    """
+    env = os.environ.get("BUFFER_ACCESS_TOKEN")
+    if env and env.strip():
+        return env.strip()
+    return get_secret("buffer_access_token")
+
+
+def has_buffer_access_token() -> bool:
+    return bool(get_buffer_access_token())
+
+
+def set_buffer_access_token(token: Optional[str]) -> None:
+    """Store the Buffer access token. Empty/None clears it."""
+    set_secret("buffer_access_token", token)
+
+
 def mask_key(key: Optional[str]) -> str:
     """Render a partially-masked key for UI display."""
     if not key:
@@ -100,5 +122,7 @@ __all__ = [
     "load_secrets", "save_secrets",
     "get_secret", "set_secret",
     "get_anthropic_key", "has_anthropic_key",
+    "get_buffer_access_token", "has_buffer_access_token",
+    "set_buffer_access_token",
     "mask_key",
 ]

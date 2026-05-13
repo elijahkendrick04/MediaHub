@@ -88,10 +88,15 @@ def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
         if wf:
             wf_status = wf.status.value if hasattr(wf, "status") else str(wf)
             item["wf_status"] = wf_status
+            sched = getattr(wf, "schedule_status", None)
+            item["schedule_status"] = sched.value if sched is not None and hasattr(sched, "value") else "queued"
+            item["buffer_update_id"] = getattr(wf, "buffer_update_id", None)
         else:
             item["wf_status"] = "queue"
+            item["schedule_status"] = "queued"
     else:
         item["wf_status"] = item.get("wf_status", "queue")
+        item["schedule_status"] = item.get("schedule_status", "queued")
 
     return item
 

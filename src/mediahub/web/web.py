@@ -96,6 +96,122 @@ except ImportError as _v73_err:
     _load_voice_profile = None
     _save_voice_profile = None
 
+# V9: "Why this card?" explainer.
+try:
+    from mediahub.recognition.explainer import explain_achievement as _explain_achievement
+except ImportError:
+    _explain_achievement = None
+
+
+def _build_card_explanation(ra: dict) -> dict:
+    """Build the "Why this card?" explanation dict for a ranked-achievement.
+
+    Returns the explain_achievement() output, or a fallback dict when the
+    explainer module is unavailable. Always returns a dict with the three
+    expected keys so downstream code can render unconditionally.
+    """
+    if _explain_achievement is None:
+        return {
+            "headline":     "Generated for: ranked top-N by overall score.",
+            "bullets":      [],
+            "source_lines": [],
+        }
+    try:
+        return _explain_achievement(
+            ra.get("achievement") or {},
+            ra.get("factors") or [],
+            rank=ra.get("rank"),
+        )
+    except Exception:
+        return {
+            "headline":     "Generated for: ranked top-N by overall score.",
+            "bullets":      [],
+            "source_lines": [],
+        }
+
+
+def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
+    """Render the collapsible "Why this card?" disclosure HTML.
+
+    The block is grounded: the headline / bullets come from the ranker's
+    factors and the source_lines are quoted verbatim from the achievement's
+    evidence entries. A "Copy reasoning" button copies the full text so it
+    can be pasted into a sponsor report.
+    """
+    exp = _build_card_explanation(ra)
+    headline = _h(exp.get("headline", ""))
+    bullets = exp.get("bullets") or []
+    source_lines = exp.get("source_lines") or []
+
+    bullets_html = ""
+    for b in bullets:
+        bullets_html += f'<li style="margin-bottom:3px">{_h(b)}</li>'
+    if not bullets_html:
+        bullets_html = ""
+
+    src_html = ""
+    for sl in source_lines:
+        label = _h(sl.get("label", "source"))
+        raw = _h(sl.get("raw_text", ""))
+        offset = sl.get("file_offset")
+        offset_tag = (
+            f'<span class="muted" style="font-size:10px;margin-left:6px">#{int(offset)}</span>'
+            if isinstance(offset, int) else ""
+        )
+        src_html += (
+            f'<li style="margin-bottom:6px">'
+            f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
+            f'{label}{offset_tag}</div>'
+            f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
+            f'background:rgba(34,211,238,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;'
+            f'color:var(--ink)">{raw}</blockquote>'
+            f'</li>'
+        )
+    if not src_html:
+        src_html = (
+            '<li class="muted" style="font-size:12px">'
+            'No source lines available — explanation is based on the ranker only.'
+            '</li>'
+        )
+
+    # Plain-text payload for the "Copy reasoning" button (kept in a hidden textarea
+    # so the copy works without an extra round-trip to the server).
+    plain_lines = [exp.get("headline", "")]
+    for b in bullets:
+        plain_lines.append(f"- {b}")
+    if source_lines:
+        plain_lines.append("")
+        plain_lines.append("Source lines:")
+        for sl in source_lines:
+            plain_lines.append(f"  [{sl.get('label','source')}] {sl.get('raw_text','')}")
+    plain_text = _h("\n".join(p for p in plain_lines if p is not None))
+
+    bullets_block = (
+        f'<ul style="margin:6px 0 10px 0;padding-left:20px;font-size:12px;color:var(--ink-dim)">{bullets_html}</ul>'
+        if bullets_html else ""
+    )
+
+    return f"""
+<details class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
+  border:1px solid rgba(139,92,246,0.25);border-radius:8px">
+  <summary style="cursor:pointer;font-size:12px;font-weight:600;color:#A78BFA;user-select:none;
+    list-style:none;display:flex;align-items:center;gap:6px">
+    <span aria-hidden="true">&#9432;</span> Why this card?
+  </summary>
+  <div style="margin-top:8px">
+    <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
+    {bullets_block}
+    <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
+      margin-bottom:4px">Source lines (verbatim)</div>
+    <ul style="list-style:none;margin:0;padding:0">{src_html}</ul>
+    <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn secondary" type="button" style="font-size:11px;padding:4px 10px"
+        onclick="copyWhyCard(this, 'why-text-{card_uuid}')">Copy reasoning</button>
+      <textarea id="why-text-{card_uuid}" style="display:none">{plain_text}</textarea>
+    </div>
+  </div>
+</details>"""
+
 # V8: media generation engine
 try:
     from mediahub.media_library.store import MediaLibraryStore as _V8MediaStore, get_store as _v8_get_media_store
@@ -369,6 +485,263 @@ def _delete_run(run_id: str) -> bool:
     conn.commit()
     conn.close()
     return existed
+
+
+# ---------------------------------------------------------------------
+# Schedule (Buffer) modal — shared between classic + grouped pack pages
+# ---------------------------------------------------------------------
+
+def _schedule_modal_html() -> str:
+    """Return the hidden Buffer schedule modal markup.
+
+    The modal is populated by mhScheduleOpen() with channel checkboxes
+    fetched from /api/buffer/channels. When the token is missing the
+    fetch returns 401 and the open-handler shows "Connect Buffer in
+    Settings" instead of opening the dialog.
+    """
+    return """
+<div id="mh-sched-modal" class="no-print"
+     style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(8,12,20,0.72);
+            align-items:center;justify-content:center;padding:20px"
+     onclick="if(event.target===this) mhScheduleClose()">
+  <div role="dialog" aria-modal="true" aria-labelledby="mh-sched-title"
+       style="background:var(--panel,#10141d);border:1px solid var(--border,#252a36);
+              border-radius:12px;max-width:560px;width:100%;max-height:90vh;
+              overflow:auto;padding:22px;color:var(--ink,#e9eef5)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 id="mh-sched-title" style="margin:0;font-size:18px">Schedule with Buffer</h2>
+      <button class="btn secondary" style="font-size:14px;padding:4px 10px"
+              onclick="mhScheduleClose()" aria-label="Close">&times;</button>
+    </div>
+    <div id="mh-sched-error" style="display:none;color:#ff8a99;margin-bottom:10px"></div>
+    <div id="mh-sched-channels-wrap" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">Channels</div>
+      <div id="mh-sched-channels" style="display:flex;flex-direction:column;gap:6px;
+           max-height:180px;overflow:auto;border:1px solid var(--border,#252a36);
+           border-radius:8px;padding:8px">
+        <p class="muted" style="margin:0">Loading channels…</p>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label for="mh-sched-caption" style="font-weight:600;display:block;margin-bottom:4px">Caption</label>
+      <textarea id="mh-sched-caption" rows="6"
+        style="width:100%;padding:8px;border:1px solid var(--border,#252a36);
+               border-radius:8px;background:rgba(255,255,255,0.04);
+               color:inherit;font-family:inherit;resize:vertical"></textarea>
+    </div>
+    <div style="margin-bottom:12px">
+      <label for="mh-sched-when" style="font-weight:600;display:block;margin-bottom:4px">
+        Schedule for <span class="muted" style="font-weight:400">(leave blank for next queue slot)</span>
+      </label>
+      <input id="mh-sched-when" type="datetime-local"
+             style="padding:8px;border:1px solid var(--border,#252a36);border-radius:8px;
+                    background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>
+    </div>
+    <input type="hidden" id="mh-sched-media-url"/>
+    <input type="hidden" id="mh-sched-run-id"/>
+    <input type="hidden" id="mh-sched-card-id"/>
+    <input type="hidden" id="mh-sched-pill-id"/>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+      <button class="btn secondary" onclick="mhScheduleClose()">Cancel</button>
+      <button id="mh-sched-send" class="btn" onclick="mhScheduleSend()">Send to Buffer</button>
+    </div>
+  </div>
+</div>
+"""
+
+
+def _schedule_modal_js() -> str:
+    """Return the JS that drives the Buffer schedule modal.
+
+    Pulls channels from /api/buffer/channels (401 → redirect to /settings),
+    POSTs to /api/runs/<id>/card/<cid>/schedule, and preserves the user's
+    edited caption when Buffer returns an error.
+    """
+    return """
+<script>
+(function(){
+  var API_BASE = window._API_BASE || '';
+
+  function fmtDt(d) {
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+      + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function localToIso(local) {
+    if (!local) return '';
+    var d = new Date(local);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString();
+  }
+
+  function pickActiveCaption(cardEl) {
+    if (!cardEl) return '';
+    var activePanel = cardEl.querySelector('.tone-panel:not([style*="display:none"]) textarea');
+    if (activePanel && activePanel.value && activePanel.value.trim()) return activePanel.value.trim();
+    var firstPanel = cardEl.querySelector('.tone-panel textarea');
+    if (firstPanel && firstPanel.value && firstPanel.value.trim()) return firstPanel.value.trim();
+    var ta = cardEl.querySelector('textarea[id^="cap-text-"], textarea[id^="cap-"]');
+    if (ta && ta.value) return ta.value.trim();
+    var fallback = cardEl.textContent || '';
+    return fallback.trim().slice(0, 480);
+  }
+
+  function pickMediaUrl(cardEl) {
+    if (!cardEl) return '';
+    var img = cardEl.querySelector('img[src]');
+    if (img && img.getAttribute('src')) {
+      var src = img.getAttribute('src');
+      if (/^https?:/i.test(src)) return src;
+      try { return new URL(src, window.location.href).toString(); }
+      catch (e) { return ''; }
+    }
+    return '';
+  }
+
+  window.mhScheduleOpen = function(runId, cardId, cardElId) {
+    var modal = document.getElementById('mh-sched-modal');
+    if (!modal) return;
+    var cardEl = document.getElementById(cardElId);
+    document.getElementById('mh-sched-run-id').value = runId || '';
+    document.getElementById('mh-sched-card-id').value = cardId || '';
+    document.getElementById('mh-sched-pill-id').value = cardElId || '';
+    document.getElementById('mh-sched-caption').value = pickActiveCaption(cardEl);
+    document.getElementById('mh-sched-when').value = '';
+    document.getElementById('mh-sched-media-url').value = pickMediaUrl(cardEl);
+    var err = document.getElementById('mh-sched-error');
+    err.style.display = 'none'; err.textContent = '';
+
+    var chWrap = document.getElementById('mh-sched-channels');
+    chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels…</p>';
+
+    fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
+      return r.json().then(function(j){ return {status:r.status, body:j}; });
+    }).then(function(o){
+      if (o.status === 401 || !o.body.connected) {
+        var settings = (o.body && o.body.settings_url) || (API_BASE + '/settings');
+        alert((o.body && o.body.message) || 'Connect Buffer in Settings first.');
+        window.location.href = settings;
+        return;
+      }
+      if (o.status >= 400) {
+        chWrap.innerHTML = '<p style="color:#ff8a99;margin:0">' +
+          ((o.body && o.body.message) || ('Buffer error ' + o.status)) + '</p>';
+        modal.style.display = 'flex';
+        return;
+      }
+      var channels = (o.body && o.body.channels) || [];
+      if (!channels.length) {
+        chWrap.innerHTML = '<p class="muted" style="margin:0">No channels connected to this Buffer account.</p>';
+      } else {
+        chWrap.innerHTML = '';
+        channels.forEach(function(c, i){
+          var lbl = document.createElement('label');
+          lbl.style.display = 'flex';
+          lbl.style.alignItems = 'center';
+          lbl.style.gap = '8px';
+          lbl.style.cursor = 'pointer';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.value = c.id;
+          cb.dataset.mhChannel = '1';
+          cb.checked = !!c.default || (i === 0 && channels.length === 1);
+          var name = c.formatted_username || c.service_username || c.id;
+          var service = c.service ? ' (' + c.service + ')' : '';
+          lbl.appendChild(cb);
+          var span = document.createElement('span');
+          span.textContent = name + service;
+          lbl.appendChild(span);
+          chWrap.appendChild(lbl);
+        });
+      }
+      modal.style.display = 'flex';
+    }).catch(function(e){
+      chWrap.innerHTML = '<p style="color:#ff8a99;margin:0">Network error: ' + (e && e.message || e) + '</p>';
+      modal.style.display = 'flex';
+    });
+  };
+
+  window.mhScheduleClose = function() {
+    var modal = document.getElementById('mh-sched-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.mhScheduleSend = function() {
+    var runId  = document.getElementById('mh-sched-run-id').value;
+    var cardId = document.getElementById('mh-sched-card-id').value;
+    var pillId = document.getElementById('mh-sched-pill-id').value;
+    var caption = (document.getElementById('mh-sched-caption').value || '').trim();
+    var whenLocal = document.getElementById('mh-sched-when').value;
+    var mediaUrl = document.getElementById('mh-sched-media-url').value;
+    var err = document.getElementById('mh-sched-error');
+    err.style.display = 'none'; err.textContent = '';
+
+    var cbs = document.querySelectorAll('#mh-sched-channels input[data-mh-channel]:checked');
+    var ids = Array.prototype.map.call(cbs, function(cb){ return cb.value; });
+    if (!ids.length) { err.style.display = 'block'; err.textContent = 'Pick at least one channel.'; return; }
+    if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
+
+    var btn = document.getElementById('mh-sched-send');
+    var orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
+
+    fetch(API_BASE + '/api/runs/' + encodeURIComponent(runId)
+            + '/card/' + encodeURIComponent(cardId) + '/schedule', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        channel_ids: ids,
+        caption: caption,
+        scheduled_at: localToIso(whenLocal) || null,
+        media_url: mediaUrl || null
+      })
+    }).then(function(r){
+      return r.json().then(function(j){ return {status:r.status, body:j}; });
+    }).then(function(o){
+      btn.disabled = false; btn.textContent = orig;
+      if (o.body && typeof o.body.caption === 'string') {
+        document.getElementById('mh-sched-caption').value = o.body.caption;
+      }
+      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
+        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
+        if (pill) {
+          pill.style.display = '';
+          pill.textContent = 'scheduled';
+          pill.classList.remove('bad'); pill.classList.add('good');
+        }
+        var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
+        if (window.MH && typeof window.MH.toast === 'function') {
+          window.MH.toast('Scheduled to Buffer.' + warn, warn ? 'info' : 'success');
+        } else {
+          alert('Scheduled to Buffer.' + warn);
+        }
+        mhScheduleClose();
+      } else {
+        var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
+        err.style.display = 'block'; err.textContent = msg;
+        var pill = document.querySelector('[data-schedule-pill="' + pillId + '"]');
+        if (pill) {
+          pill.style.display = '';
+          pill.textContent = 'failed';
+          pill.classList.remove('good'); pill.classList.add('bad');
+        }
+      }
+    }).catch(function(e){
+      btn.disabled = false; btn.textContent = orig;
+      err.style.display = 'block';
+      err.textContent = 'Network error: ' + (e && e.message || e);
+    });
+  };
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') {
+      var m = document.getElementById('mh-sched-modal');
+      if (m && m.style.display !== 'none') mhScheduleClose();
+    }
+  });
+})();
+</script>
+"""
 
 
 # ---------------------------------------------------------------------
@@ -2080,6 +2453,15 @@ def create_app() -> Flask:
         _delete_url = url_for('privacy_delete_run', run_id=run_id)
         _status_url = url_for('api_status', run_id=run_id)
         _pack_url = url_for('content_pack', run_id=run_id)
+        _reel_url = url_for('api_run_reel', run_id=run_id)
+        _turn_into_api = url_for('api_turn_into', run_id=run_id)
+
+        # Prior Turn-Into packs for this run (so the user can revisit them).
+        try:
+            from mediahub.turn_into import list_packs as _list_ti_packs
+            _ti_packs = _list_ti_packs(run_id, base_dir=DATA_DIR / "turn_into_packs")
+        except Exception:
+            _ti_packs = []
 
         # --- V7: Workflow state
         _wf_summary = {}
@@ -2192,6 +2574,8 @@ def create_app() -> Flask:
                 freason = _h(f.get('reason',''))
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
+            _why_uuid = str(a.get('swim_id', f'top-{rank}')).replace(':', '_').replace(',', '_').replace('/', '_')
+            why_html = _render_why_this_card(ra, card_uuid=f"top-{_why_uuid}")
             ach_rows_html += f"""
 <div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -2209,6 +2593,7 @@ def create_app() -> Flask:
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {why_html}
       <details style="margin-top:8px">
         <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Expand factors &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
@@ -2416,7 +2801,88 @@ def create_app() -> Flask:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
                 _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
-            workflow_summary_card = f"""
+            # --- Turn-Into content pack card (top of content pack section) ---
+            _ti_prior_html = ""
+            if _ti_packs:
+                rows = []
+                for p in _ti_packs[:5]:
+                    _pid = p.get("pack_id", "")
+                    _gen = p.get("generated_at", "")
+                    _n = p.get("n_artefacts", 0)
+                    _skipped = p.get("n_skipped", 0)
+                    try:
+                        _view = url_for("turn_into_pack_view", run_id=run_id, pack_id=_pid)
+                    except Exception:
+                        _view = "#"
+                    rows.append(
+                        f'<li style="font-size:12px;margin-bottom:4px">'
+                        f'<a href="{_view}">{_h(_gen)}</a> '
+                        f'<span class="muted">— {_n} artefacts'
+                        + (f", {_skipped} skipped" if _skipped else "")
+                        + '</span></li>'
+                    )
+                _ti_prior_html = (
+                    '<div style="margin-top:14px">'
+                    '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
+                    'Previously generated packs</div>'
+                    f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
+                    '</div>'
+                )
+
+            turn_into_card = f"""
+<div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <h2 style="margin-bottom:6px">Content pack</h2>
+      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
+        Turn this meet into a full pack of 7 derivative artefacts —
+        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
+        sponsor thank-you, coach quote, and next-meet preview.
+      </p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none">
+        ✦ Turn meet into content pack
+      </button>
+      <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack →</a>
+    </div>
+  </div>
+  <div id="ti-status" style="margin-top:10px;font-size:12px;color:var(--ink-muted);display:none"></div>
+  {_ti_prior_html}
+</div>
+<script>
+function turnMeetIntoPack() {{
+  var btn = document.getElementById('ti-btn');
+  var status = document.getElementById('ti-status');
+  var origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  status.style.display = '';
+  status.textContent = 'Building 7 artefacts — this can take up to 60 seconds.';
+  fetch({json.dumps(_turn_into_api)}, {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{}}),
+  }}).then(function(r) {{ return r.json(); }})
+    .then(function(j) {{
+      if (j && j.pack_url) {{
+        status.textContent = 'Done — opening pack…';
+        window.location.href = j.pack_url;
+      }} else {{
+        status.textContent = 'Failed: ' + (j && j.message ? j.message : 'unknown error');
+        btn.disabled = false;
+        btn.textContent = origText;
+      }}
+    }})
+    .catch(function() {{
+      status.textContent = 'Network error generating pack. Please retry.';
+      btn.disabled = false;
+      btn.textContent = origText;
+    }});
+}}
+</script>"""
+
+            workflow_summary_card = turn_into_card + f"""
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div>
@@ -2563,6 +3029,7 @@ def create_app() -> Flask:
 
             # V8: Create-graphic API URL (lazy visual generation)
             _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
+            _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
             tone_tabs_html = (
                 f'<div class="tone-picker" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">'
                 f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
@@ -2572,14 +3039,19 @@ def create_app() -> Flask:
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">↺ Regenerate caption</button>'
                 f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">✦ Create graphic</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">▶ Generate motion</button>'
                 f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
                 f'</div>'
                 f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+                f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>'
                 f'</div>'
             )
             brand_cap_html = tone_tabs_html
 
             _wf_api_url = url_for("api_workflow_set", run_id=run_id, card_id=card_id_raw)
+
+            # V9: "Why this card?" — plain-English, source-grounded reasoning.
+            why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}")
 
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
@@ -2602,6 +3074,7 @@ def create_app() -> Flask:
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {why_html}
       {brand_cap_html}
       <details style="margin-top:8px">
         <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption · view factors &amp; evidence</summary>
@@ -2691,7 +3164,12 @@ def create_app() -> Flask:
 {warn_html}
 
 <div class="card">
-  <h2>Top achievements</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
+    <h2 style="margin:0">Top achievements</h2>
+    <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+            onclick="generateReel(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+  </div>
+  <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
   <div class="filters-bar">
     <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
@@ -2971,6 +3449,31 @@ function regenerateCaption(btn, captionUrl, cardId) {{
   _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
 }}
 
+// V9: Copy "Why this card?" reasoning to clipboard (for sponsor reports etc.)
+function copyWhyCard(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ return; }}
+  var text = ta.value || '';
+  var orig = btn.textContent;
+  var done = function(ok) {{
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function() {{ btn.textContent = orig; }}, 1500);
+  }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function() {{ done(true); }}).catch(function() {{ fallback(); }});
+  }} else {{
+    fallback();
+  }}
+  function fallback() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }}
+    catch (e) {{ done(false); }}
+    document.body.removeChild(t);
+  }}
+}}
+
 function copyActiveTone(btn, cardId) {{
   // Find the active tone panel
   var activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]:not([style*="none"])');
@@ -3118,6 +3621,101 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {{
         '</div>' +
       '</div>' +
     '</div>';
+}}
+
+// Motion-graphic generation: lazy, cached server-side. Streams the resulting
+// MP4 into an inline <video> on the card panel.
+var _motionCache = {{}};
+function generateMotion(btn, motionUrl, cardId) {{
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering motion…';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Rendering motion graphic… cached renders return in ~5s, cold renders up to 90s.</div>';
+  fetch(motionUrl, {{method:'POST'}})
+    .then(function(r) {{
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
+        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
+      }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Motion render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      _motionCache[cardId] = url;
+      panel.innerHTML =
+        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 200px;max-width:220px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:200px">' +
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion · 1080×1920 · 6s</div>' +
+            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
+}}
+
+// Meet-reel generation: top-3 cards stitched into a 15-second reel.
+function generateReel(btn, reelUrl) {{
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering reel…';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+  fetch(reelUrl, {{method:'POST'}})
+    .then(function(r) {{
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
+        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
+      }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      panel.innerHTML =
+        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 240px;max-width:260px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:240px">' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel · 1080×1920 · 15s</div>' +
+            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
 }}
 
 function regenerateGraphic(btn, createUrl, cardId) {{
@@ -3294,10 +3892,12 @@ function addGraphicToPack(btn, visualId) {{
 
         # Find the achievement for this swim_id
         achievement = {}
+        matched_ra = None
         for ra in ranked:
             a = ra.get("achievement") or {}
             if a.get("swim_id") == swim_id_dec:
                 achievement = a
+                matched_ra = ra
                 break
         # Fallback: partial match
         if not achievement:
@@ -3305,6 +3905,7 @@ function addGraphicToPack(btn, visualId) {{
                 a = ra.get("achievement") or {}
                 if swim_id_dec in (a.get("swim_id") or ""):
                     achievement = a
+                    matched_ra = ra
                     break
 
         # Build achievement dict suitable for caption generation
@@ -3338,8 +3939,22 @@ function addGraphicToPack(btn, visualId) {{
                     _run_voice_profile = _club_prof.voice_profile
         except Exception:
             pass
+        # Resolve the ClubProfile so voice_profile (brand DNA voice layer)
+        # can flow into the caption prompt. Profiles with no voice_profile
+        # still work — generate_caption_for_tone treats it as a no-op.
+        club_profile_obj = None
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                club_profile_obj = load_profile(run_profile_id)
+            except Exception:
+                club_profile_obj = None
 
         now_iso = datetime.now(_tz.utc).isoformat()
+
+        # V9: build the plain-English explanation once per request so every
+        # response (live, fallback, error) carries it.
+        explanation = _build_card_explanation(matched_ra or {"achievement": achievement})
 
         from mediahub.media_ai.llm import is_available as _llm_available
         from mediahub.web.ai_caption import (
@@ -3363,10 +3978,15 @@ function addGraphicToPack(btn, visualId) {{
                         "Anthropic API key in Settings to generate live AI captions."
                     ),
                     "settings_url": url_for("settings_page"),
+                    "explanation": explanation,
                 }), 200
             try:
                 caption_text = _gen_tone(ach_dict, club_brand, tone=tone,
                                          voice_profile=_run_voice_profile)
+                caption_text = _gen_tone(
+                    ach_dict, club_brand, tone=tone,
+                    club_profile=club_profile_obj,
+                )
                 return jsonify({
                     "caption": caption_text,
                     "tone": tone,
@@ -3374,6 +3994,7 @@ function addGraphicToPack(btn, visualId) {{
                     "generated_at": now_iso,
                     "fallback": False,
                     "fallback_voice": None,
+                    "explanation": explanation,
                 })
             except _ClaudeUE as e:
                 return jsonify({
@@ -3387,6 +4008,7 @@ function addGraphicToPack(btn, visualId) {{
                         "Add a Gemini API key (free) or Anthropic key in Settings."
                     ),
                     "settings_url": url_for("settings_page"),
+                    "explanation": explanation,
                 }), 200
         else:
             # Voice render — deterministic template, may be cached by client
@@ -3420,6 +4042,7 @@ function addGraphicToPack(btn, visualId) {{
                 "generated_at": now_iso,
                 "fallback": False,
                 "fallback_voice": None,
+                "explanation": explanation,
             })
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
@@ -3924,8 +4547,10 @@ Relay team broke club record"></textarea>
         """
         from mediahub.web.secrets_store import (
             get_anthropic_key, set_secret, mask_key, get_secret,
+            get_buffer_access_token, set_buffer_access_token,
         )
         message_html = ""
+        buffer_message_html = ""
         # Fall through to original handler logic (preserved below).
         if request.method == "POST":
             action = (request.form.get("action") or "").strip()
@@ -3992,6 +4617,27 @@ Relay team broke club record"></textarea>
                     set_secret("replicate_api_token", key)
                     message_html = (
                         '<p class="tag good">Replicate API token saved.</p>'
+                    )
+            elif action == "clear_buffer":
+                set_buffer_access_token(None)
+                buffer_message_html = (
+                    '<p class="tag good">Buffer access token cleared.</p>'
+                )
+            elif action == "save_buffer":
+                token = (request.form.get("buffer_access_token") or "").strip()
+                if not token:
+                    buffer_message_html = (
+                        '<p class="tag bad">No Buffer token submitted.</p>'
+                    )
+                elif len(token) < 10:
+                    buffer_message_html = (
+                        '<p class="tag bad">That looks too short to be a '
+                        'Buffer access token.</p>'
+                    )
+                else:
+                    set_buffer_access_token(token)
+                    buffer_message_html = (
+                        '<p class="tag good">Buffer access token saved.</p>'
                     )
             else:
                 # Default action: save Anthropic key.
@@ -4092,6 +4738,88 @@ Relay team broke club record"></textarea>
         )
         replicate_clear_btn = _cutout_clear(
             "clear_replicate", "Replicate API token", bool(replicate_disk)
+        )
+
+        # --- Buffer (publishing) state -----------------------------------
+        buffer_env = bool(os.environ.get("BUFFER_ACCESS_TOKEN"))
+        buffer_disk = get_secret("buffer_access_token")
+        buffer_active = get_buffer_access_token()
+        buffer_status_dot = "#2cc97f" if buffer_active else "#ffae3b"
+        buffer_status_text = "Connected" if buffer_active else "Not connected"
+        if buffer_env:
+            buffer_source = "environment variable"
+        elif buffer_disk:
+            buffer_source = "saved token"
+        else:
+            buffer_source = "none — paste a token below"
+        buffer_masked_html = (
+            f' — <code>{_h(mask_key(buffer_active))}</code>' if buffer_active else ""
+        )
+        # Probe Buffer for the live channel count so users see "Connected"
+        # + an actual number after a save+reload. Failures degrade silently
+        # to a "—" so a transient network blip doesn't look like a config
+        # problem.
+        buffer_channel_count: Optional[int] = None
+        buffer_probe_error = ""
+        if buffer_active:
+            try:
+                from mediahub.publishing.buffer import (
+                    list_channels as _buf_list,
+                    BufferError as _BufError,
+                )
+                buffer_channel_count = len(_buf_list(buffer_active))
+            except Exception as exc:
+                buffer_probe_error = str(exc)
+        buffer_count_html = (
+            f'<span class="tag good">{buffer_channel_count} '
+            f'channel{"s" if buffer_channel_count != 1 else ""}</span>'
+            if buffer_channel_count is not None else ""
+        )
+        buffer_probe_html = (
+            f'<p class="muted" style="font-size:12px;margin-top:6px">'
+            f'Could not list channels: {_h(buffer_probe_error)}</p>'
+            if buffer_probe_error else ""
+        )
+        buffer_clear_btn = ""
+        if buffer_disk:
+            buffer_clear_btn = (
+                '<form method="POST" style="display:inline-block;margin-left:8px">'
+                '<input type="hidden" name="action" value="clear_buffer"/>'
+                '<button type="submit" class="btn secondary" '
+                'onclick="return confirm(\'Remove the saved Buffer access token?\')">'
+                'Disconnect Buffer</button></form>'
+            )
+        buffer_card = (
+            '<div class="card" style="margin-top:16px">'
+            '<h2 style="margin-top:0">Buffer — schedule posts to your channels</h2>'
+            f'{buffer_message_html}'
+            '<p style="display:flex;align-items:center;gap:8px;margin:8px 0">'
+            f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{buffer_status_dot}"></span>'
+            f'<strong>{buffer_status_text}</strong>'
+            f'<span class="muted">— source: {buffer_source}</span>'
+            f'{buffer_count_html}'
+            '</p>'
+            f'<p>Current token: {_h(mask_key(buffer_active)) if buffer_active else "<em>none</em>"}</p>'
+            f'{buffer_probe_html}'
+            '<form method="POST" style="margin-top:12px">'
+            '<input type="hidden" name="action" value="save_buffer"/>'
+            '<label for="buffer_access_token" style="display:block;font-weight:600;margin-bottom:4px">'
+            'Paste your Buffer access token'
+            '</label>'
+            '<input type="password" id="buffer_access_token" name="buffer_access_token" '
+            'placeholder="1/xxxxxxxxxxxxx" autocomplete="off" spellcheck="false" '
+            'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
+            '<p class="muted" style="margin-top:6px;font-size:12px">'
+            'Generate a personal access token at '
+            '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener">publish.buffer.com/account/apps</a>. '
+            'MediaHub uses this only to list your channels and queue posts you explicitly schedule — no autopost.'
+            '</p>'
+            '<div style="margin-top:10px">'
+            '<button type="submit" class="btn">Save token</button>'
+            f'{buffer_clear_btn}'
+            '</div>'
+            '</form>'
+            '</div>'
         )
 
         def _opt(value: str) -> str:
@@ -4263,8 +4991,11 @@ Relay team broke club record"></textarea>
     <li>Photoroom key: <strong>{photoroom_state}</strong>{photoroom_masked_html}</li>
     <li>Replicate token: <strong>{replicate_state}</strong>{replicate_masked_html}</li>
     <li>Cutout provider: <strong>{cutout_provider}</strong></li>
+    <li>Buffer: <strong>{buffer_status_text}</strong>{(' · ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
   </ul>
 </div>
+
+{buffer_card}
 
 {cutout_card}
 """
@@ -4302,6 +5033,218 @@ Relay team broke club record"></textarea>
             "settings_url": url_for("settings_page"),
         })
 
+
+    # ---- Buffer publishing -------------------------------------------
+    @app.route("/api/buffer/channels")
+    def api_buffer_channels():
+        """List the user's connected Buffer channels.
+
+        Returns 401 when no token is configured so the UI can show
+        "Connect Buffer in Settings" instead of opening the modal.
+        """
+        from mediahub.web.secrets_store import get_buffer_access_token
+        from mediahub.publishing.buffer import (
+            list_channels as _buf_list,
+            BufferAuthError, BufferAPIError,
+        )
+        token = get_buffer_access_token()
+        if not token:
+            return jsonify({
+                "connected": False,
+                "channels": [],
+                "error": "no_token",
+                "message": "Connect Buffer in Settings to schedule posts.",
+                "settings_url": url_for("settings_page"),
+            }), 401
+        try:
+            channels = _buf_list(token)
+        except BufferAuthError as exc:
+            return jsonify({
+                "connected": False,
+                "channels": [],
+                "error": "auth",
+                "message": str(exc),
+                "settings_url": url_for("settings_page"),
+            }), 401
+        except BufferAPIError as exc:
+            return jsonify({
+                "connected": True,
+                "channels": [],
+                "error": "api",
+                "message": str(exc),
+            }), 502
+        return jsonify({
+            "connected": True,
+            "channels": channels,
+            "count": len(channels),
+        })
+
+    @app.route(
+        "/api/runs/<run_id>/card/<path:card_id>/schedule",
+        methods=["POST"],
+    )
+    def api_card_schedule(run_id, card_id):
+        """Schedule a card to one or more Buffer channels.
+
+        Body JSON:
+            {
+              "channel_ids":  ["...", ...],   # required, non-empty
+              "scheduled_at": "2026-06-01T10:00:00Z" | null,
+              "caption":      "the edited caption text",
+              "media_url":    "https://..." | null
+            }
+
+        Returns 200 with the per-channel results on success, 4xx on bad
+        input / missing token, 502 if Buffer rejects the call. The
+        user's edited caption is echoed back in `caption` so the UI
+        can preserve it even after a failure.
+        """
+        from mediahub.web.secrets_store import get_buffer_access_token
+        from mediahub.publishing.buffer import (
+            schedule_post as _buf_schedule,
+            BufferAuthError, BufferAPIError,
+        )
+
+        payload = request.get_json(silent=True) or {}
+        channel_ids = payload.get("channel_ids") or []
+        if not isinstance(channel_ids, list) or not channel_ids:
+            return jsonify({
+                "ok": False,
+                "error": "no_channels",
+                "message": "Pick at least one Buffer channel.",
+                "caption": payload.get("caption", ""),
+            }), 400
+
+        caption = (payload.get("caption") or "").strip()
+        if not caption:
+            return jsonify({
+                "ok": False,
+                "error": "no_caption",
+                "message": "Caption is required.",
+                "caption": "",
+            }), 400
+
+        media_url = (payload.get("media_url") or "").strip()
+        media_urls = [media_url] if media_url else None
+
+        scheduled_at_iso = (payload.get("scheduled_at") or "").strip()
+        scheduled_at_dt: Optional[datetime] = None
+        if scheduled_at_iso:
+            try:
+                normalised = scheduled_at_iso.replace("Z", "+00:00")
+                scheduled_at_dt = datetime.fromisoformat(normalised)
+                if scheduled_at_dt.tzinfo is None:
+                    scheduled_at_dt = scheduled_at_dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                return jsonify({
+                    "ok": False,
+                    "error": "bad_time",
+                    "message": "Scheduled time was not a valid ISO 8601 datetime.",
+                    "caption": caption,
+                }), 400
+
+        token = get_buffer_access_token()
+        if not token:
+            return jsonify({
+                "ok": False,
+                "error": "no_token",
+                "message": "Connect Buffer in Settings before scheduling.",
+                "settings_url": url_for("settings_page"),
+                "caption": caption,
+            }), 401
+
+        ws = _get_wf_store()
+        results: list[dict] = []
+        update_ids: list[str] = []
+        failure: Optional[str] = None
+
+        for cid in channel_ids:
+            try:
+                res = _buf_schedule(
+                    token=token,
+                    channel_id=str(cid),
+                    text=caption,
+                    media_urls=media_urls,
+                    scheduled_at=scheduled_at_dt,
+                )
+                results.append({
+                    "channel_id": str(cid),
+                    "ok": True,
+                    "update_id": res.get("update_id", ""),
+                })
+                if res.get("update_id"):
+                    update_ids.append(res["update_id"])
+            except BufferAuthError as exc:
+                failure = str(exc)
+                results.append({
+                    "channel_id": str(cid),
+                    "ok": False,
+                    "error": "auth",
+                    "message": str(exc),
+                })
+                break  # Stop early — token is the same for every channel.
+            except BufferAPIError as exc:
+                failure = str(exc)
+                results.append({
+                    "channel_id": str(cid),
+                    "ok": False,
+                    "error": "api",
+                    "message": str(exc),
+                })
+
+        any_ok = any(r.get("ok") for r in results)
+        try:
+            from mediahub.workflow.status import ScheduleStatus
+        except Exception:
+            ScheduleStatus = None  # type: ignore
+
+        if ws is not None and ScheduleStatus is not None:
+            if any_ok and not failure:
+                ws.set_schedule(
+                    run_id, card_id,
+                    schedule_status=ScheduleStatus.SCHEDULED,
+                    buffer_update_id=";".join(update_ids) or None,
+                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
+                    schedule_error=None,
+                )
+            elif any_ok and failure:
+                # Partial success: at least one channel went through but
+                # another failed. Record the success and surface the
+                # failure to the user.
+                ws.set_schedule(
+                    run_id, card_id,
+                    schedule_status=ScheduleStatus.SCHEDULED,
+                    buffer_update_id=";".join(update_ids) or None,
+                    scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
+                    schedule_error=failure,
+                )
+            else:
+                ws.set_schedule(
+                    run_id, card_id,
+                    schedule_status=ScheduleStatus.FAILED,
+                    buffer_update_id=None,
+                    scheduled_at=None,
+                    schedule_error=failure or "Scheduling failed.",
+                )
+
+        if not any_ok:
+            return jsonify({
+                "ok": False,
+                "error": "buffer_failed",
+                "message": failure or "Buffer rejected the request.",
+                "results": results,
+                "caption": caption,
+            }), 502
+
+        return jsonify({
+            "ok": True,
+            "schedule_status": "scheduled",
+            "buffer_update_ids": update_ids,
+            "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
+            "results": results,
+            "caption": caption,
+            "warning": failure,  # non-empty if a partial failure occurred
+        })
 
     # ====================================================================
     # V7 NEW ROUTES
@@ -5092,6 +6035,46 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     profile = existing
 
             else:
+                existing.exemplar_captions = []
+            # Sponsor
+            existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
+            existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
+            # Voice imitation layer — one caption per line. Apply PII
+            # redaction before persisting so real swimmer names never
+            # land on disk.
+            from mediahub.brand.voice_imitation import (
+                analyse_examples as _analyse_voice,
+                redact_pii as _redact_pii,
+            )
+            raw_voice_examples = (request.form.get("voice_examples") or "").strip()
+            if raw_voice_examples:
+                voice_lines = [
+                    _redact_pii(line.strip())
+                    for line in raw_voice_examples.splitlines()
+                    if line.strip()
+                ]
+                existing.voice_examples = voice_lines[:20]
+            else:
+                existing.voice_examples = []
+            # "Analyse voice" button regenerates the profile from the
+            # current voice_examples. Plain save preserves the existing
+            # voice_profile so the user can edit other fields without
+            # losing the analysis.
+            if request.form.get("analyse_voice") and existing.voice_examples:
+                existing.voice_profile = _analyse_voice(existing.voice_examples)
+                saved_msg = (
+                    '<p class="tag good" style="margin-bottom:20px">'
+                    'Voice profile analysed and saved.</p>'
+                )
+            else:
+                if not existing.voice_examples:
+                    existing.voice_profile = {}
+                saved_msg = (
+                    '<p class="tag good" style="margin-bottom:20px">'
+                    'Organisation saved.</p>'
+                )
+            save_profile(existing)
+            profile = existing
                 # ---- Save organisation (existing behaviour) ----
                 existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
                 existing.short_name = (request.form.get("short_name") or "").strip()
@@ -5189,6 +6172,48 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         tone_radios = "".join(_radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES)
         platform_cbs = "".join(_cb("platforms", v, l, v in (profile.platforms or [])) for v, l in _PLATFORMS)
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
+        voice_examples_text = "\n".join(profile.voice_examples or [])
+
+        # Build the voice-profile summary panel so the user can see what
+        # the engine learned the last time they ran "Analyse voice".
+        vp = profile.voice_profile or {}
+        if vp:
+            def _list_chips(items):
+                items = items or []
+                if not items:
+                    return '<span class="muted" style="font-size:12px">—</span>'
+                return "".join(
+                    f'<span style="display:inline-block;padding:2px 8px;'
+                    f'margin:2px 4px 2px 0;border:1px solid var(--border);'
+                    f'border-radius:999px;font-size:12px">{_h(s)}</span>'
+                    for s in items
+                )
+            voice_profile_html = (
+                f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
+                f'border-radius:8px;background:var(--panel)">'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
+                f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
+                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
+                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
+                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
+                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
+                f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
+                f'</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
+                f'<div>{_list_chips(vp.get("characteristic_openers"))}</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
+                f'<div>{_list_chips(vp.get("characteristic_closers"))}</div>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
+                f'<div>{_list_chips(vp.get("forbidden_phrases"))}</div>'
+                f'</div>'
+            )
+        else:
+            voice_profile_html = (
+                '<p class="muted" style="font-size:12px;margin-top:8px">'
+                'No voice profile yet — paste 5-20 past captions and click '
+                '<b>Analyse voice</b>.</p>'
+            )
 
         _input_style = "width:100%;max-width:480px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px"
         _ta_style = "width:100%;max-width:600px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-family:inherit;font-size:14px"
@@ -5458,6 +6483,31 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </div>
 
 <div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Voice examples</h2>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">
+    Paste 5–20 of your recent Instagram, Facebook or X captions — one per line.
+    MediaHub will learn your sentence length, emoji and hashtag habits, opener
+    and closer style, and how you refer to swimmers, then use that profile when
+    generating live AI captions. Names are stripped before storage.
+  </p>
+  <div>
+    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Past captions (one per line)</label>
+    <textarea name="voice_examples" rows="10"
+              placeholder="Massive PB from [name] in the 200 free this morning&#10;Hard work pays off — proud of every swimmer in the pool tonight 🏊&#10;..."
+              style="{_ta_style}">{_h(voice_examples_text)}</textarea>
+    <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">
+      One caption per line, up to 20. Real swimmer names will be replaced with
+      <code>[NAME]</code> before saving.
+    </p>
+  </div>
+  <div style="margin-top:12px">
+    <button type="submit" name="analyse_voice" value="1" class="btn">Analyse voice</button>
+    <span class="muted" style="font-size:12px;margin-left:8px">Re-runs the analyser on the captions above.</span>
+  </div>
+  {voice_profile_html}
+</div>
+
+<div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Sponsors</h2>
   <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
     <div>
@@ -5595,6 +6645,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _plain_raw = f"{active_cap.get('headline','')} {active_cap.get('body','')} {active_cap.get('cta','')}".strip()
                 cap_plain_only = cap_plain_hash = cap_plain_full = _plain_raw
 
+            # Schedule-state pill from workflow sidecar (queued|scheduled|published|failed).
+            wf_dict = card.get("workflow") or {}
+            sched_state = (wf_dict.get("schedule_status") or "queued").lower()
+            sched_pill_class = {
+                "scheduled": "good",
+                "published": "good",
+                "failed":    "bad",
+            }.get(sched_state, "")
+            sched_pill = (
+                f'<span class="tag {sched_pill_class}" data-schedule-pill="pc-{card_uuid}" '
+                f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
+            )
+            # V9: "Why this card?" — explanation for the approved card.
+            why_html_pack = _render_why_this_card(card, card_uuid=f"pc-{card_uuid}")
+
             cards_html += f"""
 <div class="card" id="pc-{card_id}" style="page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px">
@@ -5602,15 +6667,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <div style="font-size:13px;font-weight:700;color:var(--ink)">{swimmer} · {event}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
-    <span class="tag good" style="flex-shrink:0">approved</span>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      {sched_pill}
+      <span class="tag good" style="flex-shrink:0">approved</span>
+    </div>
   </div>
   <div style="padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px">
     {inner_html}
   </div>
+  <div class="no-print" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  {why_html_pack}
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyActiveTone(this, 'pc-{card_uuid}')">Copy caption</button>
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-2')">Copy + hashtags</button>
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-3')">Copy full brief</button>
+    <button class="btn" style="font-size:12px;padding:5px 12px"
+      onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, 'pc-{card_uuid}')"
+      data-mh-schedule-btn>Schedule…</button>
     <textarea id="cap-text-{card_id}-1" style="display:none">{cap_plain_only}</textarea>
     <textarea id="cap-text-{card_id}-2" style="display:none">{cap_plain_hash}</textarea>
     <textarea id="cap-text-{card_id}-3" style="display:none">{cap_plain_full}</textarea>
@@ -5642,6 +6715,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 {cards_html}
 
+{_schedule_modal_html()}
+
 <script>
 // Robust copy with execCommand fallback for browsers without clipboard API.
 function copyCaption(btn, spanId) {{
@@ -5663,7 +6738,26 @@ function copyCaption(btn, spanId) {{
     document.body.removeChild(ta);
   }}
 }}
+// V9: Copy "Why this card?" reasoning (textarea-based).
+function copyWhyCard(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ return; }}
+  var text = ta.value || '';
+  var orig = btn.textContent;
+  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function() {{ btn.textContent = orig; }}, 1500); }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function() {{ done(true); }}).catch(function() {{ fb(); }});
+  }} else {{ fb(); }}
+  function fb() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
+    document.body.removeChild(t);
+  }}
+}}
 </script>
+{_schedule_modal_js()}
 """
         return _layout(f"Content Pack — {meet_name}", body, active="home")
 
@@ -5713,6 +6807,333 @@ function copyCaption(btn, spanId) {{
         ws.mark_all_posted(run_id)
         return redirect(url_for("content_pack", run_id=run_id))
 
+    # ---- Turn-Into: one meet → 7 derivative artefacts -------------------
+    @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
+    def api_turn_into(run_id):
+        """Generate a Turn-Into pack (up to 7 artefacts) from this run.
+
+        Body (JSON, all optional):
+          { "deterministic": bool }   force heuristic mode (no LLM)
+        """
+        run_data = _load_run(run_id)
+        if not run_data:
+            return jsonify({"error": "run not found"}), 404
+
+        profile_id = run_data.get("profile_id", "")
+        profile = load_profile(profile_id) if profile_id else None
+        if profile is None:
+            # Fall back to a minimal profile derived from the run's display name
+            # so Turn-Into still runs even when no profile is persisted.
+            profile = ClubProfile(
+                profile_id=profile_id or "default",
+                display_name=run_data.get("profile_display", "") or "Club",
+            )
+
+        payload = request.get_json(silent=True) or {}
+        deterministic = bool(payload.get("deterministic", False))
+
+        try:
+            from mediahub.turn_into import turn_meet_into_pack, save_pack
+            pack = turn_meet_into_pack(run_data, profile, deterministic=deterministic)
+            save_pack(pack, run_id, base_dir=DATA_DIR / "turn_into_packs")
+        except Exception as e:
+            return jsonify({"error": "turn_into_failed", "message": str(e)}), 500
+
+        return jsonify({
+            "ok": True,
+            "pack_id": pack["pack_id"],
+            "n_artefacts": len(pack.get("artefacts", [])),
+            "skipped": [s.get("type") for s in pack.get("skipped", [])],
+            "pack_url": url_for("turn_into_pack_view",
+                                run_id=run_id, pack_id=pack["pack_id"]),
+        })
+
+    @app.route("/api/runs/<run_id>/turn-into/<pack_id>/caption", methods=["POST"])
+    def api_turn_into_edit_caption(run_id, pack_id):
+        """Inline-edit a caption within a saved pack.
+
+        Body (JSON):
+          {
+            "artefact_index": int,
+            "caption_key":    str,   # e.g. "default" | "instagram" | "swimmer_1"
+            "text":           str,
+            # OR for x_thread:
+            "x_thread_index": int,   # 0-based
+            "text":           str,
+          }
+        """
+        from mediahub.turn_into import load_pack, save_pack
+        base = DATA_DIR / "turn_into_packs"
+        pack = load_pack(run_id, pack_id, base_dir=base)
+        if pack is None:
+            return jsonify({"error": "pack not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        try:
+            idx = int(data.get("artefact_index"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "artefact_index required"}), 400
+        artefacts = pack.get("artefacts") or []
+        if idx < 0 or idx >= len(artefacts):
+            return jsonify({"error": "artefact_index out of range"}), 400
+        text = str(data.get("text", ""))
+
+        artefact = artefacts[idx]
+        captions = artefact.setdefault("captions", {})
+
+        if "x_thread_index" in data and data["x_thread_index"] is not None:
+            try:
+                xi = int(data["x_thread_index"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "x_thread_index must be int"}), 400
+            posts = captions.get("x_thread") or []
+            if xi < 0 or xi >= len(posts):
+                return jsonify({"error": "x_thread_index out of range"}), 400
+            posts[xi] = text
+            captions["x_thread"] = posts
+        else:
+            key = str(data.get("caption_key", "default"))
+            captions[key] = text
+
+        artefacts[idx] = artefact
+        pack["artefacts"] = artefacts
+        save_pack(pack, run_id, base_dir=base)
+        return jsonify({"ok": True})
+
+    @app.route("/runs/<run_id>/pack/<pack_id>")
+    def turn_into_pack_view(run_id, pack_id):
+        """Render a saved Turn-Into pack with the 7 artefacts."""
+        from mediahub.turn_into import load_pack
+        pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
+        if pack is None:
+            return _layout("Not found",
+                           '<div class="empty">Turn-Into pack not found.</div>'), 404
+
+        _review_url = url_for("review", run_id=run_id)
+        _api_url = url_for("api_turn_into", run_id=run_id)
+        _edit_api = url_for("api_turn_into_edit_caption",
+                            run_id=run_id, pack_id=pack_id)
+        meet_name = _h(pack.get("meet_name", ""))
+        gen_at = _h(pack.get("generated_at", ""))
+
+        artefacts = pack.get("artefacts") or []
+        skipped = pack.get("skipped") or []
+
+        # --- Skipped notice band
+        skipped_html = ""
+        if skipped:
+            items = "".join(
+                f'<li><strong>{_h(s.get("type",""))}</strong>: '
+                f'{_h(s.get("reason",""))}</li>'
+                for s in skipped
+            )
+            skipped_html = (
+                '<div class="card" style="border-color:var(--warn);background:rgba(245,158,11,0.04)">'
+                '<h2 style="margin-top:0">Skipped artefacts</h2>'
+                f'<ul style="margin:0">{items}</ul>'
+                '</div>'
+            )
+
+        # --- Artefact cards
+        cards_html = ""
+        for art_idx, art in enumerate(artefacts):
+            atype = art.get("type", "")
+            title = _h(art.get("title", atype))
+            captions = art.get("captions") or {}
+            cards = art.get("cards") or []
+            draft = art.get("draft_flag", "")
+            html_block = art.get("html") or ""
+            notes_list = art.get("notes") or []
+
+            # Draft badge
+            draft_html = ""
+            if draft:
+                draft_html = (
+                    '<div style="margin-bottom:12px;padding:10px 14px;'
+                    'background:rgba(245,158,11,0.12);border:1px solid var(--warn);'
+                    f'border-radius:8px;font-weight:600;color:var(--warn)">{_h(draft)}</div>'
+                )
+
+            # Caption editor blocks — one per key
+            caption_blocks = ""
+            for cap_key, cap_val in captions.items():
+                if cap_key == "x_thread" and isinstance(cap_val, list):
+                    # Special-case: numbered thread of posts.
+                    sub = ""
+                    for ti, post in enumerate(cap_val):
+                        post_chars = len(post or "")
+                        cls = "good" if post_chars <= 280 else "bad"
+                        sub += (
+                            f'<div style="margin-bottom:10px">'
+                            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+                            f'<span class="muted" style="font-size:11px">Post {ti+1}</span>'
+                            f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
+                            f'</div>'
+                            f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                            f'data-thread="{ti}" '
+                            f'style="width:100%;min-height:60px;font-size:13px;'
+                            f'padding:8px;border:1px solid var(--border);border-radius:6px;'
+                            f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                            f'{_h(post)}</textarea>'
+                            f'</div>'
+                        )
+                    caption_blocks += (
+                        '<div style="margin-bottom:14px">'
+                        f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
+                        f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:8px">X thread '
+                        f'({len(cap_val)} posts, ≤280 chars each)</div>'
+                        f'{sub}'
+                        '</div>'
+                    )
+                    continue
+
+                # Single string caption
+                if not isinstance(cap_val, str):
+                    continue
+                key_label = cap_key.replace("_", " ").title()
+                char_count = len(cap_val)
+                # Show Instagram cap for ig caption.
+                cap_limit_html = ""
+                if cap_key == "instagram":
+                    cls = "good" if char_count <= 2200 else "bad"
+                    cap_limit_html = f'<span class="tag {cls}" style="font-size:10px;margin-left:8px">{char_count}/2200</span>'
+                caption_blocks += (
+                    '<div style="margin-bottom:14px">'
+                    f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
+                    f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">'
+                    f'{_h(key_label)}{cap_limit_html}</div>'
+                    f'<textarea class="ti-cap" data-artefact="{art_idx}" '
+                    f'data-key="{_h(cap_key)}" '
+                    f'style="width:100%;min-height:80px;font-size:13px;'
+                    f'padding:10px;border:1px solid var(--border);border-radius:6px;'
+                    f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                    f'{_h(cap_val)}</textarea>'
+                    '</div>'
+                )
+
+            # Optional sub-cards strip (e.g. spotlight series)
+            sub_cards_html = ""
+            if cards and atype in ("swimmer_spotlight",):
+                rows = ""
+                for c in cards:
+                    rows += (
+                        '<div style="padding:10px;background:rgba(255,255,255,0.03);'
+                        'border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
+                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer",""))} '
+                        f'· {_h(c.get("event",""))}</div>'
+                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline",""))}</div>'
+                        '</div>'
+                    )
+                sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
+
+            # Newsletter HTML preview
+            html_preview_html = ""
+            if html_block:
+                # Display rendered HTML in a sandboxed-ish preview area.
+                # The templates module HTML-escapes the body, so it's safe here.
+                html_preview_html = (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--accent)">View HTML preview</summary>'
+                    f'<div style="margin-top:10px;padding:14px;border:1px dashed var(--border);'
+                    f'border-radius:8px;background:rgba(255,255,255,0.02)">{html_block}</div>'
+                    '</details>'
+                )
+
+            notes_html = ""
+            if notes_list:
+                lis = "".join(f"<li>{_h(n)}</li>" for n in notes_list)
+                notes_html = (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this artefact?</summary>'
+                    f'<ul style="margin:8px 0 0 0;font-size:12px;color:var(--ink-dim)">{lis}</ul>'
+                    '</details>'
+                )
+
+            cards_html += f"""
+<div class="card ti-artefact" data-type="{_h(atype)}" data-artefact-index="{art_idx}" style="margin-bottom:18px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
+    <h2 style="margin:0">{title}</h2>
+    <span class="tag info" style="font-size:11px">{_h(atype)}</span>
+  </div>
+  {draft_html}
+  {sub_cards_html}
+  {caption_blocks}
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button class="btn" style="font-size:12px;padding:6px 14px"
+            onclick="tiSaveArtefact({art_idx})">Save edits</button>
+    <span class="ti-status" data-artefact="{art_idx}" style="font-size:11px;color:var(--ink-muted)"></span>
+  </div>
+  {html_preview_html}
+  {notes_html}
+</div>"""
+
+        if not cards_html:
+            cards_html = '<div class="empty">No artefacts generated.</div>'
+
+        body = f"""
+<p class="dim"><a href="{_review_url}">← Back to review</a></p>
+<h1>Turn-Into pack — {meet_name}</h1>
+<p class="dim">{len(artefacts)} artefacts · generated {gen_at}</p>
+
+<div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <button class="btn secondary" onclick="tiRegenerate()">↺ Regenerate pack</button>
+</div>
+
+{skipped_html}
+{cards_html}
+
+<script>
+const TI_EDIT_API = {json.dumps(_edit_api)};
+const TI_REGEN_API = {json.dumps(_api_url)};
+const TI_REVIEW_URL = {json.dumps(_review_url)};
+
+function tiSaveArtefact(idx) {{
+  const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
+  if (!root) return;
+  const status = root.querySelector('.ti-status');
+  status.textContent = 'Saving…';
+  const tas = root.querySelectorAll('textarea.ti-cap');
+  const tasks = [];
+  tas.forEach(function(ta) {{
+    const payload = {{ artefact_index: idx, text: ta.value }};
+    if (ta.dataset.thread !== undefined) {{
+      payload.x_thread_index = parseInt(ta.dataset.thread, 10);
+    }} else {{
+      payload.caption_key = ta.dataset.key || 'default';
+    }}
+    tasks.push(fetch(TI_EDIT_API, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(payload),
+    }}).then(r => r.json()));
+  }});
+  Promise.all(tasks).then(function(results) {{
+    const ok = results.every(function(r) {{ return r && r.ok; }});
+    status.textContent = ok ? 'Saved.' : 'Some edits failed.';
+    setTimeout(function() {{ status.textContent = ''; }}, 2200);
+  }}).catch(function() {{ status.textContent = 'Error saving.'; }});
+}}
+
+function tiRegenerate() {{
+  if (!confirm('Generate a fresh Turn-Into pack? The current pack is preserved.')) return;
+  fetch(TI_REGEN_API, {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{}}),
+  }}).then(r => r.json()).then(function(j) {{
+    if (j && j.pack_url) {{
+      window.location.href = j.pack_url;
+    }} else {{
+      alert('Regenerate failed: ' + (j && j.message ? j.message : 'unknown error'));
+    }}
+  }}).catch(function(err) {{
+    alert('Regenerate failed.');
+  }});
+}}
+</script>
+"""
+        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
+
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
         """Grouped content pack page — 8 buckets."""
@@ -5727,6 +7148,7 @@ function copyCaption(btn, spanId) {{
         meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
+        _reel_url = url_for("api_run_reel", run_id=run_id)
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
@@ -5760,11 +7182,43 @@ function copyCaption(btn, spanId) {{
                 cap_only = _h(item.get("caption_only") or ach.get("headline") or "")
                 cap_hash = _h(item.get("caption_with_hashtags") or "")
                 cap_full = _h(item.get("caption_full_brief") or "")
-                card_id = _h(ach.get("swim_id") or item.get("card_id") or "")
+                card_id_raw = ach.get("swim_id") or item.get("card_id") or ""
+                card_id = _h(card_id_raw)
+                card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
+                # Schedule state pill (queued|scheduled|published|failed).
+                sched_state_raw = (item.get("schedule_status")
+                                   or (item.get("workflow") or {}).get("schedule_status")
+                                   or "queued")
+                sched_state = str(sched_state_raw).lower()
+                sched_pill_class = {
+                    "scheduled": "good",
+                    "published": "good",
+                    "failed":    "bad",
+                }.get(sched_state, "")
+                sched_pill_html = (
+                    f'<span class="tag {sched_pill_class}" data-schedule-pill="g-{card_uuid}" '
+                    f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
+                )
+                schedule_btn = (
+                    f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
+                    f'onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \'g-{card_uuid}\')">'
+                    f'Schedule…</button>'
+                ) if card_id_raw else ""
                 rows += f"""
+<div class="card" id="g-{card_uuid}" style="margin-bottom:12px">
+                # V9: "Why this card?" — derive from factors + evidence on this item.
+            _ra_for_why = {
+                "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
+                "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
+                "rank": item.get("rank"),
+            }
+            _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(",", "_").replace("/", "_") or f"gp-{section_id}"
+            why_html = _render_why_this_card(_ra_for_why, card_uuid=f"gp-{_why_uuid}")
+
+            rows += f"""
 <div class="card" style="margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
@@ -5772,11 +7226,13 @@ function copyCaption(btn, spanId) {{
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      {sched_pill_html}
       {f'<span class="tag">{angle}</span>' if angle else ""}
       <span class="tag {s2p_cls}" title="{s2p_reason}">{s2p_level}</span>
       {f'<span class="tag">{band}</span>' if band else ""}
     </div>
   </div>
+  {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
@@ -5784,6 +7240,7 @@ function copyCaption(btn, spanId) {{
     <textarea id="cap-{card_id}-2" style="display:none">{cap_hash}</textarea>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-3')">Copy full brief</button>
     <textarea id="cap-{card_id}-3" style="display:none">{cap_full}</textarea>
+    {schedule_btn}
   </div>
 </div>"""
             if not rows:
@@ -5865,6 +7322,16 @@ function copyCaption(btn, spanId) {{
 <p class="dim"><a href="{_review_url}">← Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
 <h1>Content Pack (grouped) — {meet_name}</h1>
 
+<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Meet reel</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+  </div>
+  <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+          onclick="generateReelGrouped(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+</div>
+<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
+
 {visuals_strip}
 
 {_section_html("Main feed posts", grouped.get("main_feed", []), icon="📌")}
@@ -5874,6 +7341,8 @@ function copyCaption(btn, spanId) {{
 {_section_html("Internal notes / nice mentions", grouped.get("internal_notes", []), icon="📝")}
 {_section_html("Needs review", grouped.get("needs_review", []), icon="⚠")}
 {_section_html("Rejected / not recommended", grouped.get("rejected", []), icon="✕")}
+
+{_schedule_modal_html()}
 
 <script>
 function copyText(btn, taId) {{
@@ -5893,7 +7362,48 @@ function copyText(btn, taId) {{
     document.body.removeChild(t);
   }}
 }}
+// V9: Copy "Why this card?" reasoning.
+function copyWhyCard(btn, taId) {{ copyText(btn, taId); }}
+function generateReelGrouped(btn, reelUrl) {{
+  var panel = document.getElementById('reel-panel-grouped');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering reel…';
+  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+  fetch(reelUrl, {{method:'POST'}})
+    .then(function(r) {{
+      var ct = r.headers.get('content-type') || '';
+      if (r.ok && ct.indexOf('video') !== -1) {{ return r.blob().then(function(b){{ return {{ok:true, blob:b}}; }}); }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      panel.innerHTML =
+        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 220px;max-width:240px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:200px">' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel · 1080×1920 · 15s</div>' +
+            '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
+}}
 </script>
+{_schedule_modal_js()}
 """
         return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
 
@@ -6183,8 +7693,16 @@ function copyText(btn, taId) {{
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
+        # V9: Attach the "Why this card?" explanation so JSON consumers can
+        # render the same plain-English reasoning the UI shows.
+        explanation = _build_card_explanation(target)
         # Include the seed in the response so the UI / debugging can see it.
-        return jsonify({"ok": True, "variation_seed": variation_seed, **res})
+        return jsonify({
+            "ok": True,
+            "variation_seed": variation_seed,
+            "explanation": explanation,
+            **res,
+        })
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):
@@ -6280,6 +7798,183 @@ function copyText(btn, taId) {{
         with ThreadPoolExecutor(max_workers=3) as ex:
             variants = list(ex.map(_one, seeds))
         return jsonify({"ok": True, "variants": variants})
+
+    # ------------------------------------------------------------------
+    # Motion-graphic + short-form video output (Remotion)
+    # ------------------------------------------------------------------
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion", methods=["POST", "GET"])
+    def api_card_motion(run_id: str, card_id: str):
+        """Render (or serve cached) MP4 story for a single card.
+
+        Lazy: returns the cached file on cache hit; renders via Remotion on
+        cache miss. Always serves the MP4 with the correct mime type so the
+        UI can use <video src=…> or a direct download.
+        """
+        from flask import send_file
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_dir = RUNS_DIR / run_id
+            run_json = run_dir / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in (run_data.get("cards") or []):
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+
+        ach = target.get("achievement") or {}
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        card_payload = {
+            "id": ach.get("swim_id") or card_id,
+            "swim_id": ach.get("swim_id") or card_id,
+            "achievement": ach,
+            "meet_name": meet_name,
+        }
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        try:
+            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+        except Exception:
+            brand_kit = None
+
+        # Honour the same per-card variation seed as the static graphic, so
+        # the motion render visually aligns with the still card.
+        try:
+            from mediahub.creative_brief.generator import auto_variation_seed_for
+            variation_seed = auto_variation_seed_for(
+                ach.get("swim_id") or card_id
+            )
+        except Exception:
+            variation_seed = 1
+
+        out_dir = RUNS_DIR / run_id / "motion"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{card_id}.mp4"
+
+        try:
+            mp4 = _motion.render_story_card(
+                card_payload,
+                brand_kit,
+                out_path,
+                variation_seed=variation_seed,
+            )
+        except RuntimeError as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+
+        if not Path(mp4).exists():
+            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
+                         download_name=f"{card_id}.mp4")
+
+    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
+    def api_run_reel(run_id: str):
+        """Render (or serve cached) a multi-card MP4 reel for the meet.
+
+        Uses the top 3 ranked achievements by default; caller can override
+        the count with ?n=<int> up to a hard cap of 5.
+        """
+        from flask import send_file
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_dir = RUNS_DIR / run_id
+            run_json = run_dir / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        # ranked_achievements is generally already sorted; sort defensively.
+        ranked_sorted = sorted(
+            ranked,
+            key=lambda r: float(r.get("priority", 0.0) or 0.0),
+            reverse=True,
+        )
+        top = ranked_sorted[:n]
+        if not top:
+            # Fall back to the cards array if no recognition report.
+            top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
+        if not top:
+            return jsonify({"error": "no_cards_for_reel"}), 404
+
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        cards: list[dict] = []
+        for ra in top:
+            ach = ra.get("achievement") or {}
+            cards.append({
+                "id": ach.get("swim_id") or ra.get("id") or "",
+                "swim_id": ach.get("swim_id") or "",
+                "achievement": ach,
+                "meet_name": meet_name,
+            })
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        try:
+            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+        except Exception:
+            brand_kit = None
+
+        out_dir = RUNS_DIR / run_id / "motion"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"reel_{n}.mp4"
+
+        try:
+            mp4 = _motion.render_meet_reel(
+                cards,
+                brand_kit,
+                out_path,
+                meet_name=meet_name,
+            )
+        except RuntimeError as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+
+        if not Path(mp4).exists():
+            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
+                         download_name=f"meet_reel_{run_id}.mp4")
 
     @app.route("/api/visual/<vid>")
     def api_visual_get(vid: str):
