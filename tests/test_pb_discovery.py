@@ -130,11 +130,11 @@ class TestPBDiscoveryRanking:
         run_id = f"test-run-{uuid.uuid4()}"
 
         # Mock WebResearcher.search to return our fake results
-        with patch('context_engine.research.WebResearcher.search') as mock_search, \
-             patch('pb_discovery.fetch_profile._fetch_raw') as mock_fetch, \
-             patch('pb_discovery.cache._discovered_root') as mock_root, \
-             patch('context_engine.cache._discovered_root') as mock_cache_root, \
-             patch('context_engine.trust._ledger_path') as mock_ledger:
+        with patch("mediahub.context_engine.research.WebResearcher.search") as mock_search, \
+             patch("mediahub.pb_discovery.fetch_profile._fetch_raw") as mock_fetch, \
+             patch("mediahub.pb_discovery.cache._discovered_root") as mock_root, \
+             patch("mediahub.context_engine.cache._discovered_root") as mock_cache_root, \
+             patch("mediahub.context_engine.trust._ledger_path") as mock_ledger:
 
             # Point caches to tmp_path
             def _tmp_root():
@@ -194,7 +194,7 @@ class TestPBDiscoveryRanking:
             encoding="utf-8",
         )
 
-        with patch('context_engine.trust._ledger_path', return_value=ledger_path):
+        with patch("mediahub.context_engine.trust._ledger_path", return_value=ledger_path):
             from mediahub.context_engine.trust import rank_candidates
             urls = [
                 "https://low-trust-domain.example/alice",
@@ -217,7 +217,7 @@ class TestTrustLedger:
 
         ledger_path = tmp_path / "discovered_sources.jsonl"
 
-        with patch('context_engine.trust._ledger_path', return_value=ledger_path):
+        with patch("mediahub.context_engine.trust._ledger_path", return_value=ledger_path):
             record_attempt("test-domain.example", success=True, purpose="swimmer_pbs")
             record_attempt("test-domain.example", success=True, purpose="swimmer_pbs")
             record_attempt("test-domain.example", success=False, purpose="swimmer_pbs")
@@ -238,7 +238,7 @@ class TestTrustLedger:
 
         ledger_path = tmp_path / "discovered_sources.jsonl"
 
-        with patch('context_engine.trust._ledger_path', return_value=ledger_path):
+        with patch("mediahub.context_engine.trust._ledger_path", return_value=ledger_path):
             # 3 attempts, 3 successes → (3+1)/(3+2) = 0.8
             for _ in range(3):
                 record_attempt("perfect-domain.example", success=True, purpose="test")
@@ -250,7 +250,7 @@ class TestTrustLedger:
         """Unknown domains should score 0.5 (neutral prior)."""
         from mediahub.context_engine.trust import score_domain
 
-        with patch('context_engine.trust._ledger_path', return_value=tmp_path / "empty.jsonl"):
+        with patch("mediahub.context_engine.trust._ledger_path", return_value=tmp_path / "empty.jsonl"):
             score = score_domain("never-seen-before.example")
 
         assert score == 0.5, f"Unknown domain should score 0.5, got {score}"
@@ -271,11 +271,11 @@ class TestPerRunCache:
             call_count["n"] += 1
             return FAKE_PROFILE_HTML
 
-        with patch('context_engine.research.WebResearcher.search') as mock_search, \
-             patch('pb_discovery.fetch_profile._fetch_raw') as mock_fetch, \
-             patch('pb_discovery.cache._discovered_root') as mock_root, \
-             patch('context_engine.cache._discovered_root') as mock_cache_root, \
-             patch('context_engine.trust._ledger_path') as mock_ledger:
+        with patch("mediahub.context_engine.research.WebResearcher.search") as mock_search, \
+             patch("mediahub.pb_discovery.fetch_profile._fetch_raw") as mock_fetch, \
+             patch("mediahub.pb_discovery.cache._discovered_root") as mock_root, \
+             patch("mediahub.context_engine.cache._discovered_root") as mock_cache_root, \
+             patch("mediahub.context_engine.trust._ledger_path") as mock_ledger:
 
             def _tmp_root():
                 r = tmp_path / "discovered"
@@ -324,11 +324,11 @@ class TestPerRunCache:
             return FAKE_PROFILE_HTML
 
         def _run_discovery(run_id):
-            with patch('context_engine.research.WebResearcher.search') as mock_search, \
-                 patch('pb_discovery.fetch_profile._fetch_raw') as mock_fetch, \
-                 patch('pb_discovery.cache._discovered_root') as mock_root, \
-                 patch('context_engine.cache._discovered_root') as mock_cache_root, \
-                 patch('context_engine.trust._ledger_path') as mock_ledger:
+            with patch("mediahub.context_engine.research.WebResearcher.search") as mock_search, \
+                 patch("mediahub.pb_discovery.fetch_profile._fetch_raw") as mock_fetch, \
+                 patch("mediahub.pb_discovery.cache._discovered_root") as mock_root, \
+                 patch("mediahub.context_engine.cache._discovered_root") as mock_cache_root, \
+                 patch("mediahub.context_engine.trust._ledger_path") as mock_ledger:
 
                 def _tmp_root():
                     r = tmp_path / "discovered"
@@ -398,7 +398,7 @@ class TestWarmCache:
         """WarmCache should persist data and retrieve it within TTL."""
         from mediahub.pb_discovery.cache import WarmCache, make_swimmer_key
 
-        with patch('pb_discovery.cache._discovered_root') as mock_root:
+        with patch("mediahub.pb_discovery.cache._discovered_root") as mock_root:
             mock_root.return_value = tmp_path / "discovered"
 
             cache = WarmCache()
