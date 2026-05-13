@@ -96,6 +96,122 @@ except ImportError as _v73_err:
     _load_voice_profile = None
     _save_voice_profile = None
 
+# V9: "Why this card?" explainer.
+try:
+    from mediahub.recognition.explainer import explain_achievement as _explain_achievement
+except ImportError:
+    _explain_achievement = None
+
+
+def _build_card_explanation(ra: dict) -> dict:
+    """Build the "Why this card?" explanation dict for a ranked-achievement.
+
+    Returns the explain_achievement() output, or a fallback dict when the
+    explainer module is unavailable. Always returns a dict with the three
+    expected keys so downstream code can render unconditionally.
+    """
+    if _explain_achievement is None:
+        return {
+            "headline":     "Generated for: ranked top-N by overall score.",
+            "bullets":      [],
+            "source_lines": [],
+        }
+    try:
+        return _explain_achievement(
+            ra.get("achievement") or {},
+            ra.get("factors") or [],
+            rank=ra.get("rank"),
+        )
+    except Exception:
+        return {
+            "headline":     "Generated for: ranked top-N by overall score.",
+            "bullets":      [],
+            "source_lines": [],
+        }
+
+
+def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
+    """Render the collapsible "Why this card?" disclosure HTML.
+
+    The block is grounded: the headline / bullets come from the ranker's
+    factors and the source_lines are quoted verbatim from the achievement's
+    evidence entries. A "Copy reasoning" button copies the full text so it
+    can be pasted into a sponsor report.
+    """
+    exp = _build_card_explanation(ra)
+    headline = _h(exp.get("headline", ""))
+    bullets = exp.get("bullets") or []
+    source_lines = exp.get("source_lines") or []
+
+    bullets_html = ""
+    for b in bullets:
+        bullets_html += f'<li style="margin-bottom:3px">{_h(b)}</li>'
+    if not bullets_html:
+        bullets_html = ""
+
+    src_html = ""
+    for sl in source_lines:
+        label = _h(sl.get("label", "source"))
+        raw = _h(sl.get("raw_text", ""))
+        offset = sl.get("file_offset")
+        offset_tag = (
+            f'<span class="muted" style="font-size:10px;margin-left:6px">#{int(offset)}</span>'
+            if isinstance(offset, int) else ""
+        )
+        src_html += (
+            f'<li style="margin-bottom:6px">'
+            f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
+            f'{label}{offset_tag}</div>'
+            f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
+            f'background:rgba(34,211,238,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;'
+            f'color:var(--ink)">{raw}</blockquote>'
+            f'</li>'
+        )
+    if not src_html:
+        src_html = (
+            '<li class="muted" style="font-size:12px">'
+            'No source lines available — explanation is based on the ranker only.'
+            '</li>'
+        )
+
+    # Plain-text payload for the "Copy reasoning" button (kept in a hidden textarea
+    # so the copy works without an extra round-trip to the server).
+    plain_lines = [exp.get("headline", "")]
+    for b in bullets:
+        plain_lines.append(f"- {b}")
+    if source_lines:
+        plain_lines.append("")
+        plain_lines.append("Source lines:")
+        for sl in source_lines:
+            plain_lines.append(f"  [{sl.get('label','source')}] {sl.get('raw_text','')}")
+    plain_text = _h("\n".join(p for p in plain_lines if p is not None))
+
+    bullets_block = (
+        f'<ul style="margin:6px 0 10px 0;padding-left:20px;font-size:12px;color:var(--ink-dim)">{bullets_html}</ul>'
+        if bullets_html else ""
+    )
+
+    return f"""
+<details class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
+  border:1px solid rgba(139,92,246,0.25);border-radius:8px">
+  <summary style="cursor:pointer;font-size:12px;font-weight:600;color:#A78BFA;user-select:none;
+    list-style:none;display:flex;align-items:center;gap:6px">
+    <span aria-hidden="true">&#9432;</span> Why this card?
+  </summary>
+  <div style="margin-top:8px">
+    <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
+    {bullets_block}
+    <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
+      margin-bottom:4px">Source lines (verbatim)</div>
+    <ul style="list-style:none;margin:0;padding:0">{src_html}</ul>
+    <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn secondary" type="button" style="font-size:11px;padding:4px 10px"
+        onclick="copyWhyCard(this, 'why-text-{card_uuid}')">Copy reasoning</button>
+      <textarea id="why-text-{card_uuid}" style="display:none">{plain_text}</textarea>
+    </div>
+  </div>
+</details>"""
+
 # V8: media generation engine
 try:
     from mediahub.media_library.store import MediaLibraryStore as _V8MediaStore, get_store as _v8_get_media_store
@@ -2192,6 +2308,8 @@ def create_app() -> Flask:
                 freason = _h(f.get('reason',''))
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
+            _why_uuid = str(a.get('swim_id', f'top-{rank}')).replace(':', '_').replace(',', '_').replace('/', '_')
+            why_html = _render_why_this_card(ra, card_uuid=f"top-{_why_uuid}")
             ach_rows_html += f"""
 <div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -2209,6 +2327,7 @@ def create_app() -> Flask:
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {why_html}
       <details style="margin-top:8px">
         <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Expand factors &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
@@ -2581,6 +2700,9 @@ def create_app() -> Flask:
 
             _wf_api_url = url_for("api_workflow_set", run_id=run_id, card_id=card_id_raw)
 
+            # V9: "Why this card?" — plain-English, source-grounded reasoning.
+            why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}")
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -2602,6 +2724,7 @@ def create_app() -> Flask:
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
+      {why_html}
       {brand_cap_html}
       <details style="margin-top:8px">
         <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption · view factors &amp; evidence</summary>
@@ -2971,6 +3094,31 @@ function regenerateCaption(btn, captionUrl, cardId) {{
   _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
 }}
 
+// V9: Copy "Why this card?" reasoning to clipboard (for sponsor reports etc.)
+function copyWhyCard(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ return; }}
+  var text = ta.value || '';
+  var orig = btn.textContent;
+  var done = function(ok) {{
+    btn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(function() {{ btn.textContent = orig; }}, 1500);
+  }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function() {{ done(true); }}).catch(function() {{ fallback(); }});
+  }} else {{
+    fallback();
+  }}
+  function fallback() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }}
+    catch (e) {{ done(false); }}
+    document.body.removeChild(t);
+  }}
+}}
+
 function copyActiveTone(btn, cardId) {{
   // Find the active tone panel
   var activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]:not([style*="none"])');
@@ -3294,10 +3442,12 @@ function addGraphicToPack(btn, visualId) {{
 
         # Find the achievement for this swim_id
         achievement = {}
+        matched_ra = None
         for ra in ranked:
             a = ra.get("achievement") or {}
             if a.get("swim_id") == swim_id_dec:
                 achievement = a
+                matched_ra = ra
                 break
         # Fallback: partial match
         if not achievement:
@@ -3305,6 +3455,7 @@ function addGraphicToPack(btn, visualId) {{
                 a = ra.get("achievement") or {}
                 if swim_id_dec in (a.get("swim_id") or ""):
                     achievement = a
+                    matched_ra = ra
                     break
 
         # Build achievement dict suitable for caption generation
@@ -3330,6 +3481,10 @@ function addGraphicToPack(btn, visualId) {{
 
         now_iso = datetime.now(_tz.utc).isoformat()
 
+        # V9: build the plain-English explanation once per request so every
+        # response (live, fallback, error) carries it.
+        explanation = _build_card_explanation(matched_ra or {"achievement": achievement})
+
         from mediahub.media_ai.llm import is_available as _llm_available
         from mediahub.web.ai_caption import (
             generate_caption_for_tone as _gen_tone,
@@ -3352,6 +3507,7 @@ function addGraphicToPack(btn, visualId) {{
                         "Anthropic API key in Settings to generate live AI captions."
                     ),
                     "settings_url": url_for("settings_page"),
+                    "explanation": explanation,
                 }), 200
             try:
                 caption_text = _gen_tone(ach_dict, club_brand, tone=tone)
@@ -3362,6 +3518,7 @@ function addGraphicToPack(btn, visualId) {{
                     "generated_at": now_iso,
                     "fallback": False,
                     "fallback_voice": None,
+                    "explanation": explanation,
                 })
             except _ClaudeUE as e:
                 return jsonify({
@@ -3375,6 +3532,7 @@ function addGraphicToPack(btn, visualId) {{
                         "Add a Gemini API key (free) or Anthropic key in Settings."
                     ),
                     "settings_url": url_for("settings_page"),
+                    "explanation": explanation,
                 }), 200
         else:
             # Voice render — deterministic template, may be cached by client
@@ -3408,6 +3566,7 @@ function addGraphicToPack(btn, visualId) {{
                 "generated_at": now_iso,
                 "fallback": False,
                 "fallback_voice": None,
+                "explanation": explanation,
             })
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
@@ -5247,6 +5406,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _plain_raw = f"{active_cap.get('headline','')} {active_cap.get('body','')} {active_cap.get('cta','')}".strip()
                 cap_plain_only = cap_plain_hash = cap_plain_full = _plain_raw
 
+            # V9: "Why this card?" — explanation for the approved card.
+            why_html_pack = _render_why_this_card(card, card_uuid=f"pc-{card_uuid}")
+
             cards_html += f"""
 <div class="card" id="pc-{card_id}" style="page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px">
@@ -5259,6 +5421,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px">
     {inner_html}
   </div>
+  {why_html_pack}
   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyActiveTone(this, 'pc-{card_uuid}')">Copy caption</button>
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-2')">Copy + hashtags</button>
@@ -5313,6 +5476,24 @@ function copyCaption(btn, spanId) {{
     try {{ var ok = document.execCommand('copy'); done(ok); }}
     catch (e) {{ done(false); }}
     document.body.removeChild(ta);
+  }}
+}}
+// V9: Copy "Why this card?" reasoning (textarea-based).
+function copyWhyCard(btn, taId) {{
+  var ta = document.getElementById(taId);
+  if (!ta) {{ return; }}
+  var text = ta.value || '';
+  var orig = btn.textContent;
+  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function() {{ btn.textContent = orig; }}, 1500); }};
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(text).then(function() {{ done(true); }}).catch(function() {{ fb(); }});
+  }} else {{ fb(); }}
+  function fb() {{
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
+    document.body.appendChild(t); t.focus(); t.select();
+    try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
+    document.body.removeChild(t);
   }}
 }}
 </script>
@@ -5416,7 +5597,16 @@ function copyCaption(btn, spanId) {{
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
-                rows += f"""
+                # V9: "Why this card?" — derive from factors + evidence on this item.
+            _ra_for_why = {
+                "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
+                "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
+                "rank": item.get("rank"),
+            }
+            _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(",", "_").replace("/", "_") or f"gp-{section_id}"
+            why_html = _render_why_this_card(_ra_for_why, card_uuid=f"gp-{_why_uuid}")
+
+            rows += f"""
 <div class="card" style="margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
@@ -5429,6 +5619,7 @@ function copyCaption(btn, spanId) {{
       {f'<span class="tag">{band}</span>' if band else ""}
     </div>
   </div>
+  {why_html}
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
@@ -5545,6 +5736,8 @@ function copyText(btn, taId) {{
     document.body.removeChild(t);
   }}
 }}
+// V9: Copy "Why this card?" reasoning.
+function copyWhyCard(btn, taId) {{ copyText(btn, taId); }}
 </script>
 """
         return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
@@ -5835,8 +6028,16 @@ function copyText(btn, taId) {{
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
+        # V9: Attach the "Why this card?" explanation so JSON consumers can
+        # render the same plain-English reasoning the UI shows.
+        explanation = _build_card_explanation(target)
         # Include the seed in the response so the UI / debugging can see it.
-        return jsonify({"ok": True, "variation_seed": variation_seed, **res})
+        return jsonify({
+            "ok": True,
+            "variation_seed": variation_seed,
+            "explanation": explanation,
+            **res,
+        })
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):
