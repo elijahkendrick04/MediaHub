@@ -18,6 +18,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    ca-certificates gnupg \
     poppler-utils \
     libgl1 \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libffi-dev \
@@ -25,6 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 libdrm2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libxshmfence1 libxkbcommon0 \
     fonts-liberation \
+  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -50,6 +53,9 @@ COPY pyproject.toml /app/pyproject.toml
 
 # Install MediaHub itself in editable mode so the console script is wired.
 RUN pip install -e /app
+
+# Install Remotion node modules so /api/.../motion + /reel render MP4s.
+RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
 
 # Create runtime dirs (mounted volumes will overlay these).
 RUN mkdir -p /app/runs_v4 /app/uploads_v4 /app/.cache

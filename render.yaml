@@ -7,10 +7,17 @@ services:
     runtime: python
     plan: starter
     buildCommand: |
+      # Install Node.js 20 (required for Remotion motion/reel rendering).
+      # Render's Python image doesn't ship Node, so install via NodeSource.
+      # Errors are tolerated so a missing-node environment still deploys
+      # (motion/reel routes surface a clear "Node not installed" error).
+      (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) || true
       pip install --upgrade pip
       pip install -r requirements.txt
       pip install gunicorn
       pip install -e .
+      # Install Remotion node modules so /api/.../motion and /reel work.
+      (cd src/mediahub/remotion && npm install --no-audit --no-fund) || true
     startCommand: >-
       mkdir -p /var/mediahub/data /var/mediahub/runs_v4 /var/mediahub/uploads_v4 &&
       cp -rn data/. /var/mediahub/data/ &&
@@ -24,6 +31,8 @@ services:
       - key: FLASK_ENV
         value: production
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
         sync: false
       - key: REPLICATE_API_TOKEN
         sync: false

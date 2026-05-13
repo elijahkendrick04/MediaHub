@@ -4005,10 +4005,9 @@ function addGraphicToPack(btn, visualId) {{
                     "explanation": explanation,
                 }), 200
             try:
-                caption_text = _gen_tone(ach_dict, club_brand, tone=tone,
-                                         voice_profile=_run_voice_profile)
                 caption_text = _gen_tone(
                     ach_dict, club_brand, tone=tone,
+                    voice_profile=_run_voice_profile,
                     club_profile=club_profile_obj,
                 )
                 return jsonify({

@@ -595,9 +595,12 @@ def _heuristic_response(prompt: str, system: Optional[str]) -> str:
     so keep it stable.
     """
     full = ((system or "") + "\n" + (prompt or "")).lower()
+    sys_lower = (system or "").lower()
 
-    # JSON structured (description parsing or brief) — check first; takes priority
-    if "json" in full or "return only" in full:
+    # JSON structured output — only when the SYSTEM prompt explicitly asks
+    # for JSON. The user prompt commonly contains "Achievement data (JSON):"
+    # as a label for data, which must NOT route the response to '{}'.
+    if "return only a json" in sys_lower or "respond with json" in sys_lower or "output json" in sys_lower:
         return "{}"
     # Alt text
     if "alt text" in full or "alt-text" in full or "accessibility" in full:
@@ -651,6 +654,9 @@ def call_claude(
     result = generate(user, system=system, max_tokens=max_tokens)
     if not result or result.startswith("Generated content unavailable"):
         raise ClaudeUnavailableError("LLM returned empty or heuristic fallback")
+    # Heuristic JSON sentinel — never a real caption.
+    if result.strip() in ("{}", "{}\n", "[]", "{\n}"):
+        raise ClaudeUnavailableError("LLM returned heuristic JSON-empty sentinel")
     return result
 
 
