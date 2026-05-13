@@ -2080,6 +2080,7 @@ def create_app() -> Flask:
         _delete_url = url_for('privacy_delete_run', run_id=run_id)
         _status_url = url_for('api_status', run_id=run_id)
         _pack_url = url_for('content_pack', run_id=run_id)
+        _reel_url = url_for('api_run_reel', run_id=run_id)
 
         # --- V7: Workflow state
         _wf_summary = {}
@@ -2563,6 +2564,7 @@ def create_app() -> Flask:
 
             # V8: Create-graphic API URL (lazy visual generation)
             _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
+            _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
             tone_tabs_html = (
                 f'<div class="tone-picker" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">'
                 f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
@@ -2572,9 +2574,11 @@ def create_app() -> Flask:
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">↺ Regenerate caption</button>'
                 f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">✦ Create graphic</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">▶ Generate motion</button>'
                 f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
                 f'</div>'
                 f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+                f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>'
                 f'</div>'
             )
             brand_cap_html = tone_tabs_html
@@ -2691,7 +2695,12 @@ def create_app() -> Flask:
 {warn_html}
 
 <div class="card">
-  <h2>Top achievements</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
+    <h2 style="margin:0">Top achievements</h2>
+    <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+            onclick="generateReel(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+  </div>
+  <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
   <div class="filters-bar">
     <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
@@ -3118,6 +3127,101 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {{
         '</div>' +
       '</div>' +
     '</div>';
+}}
+
+// Motion-graphic generation: lazy, cached server-side. Streams the resulting
+// MP4 into an inline <video> on the card panel.
+var _motionCache = {{}};
+function generateMotion(btn, motionUrl, cardId) {{
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering motion…';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Rendering motion graphic… cached renders return in ~5s, cold renders up to 90s.</div>';
+  fetch(motionUrl, {{method:'POST'}})
+    .then(function(r) {{
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
+        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
+      }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Motion render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      _motionCache[cardId] = url;
+      panel.innerHTML =
+        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 200px;max-width:220px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:200px">' +
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion · 1080×1920 · 6s</div>' +
+            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
+}}
+
+// Meet-reel generation: top-3 cards stitched into a 15-second reel.
+function generateReel(btn, reelUrl) {{
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering reel…';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+  fetch(reelUrl, {{method:'POST'}})
+    .then(function(r) {{
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
+        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
+      }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      panel.innerHTML =
+        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 240px;max-width:260px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:240px">' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel · 1080×1920 · 15s</div>' +
+            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
 }}
 
 function regenerateGraphic(btn, createUrl, cardId) {{
@@ -5379,6 +5483,7 @@ function copyCaption(btn, spanId) {{
         meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
+        _reel_url = url_for("api_run_reel", run_id=run_id)
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
@@ -5517,6 +5622,16 @@ function copyCaption(btn, spanId) {{
 <p class="dim"><a href="{_review_url}">← Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
 <h1>Content Pack (grouped) — {meet_name}</h1>
 
+<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Meet reel</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+  </div>
+  <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+          onclick="generateReelGrouped(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+</div>
+<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
+
 {visuals_strip}
 
 {_section_html("Main feed posts", grouped.get("main_feed", []), icon="📌")}
@@ -5544,6 +5659,44 @@ function copyText(btn, taId) {{
     try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
     document.body.removeChild(t);
   }}
+}}
+function generateReelGrouped(btn, reelUrl) {{
+  var panel = document.getElementById('reel-panel-grouped');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering reel…';
+  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+  fetch(reelUrl, {{method:'POST'}})
+    .then(function(r) {{
+      var ct = r.headers.get('content-type') || '';
+      if (r.ok && ct.indexOf('video') !== -1) {{ return r.blob().then(function(b){{ return {{ok:true, blob:b}}; }}); }}
+      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
+    }})
+    .then(function(res) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {{
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        return;
+      }}
+      var url = URL.createObjectURL(res.blob);
+      panel.innerHTML =
+        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 220px;max-width:240px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:200px">' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel · 1080×1920 · 15s</div>' +
+            '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '</div>' +
+        '</div>';
+    }})
+    .catch(function(err) {{
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+    }});
 }}
 </script>
 """
@@ -5932,6 +6085,183 @@ function copyText(btn, taId) {{
         with ThreadPoolExecutor(max_workers=3) as ex:
             variants = list(ex.map(_one, seeds))
         return jsonify({"ok": True, "variants": variants})
+
+    # ------------------------------------------------------------------
+    # Motion-graphic + short-form video output (Remotion)
+    # ------------------------------------------------------------------
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion", methods=["POST", "GET"])
+    def api_card_motion(run_id: str, card_id: str):
+        """Render (or serve cached) MP4 story for a single card.
+
+        Lazy: returns the cached file on cache hit; renders via Remotion on
+        cache miss. Always serves the MP4 with the correct mime type so the
+        UI can use <video src=…> or a direct download.
+        """
+        from flask import send_file
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_dir = RUNS_DIR / run_id
+            run_json = run_dir / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in (run_data.get("cards") or []):
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+
+        ach = target.get("achievement") or {}
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        card_payload = {
+            "id": ach.get("swim_id") or card_id,
+            "swim_id": ach.get("swim_id") or card_id,
+            "achievement": ach,
+            "meet_name": meet_name,
+        }
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        try:
+            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+        except Exception:
+            brand_kit = None
+
+        # Honour the same per-card variation seed as the static graphic, so
+        # the motion render visually aligns with the still card.
+        try:
+            from mediahub.creative_brief.generator import auto_variation_seed_for
+            variation_seed = auto_variation_seed_for(
+                ach.get("swim_id") or card_id
+            )
+        except Exception:
+            variation_seed = 1
+
+        out_dir = RUNS_DIR / run_id / "motion"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{card_id}.mp4"
+
+        try:
+            mp4 = _motion.render_story_card(
+                card_payload,
+                brand_kit,
+                out_path,
+                variation_seed=variation_seed,
+            )
+        except RuntimeError as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+
+        if not Path(mp4).exists():
+            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
+                         download_name=f"{card_id}.mp4")
+
+    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
+    def api_run_reel(run_id: str):
+        """Render (or serve cached) a multi-card MP4 reel for the meet.
+
+        Uses the top 3 ranked achievements by default; caller can override
+        the count with ?n=<int> up to a hard cap of 5.
+        """
+        from flask import send_file
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_dir = RUNS_DIR / run_id
+            run_json = run_dir / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        # ranked_achievements is generally already sorted; sort defensively.
+        ranked_sorted = sorted(
+            ranked,
+            key=lambda r: float(r.get("priority", 0.0) or 0.0),
+            reverse=True,
+        )
+        top = ranked_sorted[:n]
+        if not top:
+            # Fall back to the cards array if no recognition report.
+            top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
+        if not top:
+            return jsonify({"error": "no_cards_for_reel"}), 404
+
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        cards: list[dict] = []
+        for ra in top:
+            ach = ra.get("achievement") or {}
+            cards.append({
+                "id": ach.get("swim_id") or ra.get("id") or "",
+                "swim_id": ach.get("swim_id") or "",
+                "achievement": ach,
+                "meet_name": meet_name,
+            })
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        try:
+            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+        except Exception:
+            brand_kit = None
+
+        out_dir = RUNS_DIR / run_id / "motion"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"reel_{n}.mp4"
+
+        try:
+            mp4 = _motion.render_meet_reel(
+                cards,
+                brand_kit,
+                out_path,
+                meet_name=meet_name,
+            )
+        except RuntimeError as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+        except Exception as e:
+            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+
+        if not Path(mp4).exists():
+            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
+                         download_name=f"meet_reel_{run_id}.mp4")
 
     @app.route("/api/visual/<vid>")
     def api_visual_get(vid: str):
