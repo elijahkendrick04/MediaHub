@@ -72,6 +72,23 @@ class ClubProfile:
     # Freeform brand voice notes
     tone_notes: str = ""
 
+    # ---- Brand DNA capture (Step 1 of roadmap; all optional) ----
+    # Populated by mediahub.brand.dna_capture.capture_brand_dna() when
+    # the user runs "Capture from website" on /organisation. Old club
+    # profile JSONs without these keys still load because from_dict
+    # filters unknown keys and dataclass defaults fill missing ones.
+
+    brand_voice_summary: str = ""
+    brand_keywords: list[str] = field(default_factory=list)
+    brand_palette_extracted: dict = field(default_factory=dict)
+    brand_logo_url: str = ""
+    brand_typography_hint: str = ""
+    brand_phrases_to_avoid: list[str] = field(default_factory=list)
+    brand_phrases_to_use: list[str] = field(default_factory=list)
+    brand_source_url: str = ""
+    brand_captured_at: str = ""
+    brand_capture_status: str = ""
+
     def to_dict(self) -> dict:
         return asdict(self)
 

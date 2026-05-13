@@ -4964,43 +4964,151 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         ]
 
         saved_msg = ""
+        capture_preview = ""      # rendered preview HTML when a capture has just run
+        capture_error = ""        # rendered error banner when capture failed
+        # The capture preview is kept in-memory only — the user must click
+        # "Save organisation" to persist it (no silent writes).
         if request.method == "POST":
+            action = (request.form.get("action") or "save").strip().lower()
             raw_id = (request.form.get("profile_id") or "default").strip().lower()
             profile_id = re.sub(r"[^a-z0-9_-]", "-", raw_id).strip("-") or "default"
             existing = load_profile(profile_id) or ClubProfile(
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
             )
-            existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
-            existing.short_name = (request.form.get("short_name") or "").strip()
-            existing.org_type = (request.form.get("org_type") or "other").strip()
-            existing.governing_body = (request.form.get("governing_body") or "").strip()
-            existing.country = (request.form.get("country") or "").strip()
-            # Club / result codes — comma-separated
-            codes_raw = request.form.get("club_codes") or ""
-            existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
-            # Brand colours
-            existing.brand_primary = (request.form.get("brand_primary") or existing.brand_primary or "#0A2540").strip()
-            existing.brand_secondary = (request.form.get("brand_secondary") or existing.brand_secondary or "#000000").strip()
-            # Tone
-            existing.tone = (request.form.get("tone") or "warm-club").strip()
-            existing.caption_tone = existing.tone
-            # Platforms
-            existing.platforms = [p.strip() for p in request.form.getlist("platforms") if p.strip()]
-            # Voice
-            existing.tone_notes = (request.form.get("tone_notes") or "").strip()
-            raw_exemplars = (request.form.get("exemplar_captions") or "").strip()
-            if raw_exemplars:
-                parts = [p.strip() for p in raw_exemplars.split("---") if p.strip()]
-                existing.exemplar_captions = parts[:5]
+
+            if action == "capture":
+                # ---- Brand DNA capture from website URL ----
+                target_url = (request.form.get("brand_source_url") or "").strip()
+                if not target_url:
+                    capture_error = (
+                        '<p class="tag bad" style="margin-bottom:20px">'
+                        'Enter a website URL to analyse.</p>'
+                    )
+                    profile = existing
+                else:
+                    try:
+                        from mediahub.brand.dna_capture import capture_brand_dna
+                        result = capture_brand_dna(target_url, force=False)
+                    except Exception as e:
+                        result = {"brand_capture_status": f"error: {e}"}
+                    status = (result or {}).get("brand_capture_status", "")
+                    if status in ("ok", "ok_heuristic"):
+                        # Merge captured fields into the in-memory profile so
+                        # the preview shows them, but DON'T save until the user
+                        # clicks "Save organisation".
+                        for k in (
+                            "brand_voice_summary", "brand_keywords",
+                            "brand_palette_extracted", "brand_logo_url",
+                            "brand_typography_hint", "brand_phrases_to_avoid",
+                            "brand_phrases_to_use", "brand_source_url",
+                            "brand_captured_at", "brand_capture_status",
+                        ):
+                            if k in result:
+                                setattr(existing, k, result[k])
+                        # Adopt extracted palette into primary/secondary if
+                        # the existing profile is still on the default colours.
+                        pal = result.get("brand_palette_extracted") or {}
+                        if pal.get("primary") and existing.brand_primary in (
+                            "", "#0A2540", "#A30D2D",
+                        ):
+                            existing.brand_primary = pal["primary"]
+                        if pal.get("secondary") and existing.brand_secondary in (
+                            "", "#000000",
+                        ):
+                            existing.brand_secondary = pal["secondary"]
+                        note = (
+                            "Captured from website — review below and click "
+                            "Save organisation to persist."
+                            if status == "ok"
+                            else "Captured from website (no LLM available, "
+                                 "heuristic fallback). Edit and save."
+                        )
+                        capture_preview = (
+                            f'<p class="tag info" style="margin-bottom:20px">'
+                            f'{_h(note)}</p>'
+                        )
+                    else:
+                        # Surface the failure clearly but keep the form usable.
+                        reason = {
+                            "missing_url": "No URL was provided.",
+                            "fetch_failed": "Could not reach that URL — check it loads in a browser.",
+                        }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
+                        capture_error = (
+                            f'<p class="tag bad" style="margin-bottom:20px">'
+                            f'{_h(reason)}</p>'
+                        )
+                profile = existing
+
             else:
-                existing.exemplar_captions = []
-            # Sponsor
-            existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
-            existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
-            save_profile(existing)
-            saved_msg = '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
-            profile = existing
+                # ---- Save organisation (existing behaviour) ----
+                existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
+                existing.short_name = (request.form.get("short_name") or "").strip()
+                existing.org_type = (request.form.get("org_type") or "other").strip()
+                existing.governing_body = (request.form.get("governing_body") or "").strip()
+                existing.country = (request.form.get("country") or "").strip()
+                # Club / result codes — comma-separated
+                codes_raw = request.form.get("club_codes") or ""
+                existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
+                # Brand colours
+                existing.brand_primary = (request.form.get("brand_primary") or existing.brand_primary or "#0A2540").strip()
+                existing.brand_secondary = (request.form.get("brand_secondary") or existing.brand_secondary or "#000000").strip()
+                # Tone
+                existing.tone = (request.form.get("tone") or "warm-club").strip()
+                existing.caption_tone = existing.tone
+                # Platforms
+                existing.platforms = [p.strip() for p in request.form.getlist("platforms") if p.strip()]
+                # Voice
+                existing.tone_notes = (request.form.get("tone_notes") or "").strip()
+                raw_exemplars = (request.form.get("exemplar_captions") or "").strip()
+                if raw_exemplars:
+                    parts = [p.strip() for p in raw_exemplars.split("---") if p.strip()]
+                    existing.exemplar_captions = parts[:5]
+                else:
+                    existing.exemplar_captions = []
+                # Sponsor
+                existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
+                existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
+                # Brand DNA — persist any captured fields submitted via hidden
+                # inputs from a prior capture preview. We accept simple scalars
+                # plus JSON-encoded lists/dicts for the structured fields.
+                def _hidden_list(name: str) -> list[str]:
+                    raw = (request.form.get(name) or "").strip()
+                    if not raw:
+                        return []
+                    try:
+                        v = json.loads(raw)
+                        if isinstance(v, list):
+                            return [str(x) for x in v]
+                    except Exception:
+                        return []
+                    return []
+
+                def _hidden_dict(name: str) -> dict:
+                    raw = (request.form.get(name) or "").strip()
+                    if not raw:
+                        return {}
+                    try:
+                        v = json.loads(raw)
+                        if isinstance(v, dict):
+                            return v
+                    except Exception:
+                        return {}
+                    return {}
+
+                existing.brand_voice_summary = (request.form.get("brand_voice_summary") or "").strip()
+                existing.brand_logo_url = (request.form.get("brand_logo_url") or "").strip()
+                existing.brand_typography_hint = (request.form.get("brand_typography_hint") or "").strip()
+                existing.brand_source_url = (request.form.get("brand_source_url_saved") or "").strip()
+                existing.brand_captured_at = (request.form.get("brand_captured_at") or "").strip()
+                existing.brand_capture_status = (request.form.get("brand_capture_status") or "").strip()
+                existing.brand_keywords = _hidden_list("brand_keywords_json")
+                existing.brand_phrases_to_use = _hidden_list("brand_phrases_to_use_json")
+                existing.brand_phrases_to_avoid = _hidden_list("brand_phrases_to_avoid_json")
+                existing.brand_palette_extracted = _hidden_dict("brand_palette_extracted_json")
+                save_profile(existing)
+                saved_msg = '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
+                profile = existing
         else:
             profiles = list_profiles()
             profile = profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
@@ -5031,13 +5139,133 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _input_style = "width:100%;max-width:480px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px"
         _ta_style = "width:100%;max-width:600px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-family:inherit;font-size:14px"
 
+        # ---- Brand DNA preview block (rendered when fields are populated) ----
+        def _swatch(hexv: str) -> str:
+            if not hexv:
+                return ""
+            return (
+                f'<div title="{_h(hexv)}" style="display:inline-flex;align-items:center;'
+                f'gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;'
+                f'margin-right:6px;margin-bottom:6px;background:var(--panel)">'
+                f'<span style="display:inline-block;width:18px;height:18px;border-radius:4px;'
+                f'background:{_h(hexv)};border:1px solid rgba(255,255,255,0.15)"></span>'
+                f'<code style="font-size:11px;color:var(--ink)">{_h(hexv)}</code></div>'
+            )
+
+        def _chip(text: str, tone: str = "neutral") -> str:
+            colour = {
+                "good": "var(--accent)",
+                "warn": "#ffae3b",
+                "bad": "#ff5d6c",
+                "neutral": "var(--ink-dim)",
+            }.get(tone, "var(--ink-dim)")
+            return (
+                f'<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;'
+                f'border:1px solid var(--border);border-radius:999px;font-size:11px;'
+                f'color:{colour};background:rgba(255,255,255,0.02)">{_h(text)}</span>'
+            )
+
+        brand_preview_html = ""
+        has_brand = bool(
+            (profile.brand_voice_summary or "").strip()
+            or profile.brand_keywords
+            or profile.brand_palette_extracted
+            or profile.brand_logo_url
+            or profile.brand_phrases_to_use
+            or profile.brand_phrases_to_avoid
+        )
+        if has_brand:
+            pal = profile.brand_palette_extracted or {}
+            swatches = "".join(_swatch(pal.get(k, "")) for k in ("primary", "secondary", "accent") if pal.get(k))
+            keywords_html = "".join(_chip(k, "neutral") for k in (profile.brand_keywords or [])[:12])
+            use_html = "".join(_chip(p, "good") for p in (profile.brand_phrases_to_use or [])[:5])
+            avoid_html = "".join(_chip(p, "bad") for p in (profile.brand_phrases_to_avoid or [])[:5])
+            logo_html = ""
+            if profile.brand_logo_url:
+                logo_html = (
+                    f'<img src="{_h(profile.brand_logo_url)}" alt="Detected logo" '
+                    f'style="max-height:60px;max-width:200px;background:var(--panel);'
+                    f'padding:6px;border:1px solid var(--border);border-radius:6px"/>'
+                )
+            captured_meta = ""
+            if profile.brand_captured_at or profile.brand_source_url:
+                src = profile.brand_source_url or ""
+                ts = profile.brand_captured_at or ""
+                status = profile.brand_capture_status or ""
+                captured_meta = (
+                    f'<p style="font-size:11px;color:var(--ink-dim);margin-top:8px">'
+                    f'Source: <a href="{_h(src)}" target="_blank" rel="noopener" '
+                    f'style="color:var(--ink-dim)">{_h(src)}</a> · '
+                    f'captured {_h(ts)} · status {_h(status)}'
+                    f'</p>'
+                )
+            brand_preview_html = f"""
+<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(34,211,238,0.03)">
+  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Brand DNA preview</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+    <div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Voice summary</div>
+      <p style="margin:0;font-size:13px;color:var(--ink);line-height:1.5">{_h(profile.brand_voice_summary or '(no summary yet)')}</p>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Palette</div>
+      <div>{swatches or '<span class="dim" style="font-size:12px">(none detected)</span>'}</div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Typography hint</div>
+      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '—')}</p>
+    </div>
+    <div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Detected logo</div>
+      <div>{logo_html or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Keywords</div>
+      <div>{keywords_html or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Phrases to use</div>
+      <div>{use_html or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+      <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Phrases to avoid</div>
+      <div>{avoid_html or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+    </div>
+  </div>
+  {captured_meta}
+</div>
+"""
+
+        # Hidden inputs that carry the captured brand fields through the
+        # next form submission so a click on Save persists them.
+        brand_hidden_inputs = (
+            f'<input type="hidden" name="brand_voice_summary" value="{_h(profile.brand_voice_summary or "")}"/>'
+            f'<input type="hidden" name="brand_logo_url" value="{_h(profile.brand_logo_url or "")}"/>'
+            f'<input type="hidden" name="brand_typography_hint" value="{_h(profile.brand_typography_hint or "")}"/>'
+            f'<input type="hidden" name="brand_source_url_saved" value="{_h(profile.brand_source_url or "")}"/>'
+            f'<input type="hidden" name="brand_captured_at" value="{_h(profile.brand_captured_at or "")}"/>'
+            f'<input type="hidden" name="brand_capture_status" value="{_h(profile.brand_capture_status or "")}"/>'
+            f'<input type="hidden" name="brand_keywords_json" value="{_h(json.dumps(profile.brand_keywords or []))}"/>'
+            f'<input type="hidden" name="brand_phrases_to_use_json" value="{_h(json.dumps(profile.brand_phrases_to_use or []))}"/>'
+            f'<input type="hidden" name="brand_phrases_to_avoid_json" value="{_h(json.dumps(profile.brand_phrases_to_avoid or []))}"/>'
+            f'<input type="hidden" name="brand_palette_extracted_json" value="{_h(json.dumps(profile.brand_palette_extracted or {}))}"/>'
+        )
+
         body = f"""
-{saved_msg}
+{saved_msg}{capture_preview}{capture_error}
 <h1>Organisation</h1>
 <p class="dim" style="margin-bottom:24px">Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
 
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(34,211,238,0.04)">
+  <h2 style="margin-top:0">Capture from website</h2>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and MediaHub will extract the palette, logo, voice and keywords automatically. The result appears below — review and click Save organisation to persist.</p>
+  <form method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input type="hidden" name="action" value="capture"/>
+    <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
+    <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
+    <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
+           placeholder="https://your-club.example"
+           style="{_input_style};max-width:520px;flex:1" required/>
+    <button type="submit" class="btn">Analyse →</button>
+  </form>
+</div>
+
+{brand_preview_html}
+
 <form method="POST">
+<input type="hidden" name="action" value="save"/>
 <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
+{brand_hidden_inputs}
 
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Identity</h2>
