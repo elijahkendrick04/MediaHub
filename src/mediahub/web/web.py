@@ -1630,7 +1630,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   // Detect deployed prefix (e.g. "/port/5000") so XHRs from inline JS use the right base.
   (function(){
     var path = window.location.pathname || '/';
-    var m = path.match(/^(\/port\/\d+)/);
+    var m = path.match(/^(\\/port\\/\\d+)/);
     window._API_BASE = m ? m[1] : '';
   })();
 </script>
@@ -3724,7 +3724,7 @@ function regenerateGraphic(btn, createUrl, cardId) {{
   if (!panel) return;
   panel.style.display = '';
   // Derive the variants endpoint from the create-graphic URL.
-  var variantsUrl = createUrl.replace(/\/create-graphic$/, '/regenerate-variants');
+  var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options…';
@@ -4095,7 +4095,7 @@ function addGraphicToPack(btn, visualId) {{
 
         body = f"""
 <h1>PB Audit — {_h(pb_audit.get('run_id', run_id))}</h1>
-<p class="dim"><a href="{_review_url}">← Back to review</a></p>
+<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 <div class="card">
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get('swimmers_total',0)}</div></div>
@@ -4186,7 +4186,7 @@ function addGraphicToPack(btn, visualId) {{
 
         body = f"""
 <h1>Verify swimmer identity</h1>
-<p class="dim"><a href="{_audit_url}">← Back to audit</a></p>
+<p class="dim"><a href="{_audit_url}">&larr; Back to audit</a></p>
 {context_html}
 <div class="card">
   <h2 style="font-size:16px;margin-bottom:8px">Set the correct ASA member ID</h2>
@@ -4261,7 +4261,7 @@ function addGraphicToPack(btn, visualId) {{
 
         body = f"""
 <h1>Ground Truth — PB Decisions</h1>
-<p class="dim"><a href="{_audit_url}">← Back to PB audit</a></p>
+<p class="dim"><a href="{_audit_url}">&larr; Back to PB audit</a></p>
 <div class="card">
   <p>Upload a CSV with columns: <code>swimmer_name, event_label, result_time, expected_pb, expected_prev_pb, expected_barrier_crossed, notes</code></p>
   <p><code>expected_pb</code>: yes | no | unknown</p>
@@ -5458,7 +5458,7 @@ Relay team broke club record"></textarea>
 </div>"""
 
         body = f"""
-<p class="dim"><a href="{_back_url}">← Back to swimmer list</a> · <a href="{_review_url}">Full meet review</a></p>
+<p class="dim"><a href="{_back_url}">&larr; Back to swimmer list</a> · <a href="{_review_url}">Full meet review</a></p>
 <h1>Spotlight: {_h(pack["swimmer_name"])}</h1>
 <p class="dim">{_h(pack["meet_name"])}</p>
 
@@ -5594,10 +5594,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if saved:
                 _packs_url = url_for("stub_packs_list")
                 body = body.replace(
-                    f'<a class="btn secondary" href="{_h(back)}">← Start over</a>',
+                    f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>',
                     (
                         f'<a class="btn" href="{_h(actions_url)}">View & export this pack →</a>'
-                        f'<a class="btn secondary" href="{_h(back)}">← Start over</a>'
+                        f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>'
                         f'<a class="btn secondary" href="{_h(_packs_url)}">All saved drafts</a>'
                     ),
                     1,
@@ -5610,11 +5610,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body += (
                 f'<p style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">'
                 f'<a href="{_packs_url}">View your saved drafts →</a>'
-                f'<a href="{url_for("make_page")}">← Back to Make</a>'
+                f'<a href="{url_for("make_page")}">&larr; Back to Make</a>'
                 f'</p>'
             )
         except Exception:
-            body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">← Back to Make</a></p>'
+            body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">&larr; Back to Make</a></p>'
         return _layout(title, body, active=active_tab)
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
@@ -5718,7 +5718,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
             f'<a class="btn" href="{export_url}">Export as text</a>'
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
-            f'<a class="btn secondary" href="{back_url}">← All drafts</a>'
+            f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
             f'</div>'
         )
         # Prepend a context band showing the type + timestamp.
@@ -5731,7 +5731,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Replace the renderer's default action row
         cards_html = cards_html.replace(
             f'<div style="margin-top:24px;display:flex;gap:10px">'
-            f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
+            f'<a class="btn secondary" href="{_h(back_url)}">&larr; Start over</a>'
             f'</div>',
             footer,
             1,
@@ -6035,64 +6035,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     profile = existing
 
             else:
-                existing.exemplar_captions = []
-            # Sponsor
-            existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
-            existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
-            # Voice imitation layer — one caption per line. Apply PII
-            # redaction before persisting so real swimmer names never
-            # land on disk.
-            from mediahub.brand.voice_imitation import (
-                analyse_examples as _analyse_voice,
-                redact_pii as _redact_pii,
-            )
-            raw_voice_examples = (request.form.get("voice_examples") or "").strip()
-            if raw_voice_examples:
-                voice_lines = [
-                    _redact_pii(line.strip())
-                    for line in raw_voice_examples.splitlines()
-                    if line.strip()
-                ]
-                existing.voice_examples = voice_lines[:20]
-            else:
-                existing.voice_examples = []
-            # "Analyse voice" button regenerates the profile from the
-            # current voice_examples. Plain save preserves the existing
-            # voice_profile so the user can edit other fields without
-            # losing the analysis.
-            if request.form.get("analyse_voice") and existing.voice_examples:
-                existing.voice_profile = _analyse_voice(existing.voice_examples)
-                saved_msg = (
-                    '<p class="tag good" style="margin-bottom:20px">'
-                    'Voice profile analysed and saved.</p>'
-                )
-            else:
-                if not existing.voice_examples:
-                    existing.voice_profile = {}
-                saved_msg = (
-                    '<p class="tag good" style="margin-bottom:20px">'
-                    'Organisation saved.</p>'
-                )
-            save_profile(existing)
-            profile = existing
-                # ---- Save organisation (existing behaviour) ----
+                # ---- Save organisation ----
                 existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
                 existing.short_name = (request.form.get("short_name") or "").strip()
                 existing.org_type = (request.form.get("org_type") or "other").strip()
                 existing.governing_body = (request.form.get("governing_body") or "").strip()
                 existing.country = (request.form.get("country") or "").strip()
-                # Club / result codes — comma-separated
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
-                # Brand colours
                 existing.brand_primary = (request.form.get("brand_primary") or existing.brand_primary or "#0A2540").strip()
                 existing.brand_secondary = (request.form.get("brand_secondary") or existing.brand_secondary or "#000000").strip()
-                # Tone
                 existing.tone = (request.form.get("tone") or "warm-club").strip()
                 existing.caption_tone = existing.tone
-                # Platforms
                 existing.platforms = [p.strip() for p in request.form.getlist("platforms") if p.strip()]
-                # Voice
                 existing.tone_notes = (request.form.get("tone_notes") or "").strip()
                 raw_exemplars = (request.form.get("exemplar_captions") or "").strip()
                 if raw_exemplars:
@@ -6100,12 +6055,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     existing.exemplar_captions = parts[:5]
                 else:
                     existing.exemplar_captions = []
-                # Sponsor
                 existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
                 existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
-                # Brand DNA — persist any captured fields submitted via hidden
-                # inputs from a prior capture preview. We accept simple scalars
-                # plus JSON-encoded lists/dicts for the structured fields.
                 def _hidden_list(name: str) -> list[str]:
                     raw = (request.form.get(name) or "").strip()
                     if not raw:
@@ -6140,11 +6091,37 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 existing.brand_phrases_to_use = _hidden_list("brand_phrases_to_use_json")
                 existing.brand_phrases_to_avoid = _hidden_list("brand_phrases_to_avoid_json")
                 existing.brand_palette_extracted = _hidden_dict("brand_palette_extracted_json")
-                # Voice imitation — persist any analysed voice_profile from hidden inputs
-                existing.voice_profile = _hidden_dict("voice_profile_json")
-                existing.voice_examples = _hidden_list("voice_examples_json")
+                from mediahub.brand.voice_imitation import (
+                    analyse_examples as _analyse_voice,
+                    redact_pii as _redact_pii,
+                )
+                raw_voice_examples = (request.form.get("voice_examples") or "").strip()
+                if raw_voice_examples:
+                    voice_lines = [
+                        _redact_pii(line.strip())
+                        for line in raw_voice_examples.splitlines()
+                        if line.strip()
+                    ]
+                    existing.voice_examples = voice_lines[:20]
+                else:
+                    existing.voice_examples = []
+                vp_from_hidden = _hidden_dict("voice_profile_json")
+                if vp_from_hidden:
+                    existing.voice_profile = vp_from_hidden
+                elif not existing.voice_examples:
+                    existing.voice_profile = {}
+                if request.form.get("analyse_voice") and existing.voice_examples:
+                    existing.voice_profile = _analyse_voice(existing.voice_examples)
+                    saved_msg = (
+                        '<p class="tag good" style="margin-bottom:20px">'
+                        'Voice profile analysed and saved.</p>'
+                    )
+                else:
+                    saved_msg = (
+                        '<p class="tag good" style="margin-bottom:20px">'
+                        'Organisation saved.</p>'
+                    )
                 save_profile(existing)
-                saved_msg = '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
                 profile = existing
         else:
             profiles = list_profiles()
@@ -6563,7 +6540,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         if not approved:
             body = f"""
-<p class="dim"><a href="{_review_url}">← Back to review</a></p>
+<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 <h1>Content Pack — {meet_name}</h1>
 <div class="card empty">No approved cards yet. Go to <a href="{_review_url}">the review page</a> and approve some cards first.</div>
 """
@@ -6700,7 +6677,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 }}
 </style>
 <div class="no-print">
-  <p class="dim"><a href="{_review_url}">← Back to review</a></p>
+  <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 </div>
 
 <h1>Content Pack — {meet_name}</h1>
@@ -7071,7 +7048,7 @@ function copyWhyCard(btn, taId) {{
             cards_html = '<div class="empty">No artefacts generated.</div>'
 
         body = f"""
-<p class="dim"><a href="{_review_url}">← Back to review</a></p>
+<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 <h1>Turn-Into pack — {meet_name}</h1>
 <p class="dim">{len(artefacts)} artefacts · generated {gen_at}</p>
 
@@ -7319,7 +7296,7 @@ function tiRegenerate() {{
             visuals_strip = ""
 
         body = f"""
-<p class="dim"><a href="{_review_url}">← Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
+<p class="dim"><a href="{_review_url}">&larr; Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
 <h1>Content Pack (grouped) — {meet_name}</h1>
 
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -8156,7 +8133,7 @@ function generateReelGrouped(btn, reelUrl) {{
               -webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px">404</div>
   <h1 style="margin-bottom:8px">Page not found</h1>
   <p class="dim" style="margin-bottom:24px">The page <code>{_h(request.path)}</code> doesn't exist.</p>
-  <a class="btn" href="{url_for('home')}">← Back to home</a>
+  <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
 </div>
 """
         return _layout("Not found", body, active="home"), 404
@@ -8178,7 +8155,7 @@ function generateReelGrouped(btn, reelUrl) {{
     The page failed to load. Refresh, or try a different action. Nothing you uploaded was lost.
   </p>
   <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-    <a class="btn" href="{url_for('home')}">← Back to home</a>
+    <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
     <a class="btn secondary" href="javascript:history.back()">Go back</a>
   </div>
 </div>
@@ -8195,7 +8172,7 @@ function generateReelGrouped(btn, reelUrl) {{
   <div style="font-size:64px;margin-bottom:12px">📦</div>
   <h1 style="margin-bottom:8px">File too large</h1>
   <p class="dim" style="margin-bottom:24px">The upload exceeded 50 MB. Try compressing or trimming the file first.</p>
-  <a class="btn" href="{url_for('home')}">← Back to home</a>
+  <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
 </div>
 """
         return _layout("File too large", body, active="home"), 413
