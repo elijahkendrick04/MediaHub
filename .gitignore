@@ -56,6 +56,7 @@ src/mediahub/data/
 src/mediahub/club_profiles/
 src/mediahub/motion_cache/
 src/mediahub/runs_v4/
+src/mediahub/turn_into_packs/
 
 # Node (legacy frontend tooling)
 node_modules/

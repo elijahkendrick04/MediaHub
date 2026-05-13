@@ -275,12 +275,9 @@ def generate_caption_for_tone(
 
     Raises ClaudeUnavailableError if no LLM provider is reachable.
     """
-    base_system = _TONE_SYSTEM_PROMPTS.get(tone, _SYSTEM_PROMPT)
-    voice_instructions = _voice_profile_instructions(voice_profile or {})
-    system = base_system + voice_instructions if voice_instructions else base_system
     system = _TONE_SYSTEM_PROMPTS.get(tone, _SYSTEM_PROMPT)
-    voice_profile = _resolve_voice_profile(club_profile)
-    addendum = _voice_profile_addendum(voice_profile)
+    resolved_vp = _resolve_voice_profile(club_profile) or (voice_profile if isinstance(voice_profile, dict) else None)
+    addendum = _voice_profile_addendum(resolved_vp)
     if addendum:
         system = system + "\n" + addendum
     nonce = random.randint(10_000, 99_999)
