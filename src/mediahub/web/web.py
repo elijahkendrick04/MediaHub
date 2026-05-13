@@ -1,5 +1,5 @@
 """
-V4 web app — Flask backend + single-file UI.
+V4 web app &mdash; Flask backend + single-file UI.
 
 Routes:
   GET  /                       Home (recent runs, profiles, status)
@@ -170,7 +170,7 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
     if not src_html:
         src_html = (
             '<li class="muted" style="font-size:12px">'
-            'No source lines available — explanation is based on the ranker only.'
+            'No source lines available &mdash; explanation is based on the ranker only.'
             '</li>'
         )
 
@@ -234,7 +234,7 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
-_SRC_ROOT = Path(__file__).resolve().parents[1]   # src/mediahub/ — local dev default
+_SRC_ROOT = Path(__file__).resolve().parents[1]   # src/mediahub/ &mdash; local dev default
 DATA_DIR   = Path(os.environ.get("DATA_DIR",   str(_SRC_ROOT)))
 RUNS_DIR   = Path(os.environ.get("RUNS_DIR",   str(DATA_DIR / "runs_v4")))
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
@@ -381,7 +381,7 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
         "recognition_error": run.recognition_error,
         "progress_log": run.progress_log,
         "error": run.error,
-        # V6 PB audit (optional — None when fetch_pbs=False)
+        # V6 PB audit (optional &mdash; None when fetch_pbs=False)
         "pb_audit": _serialise_pb_audit(getattr(run, "pb_audit", None)),
     }
     out = RUNS_DIR / f"{run.run_id}.json"
@@ -423,10 +423,10 @@ def _run_state(run_id: str) -> str:
     "still processing" page instead of a misleading 404 while the
     background worker is still running.
     """
-    # JSON file present → run is fully persisted.
+    # JSON file present &rarr; run is fully persisted.
     if (RUNS_DIR / f"{run_id}.json").exists():
         return "done"
-    # In-memory active dict → worker thread is alive in THIS process.
+    # In-memory active dict &rarr; worker thread is alive in THIS process.
     with _active_lock:
         active = _active_runs.get(run_id)
     if active:
@@ -434,9 +434,9 @@ def _run_state(run_id: str) -> str:
         if status in ("queued", "running"):
             return "in_progress"
         if status == "error":
-            return "done"  # error is "finished" — caller can read it from DB
+            return "done"  # error is "finished" &mdash; caller can read it from DB
     # Fall back to DB row (handles process restart between worker death
-    # and persistence — rare, but possible).
+    # and persistence &mdash; rare, but possible).
     try:
         conn = _db()
         row = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
@@ -488,7 +488,7 @@ def _delete_run(run_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------
-# Schedule (Buffer) modal — shared between classic + grouped pack pages
+# Schedule (Buffer) modal &mdash; shared between classic + grouped pack pages
 # ---------------------------------------------------------------------
 
 def _schedule_modal_html() -> str:
@@ -519,7 +519,7 @@ def _schedule_modal_html() -> str:
       <div id="mh-sched-channels" style="display:flex;flex-direction:column;gap:6px;
            max-height:180px;overflow:auto;border:1px solid var(--border,#252a36);
            border-radius:8px;padding:8px">
-        <p class="muted" style="margin:0">Loading channels…</p>
+        <p class="muted" style="margin:0">Loading channels&hellip;</p>
       </div>
     </div>
     <div style="margin-bottom:12px">
@@ -553,7 +553,7 @@ def _schedule_modal_html() -> str:
 def _schedule_modal_js() -> str:
     """Return the JS that drives the Buffer schedule modal.
 
-    Pulls channels from /api/buffer/channels (401 → redirect to /settings),
+    Pulls channels from /api/buffer/channels (401 &rarr; redirect to /settings),
     POSTs to /api/runs/<id>/card/<cid>/schedule, and preserves the user's
     edited caption when Buffer returns an error.
     """
@@ -612,7 +612,7 @@ def _schedule_modal_js() -> str:
     err.style.display = 'none'; err.textContent = '';
 
     var chWrap = document.getElementById('mh-sched-channels');
-    chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels…</p>';
+    chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
 
     fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
       return r.json().then(function(j){ return {status:r.status, body:j}; });
@@ -683,7 +683,7 @@ def _schedule_modal_js() -> str:
 
     var btn = document.getElementById('mh-sched-send');
     var orig = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Sending…';
+    btn.disabled = true; btn.textContent = 'Sending&hellip;';
 
     fetch(API_BASE + '/api/runs/' + encodeURIComponent(runId)
             + '/card/' + encodeURIComponent(cardId) + '/schedule', {
@@ -1049,7 +1049,7 @@ main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
 main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
 main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
 
-/* Background accent — subtle aurora */
+/* Background accent &mdash; subtle aurora */
 body::before {
   content: ''; position: fixed; top: -240px; right: -240px;
   width: 640px; height: 640px;
@@ -1293,7 +1293,7 @@ a.card:hover, .card[data-interactive]:hover {
   100% { transform: translateX(440%); }
 }
 
-/* === Mobile responsive — nav + spacing === */
+/* === Mobile responsive &mdash; nav + spacing === */
 @media (max-width: 720px) {
   main.wrap { padding: 24px 16px 80px; }
   h1 { font-size: 22px; }
@@ -1624,7 +1624,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>{{ title }} — MediaHub</title>
+<title>{{ title }} &mdash; MediaHub</title>
 <style>{{ css | safe }}</style>
 <script>
   // Detect deployed prefix (e.g. "/port/5000") so XHRs from inline JS use the right base.
@@ -1664,7 +1664,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
-      <span id="backend-pill-text">checking…</span>
+      <span id="backend-pill-text">checking&hellip;</span>
     </a>
   </nav>
 </header>
@@ -1802,7 +1802,7 @@ def create_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024   # 50 MB
     app.url_map.strict_slashes = False
 
-    # Persistent SECRET_KEY — survives restarts and redeploys.
+    # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
     # Priority: env var > persisted file > generated + saved.
     _secret = os.environ.get("SECRET_KEY", "")
     if not _secret:
@@ -1822,7 +1822,7 @@ def create_app() -> Flask:
 
     # Apply SCRIPT_NAME middleware so url_for generates prefixed URLs when
     # running behind a reverse-proxy. In the published pplx.app environment,
-    # the backend is reached via /port/5000/... — default to that unless
+    # the backend is reached via /port/5000/... &mdash; default to that unless
     # explicitly overridden.
     _script_name = os.environ.get("SCRIPT_NAME", "/port/5000").rstrip("/")
     if _script_name:
@@ -1982,9 +1982,9 @@ def create_app() -> Flask:
                 delete_href = url_for('privacy_delete_run', run_id=r['id'])
                 # V8.2: club profiles UI removed; show the stored club
                 # filter / profile_id slug as a friendly label.
-                prof_display = (r["profile_id"] or "—").replace("-", " ").replace("_", " ")
+                prof_display = (r["profile_id"] or "&mdash;").replace("-", " ").replace("_", " ")
                 if prof_display.startswith(" run "):
-                    prof_display = "—"
+                    prof_display = "&mdash;"
                 rows_html += (
                     f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
                     f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
@@ -2068,9 +2068,9 @@ def create_app() -> Flask:
     <input type="file" name="file" accept=".hy3,.zip,.pdf" required />
     <p class="dim" style="margin-top:4px;font-size:12px">Accepted: Hytek Meet Manager .hy3 or .zip export, or a Sportsystems PDF results file.</p>
     <p class="dim" style="margin-top:6px;font-size:12px">
-      You'll choose your club, upload your logo, and add photos on the next step — after we read your file.
+      You'll choose your club, upload your logo, and add photos on the next step &mdash; after we read your file.
     </p>
-    <div style="margin-top:18px"><button class="btn" type="submit">Continue →</button></div>
+    <div style="margin-top:18px"><button class="btn" type="submit">Continue &rarr;</button></div>
   </form>
 </div>
 """
@@ -2300,30 +2300,30 @@ def create_app() -> Flask:
         # keyword appears (or the run finishes successfully).
         body = f"""
 <h1>Run in progress</h1>
-<p class="dim" style="margin-bottom:6px">Sit tight — we're parsing, ranking and drafting. This usually takes 20–60 seconds.</p>
+<p class="dim" style="margin-bottom:6px">Sit tight &mdash; we're parsing, ranking and drafting. This usually takes 20&ndash;60 seconds.</p>
 
 <div class="card">
   <div class="mh-stages" id="mh-stages">
-    <div class="mh-stage" data-stage="parse"    data-state="queued"><div class="mh-stage-label">1 · Parse</div><div class="mh-stage-text">Reading the file</div></div>
-    <div class="mh-stage" data-stage="filter"   data-state="queued"><div class="mh-stage-label">2 · Filter</div><div class="mh-stage-text">Finding your athletes</div></div>
-    <div class="mh-stage" data-stage="pb"       data-state="queued"><div class="mh-stage-label">3 · Personal bests</div><div class="mh-stage-text">Checking historical times</div></div>
-    <div class="mh-stage" data-stage="detect"   data-state="queued"><div class="mh-stage-label">4 · Detect</div><div class="mh-stage-text">Spotting achievements</div></div>
-    <div class="mh-stage" data-stage="generate" data-state="queued"><div class="mh-stage-label">5 · Generate</div><div class="mh-stage-text">Drafting captions</div></div>
+    <div class="mh-stage" data-stage="parse"    data-state="queued"><div class="mh-stage-label">1 &middot; Parse</div><div class="mh-stage-text">Reading the file</div></div>
+    <div class="mh-stage" data-stage="filter"   data-state="queued"><div class="mh-stage-label">2 &middot; Filter</div><div class="mh-stage-text">Finding your athletes</div></div>
+    <div class="mh-stage" data-stage="pb"       data-state="queued"><div class="mh-stage-label">3 &middot; Personal bests</div><div class="mh-stage-text">Checking historical times</div></div>
+    <div class="mh-stage" data-stage="detect"   data-state="queued"><div class="mh-stage-label">4 &middot; Detect</div><div class="mh-stage-text">Spotting achievements</div></div>
+    <div class="mh-stage" data-stage="generate" data-state="queued"><div class="mh-stage-label">5 &middot; Generate</div><div class="mh-stage-text">Drafting captions</div></div>
   </div>
 
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-muted);margin-top:4px">
-    <span id="mh-current-stage">Starting…</span>
+    <span id="mh-current-stage">Starting&hellip;</span>
     <span id="mh-step-count">0 steps</span>
   </div>
 
   <details style="margin-top:18px">
     <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
-    <div class="progress-log" id="log" style="margin-top:10px">Starting…</div>
+    <div class="progress-log" id="log" style="margin-top:10px">Starting&hellip;</div>
   </details>
 
   <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
-    <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue →</a>
+    <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
     <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
   </div>
 </div>
@@ -2333,7 +2333,7 @@ def create_app() -> Flask:
   var STATUS_URL = {json.dumps(_status_url)};
   var REVIEW_URL = {json.dumps(_review_url)};
   var STAGES = ['parse','filter','pb','detect','generate'];
-  // Keyword → stage. First match wins; we scan each log line.
+  // Keyword &rarr; stage. First match wins; we scan each log line.
   var STAGE_PATTERNS = [
     {{re: /interpret|bridg|parse/i,                stage: 'parse'}},
     {{re: /filter|club|swims for/i,                stage: 'filter'}},
@@ -2376,10 +2376,10 @@ def create_app() -> Flask:
     var labelEl = document.getElementById('mh-current-stage');
     if (status === 'error') labelEl.textContent = 'Run failed';
     else if (status === 'done') labelEl.textContent = 'Complete';
-    else if (currentIdx < 0) labelEl.textContent = 'Starting…';
+    else if (currentIdx < 0) labelEl.textContent = 'Starting&hellip;';
     else {{
-      var labels = ['Reading the file…','Finding your athletes…','Checking personal bests…','Spotting achievements…','Drafting captions…'];
-      labelEl.textContent = labels[currentIdx] || 'Working…';
+      var labels = ['Reading the file&hellip;','Finding your athletes&hellip;','Checking personal bests&hellip;','Spotting achievements&hellip;','Drafting captions&hellip;'];
+      labelEl.textContent = labels[currentIdx] || 'Working&hellip;';
     }}
   }}
   async function poll() {{
@@ -2395,7 +2395,7 @@ def create_app() -> Flask:
       applyStages(idx, j.status);
       if (j.status === 'done') {{
         document.getElementById('review-link').style.display = 'inline-flex';
-        if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
+        if (window.MH) MH.toast('Run complete &mdash; opening review queue', 'success', 2500);
         setTimeout(function() {{ location.replace(REVIEW_URL); }}, 1200);
         return;
       }}
@@ -2516,10 +2516,10 @@ def create_app() -> Flask:
   <h2>Meet context</h2>
   <div class="kv">
     <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get('meet_level','open'))}</span></span>
-    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '—')}</span>
+    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '&mdash;')}</span>
     <span class="k">Has finals</span><span>{ctx_badge(mctx.get('has_finals'))}</span>
     <span class="k">Has age groups</span><span>{ctx_badge(mctx.get('has_age_groups'))}</span>
-    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '—')}</span>
+    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '&mdash;')}</span>
     <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get('research_available') else '<span class="tag warn">unavailable</span>'}</span>
   </div>
   {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + '</div>') if ctx_sources_html else ''}
@@ -2591,7 +2591,7 @@ def create_app() -> Flask:
         </div>
         <span class="muted" style="font-size:11px">{prio:.2f}</span>
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       <details style="margin-top:8px">
@@ -2601,7 +2601,7 @@ def create_app() -> Flask:
           <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
           <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
           <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
-          <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON →</a></div>
+          <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
         </div>
       </details>
     </div>
@@ -2660,9 +2660,9 @@ def create_app() -> Flask:
                 f'<strong style="font-size:13px">{_h(c.get("headline", ""))}</strong>'
                 f'<div class="dim" style="margin-top:4px;font-size:12px">{_h(c.get("subhead", ""))}</div>'
                 f'<div class="grid-3" style="margin-top:10px;gap:10px">'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "—")}</div></div>'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "—")}</div></div>'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "—")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "&mdash;")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "&mdash;")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "&mdash;")}</div></div>'
                 f'</div></div>'
             )
 
@@ -2673,7 +2673,7 @@ def create_app() -> Flask:
             for w in warnings[:10]:
                 cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
                 items.append(f'<li><span class="tag {cls}">{_h(w.get("severity",""))}</span> '
-                             f'<strong>{_h(w.get("code",""))}</strong> — {_h(w.get("message",""))}</li>')
+                             f'<strong>{_h(w.get("code",""))}</strong> &mdash; {_h(w.get("message",""))}</li>')
             warn_html = ('<div class="card"><h2>Parse notes</h2>'
                          '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
                          f'<ul>{"".join(items)}</ul></div>')
@@ -2711,19 +2711,19 @@ def create_app() -> Flask:
                 for sa in _needs_verif_swimmers[:10]:
                     _sw_key = _h(sa.get('asa_id') or f"name:{sa.get('hy3_name','')}")
                     _hy3 = _h(sa.get('hy3_name', ''))
-                    _sr = _h(sa.get('sr_name') or '—')
+                    _sr = _h(sa.get('sr_name') or '&mdash;')
                     _asa = _h(sa.get('asa_id') or '?')
                     _verify_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=_sw_key)
                     rows += (
                         f'<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
                         f'<a class="btn secondary" style="font-size:11px;padding:4px 8px;margin-right:8px" href="{_verify_url}">Verify</a>'
                         f'<strong>{_hy3}</strong> <span class="muted">(id {_asa})</span>'
-                        f'<div class="muted" style="font-size:12px;margin-top:2px">SR returned: "{_sr}" → canonical mismatch</div>'
+                        f'<div class="muted" style="font-size:12px;margin-top:2px">SR returned: "{_sr}" &rarr; canonical mismatch</div>'
                         f'</div>'
                     )
                 _needs_verif_html = (
                     f'<div class="divider"></div>'
-                    f'<div><strong style="color:#F59E0B">⚠ {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
+                    f'<div><strong style="color:#F59E0B">&#x26A0; {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
                     f'{rows}</div>'
                 )
 
@@ -2738,7 +2738,7 @@ def create_app() -> Flask:
     <div class="stat"><div class="l">Fetch failed</div><div class="v">{_n_fetch_fail}</div></div>
     <div class="stat"><div class="l">PB decisions</div><div class="v">{_n_decisions}</div></div>
     <div class="stat"><div class="l" style="color:#4ADE80">Confirmed PBs</div><div class="v" style="color:#4ADE80">{_n_confirmed}</div></div>
-    <div class="stat" title="Time + date match SR all-time PB — strongest possible confirmation"><div class="l" style="color:#22D3EE">Official PBs</div><div class="v" style="color:#22D3EE">{_n_official}</div></div>
+    <div class="stat" title="Time + date match SR all-time PB &mdash; strongest possible confirmation"><div class="l" style="color:#22D3EE">Official PBs</div><div class="v" style="color:#22D3EE">{_n_official}</div></div>
     <div class="stat"><div class="l">Likely PBs</div><div class="v">{_n_likely}</div></div>
     <div class="stat"><div class="l">Not PB</div><div class="v">{_n_not_pb}</div></div>
     <div class="stat"><div class="l">Unverified</div><div class="v">{_n_unverified}</div></div>
@@ -2748,7 +2748,7 @@ def create_app() -> Flask:
   </div>
   {_needs_verif_html}
   <div class="divider"></div>
-  <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits ▾</a>
+  <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits &#x25BE;</a>
 </div>"""
         elif data.get('pb_fetch_ok') and data.get('pb_fetch_ok') > 0 and not data.get('pb_audit'):
             # Run did some PB fetching but produced no audit
@@ -2817,7 +2817,7 @@ def create_app() -> Flask:
                     rows.append(
                         f'<li style="font-size:12px;margin-bottom:4px">'
                         f'<a href="{_view}">{_h(_gen)}</a> '
-                        f'<span class="muted">— {_n} artefacts'
+                        f'<span class="muted">&mdash; {_n} artefacts'
                         + (f", {_skipped} skipped" if _skipped else "")
                         + '</span></li>'
                     )
@@ -2835,16 +2835,16 @@ def create_app() -> Flask:
     <div style="flex:1;min-width:240px">
       <h2 style="margin-bottom:6px">Content pack</h2>
       <p class="dim" style="margin:0;font-size:13px;max-width:540px">
-        Turn this meet into a full pack of 7 derivative artefacts —
+        Turn this meet into a full pack of 7 derivative artefacts &mdash;
         recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
         sponsor thank-you, coach quote, and next-meet preview.
       </p>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none">
-        ✦ Turn meet into content pack
+        &#x2726; Turn meet into content pack
       </button>
-      <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack →</a>
+      <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack &rarr;</a>
     </div>
   </div>
   <div id="ti-status" style="margin-top:10px;font-size:12px;color:var(--ink-muted);display:none"></div>
@@ -2856,9 +2856,9 @@ function turnMeetIntoPack() {{
   var status = document.getElementById('ti-status');
   var origText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generating…';
+  btn.textContent = 'Generating&hellip;';
   status.style.display = '';
-  status.textContent = 'Building 7 artefacts — this can take up to 60 seconds.';
+  status.textContent = 'Building 7 artefacts &mdash; this can take up to 60 seconds.';
   fetch({json.dumps(_turn_into_api)}, {{
     method: 'POST',
     headers: {{ 'Content-Type': 'application/json' }},
@@ -2866,7 +2866,7 @@ function turnMeetIntoPack() {{
   }}).then(function(r) {{ return r.json(); }})
     .then(function(j) {{
       if (j && j.pack_url) {{
-        status.textContent = 'Done — opening pack…';
+        status.textContent = 'Done &mdash; opening pack&hellip;';
         window.location.href = j.pack_url;
       }} else {{
         status.textContent = 'Failed: ' + (j && j.message ? j.message : 'unknown error');
@@ -2895,7 +2895,7 @@ function turnMeetIntoPack() {{
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <a class="btn" href="{_pack_url}" style="align-self:flex-end">View content pack →</a>
+      <a class="btn" href="{_pack_url}" style="align-self:flex-end">View content pack &rarr;</a>
     </div>
   </div>
   <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
@@ -2968,9 +2968,9 @@ function turnMeetIntoPack() {{
 
             # V8: Live caption tone toggle.
             # All tabs (AI, Warm, Hype, Precise) generate captions live via the
-            # LLM. No pre-filled template text — clicking a tone tab always
+            # LLM. No pre-filled template text &mdash; clicking a tone tab always
             # triggers a fresh, unique generation. Results are cached per session
-            # client-side; "↺ Regenerate" forces a new fetch.
+            # client-side; "&#x21BA; Regenerate" forces a new fetch.
             tone_tabs_html = ""
 
             card_uuid = card_id_raw.replace(":", "_").replace(",", "_")
@@ -2980,21 +2980,21 @@ function turnMeetIntoPack() {{
             tabs_html = ""
             panels_html = ""
 
-            # Standard tones — always shown, always AI-generated on demand.
-            # Order: AI (first, active) → Warm → Hype → Precise
+            # Standard tones &mdash; always shown, always AI-generated on demand.
+            # Order: AI (first, active) &rarr; Warm &rarr; Hype &rarr; Precise
             _STD_TONES = [
-                ("ai",        "✦ AI",    True,  "tone-tab-ai",
+                ("ai",        "&#x2726; AI",    True,  "tone-tab-ai",
                  "rgba(139,92,246,0.15)", "#A78BFA",
                  "Live AI caption. Generates fresh each time."),
                 ("warm-club", "Warm",    False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Warm & community — friendly, first-name, inclusive."),
+                 "Warm & community &mdash; friendly, first-name, inclusive."),
                 ("hype",      "Hype",    False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Energetic & hype — race-day language, high energy."),
+                 "Energetic & hype &mdash; race-day language, high energy."),
                 ("data-led",  "Precise", False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Data-led — numbers first, sponsor-friendly, no fluff."),
+                 "Data-led &mdash; numbers first, sponsor-friendly, no fluff."),
             ]
 
             for t_key, t_label, is_active, extra_cls, active_bg, active_fg, title in _STD_TONES:
@@ -3022,7 +3022,7 @@ function turnMeetIntoPack() {{
                     f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
                     f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
                     f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
-                    f'Click to generate…</span></div>'
+                    f'Click to generate&hellip;</span></div>'
                     f'<textarea class="caption-textarea" style="display:none"></textarea>'
                     f'</div>'
                 )
@@ -3037,9 +3037,9 @@ function turnMeetIntoPack() {{
                 f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
                 f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
-                f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">↺ Regenerate caption</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">✦ Create graphic</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">▶ Generate motion</button>'
+                f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
                 f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
                 f'</div>'
                 f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px"></div>'
@@ -3050,7 +3050,7 @@ function turnMeetIntoPack() {{
 
             _wf_api_url = url_for("api_workflow_set", run_id=run_id, card_id=card_id_raw)
 
-            # V9: "Why this card?" — plain-English, source-grounded reasoning.
+            # V9: "Why this card?" &mdash; plain-English, source-grounded reasoning.
             why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}")
 
             ach_rows_html_wf += f"""
@@ -3070,23 +3070,23 @@ function turnMeetIntoPack() {{
         <!-- V7: Status pill -->
         <button class="wf-pill" data-run="{_h(run_id)}" data-card="{card_id_safe}" data-status="{wf_status}"
           style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:{s_bg};color:{s_fg};font-family:inherit;transition:opacity 150ms"
-          title="Click: queue → approved → posted. Right-click for more options.">{wf_status}</button>
+          title="Click: queue &rarr; approved &rarr; posted. Right-click for more options.">{wf_status}</button>
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} · {event}</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       {brand_cap_html}
       <details style="margin-top:8px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption · view factors &amp; evidence</summary>
+        <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption &middot; view factors &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
           <div style="padding:12px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
             <strong style="font-size:13px">Caption editor</strong>
-            <span class="muted" style="font-size:11px;margin-left:6px">(warm-club tone — leave blank to use the default)</span>
+            <span class="muted" style="font-size:11px;margin-left:6px">(warm-club tone &mdash; leave blank to use the default)</span>
             <div style="margin-top:10px">
               <label style="font-size:11px;margin-bottom:4px;display:block">Headline</label>
-              <textarea class="cap-edit" data-key="warm-club_headline" style="min-height:48px;font-size:12px" placeholder="Override the headline…"></textarea>
+              <textarea class="cap-edit" data-key="warm-club_headline" style="min-height:48px;font-size:12px" placeholder="Override the headline&hellip;"></textarea>
               <label style="font-size:11px;margin-bottom:4px;display:block;margin-top:8px">Body</label>
-              <textarea class="cap-edit" data-key="warm-club_body" style="min-height:64px;font-size:12px" placeholder="Override the body text…"></textarea>
+              <textarea class="cap-edit" data-key="warm-club_body" style="min-height:64px;font-size:12px" placeholder="Override the body text&hellip;"></textarea>
             </div>
             <button class="btn" style="font-size:12px;padding:6px 14px;margin-top:10px"
               onclick="saveCaption(this, '{_h(run_id)}', '{card_id_safe}')">Save caption edits</button>
@@ -3098,7 +3098,7 @@ function turnMeetIntoPack() {{
               <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
               <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
               <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
-              <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON →</a></div>
+              <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
             </div>
           </details>
         </div>
@@ -3129,10 +3129,10 @@ function turnMeetIntoPack() {{
 
 <h1>{_h(meet.get('name', '(unknown meet)'))}</h1>
 <p class="dim">
-  {_h(data.get('profile_display',''))} ·
-  {_h(meet.get('start_date','?'))} – {_h(meet.get('end_date','?'))} ·
-  {_h(meet.get('course',''))} ·
-  {_h(meet.get('venue') or 'venue unknown')} ·
+  {_h(data.get('profile_display',''))} &middot;
+  {_h(meet.get('start_date','?'))} &ndash; {_h(meet.get('end_date','?'))} &middot;
+  {_h(meet.get('course',''))} &middot;
+  {_h(meet.get('venue') or 'venue unknown')} &middot;
   source: {_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}
   ({_h(dispatch_log.get('chosen_adapter','?'))})
 </p>
@@ -3167,7 +3167,7 @@ function turnMeetIntoPack() {{
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
     <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
-            onclick="generateReel(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
   </div>
   <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
   <div class="filters-bar">
@@ -3185,7 +3185,7 @@ function turnMeetIntoPack() {{
 
 <div class="card">
   <details>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Legacy content cards <span class="muted" style="font-weight:400;font-size:13px">— {len(cards)} cards</span></summary>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Legacy content cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(cards)} cards</span></summary>
     <div style="margin-top:14px">
       <table>
         <thead><tr><th>Card</th><th>Confidence</th><th>Safe to post</th><th>Bucket</th><th>Why</th></tr></thead>
@@ -3198,7 +3198,7 @@ function turnMeetIntoPack() {{
 
 <div class="card">
   <details>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">— {len(no_ach_traces)} swims with no achievements</span></summary>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements</span></summary>
     <div style="margin-top:14px">
       <table>
         <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not generated</th></tr></thead>
@@ -3210,7 +3210,7 @@ function turnMeetIntoPack() {{
 
 <div class="card">
   <details>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Sources used <span class="muted" style="font-weight:400;font-size:13px">— {len(all_sources)} source(s)</span></summary>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Sources used <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(all_sources)} source(s)</span></summary>
     <div style="margin-top:14px">
       <table>
         <thead><tr><th>Source</th><th>Used for</th><th>Fetched</th></tr></thead>
@@ -3291,7 +3291,7 @@ document.addEventListener('click', function(e) {{
   _wfApply(btn, next);
 }});
 
-// Right-click cycles: queue → rejected (rare path)
+// Right-click cycles: queue &rarr; rejected (rare path)
 document.addEventListener('contextmenu', function(e) {{
   var btn = e.target.closest('.wf-pill');
   if (!btn) return;
@@ -3323,9 +3323,9 @@ function switchTone(btn) {{
   }});
 }}
 
-// V8: switchToneLive — fetches caption from API on click.
+// V8: switchToneLive &mdash; fetches caption from API on click.
 // AI tab: always fetches fresh. Warm/Hype/Precise tabs: cached for the session.
-// "↺ Regenerate" always forces a fresh fetch via regenerateCaption().
+// "&#x21BA; Regenerate" always forces a fresh fetch via regenerateCaption().
 var _captionCache = {{}};
 var _AI_TONE_KEYS = {{'ai': true}};  // other tones are cached after first gen
 
@@ -3358,14 +3358,14 @@ function switchToneLive(btn, captionUrl, cardId) {{
 
   var cacheKey = cardId + '|' + newTone;
 
-  // AI tab: always fetch fresh — never use cache.
+  // AI tab: always fetch fresh &mdash; never use cache.
   // Named tones (warm/hype/precise): use session cache after first generation.
   if (!isAiTone && _captionCache[cacheKey]) {{
     _renderCaption(panel, _captionCache[cacheKey]);
     return;
   }}
 
-  // All panels start with a placeholder — fetch if placeholder still present
+  // All panels start with a placeholder &mdash; fetch if placeholder still present
   // (or if AI tone, always fetch).
   var placeholder = panel.querySelector('.caption-placeholder');
   if (!isAiTone && !placeholder) {{
@@ -3379,7 +3379,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
   var captionDiv = panel.querySelector('.caption-text');
   var textarea = panel.querySelector('.caption-textarea');
   if (captionDiv) {{
-    captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating…<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">⟳</span></span>';
+    captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
   }}
   fetch(captionUrl + '?tone=' + encodeURIComponent(tone), {{method: 'POST'}})
     .then(function(r) {{ return r.json(); }})
@@ -3387,21 +3387,21 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
       var fallbackNote = '';
-      // No-key or LLM unavailable state — prompt to add a key.
+      // No-key or LLM unavailable state &mdash; prompt to add a key.
       if (j.live === false) {{
         var settingsHref = j.settings_url || ((window._API_BASE || '') + '/settings');
         if (captionDiv) {{
           captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
-            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">✦ AI captions need an API key</div>'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions need an API key</div>'
             + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Add a Gemini API key (free at aistudio.google.com) or Anthropic key in Settings.') + '</div>'
-            + '<div style="margin-top:8px"><a href="' + settingsHref + '" style="color:var(--accent);font-size:11px;text-decoration:underline">Open Settings →</a></div>'
+            + '<div style="margin-top:8px"><a href="' + settingsHref + '" style="color:var(--accent);font-size:11px;text-decoration:underline">Open Settings &rarr;</a></div>'
             + '</div>';
         }}
         document.querySelectorAll('.ai-status-dot').forEach(function(d){{ d.style.background='#ff5d6c'; }});
         return;
       }}
       if (j.fallback && j.fallback_voice) {{
-        fallbackNote = '<div style="margin-top:4px;font-size:10px;color:var(--warn);padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:4px">⚠ AI generation unavailable, using ' + j.fallback_voice + '</div>';
+        fallbackNote = '<div style="margin-top:4px;font-size:10px;color:var(--warn);padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:4px">&#x26A0; AI generation unavailable, using ' + j.fallback_voice + '</div>';
       }}
       if (captionDiv) {{
         captionDiv.innerHTML = '<span style="white-space:pre-wrap">' + text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>' + fallbackNote;
@@ -3413,9 +3413,9 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var picker = panel.closest('.tone-picker');
       if (picker) {{
         var tsEl = picker.querySelector('.caption-timestamp');
-        if (tsEl && ts) tsEl.textContent = 'regenerated just now · ' + ts;
+        if (tsEl && ts) tsEl.textContent = 'regenerated just now &middot; ' + ts;
       }}
-      // Cache named-tone results for this session (not the AI tab — always fresh)
+      // Cache named-tone results for this session (not the AI tab &mdash; always fresh)
       if (!isAi) {{ _captionCache[cacheKey] = {{text: text}}; }}
     }})
     .catch(function(err) {{
@@ -3518,7 +3518,7 @@ function saveCaption(btn, runId, cardId) {{
   }});
   if(!Object.keys(edits).length) return;
   var url = WF_API_BASE + encodeURIComponent(cardId);
-  btn.textContent = 'Saving…';
+  btn.textContent = 'Saving&hellip;';
   fetch(url, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{action:'set_edits',edits:edits}})}})
     .then(r=>r.json())
     .then(j=>{{
@@ -3552,10 +3552,10 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generating…';
+  btn.textContent = 'Generating&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(139,92,246,0.3);border-top-color:#8B5CF6;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Generating graphic… this may take 5-15 seconds</div>';
+    'Generating graphic&hellip; this may take 5-15 seconds</div>';
   var cacheKey = cardId + '|' + fmt;
   if (_visualCache[cacheKey]) {{
     _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
@@ -3611,12 +3611,12 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {{
         '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#0a0a0a" />' +
       '</div>' +
       '<div style="flex:1;min-width:200px">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual · ' + (layout || 'auto') + '</div>' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
         (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
-          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ')') + '>↺ Regenerate (3 variants)</button>' +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ')') + '>&#x21BA; Regenerate (3 variants)</button>' +
           '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('addGraphicToPack(this, ' + JSON.stringify(v.id) + ')') + '>+ Add to pack</button>' +
         '</div>' +
       '</div>' +
@@ -3632,10 +3632,10 @@ function generateMotion(btn, motionUrl, cardId) {{
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering motion…';
+  btn.textContent = 'Rendering motion&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering motion graphic… cached renders return in ~5s, cold renders up to 90s.</div>';
+    'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
   fetch(motionUrl, {{method:'POST'}})
     .then(function(r) {{
       if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
@@ -3658,7 +3658,7 @@ function generateMotion(btn, motionUrl, cardId) {{
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
           '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion · 1080×1920 · 6s</div>' +
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; 1080&times;1920 &middot; 6s</div>' +
             '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
@@ -3679,10 +3679,10 @@ function generateReel(btn, reelUrl) {{
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel…';
+  btn.textContent = 'Rendering reel&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+    'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
   fetch(reelUrl, {{method:'POST'}})
     .then(function(r) {{
       if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
@@ -3704,7 +3704,7 @@ function generateReel(btn, reelUrl) {{
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
           '<div style="flex:1;min-width:240px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel · 1080×1920 · 15s</div>' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
             '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
@@ -3727,10 +3727,10 @@ function regenerateGraphic(btn, createUrl, cardId) {{
   var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generating 3 options…';
+  btn.textContent = 'Generating 3 options&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(139,92,246,0.3);border-top-color:#8B5CF6;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 3 alternative designs in parallel… 10-30 seconds.</div>';
+    'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
   fetch(variantsUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
     .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, body:j}}; }}); }})
     .then(function(res){{
@@ -3764,7 +3764,7 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {{
     return (
       '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' · ' + label + '</div>' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
         '<button class="btn" data-pick-vid="' + v.id + '" data-pick-seed="' + vt.seed + '" data-pick-fmt="' + (v.format_name || 'feed_portrait') + '" style="margin-top:6px;width:100%;font-size:11px;padding:5px 0" onclick=' + _attrEsc('pickVariant(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(createUrl) + ')') + '>Pick this one</button>' +
       '</div>'
@@ -3795,7 +3795,7 @@ function pickVariant(btn, cardId, createUrl) {{
 
 function addGraphicToPack(btn, visualId) {{
   // Visuals are already persisted on render; this just confirms inclusion.
-  btn.textContent = '✓ Added to pack';
+  btn.textContent = '&#x2713; Added to pack';
   btn.disabled = true;
   setTimeout(function() {{ btn.textContent = '+ Add to pack'; btn.disabled = false; }}, 2000);
 }}
@@ -3812,8 +3812,8 @@ function addGraphicToPack(btn, visualId) {{
         var color = j.live ? '#2cc97f' : '#ff5d6c';
         var providerLabel = j.provider_label || 'Anthropic key';
         var title = j.live
-          ? ('Live AI enabled — provider: ' + providerLabel)
-          : 'Live AI DISABLED — add Anthropic key in Settings, or use this UI inside a Claude Code session.';
+          ? ('Live AI enabled &mdash; provider: ' + providerLabel)
+          : 'Live AI DISABLED &mdash; add Anthropic key in Settings, or use this UI inside a Claude Code session.';
         dots.forEach(function(d){{
           d.style.background = color;
           var btn = d.closest('button');
@@ -3941,7 +3941,7 @@ function addGraphicToPack(btn, visualId) {{
             pass
         # Resolve the ClubProfile so voice_profile (brand DNA voice layer)
         # can flow into the caption prompt. Profiles with no voice_profile
-        # still work — generate_caption_for_tone treats it as a no-op.
+        # still work &mdash; generate_caption_for_tone treats it as a no-op.
         club_profile_obj = None
         run_profile_id = data.get("profile_id") or ""
         if run_profile_id:
@@ -3964,7 +3964,7 @@ function addGraphicToPack(btn, visualId) {{
         )
 
         if tone in _AI_TONES:
-            # LIVE generation — fresh every call, nonce injected for uniqueness.
+            # LIVE generation &mdash; fresh every call, nonce injected for uniqueness.
             # Works with Gemini (free) or Anthropic API key.
             if not _llm_available():
                 return jsonify({
@@ -4011,7 +4011,7 @@ function addGraphicToPack(btn, visualId) {{
                     "explanation": explanation,
                 }), 200
         else:
-            # Voice render — deterministic template, may be cached by client
+            # Voice render &mdash; deterministic template, may be cached by client
             try:
                 from mediahub.voice.learned.store import list_voices as _lv, load_voice as _load_v
                 from mediahub.voice.learned.render import render_caption as _rc
@@ -4080,8 +4080,8 @@ function addGraphicToPack(btn, visualId) {{
             rows += (
                 f'<tr>'
                 f'<td>{_h(sa.get("hy3_name",""))}</td>'
-                f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
-                f'<td>{_h(sa.get("sr_name") or "—")}</td>'
+                f'<td class="muted">{_h(sa.get("asa_id") or "&mdash;")}</td>'
+                f'<td>{_h(sa.get("sr_name") or "&mdash;")}</td>'
                 f'<td><span class="tag {method_cls}">{_h(method)}</span></td>'
                 f'<td>{n_dec}</td>'
                 f'<td style="color:#4ADE80">{n_conf}</td>'
@@ -4094,7 +4094,7 @@ function addGraphicToPack(btn, visualId) {{
             )
 
         body = f"""
-<h1>PB Audit — {_h(pb_audit.get('run_id', run_id))}</h1>
+<h1>PB Audit &mdash; {_h(pb_audit.get('run_id', run_id))}</h1>
 <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 <div class="card">
   <div class="stat-block">
@@ -4139,7 +4139,7 @@ function addGraphicToPack(btn, visualId) {{
         _action_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=swimmer_key)
 
         # Pull this swimmer's audit details so the user can see WHY this needs
-        # verification — not just an opaque key.
+        # verification &mdash; not just an opaque key.
         pb_audit = data.get("pb_audit") or {}
         per_sw = pb_audit.get("per_swimmer") or []
         target = None
@@ -4151,13 +4151,13 @@ function addGraphicToPack(btn, visualId) {{
         context_html = ""
         if target:
             ident = target.get("identity") or {}
-            hy3_name = _h(target.get("hy3_name") or "—")
-            sr_name = _h(target.get("sr_name") or "— (no record returned)")
-            method = _h(ident.get("method") or "—")
+            hy3_name = _h(target.get("hy3_name") or "&mdash;")
+            sr_name = _h(target.get("sr_name") or "&mdash; (no record returned)")
+            method = _h(ident.get("method") or "&mdash;")
             method_pill = {"asa_id_verified": "good", "needs_verification": "warn",
                           "asa_id_unverified": "warn", "no_id": "bad",
                           "manual_override": "info"}.get(ident.get("method", ""), "")
-            cur_asa = _h(target.get("asa_id") or "—")
+            cur_asa = _h(target.get("asa_id") or "&mdash;")
             notes_list = ident.get("notes") or []
             notes_html = "".join(f"<li>{_h(n)}</li>" for n in notes_list) or "<li class='muted'>No notes</li>"
             context_html = f"""
@@ -4246,9 +4246,9 @@ function addGraphicToPack(btn, visualId) {{
                         f'<div class="stat"><div class="l" style="color:#4ADE80">True positives</div><div class="v" style="color:#4ADE80">{report.true_positives}</div></div>'
                         f'<div class="stat"><div class="l" style="color:#F87171">False positives</div><div class="v" style="color:#F87171">{report.false_positives}</div></div>'
                         f'<div class="stat"><div class="l" style="color:#FBBF24">False negatives</div><div class="v" style="color:#FBBF24">{report.false_negatives}</div></div>'
-                        f'<div class="stat"><div class="l">Precision</div><div class="v">{report.precision or "—"}</div></div>'
-                        f'<div class="stat"><div class="l">Recall</div><div class="v">{report.recall or "—"}</div></div>'
-                        f'<div class="stat"><div class="l">F1</div><div class="v">{report.f1 or "—"}</div></div>'
+                        f'<div class="stat"><div class="l">Precision</div><div class="v">{report.precision or "&mdash;"}</div></div>'
+                        f'<div class="stat"><div class="l">Recall</div><div class="v">{report.recall or "&mdash;"}</div></div>'
+                        f'<div class="stat"><div class="l">F1</div><div class="v">{report.f1 or "&mdash;"}</div></div>'
                         f'</div></div>'
                     )
                 except Exception as e:
@@ -4260,7 +4260,7 @@ function addGraphicToPack(btn, visualId) {{
                         pass
 
         body = f"""
-<h1>Ground Truth — PB Decisions</h1>
+<h1>Ground Truth &mdash; PB Decisions</h1>
 <p class="dim"><a href="{_audit_url}">&larr; Back to PB audit</a></p>
 <div class="card">
   <p>Upload a CSV with columns: <code>swimmer_name, event_label, result_time, expected_pb, expected_prev_pb, expected_barrier_crossed, notes</code></p>
@@ -4343,7 +4343,7 @@ function addGraphicToPack(btn, visualId) {{
                 rows += (f'<tr><td>{_h(m.get("moment",""))}</td>'
                          f'<td><span class="tag {badge}">'
                          f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
-                         f'<td>{_h(m.get("matched_headline") or "—")}</td>'
+                         f'<td>{_h(m.get("matched_headline") or "&mdash;")}</td>'
                          f'<td>{_h(m.get("score",""))}</td></tr>')
             rep_html = f"""
 <div class="card">
@@ -4365,7 +4365,7 @@ function addGraphicToPack(btn, visualId) {{
 
         body = f"""
 <h1>Ground-truth check</h1>
-<p class="dim">Paste 5–15 expected highlights from this meet. We score how well MediaHub
+<p class="dim">Paste 5&ndash;15 expected highlights from this meet. We score how well MediaHub
 surfaces them as content cards. One per line.</p>
 
 <div class="card">
@@ -4396,11 +4396,11 @@ Relay team broke club record"></textarea>
    This page will populate when the roadmap document is written.</p>
 <h3>Currently supported</h3>
 <ul>
-  <li><strong>HY3</strong> — Hytek Meet Manager (UK + US) — full parser with splits.</li>
+  <li><strong>HY3</strong> &mdash; Hytek Meet Manager (UK + US) &mdash; full parser with splits.</li>
 </ul>
 <h3>Planned next</h3>
 <ul>
-  <li>SDIF / CL2 — sibling format produced by Hytek and used by USA Swimming.</li>
+  <li>SDIF / CL2 &mdash; sibling format produced by Hytek and used by USA Swimming.</li>
   <li>Meet Mobile / SwimTopia exports (CSV).</li>
   <li>Public meet-result pages from external swim-results sites (HTML adapter).</li>
   <li>USA Swimming Times Search exports.</li>
@@ -4442,10 +4442,10 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>What we store</h2>
   <ul>
-    <li><strong>Run records</strong> — per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> — your roster + branding. Editable on the Profiles tab.</li>
-    <li><strong>PB cache</strong> — local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
-    <li><strong>Database</strong> — small SQLite index <code>data.db</code> for the run list.</li>
+    <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
+    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
+    <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
+    <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
   </ul>
   <p class="muted">No data is sent to third parties beyond fetching public PB-lookup pages from the configured PB source.</p>
 </div>
@@ -4537,10 +4537,10 @@ Relay team broke club record"></textarea>
         return jsonify({"ok": True, "version": APP_VERSION,
                         "ts": datetime.now(timezone.utc).isoformat()})
 
-    # ---- /settings — user-supplied API keys ---------------------------
+    # ---- /settings &mdash; user-supplied API keys ---------------------------
     @app.route("/settings", methods=["GET", "POST"])
     def settings_page():
-        """Settings page — paste API keys + pick a cutout provider.
+        """Settings page &mdash; paste API keys + pick a cutout provider.
 
         V8.1 Issue 7 expanded this from Anthropic-only to also cover
         Photoroom + Replicate cutout credentials and a provider selector.
@@ -4675,7 +4675,7 @@ Relay team broke club record"></textarea>
         elif gemini_disk:
             gemini_source = "saved key"
         else:
-            gemini_source = "none — add a key below"
+            gemini_source = "none &mdash; add a key below"
         gemini_masked = _h(mask_key(gemini_active)) if gemini_active else "<em>none</em>"
         gemini_confirm = "Remove the saved Gemini API key?"
         gemini_clear_btn = ""
@@ -4688,7 +4688,7 @@ Relay team broke club record"></textarea>
                 'Clear stored key</button></form>'
             )
 
-        # V8.1 Issue 7 — cutout provider state ----------------------------
+        # V8.1 Issue 7 &mdash; cutout provider state ----------------------------
         photoroom_env = bool(os.environ.get("PHOTOROOM_API_KEY"))
         photoroom_disk = get_secret("photoroom_api_key")
         photoroom_active = (
@@ -4698,7 +4698,7 @@ Relay team broke club record"></textarea>
             "set (env)" if photoroom_env else ("set (disk)" if photoroom_disk else "absent")
         )
         photoroom_masked_html = (
-            f' — <code>{_h(mask_key(photoroom_active))}</code>'
+            f' &mdash; <code>{_h(mask_key(photoroom_active))}</code>'
             if photoroom_active else ""
         )
 
@@ -4711,7 +4711,7 @@ Relay team broke club record"></textarea>
             "set (env)" if replicate_env else ("set (disk)" if replicate_disk else "absent")
         )
         replicate_masked_html = (
-            f' — <code>{_h(mask_key(replicate_active))}</code>'
+            f' &mdash; <code>{_h(mask_key(replicate_active))}</code>'
             if replicate_active else ""
         )
 
@@ -4751,13 +4751,13 @@ Relay team broke club record"></textarea>
         elif buffer_disk:
             buffer_source = "saved token"
         else:
-            buffer_source = "none — paste a token below"
+            buffer_source = "none &mdash; paste a token below"
         buffer_masked_html = (
-            f' — <code>{_h(mask_key(buffer_active))}</code>' if buffer_active else ""
+            f' &mdash; <code>{_h(mask_key(buffer_active))}</code>' if buffer_active else ""
         )
         # Probe Buffer for the live channel count so users see "Connected"
         # + an actual number after a save+reload. Failures degrade silently
-        # to a "—" so a transient network blip doesn't look like a config
+        # to a "&mdash;" so a transient network blip doesn't look like a config
         # problem.
         buffer_channel_count: Optional[int] = None
         buffer_probe_error = ""
@@ -4791,12 +4791,12 @@ Relay team broke club record"></textarea>
             )
         buffer_card = (
             '<div class="card" style="margin-top:16px">'
-            '<h2 style="margin-top:0">Buffer — schedule posts to your channels</h2>'
+            '<h2 style="margin-top:0">Buffer &mdash; schedule posts to your channels</h2>'
             f'{buffer_message_html}'
             '<p style="display:flex;align-items:center;gap:8px;margin:8px 0">'
             f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{buffer_status_dot}"></span>'
             f'<strong>{buffer_status_text}</strong>'
-            f'<span class="muted">— source: {buffer_source}</span>'
+            f'<span class="muted">&mdash; source: {buffer_source}</span>'
             f'{buffer_count_html}'
             '</p>'
             f'<p>Current token: {_h(mask_key(buffer_active)) if buffer_active else "<em>none</em>"}</p>'
@@ -4812,7 +4812,7 @@ Relay team broke club record"></textarea>
             '<p class="muted" style="margin-top:6px;font-size:12px">'
             'Generate a personal access token at '
             '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener">publish.buffer.com/account/apps</a>. '
-            'MediaHub uses this only to list your channels and queue posts you explicitly schedule — no autopost.'
+            'MediaHub uses this only to list your channels and queue posts you explicitly schedule &mdash; no autopost.'
             '</p>'
             '<div style="margin-top:10px">'
             '<button type="submit" class="btn">Save token</button>'
@@ -4846,7 +4846,7 @@ Relay team broke club record"></textarea>
             '<form method="POST" style="margin-top:8px">'
             '<input type="hidden" name="action" value="save_photoroom"/>'
             '<input type="password" name="photoroom_api_key" '
-            'placeholder="sandbox_xxx …" autocomplete="off" spellcheck="false" '
+            'placeholder="sandbox_xxx &hellip;" autocomplete="off" spellcheck="false" '
             'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
             '<p class="muted" style="margin-top:6px;font-size:12px">'
             'Get a key from <a href="https://www.photoroom.com/api" target="_blank" rel="noopener">photoroom.com/api</a>.'
@@ -4862,7 +4862,7 @@ Relay team broke club record"></textarea>
             '<form method="POST" style="margin-top:8px">'
             '<input type="hidden" name="action" value="save_replicate"/>'
             '<input type="password" name="replicate_api_token" '
-            'placeholder="r8_…" autocomplete="off" spellcheck="false" '
+            'placeholder="r8_&hellip;" autocomplete="off" spellcheck="false" '
             'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
             '<p class="muted" style="margin-top:6px;font-size:12px">'
             'Get a token from <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noopener">replicate.com</a>.'
@@ -4904,7 +4904,7 @@ Relay team broke club record"></textarea>
         elif llm_provider == "pplx-bridge":
             source = "Computer LLM bridge"
         else:
-            source = "none — add a key below"
+            source = "none &mdash; add a key below"
         masked = _h(mask_key(active_key)) if active_key else "<em>none</em>"
 
         clear_btn = ""
@@ -4927,13 +4927,13 @@ Relay team broke club record"></textarea>
 
 <div class="card" style="margin-top:16px;border-color:rgba(34,197,94,0.25)">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-    <h2 style="margin:0">Google Gemini — free AI captions</h2>
+    <h2 style="margin:0">Google Gemini &mdash; free AI captions</h2>
     <span class="tag good" style="font-size:11px">Recommended (free)</span>
   </div>
   <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{gemini_status_dot}"></span>
     <strong>{gemini_status_text}</strong>
-    <span class="muted">— source: {gemini_source}</span>
+    <span class="muted">&mdash; source: {gemini_source}</span>
   </p>
   <p>Current key: {gemini_masked}</p>
   <form method="POST" style="margin-top:12px">
@@ -4942,11 +4942,11 @@ Relay team broke club record"></textarea>
       Paste your Gemini API key
     </label>
     <input type="password" id="gemini_api_key" name="gemini_api_key"
-           placeholder="AIza…" autocomplete="off" spellcheck="false"
+           placeholder="AIza&hellip;" autocomplete="off" spellcheck="false"
            style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
     <p class="muted" style="margin-top:6px;font-size:12px">
       Get a <strong>free</strong> key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>
-      — no credit card required. Free tier: 15 requests/min, 1,500/day with Gemini 2.0 Flash.
+      &mdash; no credit card required. Free tier: 15 requests/min, 1,500/day with Gemini 2.0 Flash.
     </p>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button type="submit" class="btn">Save Gemini key</button>
@@ -4956,11 +4956,11 @@ Relay team broke club record"></textarea>
 </div>
 
 <div class="card" style="margin-top:16px">
-  <h2 style="margin-top:0">Anthropic (Claude) — paid AI captions</h2>
+  <h2 style="margin-top:0">Anthropic (Claude) &mdash; paid AI captions</h2>
   <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
     <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{status_dot}"></span>
     <strong>{status_text}</strong>
-    <span class="muted">— source: {source}</span>
+    <span class="muted">&mdash; source: {source}</span>
   </p>
   <p>Current key: {masked}</p>
   <form method="POST" style="margin-top:12px">
@@ -4968,7 +4968,7 @@ Relay team broke club record"></textarea>
       Paste your Anthropic API key
     </label>
     <input type="password" id="anthropic_api_key" name="anthropic_api_key"
-           placeholder="sk-ant-…" autocomplete="off" spellcheck="false"
+           placeholder="sk-ant-&hellip;" autocomplete="off" spellcheck="false"
            style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
     <p class="muted" style="margin-top:6px;font-size:12px">
       Higher-quality model, but paid. Get a key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
@@ -4991,7 +4991,7 @@ Relay team broke club record"></textarea>
     <li>Photoroom key: <strong>{photoroom_state}</strong>{photoroom_masked_html}</li>
     <li>Replicate token: <strong>{replicate_state}</strong>{replicate_masked_html}</li>
     <li>Cutout provider: <strong>{cutout_provider}</strong></li>
-    <li>Buffer: <strong>{buffer_status_text}</strong>{(' · ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
+    <li>Buffer: <strong>{buffer_status_text}</strong>{(' &middot; ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
   </ul>
 </div>
 
@@ -5182,7 +5182,7 @@ Relay team broke club record"></textarea>
                     "error": "auth",
                     "message": str(exc),
                 })
-                break  # Stop early — token is the same for every channel.
+                break  # Stop early &mdash; token is the same for every channel.
             except BufferAPIError as exc:
                 failure = str(exc)
                 results.append({
@@ -5250,7 +5250,7 @@ Relay team broke club record"></textarea>
     # V7 NEW ROUTES
     # ====================================================================
 
-    # ---- /make — content-type chooser ----------------------------------
+    # ---- /make &mdash; content-type chooser ----------------------------------
     @app.route("/make")
     def make_page():
         try:
@@ -5281,7 +5281,7 @@ Relay team broke club record"></textarea>
     {badge}
   </div>
   <div style="font-size:13px;color:var(--ink-dim);line-height:1.5">{_h(meta.description)}</div>
-  <div style="font-size:12px;color:var(--ink-muted);margin-top:auto">{_h(meta.input_contract[:120])}{"…" if len(meta.input_contract) > 120 else ""}</div>
+  <div style="font-size:12px;color:var(--ink-muted);margin-top:auto">{_h(meta.input_contract[:120])}{"&hellip;" if len(meta.input_contract) > 120 else ""}</div>
 </a>"""
 
         body = f"""
@@ -5296,7 +5296,7 @@ Relay team broke club record"></textarea>
 """
         return _layout("Create", body, active="create")
 
-    # ---- /spotlight — Athlete Spotlight landing ------------------------
+    # ---- /spotlight &mdash; Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
     def spotlight_landing():
         try:
@@ -5322,11 +5322,11 @@ Relay team broke club record"></textarea>
   <h2>No meets yet</h2>
   <p>You'll need to upload a meet results file before you can spotlight a swimmer.
   Once a meet is processed, every swimmer in your club will be available here.</p>
-  <a class="btn" href="{url_for('upload')}" style="margin-top:14px">Upload a meet →</a>
+  <a class="btn" href="{url_for('upload')}" style="margin-top:14px">Upload a meet &rarr;</a>
 </div>"""
             return _layout("Athlete Spotlight", empty_body, active="create")
 
-        runs_opts = '<option value="">Select a meet…</option>'
+        runs_opts = '<option value="">Select a meet&hellip;</option>'
         for r in recent_runs:
             sel = 'selected' if r["id"] == run_id_param else ''
             label = _h(r["meet_name"] or r["file_name"] or r["id"])
@@ -5363,14 +5363,14 @@ Relay team broke club record"></textarea>
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
-    <noscript><button class="btn" type="submit" style="margin-top:10px">Load swimmers →</button></noscript>
+    <noscript><button class="btn" type="submit" style="margin-top:10px">Load swimmers &rarr;</button></noscript>
   </form>
   {swimmers_html}
 </div>
 """
         return _layout("Athlete Spotlight", body, active="create")
 
-    # ---- /spotlight/<run_id>/<swimmer_key> — spotlight view -------------
+    # ---- /spotlight/<run_id>/<swimmer_key> &mdash; spotlight view -------------
     @app.route("/spotlight/<run_id>/<path:swimmer_key>")
     def spotlight_view(run_id, swimmer_key):
         try:
@@ -5446,7 +5446,7 @@ Relay team broke club record"></textarea>
       <span class="muted" style="font-size:11px">{prio:.2f}</span>
       <button class="sp-pill wf-pill" data-run="{_h(run_id)}" data-card="{card_id_safe}" data-status="{wf_status}"
         style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:{s_bg};color:{s_fg};font-family:inherit"
-        title="Click: queue → approved → posted. Right-click for more options.">{wf_status}</button>
+        title="Click: queue &rarr; approved &rarr; posted. Right-click for more options.">{wf_status}</button>
     </div>
     <div style="font-size:14px;font-weight:600;color:var(--ink)">{event}</div>
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
@@ -5458,7 +5458,7 @@ Relay team broke club record"></textarea>
 </div>"""
 
         body = f"""
-<p class="dim"><a href="{_back_url}">&larr; Back to swimmer list</a> · <a href="{_review_url}">Full meet review</a></p>
+<p class="dim"><a href="{_back_url}">&larr; Back to swimmer list</a> &middot; <a href="{_review_url}">Full meet review</a></p>
 <h1>Spotlight: {_h(pack["swimmer_name"])}</h1>
 <p class="dim">{_h(pack["meet_name"])}</p>
 
@@ -5470,7 +5470,7 @@ Relay team broke club record"></textarea>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
   <div style="margin-top:14px">
-    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content pack →</a>
+    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content pack &rarr;</a>
     <span class="muted" style="font-size:12px;margin-left:8px">Approve cards below to add them to the pack.</span>
   </div>
 </div>
@@ -5590,26 +5590,26 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 app.logger.exception("stub save_pack failed")
             back = url_for(route_endpoint)
             actions_url = url_for("stub_pack_view", pack_id=saved["pack_id"]) if saved else None
-            body = _stubs_mod.render_cards_html(cards_payload, back, f"{title} — drafts")
+            body = _stubs_mod.render_cards_html(cards_payload, back, f"{title} &mdash; drafts")
             if saved:
                 _packs_url = url_for("stub_packs_list")
                 body = body.replace(
                     f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>',
                     (
-                        f'<a class="btn" href="{_h(actions_url)}">View & export this pack →</a>'
+                        f'<a class="btn" href="{_h(actions_url)}">View & export this pack &rarr;</a>'
                         f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>'
                         f'<a class="btn secondary" href="{_h(_packs_url)}">All saved drafts</a>'
                     ),
                     1,
                 )
             return _layout(title, body, active=active_tab)
-        # GET — render form
+        # GET &mdash; render form
         body = stub.render_stub_html()
         try:
             _packs_url = url_for("stub_packs_list")
             body += (
                 f'<p style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">'
-                f'<a href="{_packs_url}">View your saved drafts →</a>'
+                f'<a href="{_packs_url}">View your saved drafts &rarr;</a>'
                 f'<a href="{url_for("make_page")}">&larr; Back to Make</a>'
                 f'</p>'
             )
@@ -5633,7 +5633,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_free_text():
         return _render_stub("FreeTextStub", "stub_free_text", "Free Text")
 
-    # ---- Saved stub packs — list + view + export -----------------------
+    # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
         "free_text":        "Free Text",
         "weekend_preview":  "Event Preview",
@@ -5650,10 +5650,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <h1>Saved drafts</h1>
 <p class="dim">Content packs you generate from Free Text, Event Preview, Sponsor Post and Session Update are saved here.</p>
 <div class="card" style="text-align:center;padding:48px 28px">
-  <div style="font-size:42px;margin-bottom:12px">📝</div>
+  <div style="font-size:42px;margin-bottom:12px">&#x1F4DD;</div>
   <h2 style="margin-bottom:6px">No drafts yet</h2>
   <p class="dim" style="margin-bottom:18px">Generate your first content cards from the Add Input page.</p>
-  <a class="btn" href="{url_for('add_input_page')}">Add input →</a>
+  <a class="btn" href="{url_for('add_input_page')}">Add input &rarr;</a>
 </div>
 """
             return _layout("Saved drafts", body, active="add_input")
@@ -5760,7 +5760,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         delete_pack(pack_id)
         return redirect(url_for("stub_packs_list"))
 
-    # ---- /add-input — multi-input landing page --------------------------
+    # ---- /add-input &mdash; multi-input landing page --------------------------
     @app.route("/add-input")
     def add_input_page():
         _INPUT_TYPES = [
@@ -5856,10 +5856,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             is_live = card["status"] == "live"
             if is_live:
                 badge = '<span class="tag good" style="font-size:11px">Live</span>'
-                btn_label = "Start →"
+                btn_label = "Start &rarr;"
             else:
                 badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
-                btn_label = "Preview →"
+                btn_label = "Preview &rarr;"
             try:
                 card_url = url_for(card["endpoint"])
                 href_attr = f'href="{card_url}"'
@@ -5894,7 +5894,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 """
         return _layout("Add Input", body, active="add_input")
 
-    # ---- /organisation — organisation DNA / club identity ---------------
+    # ---- /organisation &mdash; organisation DNA / club identity ---------------
     @app.route("/organisation", methods=["GET", "POST"])
     def organisation_page():
         _ORG_TYPES = [
@@ -5913,9 +5913,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             ("linkedin", "LinkedIn"),
         ]
         _TONES = [
-            ("warm-club", "Warm &amp; community — conversational, member-facing, first-name use"),
-            ("hype", "Energetic &amp; hype — race-day language, exclamation marks, high energy"),
-            ("data-led", "Data-led — numbers-first, precise, sponsor-friendly"),
+            ("warm-club", "Warm &amp; community &mdash; conversational, member-facing, first-name use"),
+            ("hype", "Energetic &amp; hype &mdash; race-day language, exclamation marks, high energy"),
+            ("data-led", "Data-led &mdash; numbers-first, precise, sponsor-friendly"),
         ]
 
         saved_msg = ""
@@ -5923,7 +5923,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         capture_error = ""        # rendered error banner when capture failed
         voice_preview = ""        # rendered preview HTML after voice analysis
         voice_error = ""          # rendered error banner when voice analysis failed
-        # The capture/voice previews are kept in-memory only — the user must
+        # The capture/voice previews are kept in-memory only &mdash; the user must
         # click "Save organisation" to persist them (no silent writes).
         if request.method == "POST":
             action = (request.form.get("action") or "save").strip().lower()
@@ -5975,7 +5975,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         ):
                             existing.brand_secondary = pal["secondary"]
                         note = (
-                            "Captured from website — review below and click "
+                            "Captured from website &mdash; review below and click "
                             "Save organisation to persist."
                             if status == "ok"
                             else "Captured from website (no LLM available, "
@@ -5989,7 +5989,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         # Surface the failure clearly but keep the form usable.
                         reason = {
                             "missing_url": "No URL was provided.",
-                            "fetch_failed": "Could not reach that URL — check it loads in a browser.",
+                            "fetch_failed": "Could not reach that URL &mdash; check it loads in a browser.",
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
                             f'<p class="tag bad" style="margin-bottom:20px">'
@@ -6029,7 +6029,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             existing.voice_profile = vp
                             voice_preview = (
                                 '<p class="tag info" style="margin-bottom:20px">'
-                                'Voice profile analysed — review below and click '
+                                'Voice profile analysed &mdash; review below and click '
                                 'Save organisation to persist.</p>'
                             )
                     profile = existing
@@ -6158,7 +6158,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             def _list_chips(items):
                 items = items or []
                 if not items:
-                    return '<span class="muted" style="font-size:12px">—</span>'
+                    return '<span class="muted" style="font-size:12px">&mdash;</span>'
                 return "".join(
                     f'<span style="display:inline-block;padding:2px 8px;'
                     f'margin:2px 4px 2px 0;border:1px solid var(--border);'
@@ -6171,10 +6171,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
                 f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
-                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
-                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
-                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
+                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "&mdash;"))}</b> words</div>'
+                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "&mdash;"))}</b> words</div>'
+                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "&mdash;"))}</b></div>'
+                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "&mdash;"))}</b></div>'
                 f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
                 f'</div>'
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
@@ -6188,7 +6188,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         else:
             voice_profile_html = (
                 '<p class="muted" style="font-size:12px;margin-top:8px">'
-                'No voice profile yet — paste 5-20 past captions and click '
+                'No voice profile yet &mdash; paste 5-20 past captions and click '
                 '<b>Analyse voice</b>.</p>'
             )
 
@@ -6251,8 +6251,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 captured_meta = (
                     f'<p style="font-size:11px;color:var(--ink-dim);margin-top:8px">'
                     f'Source: <a href="{_h(src)}" target="_blank" rel="noopener" '
-                    f'style="color:var(--ink-dim)">{_h(src)}</a> · '
-                    f'captured {_h(ts)} · status {_h(status)}'
+                    f'style="color:var(--ink-dim)">{_h(src)}</a> &middot; '
+                    f'captured {_h(ts)} &middot; status {_h(status)}'
                     f'</p>'
                 )
             brand_preview_html = f"""
@@ -6265,7 +6265,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Palette</div>
       <div>{swatches or '<span class="dim" style="font-size:12px">(none detected)</span>'}</div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Typography hint</div>
-      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '—')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '&mdash;')}</p>
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Detected logo</div>
@@ -6320,7 +6320,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             n_examples = len(profile.voice_examples or [])
             voice_profile_html = f"""
 <div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(167,139,250,0.04)">
-  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview · {n_examples} example{'s' if n_examples != 1 else ''}</h3>
+  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview &middot; {n_examples} example{'s' if n_examples != 1 else ''}</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:8px">Style metrics</div>
@@ -6354,7 +6354,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 <div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(34,211,238,0.04)">
   <h2 style="margin-top:0">Capture from website</h2>
-  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and MediaHub will extract the palette, logo, voice and keywords automatically. The result appears below — review and click Save organisation to persist.</p>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and MediaHub will extract the palette, logo, voice and keywords automatically. The result appears below &mdash; review and click Save organisation to persist.</p>
   <form method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <input type="hidden" name="action" value="capture"/>
     <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
@@ -6362,7 +6362,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
            placeholder="https://your-club.example"
            style="{_input_style};max-width:520px;flex:1" required/>
-    <button type="submit" class="btn">Analyse →</button>
+    <button type="submit" class="btn">Analyse &rarr;</button>
   </form>
 </div>
 
@@ -6370,15 +6370,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 <div class="card" style="margin-bottom:20px;border:1px solid rgba(167,139,250,0.4);background:rgba(167,139,250,0.04)">
   <h2 style="margin-top:0">Analyse voice from past posts</h2>
-  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste 5–20 recent captions (one per line). MediaHub measures sentence length, emoji density, hashtag style, and extracts opening/closing phrase patterns so generated captions sound like you.</p>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste 5&ndash;20 recent captions (one per line). MediaHub measures sentence length, emoji density, hashtag style, and extracts opening/closing phrase patterns so generated captions sound like you.</p>
   <form method="POST">
     <input type="hidden" name="action" value="analyse_voice"/>
     <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
     <textarea name="voice_examples" rows="8"
-              placeholder="Paste one caption per line&#10;e.g.&#10;Huge PB for the squad this weekend — 200 free goes sub-2 for the first time &#127946;&#10;What a meet! Five PBs and a county standard from our junior group. #swimming #clublife"
+              placeholder="Paste one caption per line&#10;e.g.&#10;Huge PB for the squad this weekend &mdash; 200 free goes sub-2 for the first time &#127946;&#10;What a meet! Five PBs and a county standard from our junior group. #swimming #clublife"
               style="{_ta_style};max-width:640px;display:block;margin-bottom:10px">{_h(voice_examples_text)}</textarea>
-    <button type="submit" class="btn">Analyse voice →</button>
+    <button type="submit" class="btn">Analyse voice &rarr;</button>
   </form>
 </div>
 
@@ -6462,7 +6462,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Voice examples</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">
-    Paste 5–20 of your recent Instagram, Facebook or X captions — one per line.
+    Paste 5&ndash;20 of your recent Instagram, Facebook or X captions &mdash; one per line.
     MediaHub will learn your sentence length, emoji and hashtag habits, opener
     and closer style, and how you refer to swimmers, then use that profile when
     generating live AI captions. Names are stripped before storage.
@@ -6470,7 +6470,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div>
     <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Past captions (one per line)</label>
     <textarea name="voice_examples" rows="10"
-              placeholder="Massive PB from [name] in the 200 free this morning&#10;Hard work pays off — proud of every swimmer in the pool tonight 🏊&#10;..."
+              placeholder="Massive PB from [name] in the 200 free this morning&#10;Hard work pays off &mdash; proud of every swimmer in the pool tonight &#x1F3CA;&#10;..."
               style="{_ta_style}">{_h(voice_examples_text)}</textarea>
     <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">
       One caption per line, up to 20. Real swimmer names will be replaced with
@@ -6508,7 +6508,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 """
         return _layout("Organisation", body, active="organisation")
 
-    # ---- /pack/<run_id> — content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
+    # ---- /pack/<run_id> &mdash; content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
     def content_pack(run_id):
         # V7.3: redirect to the grouped pack which shows engine recommendations
@@ -6541,7 +6541,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not approved:
             body = f"""
 <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
-<h1>Content Pack — {meet_name}</h1>
+<h1>Content Pack &mdash; {meet_name}</h1>
 <div class="card empty">No approved cards yet. Go to <a href="{_review_url}">the review page</a> and approve some cards first.</div>
 """
             return _layout("Content Pack", body, active="home")
@@ -6598,11 +6598,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 )
             else:
                 inner_parts = []
-                if cap_headline and cap_headline != "—":
+                if cap_headline and cap_headline != "&mdash;":
                     inner_parts.append(f'<div style="font-size:14px;font-weight:700;margin-bottom:6px">{cap_headline}</div>')
-                if cap_body and cap_body != "—":
+                if cap_body and cap_body != "&mdash;":
                     inner_parts.append(f'<div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">{cap_body}</div>')
-                if cap_cta and cap_cta != "—":
+                if cap_cta and cap_cta != "&mdash;":
                     inner_parts.append(f'<div style="font-size:12px;color:var(--accent)">{cap_cta}</div>')
                 inner_html = "".join(inner_parts)
             scheduled_html = (
@@ -6634,14 +6634,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<span class="tag {sched_pill_class}" data-schedule-pill="pc-{card_uuid}" '
                 f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
             )
-            # V9: "Why this card?" — explanation for the approved card.
+            # V9: "Why this card?" &mdash; explanation for the approved card.
             why_html_pack = _render_why_this_card(card, card_uuid=f"pc-{card_uuid}")
 
             cards_html += f"""
 <div class="card" id="pc-{card_id}" style="page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px">
     <div>
-      <div style="font-size:13px;font-weight:700;color:var(--ink)">{swimmer} · {event}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--ink)">{swimmer} &middot; {event}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -6660,7 +6660,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-3')">Copy full brief</button>
     <button class="btn" style="font-size:12px;padding:5px 12px"
       onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, 'pc-{card_uuid}')"
-      data-mh-schedule-btn>Schedule…</button>
+      data-mh-schedule-btn>Schedule&hellip;</button>
     <textarea id="cap-text-{card_id}-1" style="display:none">{cap_plain_only}</textarea>
     <textarea id="cap-text-{card_id}-2" style="display:none">{cap_plain_hash}</textarea>
     <textarea id="cap-text-{card_id}-3" style="display:none">{cap_plain_full}</textarea>
@@ -6680,8 +6680,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
 </div>
 
-<h1>Content Pack — {meet_name}</h1>
-<p class="dim">{len(approved)} approved card{"s" if len(approved) != 1 else ""} · ready to post</p>
+<h1>Content Pack &mdash; {meet_name}</h1>
+<p class="dim">{len(approved)} approved card{"s" if len(approved) != 1 else ""} &middot; ready to post</p>
 
 <div class="no-print" style="margin-bottom:20px;display:flex;gap:10px">
   <form method="post" action="{_mark_all_url}" onsubmit="return confirm('Mark all approved cards as posted?')">
@@ -6736,7 +6736,7 @@ function copyWhyCard(btn, taId) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack — {meet_name}", body, active="home")
+        return _layout(f"Content Pack &mdash; {meet_name}", body, active="home")
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
@@ -6784,7 +6784,7 @@ function copyWhyCard(btn, taId) {{
         ws.mark_all_posted(run_id)
         return redirect(url_for("content_pack", run_id=run_id))
 
-    # ---- Turn-Into: one meet → 7 derivative artefacts -------------------
+    # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
     def api_turn_into(run_id):
         """Generate a Turn-Into pack (up to 7 artefacts) from this run.
@@ -6931,7 +6931,7 @@ function copyWhyCard(btn, taId) {{
                     f'border-radius:8px;font-weight:600;color:var(--warn)">{_h(draft)}</div>'
                 )
 
-            # Caption editor blocks — one per key
+            # Caption editor blocks &mdash; one per key
             caption_blocks = ""
             for cap_key, cap_val in captions.items():
                 if cap_key == "x_thread" and isinstance(cap_val, list):
@@ -6958,7 +6958,7 @@ function copyWhyCard(btn, taId) {{
                         '<div style="margin-bottom:14px">'
                         f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
                         f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:8px">X thread '
-                        f'({len(cap_val)} posts, ≤280 chars each)</div>'
+                        f'({len(cap_val)} posts, &le;280 chars each)</div>'
                         f'{sub}'
                         '</div>'
                     )
@@ -6997,7 +6997,7 @@ function copyWhyCard(btn, taId) {{
                         '<div style="padding:10px;background:rgba(255,255,255,0.03);'
                         'border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
                         f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer",""))} '
-                        f'· {_h(c.get("event",""))}</div>'
+                        f'&middot; {_h(c.get("event",""))}</div>'
                         f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline",""))}</div>'
                         '</div>'
                     )
@@ -7049,11 +7049,11 @@ function copyWhyCard(btn, taId) {{
 
         body = f"""
 <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
-<h1>Turn-Into pack — {meet_name}</h1>
-<p class="dim">{len(artefacts)} artefacts · generated {gen_at}</p>
+<h1>Turn-Into pack &mdash; {meet_name}</h1>
+<p class="dim">{len(artefacts)} artefacts &middot; generated {gen_at}</p>
 
 <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
-  <button class="btn secondary" onclick="tiRegenerate()">↺ Regenerate pack</button>
+  <button class="btn secondary" onclick="tiRegenerate()">&#x21BA; Regenerate pack</button>
 </div>
 
 {skipped_html}
@@ -7068,7 +7068,7 @@ function tiSaveArtefact(idx) {{
   const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
   if (!root) return;
   const status = root.querySelector('.ti-status');
-  status.textContent = 'Saving…';
+  status.textContent = 'Saving&hellip;';
   const tas = root.querySelectorAll('textarea.ti-cap');
   const tasks = [];
   tas.forEach(function(ta) {{
@@ -7109,11 +7109,11 @@ function tiRegenerate() {{
 }}
 </script>
 """
-        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
+        return _layout(f"Turn-Into pack &mdash; {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
-        """Grouped content pack page — 8 buckets."""
+        """Grouped content pack page &mdash; 8 buckets."""
         state = _run_state(run_id)
         if state == "in_progress":
             return _layout("Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home")
@@ -7182,24 +7182,20 @@ function tiRegenerate() {{
                 schedule_btn = (
                     f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
                     f'onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \'g-{card_uuid}\')">'
-                    f'Schedule…</button>'
+                    f'Schedule&hellip;</button>'
                 ) if card_id_raw else ""
+                _ra_for_why = {
+                    "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
+                    "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
+                    "rank": item.get("rank"),
+                }
+                _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(",", "_").replace("/", "_") or f"gp-{section_id}"
+                why_html = _render_why_this_card(_ra_for_why, card_uuid=f"gp-{_why_uuid}")
                 rows += f"""
 <div class="card" id="g-{card_uuid}" style="margin-bottom:12px">
-                # V9: "Why this card?" — derive from factors + evidence on this item.
-            _ra_for_why = {
-                "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
-                "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
-                "rank": item.get("rank"),
-            }
-            _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(",", "_").replace("/", "_") or f"gp-{section_id}"
-            why_html = _render_why_this_card(_ra_for_why, card_uuid=f"gp-{_why_uuid}")
-
-            rows += f"""
-<div class="card" style="margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
-      <div style="font-size:13px;font-weight:700">{swimmer}{(" · " + evt) if evt else ""}</div>
+      <div style="font-size:13px;font-weight:700">{swimmer}{(" &middot; " + evt) if evt else ""}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -7287,7 +7283,7 @@ function tiRegenerate() {{
                     visuals_strip = f'''
 <details open>
   <summary style="cursor:pointer;font-size:16px;font-weight:700;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px;list-style:none;display:flex;justify-content:space-between;align-items:center">
-    <span>🎨 Generated visuals <span class="tag" style="font-size:11px">{len(tiles)}</span></span>
+    <span>&#x1F3A8; Generated visuals <span class="tag" style="font-size:11px">{len(tiles)}</span></span>
     <a class="btn" style="font-size:12px;padding:6px 14px" href="{_zip_url}">Download all as ZIP</a>
   </summary>
   <div style="display:flex;gap:12px;overflow-x:auto;padding:8px 0 12px">{"".join(tiles)}</div>
@@ -7297,7 +7293,7 @@ function tiRegenerate() {{
 
         body = f"""
 <p class="dim"><a href="{_review_url}">&larr; Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
-<h1>Content Pack (grouped) — {meet_name}</h1>
+<h1>Content Pack (grouped) &mdash; {meet_name}</h1>
 
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -7305,19 +7301,19 @@ function tiRegenerate() {{
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
   </div>
   <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
-          onclick="generateReelGrouped(this, {repr(_reel_url)})">▶ Generate reel from this meet</button>
+          onclick="generateReelGrouped(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
 </div>
 <div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
 
 {visuals_strip}
 
-{_section_html("Main feed posts", grouped.get("main_feed", []), icon="📌")}
-{_section_html("Stories", grouped.get("stories", []), icon="📖")}
-{_section_html("Athlete spotlights", grouped.get("athlete_spotlights", []), icon="🌟", empty_msg="No swimmers with 3+ achievements.")}
+{_section_html("Main feed posts", grouped.get("main_feed", []), icon="&#x1F4CC;")}
+{_section_html("Stories", grouped.get("stories", []), icon="&#x1F4D6;")}
+{_section_html("Athlete spotlights", grouped.get("athlete_spotlights", []), icon="&#x1F31F;", empty_msg="No swimmers with 3+ achievements.")}
 {win_html}
-{_section_html("Internal notes / nice mentions", grouped.get("internal_notes", []), icon="📝")}
-{_section_html("Needs review", grouped.get("needs_review", []), icon="⚠")}
-{_section_html("Rejected / not recommended", grouped.get("rejected", []), icon="✕")}
+{_section_html("Internal notes / nice mentions", grouped.get("internal_notes", []), icon="&#x1F4DD;")}
+{_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
+{_section_html("Rejected / not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
 {_schedule_modal_html()}
 
@@ -7347,8 +7343,8 @@ function generateReelGrouped(btn, reelUrl) {{
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel…';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards… cold renders may take up to 90s.</div>';
+  btn.textContent = 'Rendering reel&hellip;';
+  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
   fetch(reelUrl, {{method:'POST'}})
     .then(function(r) {{
       var ct = r.headers.get('content-type') || '';
@@ -7369,7 +7365,7 @@ function generateReelGrouped(btn, reelUrl) {{
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
           '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel · 1080×1920 · 15s</div>' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
             '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
           '</div>' +
         '</div>';
@@ -7382,7 +7378,7 @@ function generateReelGrouped(btn, reelUrl) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
+        return _layout(f"Content Pack (grouped) &mdash; {meet_name}", body, active="home")
 
     # ===================================================================
     # V8: Media library + visuals
@@ -7449,8 +7445,8 @@ function generateReelGrouped(btn, reelUrl) {{
   <div style="font-size:48px;margin-bottom:16px">&#128247;</div>
   <h2 style="margin-bottom:8px">No organisation set up yet</h2>
   <p class="dim" style="margin-bottom:24px">The media library is scoped per organisation. Set up your organisation first, or add an input to auto-create one.</p>
-  <a class="btn" href="{_org_url}">Set up organisation →</a>
-  <a class="btn secondary" href="{_add_input_url}" style="margin-left:8px">Or add an input →</a>
+  <a class="btn" href="{_org_url}">Set up organisation &rarr;</a>
+  <a class="btn secondary" href="{_add_input_url}" style="margin-left:8px">Or add an input &rarr;</a>
 </div>
 """
                 return _layout("Media library", empty_body, active="media")
@@ -7473,7 +7469,7 @@ function generateReelGrouped(btn, reelUrl) {{
 </tr>"""
         body = f"""
 <div class=\"card\">
-  <h2>Media library — {profile_id}</h2>
+  <h2>Media library &mdash; {profile_id}</h2>
   <p>Upload reusable photos. Each gets parsed for athlete/venue/event metadata.</p>
   <form method=\"POST\" action=\"{url_for('api_media_library_upload')}\" enctype=\"multipart/form-data\">
     <p><input type=\"file\" name=\"file\" accept=\"image/*\" required></p>
@@ -7785,7 +7781,7 @@ function generateReelGrouped(btn, reelUrl) {{
 
         Lazy: returns the cached file on cache hit; renders via Remotion on
         cache miss. Always serves the MP4 with the correct mime type so the
-        UI can use <video src=…> or a direct download.
+        UI can use <video src=&hellip;> or a direct download.
         """
         from flask import send_file
         try:
@@ -8120,7 +8116,7 @@ function generateReelGrouped(btn, reelUrl) {{
             mimetype="application/zip",
         )
 
-    # ---- Global error handlers — keep tracebacks out of the UI ---------
+    # ---- Global error handlers &mdash; keep tracebacks out of the UI ---------
     @app.errorhandler(404)
     def _not_found_page(e):
         accepts = request.headers.get("Accept", "") if request else ""
@@ -8149,7 +8145,7 @@ function generateReelGrouped(btn, reelUrl) {{
             return jsonify({"error": "internal_error"}), 500
         body = f"""
 <div style="text-align:center;padding:64px 24px">
-  <div style="font-size:64px;margin-bottom:12px">⚠️</div>
+  <div style="font-size:64px;margin-bottom:12px">&#x26A0;</div>
   <h1 style="margin-bottom:8px">Something went wrong</h1>
   <p class="dim" style="margin-bottom:24px;max-width:480px;margin-left:auto;margin-right:auto">
     The page failed to load. Refresh, or try a different action. Nothing you uploaded was lost.
@@ -8169,7 +8165,7 @@ function generateReelGrouped(btn, reelUrl) {{
             return jsonify({"error": "file_too_large", "max_mb": 50}), 413
         body = f"""
 <div style="text-align:center;padding:64px 24px">
-  <div style="font-size:64px;margin-bottom:12px">📦</div>
+  <div style="font-size:64px;margin-bottom:12px">&#x1F4E6;</div>
   <h1 style="margin-bottom:8px">File too large</h1>
   <p class="dim" style="margin-bottom:24px">The upload exceeded 50 MB. Try compressing or trimming the file first.</p>
   <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
