@@ -226,42 +226,214 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     return out
 
 
+_explanation_cache: dict[str, dict] = {}
+
+
+def _llm_build_explanation(achievement: dict, factors: list,
+                            rank: Optional[int] = None,
+                            meet_context: Optional[dict] = None) -> Optional[dict]:
+    """Have the LLM write the headline + bullets for "Why this card?"
+    based on the achievement and the ranker's factors. Returns
+    ``{"headline": str, "bullets": [str]}`` or None if no provider is
+    configured or the call fails. Uses a `submit_explanation` tool so
+    we never have to parse JSON out of free-text output.
+    """
+    try:
+        from mediahub.ai_core import (
+            ask_with_tools, narrate_achievement, narrate_meet,
+            ProviderNotConfigured, ProviderError,
+        )
+    except Exception:
+        return None
+    a = achievement or {}
+    swim_prose = narrate_achievement(a, meet=meet_context or None)
+    if not swim_prose:
+        return None
+
+    # English summary of the factors — no JSON dump.
+    factor_lines: list[str] = []
+    for f in (factors or []):
+        if hasattr(f, "to_dict"):
+            try:
+                f = f.to_dict()
+            except Exception:
+                pass
+        if not isinstance(f, dict):
+            continue
+        ps = (f.get("plain_summary") or f.get("reason") or "").strip()
+        if not ps:
+            continue
+        try:
+            val = float(f.get("value", 0.0) or 0.0)
+            wt = float(f.get("weight", 0.0) or 0.0)
+            contrib = val * wt
+        except (TypeError, ValueError):
+            contrib = 0.0
+        factor_lines.append(f"- {ps} (contribution {contrib:.2f})")
+    factors_prose = "\n".join(factor_lines[:8]) or "(no factor list)"
+
+    meet_prose = narrate_meet(meet_context or None)
+    user_prose = (
+        swim_prose
+        + (("\n\nMeet context: " + meet_prose) if meet_prose else "")
+        + "\n\nRanker factors that contributed (highest first):\n" + factors_prose
+        + (f"\n\nThis swim ranked #{int(rank)} overall." if isinstance(rank, int) else "")
+        + "\n\nPlease emit one `submit_explanation` call with a "
+          "15-25 word headline plus 3-5 short bullets covering the "
+          "reasons. Use ONLY the facts above — never invent ranker "
+          "factors that aren't listed."
+    )
+
+    system = (
+        "You are MediaHub's content-rationale writer. Your job is to "
+        "tell the user, in plain English, why a specific swim got "
+        "selected as a content card. Be specific, grounded, no fluff. "
+        "Never invent achievements or factors. Always emit exactly one "
+        "`submit_explanation` tool call."
+    )
+    tool = [{
+        "name": "submit_explanation",
+        "description": (
+            "Submit the final explanation: a one-sentence headline plus "
+            "3-5 short factor bullets."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "headline": {"type": "string"},
+                "bullets":  {"type": "array",
+                              "items": {"type": "string"}},
+            },
+            "required": ["headline", "bullets"],
+        },
+    }]
+
+    captured: dict[str, Any] = {}
+
+    def _tool(name, inp):
+        if name == "submit_explanation":
+            hl = (inp.get("headline") or "").strip()
+            bullets = inp.get("bullets") or []
+            if isinstance(bullets, str):
+                bullets = [bullets]
+            bullets = [str(b).strip() for b in bullets if str(b).strip()]
+            captured["headline"] = hl
+            captured["bullets"] = bullets[:6]
+            return "ok"
+        return "(unknown tool)"
+
+    try:
+        ask_with_tools(
+            system=system, user=user_prose,
+            tools=tool, on_tool_call=_tool,
+            max_tokens=500, max_rounds=2,
+        )
+    except (ProviderNotConfigured, ProviderError):
+        return None
+    except Exception:
+        return None
+    if not captured.get("headline"):
+        return None
+    return {
+        "headline": captured["headline"],
+        "bullets":  captured.get("bullets") or [],
+    }
+
+
+def _build_source_lines_from_evidence(achievement: dict) -> list[dict]:
+    """Pull up to 3 verbatim evidence quotes off the achievement."""
+    out: list[dict] = []
+    for ev in (achievement.get("evidence") or [])[:3]:
+        if not isinstance(ev, dict):
+            try:
+                ev = ev.to_dict()
+            except Exception:
+                continue
+        statement = (ev.get("statement") or "").strip()
+        if not statement:
+            continue
+        source_name = (ev.get("source_name") or "").strip()
+        source_type = (ev.get("source_type") or "").strip()
+        if source_name and source_type and source_name != source_type:
+            label = f"{source_type} ({source_name.replace('_', ' ')})"
+        elif source_name:
+            label = source_name
+        elif source_type:
+            label = source_type.replace("_", " ")
+        else:
+            label = "source"
+        out.append({
+            "file_offset": ev.get("file_offset"),
+            "raw_text":    statement,
+            "label":       label,
+        })
+    return out
+
+
 def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> dict:
     """Build the "Why this card?" explanation dict for a ranked-achievement.
 
-    Returns the explain_achievement() output, or a fallback dict when the
-    explainer module is unavailable. Always returns a dict with the three
-    expected keys so downstream code can render unconditionally.
+    Headline + bullets are written by the active LLM (Claude / ChatGPT
+    / Gemini) using a `submit_explanation` tool — no template strings,
+    no hardcoded type-phrase dictionary. Source lines remain verbatim
+    quotes from evidence (no LLM reasoning involved). Performance
+    context is the LLM's level-context sentence.
 
-    When an LLM is configured, also enriches the result with a
-    ``performance_context`` field — a single-sentence judgement of whether
-    the time is good FOR THIS SWIMMER'S LEVEL (Olympic finalists swimming
-    county-level PBs no longer get described as "moderately good").
+    Falls back to the legacy rule-based explainer ONLY when no LLM
+    provider is configured at all, so tests + offline dev still work.
     """
-    if _explain_achievement is None:
-        exp = {
-            "headline":     "Generated for: ranked top-N by overall score.",
-            "bullets":      [],
-            "source_lines": [],
-        }
-    else:
+    achievement = ra.get("achievement") or {}
+    factors = ra.get("factors") or []
+    rank = ra.get("rank")
+
+    cache_key_parts = [
+        (achievement.get("swim_id") or ""),
+        (achievement.get("swimmer_name") or ""),
+        (achievement.get("event") or ""),
+        (achievement.get("time") or ""),
+        str(rank or ""),
+        str((meet_context or {}).get("level", "")),
+    ]
+    cache_key = "|".join(cache_key_parts)
+    cached = _explanation_cache.get(cache_key)
+    if cached is not None:
+        # Re-read perf context separately — its cache key is finer-grained.
+        exp = dict(cached)
         try:
-            exp = _explain_achievement(
-                ra.get("achievement") or {},
-                ra.get("factors") or [],
-                rank=ra.get("rank"),
-            )
+            ctx = _llm_performance_context(achievement, meet_context)
+            if ctx:
+                exp["performance_context"] = ctx
+        except Exception:
+            pass
+        return exp
+
+    llm_exp = _llm_build_explanation(achievement, factors, rank, meet_context)
+    if llm_exp is not None:
+        exp = {
+            "headline":     llm_exp["headline"],
+            "bullets":      llm_exp["bullets"],
+            "source_lines": _build_source_lines_from_evidence(achievement),
+        }
+    elif _explain_achievement is not None:
+        # Legacy rule-based explainer for environments with no LLM at all.
+        try:
+            exp = _explain_achievement(achievement, factors, rank=rank)
         except Exception:
             exp = {
                 "headline":     "Generated for: ranked top-N by overall score.",
                 "bullets":      [],
-                "source_lines": [],
+                "source_lines": _build_source_lines_from_evidence(achievement),
             }
+    else:
+        exp = {
+            "headline":     "Generated for: ranked top-N by overall score.",
+            "bullets":      [],
+            "source_lines": _build_source_lines_from_evidence(achievement),
+        }
+    _explanation_cache[cache_key] = exp
 
-    # LLM-driven level context. Defensive: any failure is silent — the
-    # base grounded explanation is still rendered.
     try:
-        ctx = _llm_performance_context(ra.get("achievement") or {}, meet_context)
+        ctx = _llm_performance_context(achievement, meet_context)
         if ctx:
             exp["performance_context"] = ctx
     except Exception:
@@ -5865,45 +6037,54 @@ Relay team broke club record"></textarea>
             }.items() if v not in (None, "", [], {})}
             fact_list.append(fact)
 
-        try:
-            from mediahub.media_ai.llm import is_available, generate
-        except Exception:
-            is_available = lambda: False  # noqa: E731
-            generate = None  # type: ignore[assignment]
-
+        # English brief — no JSON envelope. Each approved moment is a
+        # natural-language line the model can weave into prose.
+        moment_lines: list[str] = []
+        for f in fact_list:
+            hl = (f.get("headline") or "").strip()
+            ev = (f.get("event") or "").strip()
+            tm = (f.get("time") or "").strip()
+            pl = f.get("place")
+            pb = "PB" if f.get("is_pb") else ""
+            bits = [b for b in [ev, tm, (f"{pl}" if pl else ""), pb] if b]
+            line = "; ".join(bits)
+            if hl:
+                line = f"{hl} ({line})" if line else hl
+            if line:
+                moment_lines.append(line)
+        brief = (
+            f"{swimmer_name} just had their day at {meet_name}. The reviewer "
+            f"has hand-approved these moments for the spotlight post:\n"
+            + "\n".join(f"- {l}" for l in moment_lines)
+            + "\n\nWrite ONE single Instagram-ready caption: a hooky "
+              "opener, a tight body weaving the approved moments together, "
+              "and a closing line. Use the swimmer's first name. Don't "
+              "invent facts. ~700 characters max. Output the caption only."
+        )
         composed_caption = ""
-        if is_available() and generate is not None:
-            system = (
-                "You are writing ONE single social-media post celebrating an "
-                "athlete spotlight. The user has hand-approved a list of "
-                "achievements they want featured. Weave them into one "
-                "natural-sounding caption: a hooky opener, a tight body "
-                "covering the picked moments, and a closing line. "
-                "Use the swimmer's first name. Don't invent facts. ~700 "
-                "characters max. Output the caption only — no preamble, "
-                "no markdown."
+        try:
+            from mediahub.ai_core import (
+                ask, ProviderNotConfigured, ProviderError,
             )
-            payload = {
-                "swimmer":   swimmer_name,
-                "meet":      meet_name,
-                "approved":  fact_list,
-            }
-            try:
-                composed_caption = generate(
-                    "Spotlight data (JSON):\n" + json.dumps(payload, ensure_ascii=False),
-                    system=system,
-                    max_tokens=600,
-                ).strip()
-            except Exception:
-                composed_caption = ""
+            composed_caption = (ask(
+                "You are MediaHub's spotlight-post writer. Output only the "
+                "caption text, no preamble or markdown.",
+                brief,
+                max_tokens=600,
+            ) or "").strip()
+        except (ProviderNotConfigured, ProviderError):
+            composed_caption = ""
+        except Exception:
+            composed_caption = ""
         if not composed_caption:
-            # Last-resort deterministic stitch — used only if no LLM at all.
-            bits = [f"Spotlight: {swimmer_name} at {meet_name}." ]
-            for f in fact_list:
-                hl = f.get("headline") or f.get("event") or ""
-                if hl:
-                    bits.append("• " + hl)
-            composed_caption = "\n".join(bits)
+            # Honest message when no provider is configured — no fake
+            # template stitch that pretends to be AI output.
+            composed_caption = (
+                f"Spotlight draft for {swimmer_name} at {meet_name} could "
+                f"not be generated — no AI provider is configured. "
+                f"Approved moments:\n"
+                + "\n".join(f"• {l}" for l in moment_lines)
+            )
 
         card = {
             "platform":   "Instagram",
@@ -6224,11 +6405,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     form_data["attached_photo_filename"] = Path(photo.filename).name
                 except Exception:
                     app.logger.exception("stub photo upload failed")
+            generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
-            except Exception:
+            except Exception as e:
                 app.logger.exception("stub generate_cards failed")
                 cards_payload = {"cards": []}
+                generation_error = str(e)
+                # Show the actual error to the user — no silent fake card.
+                from mediahub.ai_core import (
+                    ProviderNotConfigured, ProviderError,
+                )
+                if isinstance(e, ProviderNotConfigured):
+                    err_html = (
+                        '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                        '<h2 style="margin-top:0">No AI provider configured</h2>'
+                        f'<p>{_h(str(e))}</p>'
+                        f'<p><a class="btn" href="{url_for("settings_page")}">Open settings →</a></p>'
+                        '</div>'
+                    )
+                    return _layout(title, err_html, active=active_tab)
+                if isinstance(e, ProviderError):
+                    err_html = (
+                        '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                        '<h2 style="margin-top:0">AI provider error</h2>'
+                        f'<p>{_h(str(e))}</p>'
+                        '<p class="muted">Check the provider status on '
+                        f'<a href="{url_for("settings_page")}">/settings</a>.</p>'
+                        '</div>'
+                    )
+                    return _layout(title, err_html, active=active_tab)
             # Persist this pack so it survives refresh + is exportable.
             saved = None
             try:

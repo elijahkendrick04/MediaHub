@@ -1,22 +1,25 @@
 """
-Stub content types — now powered by real LLM generation with heuristic fallback.
+Stub content types — refactored onto the ai_core (Claude / ChatGPT /
+Gemini) reasoning layer.
 
-Each stub class provides:
-  render_stub_html()    — form HTML
-  generate_brief()      — legacy plain-text brief (back-compat)
-  generate_cards()      — structured content cards (caption + variations + hashtags)
+The four stubs (Weekend Preview, Sponsor Post, Session Update, Free
+Text) all funnel through one helper, ``_generate_cards_via_llm``, which:
+
+  * Takes an English brief built from the user's form input.
+  * Calls ai_core.ask_with_tools with a single tool, `submit_card`,
+    that the model uses to emit each card (platform, caption,
+    hashtags, notes). No JSON envelopes in the prompt, no parsing
+    JSON out of free-text replies — the model speaks via the tool.
+  * Surfaces honest errors when no provider is configured or the call
+    fails. No hardcoded heuristic template fallback any more.
 
 Classes:
-  WeekendPreviewStub
-  SponsorPostStub
-  SessionUpdateStub
-  FreeTextStub
+  WeekendPreviewStub, SponsorPostStub, SessionUpdateStub, FreeTextStub
 """
 from __future__ import annotations
 
 import html
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -40,9 +43,6 @@ _PHOTO_INPUT_HTML = (
 )
 
 
-_MULTIPART_ATTR = ' enctype="multipart/form-data"'
-
-
 @dataclass
 class ContentCard:
     """One generated content card — a single platform-ready post draft."""
@@ -54,36 +54,44 @@ class ContentCard:
 
     def to_dict(self) -> dict:
         return {
-            "platform": self.platform,
-            "caption": self.caption,
-            "hashtags": self.hashtags,
+            "platform":   self.platform,
+            "caption":    self.caption,
+            "hashtags":   self.hashtags,
             "confidence": self.confidence,
-            "notes": self.notes,
+            "notes":      self.notes,
         }
 
 
-def _try_llm_generate(prompt: str, system: str, fallback: dict) -> dict:
-    """Try real LLM; fall back to a heuristic dict if unavailable or parse fails."""
-    try:
-        from mediahub.media_ai import llm  # type: ignore
-    except Exception:
-        return fallback
-    try:
-        if not llm.is_available():
-            return fallback
-        result = llm.generate_json(prompt, system=system, max_tokens=900, fallback=fallback)
-        if not isinstance(result, dict) or "cards" not in result:
-            return fallback
-        cards = result.get("cards") or []
-        if not isinstance(cards, list) or not cards:
-            return fallback
-        return result
-    except Exception:
-        return fallback
+# ---------------------------------------------------------------------------
+# Shared generator — every stub funnels through this
+# ---------------------------------------------------------------------------
+
+_SUBMIT_CARD_TOOL = [{
+    "name": "submit_card",
+    "description": (
+        "Emit one social-media card for this brief. Call this 2-4 times, "
+        "once per platform you want to cover. Each call produces one "
+        "draft the user will review."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "platform": {"type": "string",
+                         "description": "Instagram | Stories | Twitter | Facebook | LinkedIn | TikTok"},
+            "caption":  {"type": "string",
+                         "description": "The caption body, 1-4 short lines."},
+            "hashtags": {"type": "array", "items": {"type": "string"},
+                         "description": "2-6 hashtags, no leading #."},
+            "notes":    {"type": "string",
+                         "description": "One-line rationale for this card."},
+        },
+        "required": ["platform", "caption"],
+    },
+}]
 
 
 def _load_brand_context() -> dict:
-    """Best-effort load of the first ClubProfile to ground LLM output in brand voice."""
+    """Best-effort load of the first ClubProfile for brand voice grounding."""
     try:
         from mediahub.web.club_profile import list_profiles, load_profile  # type: ignore
     except Exception:
@@ -100,76 +108,98 @@ def _load_brand_context() -> dict:
         if not prof:
             return {}
         return {
-            "name":           getattr(prof, "display_name", "") or "",
-            "short_name":     getattr(prof, "short_name", "") or "",
-            "org_type":       getattr(prof, "org_type", "") or "",
-            "tone":           getattr(prof, "tone", "warm-club") or "warm-club",
-            "tone_notes":     getattr(prof, "tone_notes", "") or "",
-            "platforms":      getattr(prof, "platforms", []) or [],
-            "exemplars":      getattr(prof, "exemplar_captions", []) or [],
-            "sponsor_name":   getattr(prof, "sponsor_name", "") or "",
-            "sponsor_rules":  getattr(prof, "sponsor_guidelines", "") or "",
+            "name":          getattr(prof, "display_name", "") or "",
+            "short_name":    getattr(prof, "short_name", "") or "",
+            "org_type":      getattr(prof, "org_type", "") or "",
+            "tone":          getattr(prof, "tone", "") or "",
+            "tone_notes":    getattr(prof, "tone_notes", "") or "",
+            "exemplars":     getattr(prof, "exemplar_captions", []) or [],
+            "sponsor_name":  getattr(prof, "sponsor_name", "") or "",
+            "sponsor_rules": getattr(prof, "sponsor_guidelines", "") or "",
         }
     except Exception:
         return {}
 
 
-def _brand_system_prompt(extra: str = "") -> str:
-    ctx = _load_brand_context()
-    bits = [
-        "You are MediaHub's content engine for sports clubs, societies, teams and organisations.",
-        "Generate short, human-sounding social captions grounded only in the user's input.",
-        "Never invent facts, names, times, places, or achievements that aren't in the input.",
-        "If the input is thin, write shorter cards rather than padding with filler.",
-    ]
-    if ctx.get("name"):
-        bits.append(f"Organisation: {ctx['name']}.")
-    if ctx.get("tone"):
-        tone_map = {
-            "warm-club": "Warm, community, first-name use. Conversational.",
-            "hype":      "Energetic, race-day language, allowed sparing exclamation marks.",
-            "data-led":  "Numbers-first, precise, sponsor-friendly, fewer emojis.",
-        }
-        bits.append(f"Tone: {tone_map.get(ctx['tone'], ctx['tone'])}.")
-    if ctx.get("tone_notes"):
-        bits.append(f"Brand voice notes: {ctx['tone_notes']}")
-    if ctx.get("exemplars"):
-        bits.append("Example captions (style reference): " + " || ".join(ctx["exemplars"][:3]))
-    if ctx.get("sponsor_name"):
-        bits.append(f"Sponsor: {ctx['sponsor_name']}.")
-    if ctx.get("sponsor_rules"):
-        bits.append(f"Sponsor rules: {ctx['sponsor_rules']}")
-    if extra:
-        bits.append(extra)
-    bits.append(
-        'Return JSON: {"cards":[{"platform":"Instagram",'
-        '"caption":"...","hashtags":["#a","#b"],"confidence":0.7,"notes":"why"},...]} '
-        'with 2 to 4 cards. Captions must be 1–4 short lines. Hashtags 2–6 max.'
+def _system_prompt(extra_context: str) -> str:
+    """English-only system prompt: voice, brand, and the rule about
+    using the submit_card tool. No JSON envelope contracts."""
+    brand = _load_brand_context()
+    try:
+        from mediahub.ai_core import narrate_brand
+        brand_prose = narrate_brand(brand)
+    except Exception:
+        brand_prose = ""
+    base = (
+        "You are MediaHub's content engine for sports clubs, societies, "
+        "teams and organisations. You generate short, human-sounding "
+        "social captions grounded only in the user's input. Never invent "
+        "facts, names, times, places, or achievements not provided. If "
+        "the input is thin, write shorter cards rather than padding.\n\n"
+        "Emit each card by calling the `submit_card` tool. Produce 2-4 "
+        "cards covering different platforms (Instagram + Stories + "
+        "Twitter is a good default). Captions: 1-4 short lines, ~280 "
+        "characters. Hashtags: 2-6. After your last card, write nothing "
+        "— the tool calls are the answer."
     )
-    return "\n".join(bits)
+    if brand_prose:
+        base = base + "\n\nBrand voice:\n" + brand_prose
+    if extra_context:
+        base = base + "\n\nThis brief is:\n" + extra_context
+    return base
 
 
-def _fallback_cards(captions: list[tuple[str, str]], hashtags: list[str]) -> dict:
-    """Build a cards dict from (platform, caption) tuples for offline fallback."""
-    out = []
-    for platform, caption in captions:
-        out.append({
-            "platform": platform,
-            "caption": caption,
-            "hashtags": hashtags[:5],
-            "confidence": 0.55,
-            "notes": "Generated by template fallback (no LLM available).",
+def _generate_cards_via_llm(brief_prose: str, extra_context: str) -> dict:
+    """Run a single ask_with_tools call and return {"cards": [...]}.
+
+    Raises ai_core.ProviderNotConfigured / ProviderError so callers can
+    surface the actual reason to the user — no silent template
+    fallback any more.
+    """
+    from mediahub.ai_core import ask_with_tools
+
+    cards: list[dict] = []
+
+    def _tool(name, inp):
+        if name != "submit_card":
+            return json.dumps({"error": f"unknown tool: {name}"})
+        platform = (inp.get("platform") or "Instagram").strip()
+        caption = (inp.get("caption") or "").strip()
+        hashtags = inp.get("hashtags") or []
+        if isinstance(hashtags, str):
+            hashtags = [h.strip() for h in hashtags.split() if h.strip()]
+        notes = (inp.get("notes") or "").strip()
+        if not caption:
+            return json.dumps({"ok": False, "reason": "empty caption — skipped"})
+        cards.append({
+            "platform":   platform,
+            "caption":    caption,
+            "hashtags":   [str(h).lstrip("#").strip() for h in list(hashtags)[:6] if str(h).strip()],
+            "confidence": 0.8,
+            "notes":      notes,
         })
-    return {"cards": out}
+        return json.dumps({"ok": True, "received": len(cards)})
+
+    ask_with_tools(
+        system=_system_prompt(extra_context),
+        user=brief_prose,
+        tools=_SUBMIT_CARD_TOOL,
+        on_tool_call=_tool,
+        max_tokens=1500,
+        max_rounds=6,
+    )
+    return {"cards": cards}
 
 
 def _split_lines(raw: str) -> list[str]:
     return [l.strip() for l in (raw or "").splitlines() if l.strip()]
 
 
-class _StubContentType:
-    """Base for all stub content types."""
+# ---------------------------------------------------------------------------
+# Stub base class
+# ---------------------------------------------------------------------------
 
+class _StubContentType:
     _type: ContentType
 
     @classmethod
@@ -178,35 +208,24 @@ class _StubContentType:
 
     @classmethod
     def is_ready(cls) -> bool:
-        return True  # All stubs are now functional (with LLM fallback)
+        return True
 
     def render_stub_html(self) -> str:
-        """Return a full HTML fragment (body only) with the input form.
-
-        Patches the per-stub form HTML to inject a photo-upload control and
-        the enctype="multipart/form-data" attribute the upload needs. This
-        keeps the per-stub form_html methods focused on their own fields
-        while every stub gets a consistent photo attachment widget — the
-        photo flows through as form_data['attached_photo'] and is saved
-        with the pack so downstream visual generators can use it.
-        """
+        """Wrap the per-stub form HTML with a photo-upload widget and the
+        multipart enctype the upload needs."""
         meta = self.get_meta()
         form_html = self.render_form_html()
-        # Inject enctype on the form so file uploads work.
         form_html = form_html.replace(
             '<form method="POST"',
             '<form method="POST" enctype="multipart/form-data"',
             1,
         )
-        # Inject the photo input above the submit button (works for any
-        # form whose primary action button has class="btn" and label
-        # containing "→"). Fallback: inject before </form>.
         injected = False
         for marker in (
             '<button type="submit" class="btn">Generate content cards →</button>',
             '<button type="submit" class="btn">Generate preview cards →</button>',
             '<button type="submit" class="btn">Generate sponsor cards →</button>',
-            '<button type="submit" class="btn">Generate session update cards →</button>',
+            '<button type="submit" class="btn">Generate live update →</button>',
         ):
             if marker in form_html:
                 form_html = form_html.replace(
@@ -234,16 +253,18 @@ class _StubContentType:
         raise NotImplementedError
 
     def generate_brief(self, form_data: dict) -> str:
-        """Legacy plain-text brief — kept for backwards compatibility."""
         raise NotImplementedError
 
     def generate_cards(self, form_data: dict) -> dict:
-        """Return structured cards: {"cards": [{platform, caption, hashtags, confidence, notes}, ...]}"""
         raise NotImplementedError
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} ready=True>"
 
+
+# ---------------------------------------------------------------------------
+# Weekend / Event Preview
+# ---------------------------------------------------------------------------
 
 class WeekendPreviewStub(_StubContentType):
     _type = ContentType.WEEKEND_PREVIEW
@@ -275,61 +296,33 @@ class WeekendPreviewStub(_StubContentType):
 </div>"""
 
     def generate_brief(self, form_data: dict) -> str:
-        meet = _h(form_data.get("meet_name", "the upcoming event"))
-        date_venue = _h(form_data.get("date_venue", ""))
-        athletes_raw = form_data.get("athletes", "").strip()
-        angles_raw = form_data.get("angles", "").strip()
-        athlete_lines = _split_lines(athletes_raw)
-        athlete_block = "\n".join(f"• {_h(a)}" for a in athlete_lines) if athlete_lines else "• [add athletes here]"
-        location_line = f" at {date_venue}" if date_venue else ""
-        angles_block = f"\n\nKey angles:\n{_h(angles_raw)}" if angles_raw else ""
-        return (
-            f"Weekend Preview brief — {meet}\n{'=' * 60}\n\n"
-            f"📍 {meet}{location_line}\n\n"
-            f"Athletes to watch:\n{athlete_block}"
-            f"{angles_block}\n"
-        )
+        meet = form_data.get("meet_name", "the upcoming event").strip()
+        date_venue = form_data.get("date_venue", "").strip()
+        athletes = _split_lines(form_data.get("athletes", ""))
+        angles = form_data.get("angles", "").strip()
+        parts = [f"Event preview brief — {meet}"]
+        if date_venue:
+            parts.append(f"Held at {date_venue}.")
+        if athletes:
+            parts.append("Athletes to watch: " + "; ".join(athletes) + ".")
+        if angles:
+            parts.append(f"Story angles: {angles}")
+        return "\n".join(parts)
 
     def generate_cards(self, form_data: dict) -> dict:
-        meet       = (form_data.get("meet_name") or "").strip()
-        date_venue = (form_data.get("date_venue") or "").strip()
-        athletes   = _split_lines(form_data.get("athletes", ""))
-        angles     = (form_data.get("angles") or "").strip()
-
-        athletes_block = "\n".join(f"- {a}" for a in athletes) if athletes else "(none specified)"
-        prompt = (
-            "Generate 3 social-media preview cards for an upcoming event.\n\n"
-            f"Event: {meet or '(unspecified)'}\n"
-            f"Date / venue: {date_venue or '(unspecified)'}\n"
-            f"Athletes to watch:\n{athletes_block}\n"
-            f"Story angles: {angles or '(none)'}\n\n"
-            "Produce one Instagram feed caption, one Instagram Stories teaser, and one "
-            "Twitter/X post. Each platform's caption should match its native tone."
+        return _generate_cards_via_llm(
+            brief_prose=self.generate_brief(form_data),
+            extra_context=(
+                "an EVENT PREVIEW. Tease what's coming, build "
+                "anticipation, no results yet. Stay factual; only use "
+                "names and events explicitly given."
+            ),
         )
-        system = _brand_system_prompt(
-            "This is an EVENT PREVIEW — tease what's coming, build anticipation, "
-            "no results yet. Stay factual; only use names/events explicitly given."
-        )
-        # Heuristic fallback
-        teaser_athletes = ", ".join(a.split("—")[0].strip() for a in athletes[:3]) or "the squad"
-        location = f" at {date_venue}" if date_venue else ""
-        fallback = _fallback_cards([
-            ("Instagram",
-             f"🏊 {meet or 'Big weekend ahead'}{location}.\n\n"
-             f"Watching {teaser_athletes} take to the water. "
-             f"{('Big angle: ' + angles) if angles else 'Backing the squad all the way.'}\n\n"
-             f"Cheer them on 💙"),
-            ("Stories",
-             f"⏰ {meet or 'Upcoming'}{location}\n\n"
-             f"Athletes to watch:\n" +
-             "\n".join(f"• {a}" for a in athletes[:5] or ['(add athletes)'])),
-            ("Twitter",
-             f"{meet or 'Event'}{location}. "
-             f"Spotlighting {teaser_athletes}. "
-             f"{angles[:120] if angles else 'Bring on the racing.'}"),
-        ], ["#race", "#preview", "#squad"])
-        return _try_llm_generate(prompt, system, fallback)
 
+
+# ---------------------------------------------------------------------------
+# Free Text
+# ---------------------------------------------------------------------------
 
 class FreeTextStub(_StubContentType):
     _type = ContentType.FREE_TEXT
@@ -352,40 +345,27 @@ class FreeTextStub(_StubContentType):
     def generate_brief(self, form_data: dict) -> str:
         text = (form_data.get("free_text") or "").strip()
         if not text:
-            return "No text provided."
-        return f"Free Text brief\n{'=' * 60}\n\n{text[:1200]}\n"
+            return "(no text provided)"
+        return f"User-supplied moment:\n\n{text[:2400]}"
 
     def generate_cards(self, form_data: dict) -> dict:
         text = (form_data.get("free_text") or "").strip()
         if not text:
-            return _fallback_cards(
-                [("Instagram", "Add some notes describing the moment to generate captions.")],
-                [],
-            )
-        prompt = (
-            "The user gave a short free-text description of a club/team moment. "
-            "Identify the strongest 2–3 social-media angles and generate one card per angle. "
-            "Pick the platform per angle (Instagram, Stories, Twitter, Facebook, LinkedIn). "
-            "Stay strictly within the facts in the text.\n\n"
-            f"User notes:\n\"\"\"\n{text[:2000]}\n\"\"\""
+            return {"cards": []}
+        return _generate_cards_via_llm(
+            brief_prose=self.generate_brief(form_data),
+            extra_context=(
+                "a FREE-TEXT moment. The user's description is the only "
+                "source of truth — do not invent specifics. If a fact "
+                "isn't in the notes, leave it out. Identify the strongest "
+                "2-3 angles and pick the platform per angle."
+            ),
         )
-        system = _brand_system_prompt(
-            "This is a FREE-TEXT moment. The user's description is the only source of truth — "
-            "do not invent specifics. If a fact isn't in the notes, leave it out."
-        )
-        # Heuristic fallback: try to pull a first sentence, then a generic Stories teaser.
-        first_sentence = re.split(r"[.!?]\s+", text, maxsplit=1)[0]
-        clip = (first_sentence[:180] + ("…" if len(first_sentence) > 180 else "")) if first_sentence else text[:160]
-        fallback = _fallback_cards([
-            ("Instagram",
-             f"{clip}\n\nWhat a moment for the team 💙"),
-            ("Stories",
-             f"🎉 Big moment\n\n{clip}"),
-            ("Twitter",
-             clip[:240]),
-        ], ["#proud", "#teamfirst"])
-        return _try_llm_generate(prompt, system, fallback)
 
+
+# ---------------------------------------------------------------------------
+# Sponsor Post
+# ---------------------------------------------------------------------------
 
 class SponsorPostStub(_StubContentType):
     _type = ContentType.SPONSOR_POST
@@ -417,51 +397,34 @@ class SponsorPostStub(_StubContentType):
 </div>"""
 
     def generate_brief(self, form_data: dict) -> str:
-        sponsor = _h(form_data.get("sponsor_name", "[Sponsor]"))
-        meet = _h(form_data.get("meet_name", "the event"))
-        achievement = _h(form_data.get("achievement", ""))
-        guidelines = _h(form_data.get("guidelines", "").strip())
-        achievement_line = f"\nHighlight: {achievement}" if achievement else ""
-        guidelines_block = f"\nBrand guidelines:\n{guidelines}" if guidelines else ""
-        return (
-            f"Sponsor Post brief — {sponsor} x {meet}\n{'=' * 60}\n\n"
-            f"Partner: {sponsor}\nEvent: {meet}{achievement_line}{guidelines_block}\n"
-        )
+        sponsor = form_data.get("sponsor_name", "the sponsor").strip()
+        meet = form_data.get("meet_name", "").strip()
+        achievement = form_data.get("achievement", "").strip()
+        guidelines = form_data.get("guidelines", "").strip()
+        parts = [f"Sponsor activation brief: partner {sponsor}."]
+        if meet:
+            parts.append(f"Event: {meet}.")
+        if achievement:
+            parts.append(f"Key moment to highlight: {achievement}.")
+        if guidelines:
+            parts.append(f"Brand guidelines: {guidelines}")
+        return "\n".join(parts)
 
     def generate_cards(self, form_data: dict) -> dict:
-        sponsor     = (form_data.get("sponsor_name") or "").strip()
-        meet        = (form_data.get("meet_name") or "").strip()
-        achievement = (form_data.get("achievement") or "").strip()
-        guidelines  = (form_data.get("guidelines") or "").strip()
-
-        prompt = (
-            "Generate 3 sponsor-activation social cards: Instagram feed, Stories, Twitter.\n\n"
-            f"Sponsor: {sponsor or '(unspecified)'}\n"
-            f"Event: {meet or '(unspecified)'}\n"
-            f"Key achievement: {achievement or '(unspecified)'}\n"
-            f"Brand guidelines: {guidelines or '(none)'}\n\n"
-            "Make sponsor mentions feel natural, not forced. Lead with the moment, partner with the sponsor."
+        return _generate_cards_via_llm(
+            brief_prose=self.generate_brief(form_data),
+            extra_context=(
+                "a SPONSOR POST. Respect every brand guideline. Never "
+                "imply the sponsor caused the achievement — they support, "
+                "the athletes perform. Make sponsor mentions feel natural, "
+                "not forced."
+            ),
         )
-        system = _brand_system_prompt(
-            "This is a SPONSOR POST. Respect all brand rules above. "
-            "Never imply the sponsor caused the achievement — they support, the athletes perform."
-        )
-        # Heuristic fallback
-        sponsor_disp = sponsor or "[Sponsor]"
-        meet_part = f" at {meet}" if meet else ""
-        achievement_part = f" {achievement}." if achievement else ""
-        fallback = _fallback_cards([
-            ("Instagram",
-             f"Big moments{meet_part}, powered by our partners at {sponsor_disp}.{achievement_part}\n\n"
-             f"Proud to be supported by {sponsor_disp} 🤝"),
-            ("Stories",
-             f"🤝 Powered by {sponsor_disp}\n\n{achievement or 'Highlights from the event'}"),
-            ("Twitter",
-             f"{achievement or 'A standout moment'}{meet_part}. "
-             f"With thanks to our partners at {sponsor_disp}."),
-        ], [f"#{sponsor.replace(' ', '')}" if sponsor else "#sponsored", "#partner"])
-        return _try_llm_generate(prompt, system, fallback)
 
+
+# ---------------------------------------------------------------------------
+# Session Update (live)
+# ---------------------------------------------------------------------------
 
 class SessionUpdateStub(_StubContentType):
     _type = ContentType.SESSION_UPDATE
@@ -489,52 +452,32 @@ class SessionUpdateStub(_StubContentType):
 </div>"""
 
     def generate_brief(self, form_data: dict) -> str:
-        meet = _h(form_data.get("meet_name", "the event"))
-        moments_raw = form_data.get("moments", "").strip()
-        session = _h(form_data.get("session", "").strip())
-        moment_lines = _split_lines(moments_raw)
-        moment_block = "\n".join(f"• {_h(m)}" for m in moment_lines) if moment_lines else "• [no moments]"
-        session_line = f" — {session}" if session else ""
-        return (
-            f"Session Update brief — {meet}{session_line}\n{'=' * 60}\n\n"
-            f"🏊 Live from {meet}{session_line}\n\nEarly highlights:\n{moment_block}\n"
-        )
+        meet = form_data.get("meet_name", "the event").strip()
+        moments = _split_lines(form_data.get("moments", ""))
+        session = form_data.get("session", "").strip()
+        parts = [f"Live session update from {meet}."]
+        if session:
+            parts.append(f"Session: {session}.")
+        if moments:
+            parts.append("Moments so far:\n  - " + "\n  - ".join(moments))
+        return "\n".join(parts)
 
     def generate_cards(self, form_data: dict) -> dict:
-        meet    = (form_data.get("meet_name") or "").strip()
-        moments = _split_lines(form_data.get("moments", ""))
-        session = (form_data.get("session") or "").strip()
-
-        moments_block = "\n".join(f"- {m}" for m in moments) if moments else "(none)"
-        prompt = (
-            "Generate 2 short live-update social cards: Instagram Stories teaser, Twitter/X update.\n\n"
-            f"Event: {meet or '(unspecified)'}\n"
-            f"Session: {session or '(not specified)'}\n"
-            f"Moments so far:\n{moments_block}\n\n"
-            "Keep it urgent and current — this is mid-event. 1–2 short lines max. "
-            "Pull only 1–2 highlights, not all of them."
+        return _generate_cards_via_llm(
+            brief_prose=self.generate_brief(form_data),
+            extra_context=(
+                "a LIVE SESSION UPDATE. Short, share-now energy. Stay "
+                "factual — only mention swimmers and times explicitly "
+                "provided. Stories should feel real-time."
+            ),
         )
-        system = _brand_system_prompt(
-            "This is a LIVE / SESSION UPDATE. Write present-tense, urgent, share-now style."
-        )
-        # Heuristic fallback
-        session_part = f" — {session}" if session else ""
-        first_moment = moments[0] if moments else "Action under way"
-        fallback = _fallback_cards([
-            ("Stories",
-             f"🔴 LIVE from {meet or 'the event'}{session_part}\n\n{first_moment}"),
-            ("Twitter",
-             f"Live from {meet or 'the event'}{session_part}: {first_moment[:200]}"),
-        ], ["#live"])
-        return _try_llm_generate(prompt, system, fallback)
 
 
 # ---------------------------------------------------------------------------
-# Renderer — used by web routes to display generated cards
+# Renderer — turns the cards into UI
 # ---------------------------------------------------------------------------
 
 def _platform_icon(platform: str) -> str:
-    """Return a small SVG icon for the platform name."""
     p = (platform or "").lower()
     if "instagram" in p or "feed" in p:
         return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -584,18 +527,13 @@ def render_cards_html(
     pack_id: Optional[str] = None,
     status_api_base: Optional[str] = None,
 ) -> str:
-    """Render the structured cards payload as polished HTML.
-
-    When ``pack_id`` and ``status_api_base`` are supplied, each card gets an
-    Approve / Reject / Queue pill that POSTs to ``{status_api_base}/<idx>``
-    so reviewers can sign off generated drafts inline. The endpoint URL is
-    built by the caller so this module stays free of Flask url_for() coupling.
-    """
     cards = (cards_payload or {}).get("cards") or []
     if not cards:
         return (
             f'<h1>{_h(title)}</h1>'
-            '<div class="card"><p class="muted">No cards generated — try adding more detail.</p>'
+            '<div class="card"><p class="muted">No cards generated — '
+            'check Settings to make sure a provider is configured, '
+            'and try again with a bit more detail.</p>'
             f'<p style="margin-top:12px"><a class="btn secondary" href="{_h(back_url)}">← Try again</a></p></div>'
         )
 
@@ -622,7 +560,6 @@ def render_cards_html(
             if t:
                 tag_chips += f'<span class="mh-card-tag">#{_h(t)}</span>'
 
-        # Encode caption safely for the copy button JS payload
         caption_for_copy = json.dumps(caption)
         notes_html = (
             f'<div style="margin-top:10px;font-size:12px;color:var(--ink-muted)">'
@@ -662,9 +599,6 @@ def render_cards_html(
 
     pill_js = ""
     if show_pill:
-        # One delegated handler. Click cycles queue → approved → rejected → queue.
-        # Right-click resets to queue. Sends a POST with status= as form data;
-        # the server returns {ok, status} JSON. On failure we revert visually.
         pill_js = """
 <script>
 (function(){
