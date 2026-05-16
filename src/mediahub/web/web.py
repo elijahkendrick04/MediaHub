@@ -103,91 +103,25 @@ except ImportError:
     _explain_achievement = None
 
 
-# Two-tier cache:
-#  - _swimmer_research_cache: keyed by swimmer name, holds the web-search
-#    evidence we'll feed to the LLM. Research is the slow step.
-#  - _perf_context_cache: keyed by (swimmer, event, time, meet level) and
-#    holds the final LLM sentence.
-_swimmer_research_cache: dict[str, list[dict]] = {}
+# LLM-derived performance-context sentence, keyed by
+# (swimmer, event, time, meet level) so page re-renders are cheap.
 _perf_context_cache: dict[str, str] = {}
-
-
-def _research_swimmer(swimmer: str, event: str) -> list[dict]:
-    """Web-search for evidence about a swimmer + event. Returns list of
-    {title, url, snippet, domain} hits. Cached per swimmer for the
-    process lifetime so re-rendering a review page is cheap.
-
-    No source domains are hardcoded — the engine discovers swimmingresults.org,
-    Wikipedia, news articles, club bios, etc. via the existing
-    ResearchClient. The LLM then reasons from whatever evidence comes
-    back, exactly as the user asked.
-    """
-    key = swimmer.lower().strip()
-    if key in _swimmer_research_cache:
-        return _swimmer_research_cache[key]
-    hits: list[dict] = []
-    try:
-        from mediahub.context_engine.research import ResearchClient
-    except Exception:
-        _swimmer_research_cache[key] = hits
-        return hits
-    try:
-        client = ResearchClient(num_results=4)
-    except Exception:
-        _swimmer_research_cache[key] = hits
-        return hits
-    # Multi-query: the SR.org profile-style query gets official PBs; the
-    # generic query gets news/Wikipedia for elite-name recognition.
-    queries = [
-        f'swimmingresults.org "{swimmer}"',
-        f'{swimmer} swimmer {event} personal best',
-        f'{swimmer} swimmer national champion OR olympic OR GBR',
-    ]
-    seen_urls: set[str] = set()
-    for q in queries:
-        try:
-            results = client.search(q, num=3)
-        except Exception:
-            continue
-        for r in results:
-            url = (r.url or "").strip()
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            snippet = (r.snippet or "").strip()
-            if not snippet:
-                continue
-            hits.append({
-                "title":   (r.title or "")[:160],
-                "url":     url,
-                "snippet": snippet[:400],
-                "domain":  r.domain,
-            })
-            if len(hits) >= 8:
-                break
-        if len(hits) >= 8:
-            break
-    _swimmer_research_cache[key] = hits
-    return hits
 
 
 def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = None) -> str:
     """Return a 1-sentence LLM judgement on whether this swim is good *for this swimmer's level*.
 
-    Research-grounded: searches the web for the swimmer (swimmingresults.org
-    profile pages, news articles, club bios) and passes the snippets to the
-    LLM as evidence. The LLM then writes a single contextual sentence based
-    on real evidence rather than a hardcoded "high-performing athlete" rule.
-
-    Empty string when no LLM is available, when research returned nothing
-    useful AND we have no recorded PB, or when the LLM refuses — callers
-    tolerate empty strings.
+    The model gets a natural-language description of the swim (no JSON
+    blob) plus a `research_web` tool it can call on its own to verify
+    elite recognition. Honours the user's provider preference
+    (Claude / ChatGPT / Gemini); empty string when none is configured.
     """
     try:
-        from mediahub.media_ai.llm import is_available, generate
+        from mediahub.ai_core import (
+            ask_with_tools, narrate_achievement, narrate_meet,
+            ProviderNotConfigured, ProviderError,
+        )
     except Exception:
-        return ""
-    if not is_available():
         return ""
 
     swimmer = (achievement.get("swimmer_name") or "").strip()
@@ -205,64 +139,88 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     if cached is not None:
         return cached
 
-    payload: dict[str, Any] = {
-        "swimmer": swimmer,
-        "event":   event,
-        "time":    time_s,
-    }
-    for k in ("place", "age_group", "course", "venue",
-              "recorded_pb", "pb_delta_seconds", "is_pb",
-              "asa_id", "club", "headline"):
-        v = achievement.get(k)
-        if v not in (None, "", [], {}):
-            payload[k] = v
-    if meet:
-        for k in ("name", "level", "governing_body", "venue"):
-            v = meet.get(k)
-            if v not in (None, "", [], {}):
-                payload[f"meet_{k}"] = v
-
-    # Research step — the model can only judge level if it has evidence.
-    evidence = _research_swimmer(swimmer, event)
-    if evidence:
-        payload["research_evidence"] = evidence
+    # Natural-language prompt — no JSON. The model reads it and uses
+    # research_web on its own if it wants to verify elite recognition.
+    swim_prose = narrate_achievement(achievement, meet=meet or None)
+    meet_prose = narrate_meet(meet or None)
+    user = swim_prose + (("\n\nMeet context: " + meet_prose) if meet_prose else "")
+    user += (
+        "\n\nWrite ONE short sentence (max 25 words) putting this time in "
+        "context FOR THIS SWIMMER'S LEVEL. Use research_web if you need "
+        "to verify whether the swimmer is recognisably elite."
+    )
 
     system = (
-        "You are a swimming performance analyst. Given a swim + web research "
-        "evidence about the swimmer, write ONE short sentence (max 25 words) "
-        "putting the time in context FOR THIS SWIMMER'S LEVEL.\n"
-        "Hard rules:\n"
-        "- Output exactly one sentence. No questions, lists, markdown, "
-        "preamble, or quotes.\n"
-        "- Reason ONLY from the swim data + research_evidence given. "
-        "Never invent PBs, ages, clubs, rankings, or biographical claims.\n"
-        "- If research_evidence clearly identifies the swimmer as elite "
-        "(Olympic/Commonwealth/national finalist, GBR squad, county "
-        "record-holder), say so plainly and judge the swim against that "
-        "level — a county-level time may be 'a routine training swim for "
-        "a national-level athlete'.\n"
-        "- If research_evidence is empty or doesn't identify the swimmer, "
-        "write a neutral one-liner about the meet level only.\n"
-        "- Citations: if you reference research evidence, mention the "
+        "You are a swimming performance analyst. Output exactly one sentence "
+        "putting a swim in context for the swimmer's level. No questions, "
+        "no lists, no markdown, no preamble. Reason only from the swim "
+        "details I give you and any web evidence you fetch via "
+        "research_web. Never invent PBs, ages, clubs, rankings, or "
+        "biographical facts. If you cite a research result, mention the "
         "domain in parentheses, e.g. '(swimmingresults.org)'."
     )
-    user = "Swim and research data (JSON):\n" + json.dumps(payload, ensure_ascii=False)
+
+    research_tool = [{
+        "name": "research_web",
+        "description": (
+            "Search the web for evidence about this swimmer (elite "
+            "recognition, PB history). Returns title/url/snippet/domain."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        },
+    }]
+
+    def _tool(name, inp):
+        if name != "research_web":
+            return "(unknown tool)"
+        q = (inp.get("query") or "").strip()
+        if not q:
+            return "(empty query)"
+        try:
+            from mediahub.context_engine.research import ResearchClient
+            client = ResearchClient(num_results=4)
+            hits = client.search(q, num=4)
+        except Exception as e:
+            return f"(search failed: {e})"
+        evidence = []
+        for h in hits:
+            snip = (h.snippet or "").strip()
+            if not snip:
+                continue
+            evidence.append({
+                "title": (h.title or "")[:160],
+                "url":   h.url,
+                "snippet": snip[:300],
+                "domain":  h.domain,
+            })
+        return json.dumps({"hits": evidence}, ensure_ascii=False)
+
+    out = ""
     try:
-        out = generate(user, system=system, max_tokens=120).strip()
+        convo = ask_with_tools(
+            system=system, user=user,
+            tools=research_tool, on_tool_call=_tool,
+            max_tokens=200, max_rounds=3,
+        )
+        out = (convo.text or "").strip()
+    except (ProviderNotConfigured, ProviderError):
+        out = ""
     except Exception:
         out = ""
     if out:
-        # Keep only the first sentence the LLM produced.
         for ln in out.splitlines():
             ln = ln.strip().lstrip("-* ").strip()
             if ln:
                 out = ln
                 break
-    if (not out
-        or out.startswith("Generated content unavailable")
-        or out.lower().startswith(("i need", "i'd need", "please provide",
-                                    "can you provide", "could you",
-                                    "i don't have"))):
+    if out.lower().startswith(("i need", "i'd need", "please provide",
+                                "can you provide", "could you",
+                                "i don't have")):
         out = ""
     _perf_context_cache[cache_key] = out
     return out
@@ -4884,6 +4842,38 @@ Relay team broke club record"></textarea>
             elif action == "clear_gemini":
                 set_secret("gemini_api_key", None)
                 message_html = '<p class="tag good">Gemini API key cleared.</p>'
+            elif action == "clear_openai":
+                set_secret("openai_api_key", None)
+                message_html = '<p class="tag good">OpenAI API key cleared.</p>'
+            elif action == "save_openai":
+                key = (request.form.get("openai_api_key") or "").strip()
+                if not key:
+                    message_html = '<p class="tag bad">No OpenAI key submitted.</p>'
+                elif not (key.startswith("sk-") and len(key) >= 20):
+                    message_html = (
+                        '<p class="tag bad">That doesn\'t look like an OpenAI API key. '
+                        'Keys start with <code>sk-</code>. Get one at '
+                        '<a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.</p>'
+                    )
+                else:
+                    set_secret("openai_api_key", key)
+                    message_html = (
+                        '<p class="tag good">OpenAI API key saved. '
+                        'Live AI captions are now enabled.</p>'
+                    )
+            elif action == "set_llm_provider":
+                from mediahub.ai_core import set_preferred_provider
+                choice = (request.form.get("llm_provider") or "auto").strip().lower()
+                try:
+                    set_preferred_provider(choice)
+                    message_html = (
+                        f'<p class="tag good">LLM provider preference set to '
+                        f'<code>{_h(choice)}</code>.</p>'
+                    )
+                except Exception as e:
+                    message_html = (
+                        f'<p class="tag bad">Could not save provider preference: {_h(str(e))}.</p>'
+                    )
             elif action == "save_gemini":
                 key = (request.form.get("gemini_api_key") or "").strip()
                 if not key:
@@ -5330,12 +5320,75 @@ Relay team broke club record"></textarea>
         except Exception:
             render_deps_html = ""
 
+        # AI provider preference + status (Claude / OpenAI / Gemini)
+        from mediahub.ai_core import list_provider_status as _ai_status
+        _ai_provider_status = _ai_status()
+        _ai_active = next((p["provider"] for p in _ai_provider_status if p["active"]), None)
+        _ai_pref = (get_secret("mediahub_llm_provider") or "auto").strip().lower()
+        def _ai_pref_radio(value: str, label: str, hint: str) -> str:
+            checked = "checked" if _ai_pref == value else ""
+            return (
+                '<label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">'
+                f'<input type="radio" name="llm_provider" value="{value}" {checked} style="margin-top:3px"/>'
+                f'<span><strong>{_h(label)}</strong>'
+                f'<span class="muted" style="display:block;font-size:11px">{_h(hint)}</span></span>'
+                '</label>'
+            )
+        _ai_dots = "".join(
+            f'<span style="display:inline-flex;align-items:center;gap:6px;'
+            f'margin-right:14px;font-size:12px">'
+            f'<span style="width:8px;height:8px;border-radius:50%;background:'
+            f'{"#2cc97f" if p["configured"] else "#444"}"></span>'
+            f'<strong>{_h(p["provider"])}</strong>'
+            + (' <span class="tag good" style="font-size:10px">active</span>' if p["active"] else '')
+            + '</span>'
+            for p in _ai_provider_status
+        )
+        # OpenAI state
+        openai_disk = get_secret("openai_api_key")
+        openai_env = bool(os.environ.get("OPENAI_API_KEY"))
+        openai_active = os.environ.get("OPENAI_API_KEY") if openai_env else openai_disk
+        openai_status_dot = "#2cc97f" if openai_active else "#ffae3b"
+        openai_status_text = "OpenAI ENABLED" if openai_active else "OpenAI DISABLED"
+        openai_source = (
+            "environment variable" if openai_env else
+            "saved key" if openai_disk else
+            "none &mdash; add a key below"
+        )
+        openai_masked = _h(mask_key(openai_active)) if openai_active else "<em>none</em>"
+        openai_clear_btn = ""
+        if openai_disk:
+            openai_clear_btn = (
+                '<form method="POST" style="display:inline-block;margin-left:0">'
+                '<input type="hidden" name="action" value="clear_openai"/>'
+                '<button type="submit" class="btn secondary" '
+                'onclick="return confirm(\'Remove the saved OpenAI API key?\')">'
+                'Clear stored key</button></form>'
+            )
+
         body = f"""
 <div class="card">
   <h1 style="margin-top:0">Settings</h1>
   <p class="muted">Configure provider credentials. Keys are stored on disk with
      restricted permissions and never sent anywhere except the provider you've configured.</p>
   {message_html}
+</div>
+
+<div class="card" style="margin-top:16px;border-color:rgba(139,92,246,0.35)">
+  <h2 style="margin-top:0">AI provider preference</h2>
+  <p class="muted" style="font-size:13px">Pick which model MediaHub uses
+    for reasoning (captions, chat brief builder, "Why this card?"
+    context, etc.). "Auto" picks the first configured one in the order
+    Claude → ChatGPT → Gemini.</p>
+  <p style="margin:8px 0">{_ai_dots or '<span class="muted">No providers configured yet.</span>'}</p>
+  <form method="POST" style="margin-top:8px">
+    <input type="hidden" name="action" value="set_llm_provider"/>
+    {_ai_pref_radio("auto",   "Auto (recommended)", "Use whichever provider has a key, prefer Claude.")}
+    {_ai_pref_radio("claude", "Claude (Anthropic)", "Best reasoning + native tool-use. Paid.")}
+    {_ai_pref_radio("openai", "ChatGPT (OpenAI)",   "GPT-4o with function calling. Paid.")}
+    {_ai_pref_radio("gemini", "Gemini (Google)",    "Free tier (15 RPM / 1,500 RPD).")}
+    <button type="submit" class="btn" style="margin-top:6px">Save preference</button>
+  </form>
 </div>
 
 <div class="card" style="margin-top:16px;border-color:rgba(34,197,94,0.25)">
@@ -5364,6 +5417,35 @@ Relay team broke club record"></textarea>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button type="submit" class="btn">Save Gemini key</button>
       {gemini_clear_btn}
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+    <h2 style="margin:0">OpenAI (ChatGPT) &mdash; paid AI captions</h2>
+  </div>
+  <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{openai_status_dot}"></span>
+    <strong>{openai_status_text}</strong>
+    <span class="muted">&mdash; source: {openai_source}</span>
+  </p>
+  <p>Current key: {openai_masked}</p>
+  <form method="POST" style="margin-top:12px">
+    <input type="hidden" name="action" value="save_openai"/>
+    <label for="openai_api_key" style="display:block;font-weight:600;margin-bottom:4px">
+      Paste your OpenAI API key
+    </label>
+    <input type="password" id="openai_api_key" name="openai_api_key"
+           placeholder="sk-&hellip;" autocomplete="off" spellcheck="false"
+           style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
+    <p class="muted" style="margin-top:6px;font-size:12px">
+      Get a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
+      Used for GPT-4o-class responses with native function calling.
+    </p>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="submit" class="btn">Save OpenAI key</button>
+      {openai_clear_btn}
     </div>
   </form>
 </div>

@@ -1,253 +1,82 @@
 """
-ai_caption.py — Generate live AI captions for achievements, with tone support.
+ai_caption.py — Generate captions via the multi-provider ai_core.
 
-All tones are generated live via the LLM (Gemini free tier or Anthropic).
-No results are cached — every call produces a fresh, unique generation.
-A random nonce is injected into every prompt to ensure uniqueness.
+User direction: replace JSON-shaped prompts and hardcoded fallback
+templates with natural-language prompts the model can reason about.
+Captions are written by Claude / ChatGPT / Gemini (whichever the user
+has selected). There is NO heuristic fallback — if no provider is
+configured the caller gets ``ClaudeUnavailableError`` and the UI
+surfaces a clear "configure a provider" message instead of pretending
+to generate a fake caption.
 
-Supported tones:
-  ai          — balanced, sports social media writer (default)
-  warm-club   — warm, community-focused, first-name friendly
-  hype        — energetic, race-day language, high energy
-  data-led    — numbers-first, precise, sponsor-friendly
+Public API kept for backward compatibility:
 
-Public API
-----------
-generate_ai_caption(achievement_dict, club_brand=None)
-    -> dict {caption, tone, fallback, fallback_voice}
+  generate_caption_for_tone(ach, club_brand=None, tone="ai", ...)
+      → str. Raises ClaudeUnavailableError if no provider can answer.
 
-generate_caption_for_tone(achievement_dict, club_brand=None, tone="ai")
-    -> str  (the caption text; raises ClaudeUnavailableError on hard failure)
+  generate_ai_caption(ach, club_brand=None)
+      → {"caption": str, "tone": str, "fallback": bool,
+         "fallback_voice": Optional[str]}.
 
-_SYSTEM_PROMPT   — default system prompt (used by the legacy route)
-_build_user_message(ach, brand) — builds the user message string
-KNOWN_AI_TONES  — set of tone keys handled as AI generation
+  KNOWN_AI_TONES = frozenset({"ai","warm-club","hype","data-led"})
+
+The tone is now described to the model in plain English (e.g. "warm,
+community-focused, first-name use") instead of being a hardcoded
+system-prompt branch. The model decides exactly what that looks like.
 """
 from __future__ import annotations
 
-import json
 import random
 import sys
 from pathlib import Path
 from typing import Optional
 
+
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-try:
-    from mediahub.media_ai.llm import call_claude, ClaudeUnavailableError
-    _llm_ok = True
-except ImportError:
-    _llm_ok = False
-    ClaudeUnavailableError = RuntimeError  # type: ignore[assignment,misc]
 
-try:
-    from mediahub.voice.learned.store import list_voices
-    from mediahub.voice.learned.render import render_caption
-    _voice_ok = True
-except ImportError:
-    _voice_ok = False
-    list_voices = None  # type: ignore[assignment]
-    render_caption = None  # type: ignore[assignment]
+class ClaudeUnavailableError(RuntimeError):
+    """Raised when no provider can produce a caption (kept name for
+    backwards compatibility with existing imports in web.py)."""
 
-# ---------------------------------------------------------------------------
-# Tone-specific system prompts
-# ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = (
-    "You are a sports social-media writer producing one caption for a swimming achievement. "
-    "Keep it specific, human, club-appropriate, ~280 chars max, "
-    "no generic filler, never invent facts. "
-    "Respond with only the caption text — no preamble, no quotes, no markdown."
-)
+def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str:
+    """Thin wrapper kept for tests + back-compat. Delegates to ai_core
+    so the active provider (Claude / OpenAI / Gemini) actually runs."""
+    from mediahub.ai_core import (
+        ask, ProviderNotConfigured, ProviderError,
+    )
+    try:
+        return ask(system, user, max_tokens=max_tokens) or ""
+    except ProviderNotConfigured as e:
+        raise ClaudeUnavailableError(str(e)) from e
+    except ProviderError as e:
+        raise ClaudeUnavailableError(str(e)) from e
 
-_TONE_SYSTEM_PROMPTS: dict[str, str] = {
-    "ai": _SYSTEM_PROMPT,
-    "warm-club": (
-        "You are a warm, community-focused sports club writer. "
-        "Write one short social caption celebrating this swimming achievement. "
-        "Be friendly and inclusive — use the swimmer's first name, celebrate the team spirit, "
-        "make it feel like a message from a club family. "
-        "~280 chars max. Only the caption — no preamble, no quotes, no markdown."
-    ),
-    "hype": (
-        "You are an energetic, hype-focused sports content creator. "
-        "Write one explosive social caption for this swimming achievement. "
-        "High energy, race-day language, bold — exclamation marks where they feel earned. "
-        "Make the reader feel the adrenaline. "
-        "~280 chars max. Only the caption — no preamble, no quotes, no markdown."
-    ),
-    "data-led": (
-        "You are a precise, data-led sports journalist writing for a results-focused audience. "
-        "Write one social caption that leads with the numbers and hard facts. "
-        "Sponsor-friendly, clean, no fluff — every word must earn its place. "
-        "~280 chars max. Only the caption — no preamble, no quotes, no markdown."
-    ),
+
+# A short English description of each tone — given to the model verbatim
+# as part of the system prompt. No JSON, no rules-as-code. The model
+# interprets these descriptors itself.
+_TONE_DESCRIPTORS: dict[str, str] = {
+    "ai":         "a balanced sports social-media voice — natural, "
+                  "specific, mildly warm, no jargon.",
+    "warm-club":  "warm and community-focused: first-name the swimmer, "
+                  "celebrate the team, sound like the club family talking.",
+    "hype":       "energetic and race-day: high-energy language, "
+                  "exclamation marks where genuinely earned, make the "
+                  "reader feel the adrenaline.",
+    "data-led":   "precise and data-led: lead with numbers and hard "
+                  "facts, sponsor-friendly, no fluff — every word earns "
+                  "its place.",
 }
 
-# All tone keys this module handles via AI (not voice templates).
-# Any tone key NOT in this set falls through to voice rendering in the route.
-KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_SYSTEM_PROMPTS.keys())
+KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
 
 
-_ADDRESS_INSTRUCTIONS: dict[str, str] = {
-    "first_name": "Address the swimmer by first name only.",
-    "last_name": "Address the swimmer by their full name with surname.",
-    "surname_only": "Address the swimmer by surname only (sports-broadcast style).",
-    "nickname": "Address the swimmer in a familiar, nickname-style way.",
-}
-
-
-def _voice_profile_addendum(voice_profile: Optional[dict]) -> str:
-    """Render a club's voice_profile as system-prompt guidance.
-
-    Returns "" when the profile is empty or missing — callers can safely
-    concatenate the result with no extra checks.
-    """
-    if not voice_profile:
-        return ""
-    parts: list[str] = ["", "Club voice profile — match this style:"]
-
-    avg_len = voice_profile.get("sentence_length_avg")
-    if avg_len:
-        try:
-            parts.append(
-                f"- Aim for sentences of roughly {float(avg_len):.0f} words "
-                f"on average."
-            )
-        except (TypeError, ValueError):
-            pass
-
-    hash_avg = voice_profile.get("hashtag_count_avg")
-    if hash_avg is not None:
-        try:
-            n = int(round(float(hash_avg)))
-            if n <= 0:
-                parts.append("- Do NOT use hashtags.")
-            else:
-                parts.append(f"- Use about {n} hashtag{'s' if n != 1 else ''}.")
-        except (TypeError, ValueError):
-            pass
-
-    emoji_rate = voice_profile.get("emoji_rate_per_caption")
-    if emoji_rate is not None:
-        try:
-            r = float(emoji_rate)
-            if r <= 0.1:
-                parts.append("- Avoid emoji entirely — this club doesn't use them.")
-            elif r < 1.0:
-                parts.append("- Use emoji sparingly (at most one per caption).")
-            else:
-                parts.append(
-                    f"- This club typically uses around {r:.1f} emoji per caption."
-                )
-        except (TypeError, ValueError):
-            pass
-
-    address = voice_profile.get("preferred_swimmer_address")
-    if isinstance(address, str) and address in _ADDRESS_INSTRUCTIONS:
-        parts.append(f"- {_ADDRESS_INSTRUCTIONS[address]}")
-
-    openers = voice_profile.get("characteristic_openers") or []
-    if openers:
-        sample = ", ".join(f'"{o}"' for o in openers[:5])
-        parts.append(
-            f"- Characteristic opener styles to draw from: {sample}."
-        )
-
-    closers = voice_profile.get("characteristic_closers") or []
-    if closers:
-        sample = ", ".join(f'"{c}"' for c in closers[:5])
-        parts.append(
-            f"- Characteristic closer styles to draw from: {sample}."
-        )
-
-    forbidden = voice_profile.get("forbidden_phrases") or []
-    if forbidden:
-        sample = ", ".join(f'"{p}"' for p in forbidden[:5])
-        parts.append(f"- Phrases to avoid entirely: {sample}.")
-
-    return "\n".join(parts) if len(parts) > 2 else ""
-
-
-def _build_user_message(achievement: dict, club_brand: Optional[dict],
-                        nonce: Optional[int] = None) -> str:
-    """Format the achievement dict as a structured user message.
-
-    The optional nonce is appended to guarantee a unique generation even
-    when the achievement data is identical to a previous call.
-    """
-    safe = {k: v for k, v in achievement.items() if v not in (None, "", [], {})}
-    parts = ["Achievement data (JSON):", json.dumps(safe, ensure_ascii=False)]
-    if club_brand:
-        safe_brand = {k: v for k, v in club_brand.items() if v not in (None, "", [], {})}
-        if safe_brand:
-            parts.append("Club/brand context (JSON):")
-            parts.append(json.dumps(safe_brand, ensure_ascii=False))
-    if nonce is not None:
-        parts.append(f"[generation-nonce: {nonce}]")
-    return "\n".join(parts)
-
-
-def _voice_profile_instructions(vp: dict) -> str:
-    """Build a voice-style instruction block from a voice_profile dict."""
-    if not vp:
-        return ""
-    lines: list[str] = []
-
-    avg = vp.get("sentence_length_avg")
-    if avg:
-        lines.append(f"Target sentence length: ~{int(round(float(avg)))} words.")
-
-    emoji_rate = vp.get("emoji_rate_per_caption", 0)
-    if float(emoji_rate) < 0.1:
-        lines.append("Use no emoji.")
-    elif float(emoji_rate) < 0.8:
-        lines.append("Use emoji sparingly (0-1 per caption).")
-    else:
-        lines.append(f"Use emoji freely (~{float(emoji_rate):.0f} per caption).")
-
-    hashtag_avg = vp.get("hashtag_count_avg", 0)
-    if float(hashtag_avg) < 0.3:
-        lines.append("Do not add hashtags.")
-    elif float(hashtag_avg) < 2:
-        lines.append(f"Include ~{float(hashtag_avg):.0f}-1 relevant hashtag(s).")
-    else:
-        lines.append(f"Include ~{int(round(float(hashtag_avg)))} hashtags.")
-
-    address = vp.get("preferred_swimmer_address") or "first_name"
-    if address == "last_name":
-        lines.append("Refer to the swimmer by last name only.")
-    elif address in ("surname_only", "last_name"):
-        lines.append("Refer to the swimmer by surname only.")
-    else:
-        lines.append("Refer to the swimmer by first name.")
-
-    openers = vp.get("characteristic_openers") or []
-    if openers:
-        sample = "; ".join(f'"{o}"' for o in openers[:3])
-        lines.append(f"Opening style similar to: {sample}.")
-
-    forbidden = vp.get("forbidden_phrases") or []
-    if forbidden:
-        sample = ", ".join(f'"{p}"' for p in forbidden[:4])
-        lines.append(f"Avoid these phrases or patterns: {sample}.")
-
-    cap_style = vp.get("capitalisation_style") or "sentence"
-    if cap_style == "all_caps_emphasis":
-        lines.append("Use ALL-CAPS for emphasis on key words.")
-
-    if not lines:
-        return ""
-    return "\nVoice style instructions (based on this club's past posts):\n" + "\n".join(f"- {l}" for l in lines)
 def _resolve_voice_profile(club_profile) -> Optional[dict]:
-    """Return a usable voice_profile dict from a ClubProfile-like object.
-
-    Tolerates: None, plain dicts (treated as the voice_profile itself),
-    or any object exposing a ``voice_profile`` attribute. Returns None
-    when nothing usable is present so callers can fall straight through.
-    """
+    """Return a usable voice_profile dict from a ClubProfile-like object."""
     if club_profile is None:
         return None
     if isinstance(club_profile, dict):
@@ -257,6 +86,67 @@ def _resolve_voice_profile(club_profile) -> Optional[dict]:
     return vp if isinstance(vp, dict) and vp else None
 
 
+def _voice_profile_prose(vp: Optional[dict]) -> str:
+    """Turn a learned voice_profile dict into natural-language guidance."""
+    if not vp:
+        return ""
+    bits: list[str] = ["Club voice profile — match this style:"]
+    avg = vp.get("sentence_length_avg")
+    if avg:
+        try:
+            bits.append(f"Aim for sentences of about {int(round(float(avg)))} words on average.")
+        except (TypeError, ValueError):
+            pass
+    er = vp.get("emoji_rate_per_caption")
+    if er is not None:
+        try:
+            r = float(er)
+            if r <= 0.1:
+                bits.append("Avoid emoji entirely — use no emoji, this club doesn't use them.")
+            elif r < 1.0:
+                bits.append("Use emoji sparingly (at most one per caption).")
+            else:
+                bits.append(f"This club typically uses around {r:.1f} emoji per caption.")
+        except (TypeError, ValueError):
+            pass
+    ha = vp.get("hashtag_count_avg")
+    if ha is not None:
+        try:
+            n = int(round(float(ha)))
+            if n <= 0:
+                bits.append("Do NOT use hashtags.")
+            else:
+                bits.append(f"Use about {n} hashtag{'s' if n != 1 else ''}.")
+        except (TypeError, ValueError):
+            pass
+    addr = vp.get("preferred_swimmer_address")
+    addr_map = {
+        "first_name":   "Address the swimmer by first name only.",
+        "last_name":    "Address the swimmer by their full name with surname.",
+        "surname_only": "Address the swimmer by surname only (broadcast style).",
+        "nickname":     "Address the swimmer in a familiar, nickname-style way.",
+    }
+    if isinstance(addr, str) and addr in addr_map:
+        bits.append(addr_map[addr])
+    openers = vp.get("characteristic_openers") or []
+    if openers:
+        sample = ", ".join(f'"{o}"' for o in openers[:4])
+        bits.append(f"Characteristic opener styles to draw from: {sample}.")
+    closers = vp.get("characteristic_closers") or []
+    if closers:
+        sample = ", ".join(f'"{c}"' for c in closers[:4])
+        bits.append(f"Characteristic closer styles to draw from: {sample}.")
+    forbidden = vp.get("forbidden_phrases") or []
+    if forbidden:
+        sample = ", ".join(f'"{p}"' for p in forbidden[:5])
+        bits.append(f"Phrases to avoid entirely: {sample}.")
+    # Strip the header if we didn't add anything substantive (so empty
+    # profiles return "").
+    if len(bits) <= 1:
+        return ""
+    return " ".join(bits)
+
+
 def generate_caption_for_tone(
     achievement_dict: dict,
     club_brand: Optional[dict] = None,
@@ -264,76 +154,103 @@ def generate_caption_for_tone(
     voice_profile: Optional[dict] = None,
     club_profile=None,
 ) -> str:
-    """Generate a unique AI caption for the given tone. Returns caption text.
-
-    Always generates fresh — never uses a cache. A random nonce is injected
-    so that repeated calls with the same data produce different captions.
-
-    voice_profile: optional dict from ClubProfile.voice_profile; if provided,
-    style instructions (sentence length, emoji rate, hashtag count, etc.) are
-    injected into the system prompt so the output sounds like the club's own posts.
-
-    Raises ClaudeUnavailableError if no LLM provider is reachable.
+    """Generate one caption in plain English. Raises ClaudeUnavailableError
+    if no provider can answer. NO heuristic fallback — that's intentional;
+    a fake caption is worse than an honest error.
     """
-    system = _TONE_SYSTEM_PROMPTS.get(tone, _SYSTEM_PROMPT)
-    resolved_vp = _resolve_voice_profile(club_profile) or (voice_profile if isinstance(voice_profile, dict) else None)
-    addendum = _voice_profile_addendum(resolved_vp)
-    if addendum:
-        system = system + "\n" + addendum
+    from mediahub.ai_core import narrate_achievement, narrate_brand
+
+    tone_desc = _TONE_DESCRIPTORS.get(tone, _TONE_DESCRIPTORS["ai"])
+    resolved_vp = (_resolve_voice_profile(club_profile)
+                   or (voice_profile if isinstance(voice_profile, dict) else None))
+    vp_prose = _voice_profile_prose(resolved_vp)
+
+    system_parts = [
+        "You are a sports social-media writer. Produce ONE caption for a "
+        "single swimming achievement.",
+        "Tone: " + tone_desc,
+        "Keep it specific, human, club-appropriate, ~280 characters max. "
+        "Never invent facts. Output ONLY the caption text — no preamble, "
+        "no quotes, no markdown.",
+    ]
+    brand_prose = narrate_brand(club_brand)
+    if brand_prose:
+        system_parts.append("Brand voice: " + brand_prose)
+    if vp_prose:
+        system_parts.append("Voice profile from past captions: " + vp_prose)
+    system = "\n\n".join(system_parts)
+
+    # User message is a single English paragraph describing the swim — no
+    # JSON envelope, no field names. The model writes from this prose.
+    user_prose = narrate_achievement(achievement_dict)
+    if not user_prose.strip():
+        raise ClaudeUnavailableError("not enough detail to generate a caption")
+    # Tiny random suffix breaks identical-output caching at the provider's
+    # end without leaking into the visible caption (the prompt asks for
+    # caption-only output, so the model will not echo the seed).
     nonce = random.randint(10_000, 99_999)
-    user_msg = _build_user_message(achievement_dict, club_brand, nonce=nonce)
-    return call_claude(system=system, user=user_msg, max_tokens=400).strip()
+    user_prose = user_prose + f"\n\n[Generate a fresh caption. seed={nonce}]"
 
+    # Route through the local call_claude shim so tests that patch
+    # `mediahub.web.ai_caption.call_claude` continue to work, and the
+    # production path still goes through ai_core under the hood.
+    try:
+        text = call_claude(system=system, user=user_prose, max_tokens=400)
+    except ClaudeUnavailableError:
+        raise
+    text = (text or "").strip()
+    if not text:
+        raise ClaudeUnavailableError("provider returned an empty caption")
+    return text
 
-# ---------------------------------------------------------------------------
-# Fallback helpers (voice templates, then minimal text)
-# ---------------------------------------------------------------------------
-
-def _voice_fallback(achievement: dict) -> dict:
-    if not _voice_ok or list_voices is None or render_caption is None:
-        return {"caption": _minimal_caption(achievement),
-                "tone": "fallback", "fallback": True, "fallback_voice": "text fallback"}
-    voices = list_voices(include_seed=True)
-    if not voices:
-        return {"caption": _minimal_caption(achievement),
-                "tone": "fallback", "fallback": True, "fallback_voice": "text fallback"}
-    profile = random.choice(voices)
-    captions = render_caption(achievement, profile, n_variants=1)
-    text = captions[0] if captions else _minimal_caption(achievement)
-    return {"caption": text, "tone": profile.voice_id,
-            "fallback": True, "fallback_voice": profile.display_name}
-
-
-def _minimal_caption(achievement: dict) -> str:
-    name = achievement.get("swimmer_first", "") or achievement.get("swimmer_name", "")
-    event = achievement.get("event", "")
-    time_ = achievement.get("time", "")
-    parts = [p for p in [name, event, time_] if p]
-    return "Great swim: " + " — ".join(parts) if parts else "Great swim!"
-
-
-# ---------------------------------------------------------------------------
-# Public legacy API (used by the review page route)
-# ---------------------------------------------------------------------------
 
 def generate_ai_caption(
     achievement_dict: dict,
     club_brand: Optional[dict] = None,
 ) -> dict:
-    """Generate a live AI caption (default tone). Falls back to voice on error."""
-    if not _llm_ok:
-        return _voice_fallback(achievement_dict)
+    """Generate a live AI caption (default tone). Returns an error-bearing
+    dict on failure (no template fallback)."""
     try:
         caption = generate_caption_for_tone(achievement_dict, club_brand, tone="ai")
-        return {"caption": caption, "tone": "ai", "fallback": False, "fallback_voice": None}
-    except ClaudeUnavailableError:
-        return _voice_fallback(achievement_dict)
+        return {"caption": caption, "tone": "ai",
+                "fallback": False, "fallback_voice": None}
+    except ClaudeUnavailableError as e:
+        return {"caption": "", "tone": "ai",
+                "fallback": True, "fallback_voice": None,
+                "error": str(e)}
+
+
+# Back-compat exports — the names are imported elsewhere in web.py.
+_SYSTEM_PROMPT = (
+    "You are a sports social-media writer producing one caption for a "
+    "swimming achievement. Keep it specific, human, club-appropriate, "
+    "~280 chars max. Never invent facts. Output only the caption text."
+)
+
+
+def _build_user_message(*_args, **_kwargs) -> str:
+    """Kept for back-compat with tests that import it. The new pipeline
+    builds prose via narrate_achievement instead."""
+    from mediahub.ai_core import narrate_achievement
+    a = _args[0] if _args else _kwargs.get("achievement", {}) or {}
+    return narrate_achievement(a if isinstance(a, dict) else {})
+
+
+def _voice_profile_addendum(*_args, **_kwargs) -> str:
+    """Kept for back-compat. New pipeline uses _voice_profile_prose."""
+    vp = _args[0] if _args else _kwargs.get("voice_profile")
+    return _voice_profile_prose(vp if isinstance(vp, dict) else None)
+
+
+# Test/back-compat alias used by tests/test_voice_imitation.py.
+_voice_profile_instructions = _voice_profile_addendum
 
 
 __all__ = [
+    "ClaudeUnavailableError",
+    "KNOWN_AI_TONES",
     "generate_ai_caption",
     "generate_caption_for_tone",
-    "KNOWN_AI_TONES",
     "_SYSTEM_PROMPT",
     "_build_user_message",
     "_voice_profile_addendum",
