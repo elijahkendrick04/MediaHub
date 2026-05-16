@@ -22,6 +22,26 @@ log = logging.getLogger(__name__)
 DEFAULT_MODEL = os.environ.get("MEDIAHUB_LLM_MODEL", "claude-sonnet-4-5-20250929")
 ALT_MODEL = "claude-3-5-sonnet-20241022"
 
+# In-memory log of the most recent failure per provider. Surfaced by the
+# /settings page so users can see WHY the LLM is falling back to heuristic
+# instead of being told "key saved" while the provider 401s silently.
+# Each entry: {"when": iso, "reason": str, "detail": str (truncated)}
+_LAST_PROVIDER_ERROR: dict[str, dict[str, str]] = {}
+
+
+def _record_provider_error(provider: str, reason: str, detail: str = "") -> None:
+    from datetime import datetime, timezone
+    _LAST_PROVIDER_ERROR[provider] = {
+        "when": datetime.now(timezone.utc).isoformat(),
+        "reason": str(reason)[:120],
+        "detail": str(detail)[:500],
+    }
+
+
+def last_provider_errors() -> dict[str, dict[str, str]]:
+    """Return a copy of the last-error log keyed by provider name."""
+    return {k: dict(v) for k, v in _LAST_PROVIDER_ERROR.items()}
+
 
 # ---------------------------------------------------------------------------
 # Provider detection
@@ -245,19 +265,29 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
             headers={"Content-Type": "application/json"},
         )
     except Exception as e:
-        log.debug("gemini http error: %s", e)
+        log.warning("gemini http error: %s", e)
+        _record_provider_error("gemini-api", "http_error", str(e))
         return None
     if r.status_code != 200:
-        log.debug("gemini non-200 (%s): %s", r.status_code, r.text[:200])
+        log.warning("gemini non-200 (%s): %s", r.status_code, r.text[:200])
+        # Status 400 with "API_KEY_INVALID" is the single most useful signal.
+        reason = f"http_{r.status_code}"
+        if r.status_code in (401, 403):
+            reason = "auth_failed"
+        elif r.status_code == 429:
+            reason = "rate_limited"
+        _record_provider_error("gemini-api", reason, r.text[:500])
         return None
     try:
         data = r.json()
-    except Exception:
+    except Exception as e:
+        _record_provider_error("gemini-api", "bad_json", str(e))
         return None
     # Walk: candidates[0].content.parts[*].text
     candidates = data.get("candidates") or []
     if not candidates:
-        log.debug("gemini empty candidates: %s", str(data)[:200])
+        log.warning("gemini empty candidates: %s", str(data)[:200])
+        _record_provider_error("gemini-api", "empty_candidates", str(data)[:500])
         return None
     parts = ((candidates[0].get("content") or {}).get("parts") or [])
     text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
@@ -386,7 +416,8 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
             parts = [b.text for b in resp.content if hasattr(b, "text")]
             return "".join(parts).strip() or None
         except Exception as e:
-            log.debug("anthropic call failed (%s): %s", attempt_model, e)
+            log.warning("anthropic call failed (%s): %s", attempt_model, e)
+            _record_provider_error("anthropic-api", f"call_failed_{attempt_model}", str(e))
             continue
     return None
 
@@ -612,16 +643,51 @@ def _heuristic_response(prompt: str, system: Optional[str]) -> str:
 
 
 def _heuristic_caption(prompt: str) -> str:
-    """Simple template caption from the prompt fields if recognisable."""
-    name_match = re.search(r"(?:swimmer|athlete)[:=]\s*([^\n,]+)", prompt, re.I)
-    event_match = re.search(r"event[:=]\s*([^\n,]+)", prompt, re.I)
-    result_match = re.search(r"(?:result|time)[:=]\s*([^\n,]+)", prompt, re.I)
-    name = name_match.group(1).strip() if name_match else "the swimmer"
-    event = event_match.group(1).strip() if event_match else "the event"
-    result = result_match.group(1).strip() if result_match else ""
+    """Simple template caption from the prompt fields if recognisable.
+
+    ai_caption._build_user_message emits JSON like
+        {"swimmer_first": "Hannah", "swimmer_name": "Hannah Smith",
+         "event": "100 Free", "time": "1:02.34", ...}
+    so we try JSON-shaped keys first. The old `swimmer:` / `event:` regex
+    never matched that payload and produced "Strong swim from the swimmer
+    in the event" — the symptom users reported when the LLM was down.
+    """
+    name = ""
+    event = ""
+    result = ""
+
+    m = re.search(r'"swimmer_first"\s*:\s*"([^"]+)"', prompt)
+    if m:
+        name = m.group(1).strip()
+    if not name:
+        m = re.search(r'"swimmer_name"\s*:\s*"([^"]+)"', prompt)
+        if m:
+            name = m.group(1).strip().split()[0] if m.group(1).strip() else ""
+    m = re.search(r'"event"\s*:\s*"([^"]+)"', prompt)
+    if m:
+        event = m.group(1).strip()
+    m = re.search(r'"time"\s*:\s*"([^"]+)"', prompt)
+    if m:
+        result = m.group(1).strip()
+
+    if not name:
+        m = re.search(r"(?:swimmer|athlete)\s*[:=]\s*([^\n,]+)", prompt, re.I)
+        if m:
+            name = m.group(1).strip()
+    if not event:
+        m = re.search(r"event\s*[:=]\s*([^\n,]+)", prompt, re.I)
+        if m:
+            event = m.group(1).strip()
+    if not result:
+        m = re.search(r"(?:result|time)\s*[:=]\s*([^\n,]+)", prompt, re.I)
+        if m:
+            result = m.group(1).strip()
+
+    name = name or "the swimmer"
+    event_phrase = f"the {event}" if event else "their event"
     if result:
-        return f"Massive swim from {name} — {result} in the {event}. One for the grid."
-    return f"Strong swim from {name} in the {event}. Proud of the work."
+        return f"Massive swim from {name} — {result} in {event_phrase}. One for the grid."
+    return f"Strong swim from {name} in {event_phrase}. Proud of the work."
 
 
 def _heuristic_alt(prompt: str) -> str:
@@ -661,4 +727,5 @@ def call_claude(
 
 
 __all__ = ["generate", "generate_json", "generate_vision", "is_available",
-           "active_provider", "call_claude", "ClaudeUnavailableError"]
+           "active_provider", "call_claude", "ClaudeUnavailableError",
+           "last_provider_errors"]

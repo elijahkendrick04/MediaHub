@@ -108,6 +108,34 @@ def list_packs(limit: int = 50) -> list[dict]:
     return items[:limit]
 
 
+_VALID_STATUSES: frozenset[str] = frozenset({"queue", "approved", "rejected"})
+
+
+def update_card_status(pack_id: str, card_idx: int, status: str) -> Optional[dict]:
+    """Set the approval `status` on a single card within a saved pack.
+
+    Returns the updated record on success, or None if the pack/card/status
+    is invalid. Approval drives the per-card pill on the stub render pages
+    and is read by the export step downstream.
+    """
+    if status not in _VALID_STATUSES:
+        return None
+    rec = load_pack(pack_id)
+    if not rec:
+        return None
+    cards = rec.get("cards") or []
+    if not isinstance(card_idx, int) or card_idx < 0 or card_idx >= len(cards):
+        return None
+    card = cards[card_idx]
+    if not isinstance(card, dict):
+        return None
+    card["status"] = status
+    rec["cards"] = cards
+    path = _packs_dir() / f"{pack_id}.json"
+    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    return rec
+
+
 def delete_pack(pack_id: str) -> bool:
     if not pack_id or not pack_id.replace("-", "").isalnum():
         return False

@@ -520,8 +520,27 @@ def _platform_icon(platform: str) -> str:
             '<circle cx="12" cy="12" r="10"/></svg>')
 
 
-def render_cards_html(cards_payload: dict, back_url: str, title: str) -> str:
-    """Render the structured cards payload as polished HTML."""
+_PILL_STYLE = {
+    "queue":    ("rgba(255,174,59,0.18)", "#ffae3b", "queue"),
+    "approved": ("rgba(74,222,128,0.18)", "#4ade80", "approved"),
+    "rejected": ("rgba(244,63,94,0.18)",  "#f43f5e", "rejected"),
+}
+
+
+def render_cards_html(
+    cards_payload: dict,
+    back_url: str,
+    title: str,
+    pack_id: Optional[str] = None,
+    status_api_base: Optional[str] = None,
+) -> str:
+    """Render the structured cards payload as polished HTML.
+
+    When ``pack_id`` and ``status_api_base`` are supplied, each card gets an
+    Approve / Reject / Queue pill that POSTs to ``{status_api_base}/<idx>``
+    so reviewers can sign off generated drafts inline. The endpoint URL is
+    built by the caller so this module stays free of Flask url_for() coupling.
+    """
     cards = (cards_payload or {}).get("cards") or []
     if not cards:
         return (
@@ -531,12 +550,16 @@ def render_cards_html(cards_payload: dict, back_url: str, title: str) -> str:
         )
 
     cards_html = ""
-    for card in cards:
+    show_pill = bool(pack_id and status_api_base)
+    for idx, card in enumerate(cards):
         platform   = str(card.get("platform", "Post") or "Post")
         caption    = str(card.get("caption", "") or "").strip()
         hashtags   = card.get("hashtags") or []
         confidence = card.get("confidence", 0.6)
         notes      = str(card.get("notes", "") or "").strip()
+        status     = str(card.get("status") or "queue").lower()
+        if status not in _PILL_STYLE:
+            status = "queue"
 
         try:
             conf_pct = max(0, min(100, int(round(float(confidence) * 100))))
@@ -555,9 +578,24 @@ def render_cards_html(cards_payload: dict, back_url: str, title: str) -> str:
             f'<div style="margin-top:10px;font-size:12px;color:var(--ink-muted)">'
             f'<em>{_h(notes)}</em></div>' if notes else ''
         )
+
+        pill_html = ""
+        if show_pill:
+            bg, fg, label = _PILL_STYLE[status]
+            pill_url = f"{status_api_base}/{idx}"
+            pill_html = (
+                f'<button type="button" class="stub-wf-pill" data-pack="{_h(pack_id)}" '
+                f'data-idx="{idx}" data-status="{_h(status)}" data-url="{_h(pill_url)}" '
+                f'style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;'
+                f'font-size:11px;font-weight:600;background:{bg};color:{fg};'
+                f'font-family:inherit;margin-left:8px"'
+                f' title="Click: queue → approved → rejected → queue. Right-click to reset.">'
+                f'{_h(label)}</button>'
+            )
+
         cards_html += f"""
-<div class="mh-content-card" data-interactive>
-  <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf</div>
+<div class="mh-content-card" data-interactive data-card-status="{_h(status)}">
+  <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
   {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ''}
@@ -572,11 +610,56 @@ def render_cards_html(cards_payload: dict, back_url: str, title: str) -> str:
   </div>
 </div>"""
 
+    pill_js = ""
+    if show_pill:
+        # One delegated handler. Click cycles queue → approved → rejected → queue.
+        # Right-click resets to queue. Sends a POST with status= as form data;
+        # the server returns {ok, status} JSON. On failure we revert visually.
+        pill_js = """
+<script>
+(function(){
+  var NEXT = {queue:'approved', approved:'rejected', rejected:'queue'};
+  var STYLE = {
+    queue:    ['rgba(255,174,59,0.18)','#ffae3b'],
+    approved: ['rgba(74,222,128,0.18)','#4ade80'],
+    rejected: ['rgba(244,63,94,0.18)','#f43f5e']
+  };
+  function apply(btn, status){
+    var s = STYLE[status] || STYLE.queue;
+    btn.style.background = s[0]; btn.style.color = s[1];
+    btn.dataset.status = status; btn.textContent = status;
+    var card = btn.closest('[data-card-status]');
+    if (card) card.dataset.cardStatus = status;
+  }
+  function send(btn, status){
+    var prev = btn.dataset.status;
+    apply(btn, status);
+    var fd = new FormData(); fd.append('status', status);
+    fetch(btn.dataset.url, {method:'POST', body:fd, credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(j){ if(j && j.status) apply(btn, j.status); })
+      .catch(function(){ apply(btn, prev); window.MH && MH.toast('Could not save status','error'); });
+  }
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('.stub-wf-pill'); if (!btn) return;
+    e.preventDefault();
+    send(btn, NEXT[btn.dataset.status] || 'approved');
+  });
+  document.addEventListener('contextmenu', function(e){
+    var btn = e.target.closest('.stub-wf-pill'); if (!btn) return;
+    e.preventDefault();
+    send(btn, 'queue');
+  });
+})();
+</script>
+"""
+
     return (
         f'<h1>{_h(title)}</h1>'
         f'<p class="dim" style="margin-bottom:20px">{len(cards)} draft '
-        f'{"card" if len(cards) == 1 else "cards"} generated. Review, edit, and post.</p>'
+        f'{"card" if len(cards) == 1 else "cards"} generated. Review, edit, approve, and post.</p>'
         f'{cards_html}'
+        f'{pill_js}'
         f'<div style="margin-top:24px;display:flex;gap:10px">'
         f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
         f'</div>'
