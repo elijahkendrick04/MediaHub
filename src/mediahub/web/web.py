@@ -5988,6 +5988,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         stub = StubCls()
         if request.method == "POST":
             form_data = request.form.to_dict(flat=True)
+            # Photo attachment (optional) — every stub form has this field.
+            # Save to DATA_DIR/uploads/stub_attachments/<uuid>.<ext> and
+            # record the relative path on form_data so the saved pack carries
+            # the reference forward to downstream visual generators.
+            photo = request.files.get("attached_photo")
+            if photo and getattr(photo, "filename", ""):
+                import uuid as _uuid
+                ext = Path(photo.filename).suffix.lower() or ".jpg"
+                if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                    ext = ".jpg"
+                att_dir = UPLOADS_DIR / "stub_attachments"
+                att_dir.mkdir(parents=True, exist_ok=True)
+                dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                try:
+                    photo.save(str(dest))
+                    form_data["attached_photo_path"] = str(dest)
+                    form_data["attached_photo_filename"] = Path(photo.filename).name
+                except Exception:
+                    app.logger.exception("stub photo upload failed")
             try:
                 cards_payload = stub.generate_cards(form_data)
             except Exception:

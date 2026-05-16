@@ -27,6 +27,22 @@ def _h(s: Any) -> str:
     return html.escape(str(s or ""))
 
 
+_PHOTO_INPUT_HTML = (
+    '<div style="margin-bottom:14px;padding:12px;background:rgba(34,211,238,0.05);'
+    'border:1px dashed var(--border);border-radius:6px">'
+    '<label style="display:block;margin-bottom:6px;font-weight:600">'
+    'Attach a photo (optional)</label>'
+    '<input type="file" name="attached_photo" accept="image/*" '
+    'style="font-size:13px"/>'
+    '<p class="muted" style="font-size:11px;margin:6px 0 0 0">'
+    "We'll use this photo when generating the visual for this post. "
+    'Leave blank to use a library photo or no photo.</p></div>'
+)
+
+
+_MULTIPART_ATTR = ' enctype="multipart/form-data"'
+
+
 @dataclass
 class ContentCard:
     """One generated content card — a single platform-ready post draft."""
@@ -165,9 +181,43 @@ class _StubContentType:
         return True  # All stubs are now functional (with LLM fallback)
 
     def render_stub_html(self) -> str:
-        """Return a full HTML fragment (body only) with the input form."""
+        """Return a full HTML fragment (body only) with the input form.
+
+        Patches the per-stub form HTML to inject a photo-upload control and
+        the enctype="multipart/form-data" attribute the upload needs. This
+        keeps the per-stub form_html methods focused on their own fields
+        while every stub gets a consistent photo attachment widget — the
+        photo flows through as form_data['attached_photo'] and is saved
+        with the pack so downstream visual generators can use it.
+        """
         meta = self.get_meta()
         form_html = self.render_form_html()
+        # Inject enctype on the form so file uploads work.
+        form_html = form_html.replace(
+            '<form method="POST"',
+            '<form method="POST" enctype="multipart/form-data"',
+            1,
+        )
+        # Inject the photo input above the submit button (works for any
+        # form whose primary action button has class="btn" and label
+        # containing "→"). Fallback: inject before </form>.
+        injected = False
+        for marker in (
+            '<button type="submit" class="btn">Generate content cards →</button>',
+            '<button type="submit" class="btn">Generate preview cards →</button>',
+            '<button type="submit" class="btn">Generate sponsor cards →</button>',
+            '<button type="submit" class="btn">Generate session update cards →</button>',
+        ):
+            if marker in form_html:
+                form_html = form_html.replace(
+                    marker, _PHOTO_INPUT_HTML + marker, 1
+                )
+                injected = True
+                break
+        if not injected:
+            form_html = form_html.replace(
+                "</form>", _PHOTO_INPUT_HTML + "</form>", 1
+            )
         return f"""
 <h1>{_h(meta.title)}</h1>
 <p class="dim">{_h(meta.description)}</p>
