@@ -4604,6 +4604,58 @@ Relay team broke club record"></textarea>
         return jsonify({"ok": True, "version": APP_VERSION,
                         "ts": datetime.now(timezone.utc).isoformat()})
 
+    @app.route("/healthz/deps")
+    def healthz_deps():
+        """Report whether image / motion rendering dependencies are available.
+
+        Surfaced as a small status block on /settings so users can tell at a
+        glance whether "Create graphic" and "Generate motion" buttons will
+        succeed in the current deployment. Silent failures of these in
+        production were the root of "images and videos aren't generating".
+        """
+        import shutil
+        import subprocess
+        deps: dict[str, dict] = {}
+        # Playwright + chromium browser
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F401
+            try:
+                with sync_playwright() as p:
+                    browser_path = p.chromium.executable_path
+                    chromium_ok = bool(browser_path and Path(browser_path).exists())
+            except Exception as e:
+                chromium_ok = False
+                deps["playwright"] = {"available": True, "chromium": False,
+                                      "error": str(e)[:200]}
+            else:
+                deps["playwright"] = {"available": True, "chromium": chromium_ok,
+                                      "executable": browser_path or ""}
+        except Exception as e:
+            deps["playwright"] = {"available": False, "error": str(e)[:200]}
+        # Node binary
+        node_path = shutil.which("node")
+        if node_path:
+            try:
+                v = subprocess.run([node_path, "--version"],
+                                   capture_output=True, text=True, timeout=5)
+                deps["node"] = {"available": True, "path": node_path,
+                                "version": (v.stdout or "").strip()}
+            except Exception as e:
+                deps["node"] = {"available": True, "path": node_path,
+                                "error": str(e)[:200]}
+        else:
+            deps["node"] = {"available": False}
+        # Remotion node_modules
+        remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
+        node_modules = remotion_dir / "node_modules" / "remotion"
+        deps["remotion"] = {
+            "available": node_modules.exists(),
+            "dir": str(remotion_dir),
+        }
+        ok = (deps["playwright"].get("chromium") and deps["node"].get("available")
+              and deps["remotion"].get("available"))
+        return jsonify({"ok": bool(ok), "deps": deps})
+
     # ---- /settings &mdash; user-supplied API keys ---------------------------
     @app.route("/settings", methods=["GET", "POST"])
     def settings_page():
@@ -5022,6 +5074,65 @@ Relay team broke club record"></textarea>
                 'No LLM provider errors recorded since startup.</p>'
             )
 
+        # Render-deps diagnostic block. Same data the /healthz/deps endpoint
+        # serves, inlined so users can SEE why a "Create graphic" or
+        # "Generate motion" button might return an error.
+        try:
+            import shutil
+            import subprocess
+            _pw_ok = False
+            _pw_detail = ""
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as _p:
+                    _pw_bin = _p.chromium.executable_path
+                    _pw_ok = bool(_pw_bin and Path(_pw_bin).exists())
+                    _pw_detail = _pw_bin or ""
+            except Exception as _e:
+                _pw_detail = str(_e)[:160]
+            _node_path = shutil.which("node")
+            _node_ver = ""
+            if _node_path:
+                try:
+                    _node_ver = subprocess.run(
+                        [_node_path, "--version"],
+                        capture_output=True, text=True, timeout=5,
+                    ).stdout.strip()
+                except Exception:
+                    _node_ver = ""
+            _remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
+            _remotion_ok = (_remotion_dir / "node_modules" / "remotion").exists()
+            def _dep_row(label: str, ok: bool, detail: str) -> str:
+                dot = "#2cc97f" if ok else "#f43f5e"
+                return (
+                    f'<li><span style="display:inline-block;width:8px;height:8px;'
+                    f'border-radius:50%;background:{dot};margin-right:6px"></span>'
+                    f'<strong>{_h(label)}</strong>: '
+                    f'<span class="muted" style="font-size:11px">'
+                    f'{_h(detail) if detail else ("present" if ok else "missing")}</span></li>'
+                )
+            render_deps_html = (
+                '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">'
+                'Render dependencies (image &amp; motion generation)</summary>'
+                '<ul style="margin-top:8px;font-size:12px;list-style:none;padding-left:0">'
+                + _dep_row("Playwright + Chromium",
+                          _pw_ok, _pw_detail if _pw_ok else (_pw_detail or "not installed"))
+                + _dep_row("Node",
+                          bool(_node_path),
+                          f"{_node_ver} ({_node_path})" if _node_path else "not installed")
+                + _dep_row("Remotion node_modules",
+                          _remotion_ok, str(_remotion_dir))
+                + '</ul>'
+                '<p class="muted" style="font-size:11px;margin-top:4px">'
+                'Red = the corresponding generator button on the review page '
+                'will return an error. In Render: bake into <code>buildCommand</code>. '
+                'Locally: <code>playwright install chromium</code> and '
+                '<code>cd src/mediahub/remotion && npm install</code>.'
+                '</p></details>'
+            )
+        except Exception:
+            render_deps_html = ""
+
         body = f"""
 <div class="card">
   <h1 style="margin-top:0">Settings</h1>
@@ -5100,6 +5211,7 @@ Relay team broke club record"></textarea>
     <li>Buffer: <strong>{buffer_status_text}</strong>{(' &middot; ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
   </ul>
   {llm_diag_html}
+  {render_deps_html}
 </div>
 
 {buffer_card}

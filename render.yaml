@@ -7,17 +7,26 @@ services:
     runtime: python
     plan: starter
     buildCommand: |
+      set -e
       # Install Node.js 20 (required for Remotion motion/reel rendering).
       # Render's Python image doesn't ship Node, so install via NodeSource.
-      # Errors are tolerated so a missing-node environment still deploys
-      # (motion/reel routes surface a clear "Node not installed" error).
-      (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) || true
+      # We DO NOT swallow failures any more — silent install failures were
+      # leaving deployments where motion/visual buttons appeared to do
+      # nothing. If Node install legitimately can't happen on this image
+      # we want the build to fail loudly so it can be fixed.
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      apt-get install -y nodejs
+      node --version
       pip install --upgrade pip
       pip install -r requirements.txt
       pip install gunicorn
       pip install -e .
+      # Playwright Chromium for /api/runs/<run>/cards/<card>/create-graphic.
+      # Without this, the "Create graphic" button returns "Playwright not
+      # installed". Fail the build if it doesn't install.
+      python -m playwright install --with-deps chromium
       # Install Remotion node modules so /api/.../motion and /reel work.
-      (cd src/mediahub/remotion && npm install --no-audit --no-fund) || true
+      cd src/mediahub/remotion && npm install --no-audit --no-fund && cd -
     startCommand: >-
       mkdir -p /var/mediahub/data /var/mediahub/runs_v4 /var/mediahub/uploads_v4 &&
       cp -rn data/. /var/mediahub/data/ &&
