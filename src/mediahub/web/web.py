@@ -103,31 +103,212 @@ except ImportError:
     _explain_achievement = None
 
 
-def _build_card_explanation(ra: dict) -> dict:
+# Two-tier cache:
+#  - _swimmer_research_cache: keyed by swimmer name, holds the web-search
+#    evidence we'll feed to the LLM. Research is the slow step.
+#  - _perf_context_cache: keyed by (swimmer, event, time, meet level) and
+#    holds the final LLM sentence.
+_swimmer_research_cache: dict[str, list[dict]] = {}
+_perf_context_cache: dict[str, str] = {}
+
+
+def _research_swimmer(swimmer: str, event: str) -> list[dict]:
+    """Web-search for evidence about a swimmer + event. Returns list of
+    {title, url, snippet, domain} hits. Cached per swimmer for the
+    process lifetime so re-rendering a review page is cheap.
+
+    No source domains are hardcoded — the engine discovers swimmingresults.org,
+    Wikipedia, news articles, club bios, etc. via the existing
+    ResearchClient. The LLM then reasons from whatever evidence comes
+    back, exactly as the user asked.
+    """
+    key = swimmer.lower().strip()
+    if key in _swimmer_research_cache:
+        return _swimmer_research_cache[key]
+    hits: list[dict] = []
+    try:
+        from mediahub.context_engine.research import ResearchClient
+    except Exception:
+        _swimmer_research_cache[key] = hits
+        return hits
+    try:
+        client = ResearchClient(num_results=4)
+    except Exception:
+        _swimmer_research_cache[key] = hits
+        return hits
+    # Multi-query: the SR.org profile-style query gets official PBs; the
+    # generic query gets news/Wikipedia for elite-name recognition.
+    queries = [
+        f'swimmingresults.org "{swimmer}"',
+        f'{swimmer} swimmer {event} personal best',
+        f'{swimmer} swimmer national champion OR olympic OR GBR',
+    ]
+    seen_urls: set[str] = set()
+    for q in queries:
+        try:
+            results = client.search(q, num=3)
+        except Exception:
+            continue
+        for r in results:
+            url = (r.url or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            snippet = (r.snippet or "").strip()
+            if not snippet:
+                continue
+            hits.append({
+                "title":   (r.title or "")[:160],
+                "url":     url,
+                "snippet": snippet[:400],
+                "domain":  r.domain,
+            })
+            if len(hits) >= 8:
+                break
+        if len(hits) >= 8:
+            break
+    _swimmer_research_cache[key] = hits
+    return hits
+
+
+def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = None) -> str:
+    """Return a 1-sentence LLM judgement on whether this swim is good *for this swimmer's level*.
+
+    Research-grounded: searches the web for the swimmer (swimmingresults.org
+    profile pages, news articles, club bios) and passes the snippets to the
+    LLM as evidence. The LLM then writes a single contextual sentence based
+    on real evidence rather than a hardcoded "high-performing athlete" rule.
+
+    Empty string when no LLM is available, when research returned nothing
+    useful AND we have no recorded PB, or when the LLM refuses — callers
+    tolerate empty strings.
+    """
+    try:
+        from mediahub.media_ai.llm import is_available, generate
+    except Exception:
+        return ""
+    if not is_available():
+        return ""
+
+    swimmer = (achievement.get("swimmer_name") or "").strip()
+    event = (achievement.get("event") or "").strip()
+    time_s = (achievement.get("time") or "").strip()
+    if not (swimmer and event and time_s):
+        return ""
+
+    meet = meet_context or {}
+    cache_key = "|".join([
+        swimmer.lower(), event.lower(), time_s,
+        str(meet.get("level", "")), str(meet.get("governing_body", "")),
+    ])
+    cached = _perf_context_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    payload: dict[str, Any] = {
+        "swimmer": swimmer,
+        "event":   event,
+        "time":    time_s,
+    }
+    for k in ("place", "age_group", "course", "venue",
+              "recorded_pb", "pb_delta_seconds", "is_pb",
+              "asa_id", "club", "headline"):
+        v = achievement.get(k)
+        if v not in (None, "", [], {}):
+            payload[k] = v
+    if meet:
+        for k in ("name", "level", "governing_body", "venue"):
+            v = meet.get(k)
+            if v not in (None, "", [], {}):
+                payload[f"meet_{k}"] = v
+
+    # Research step — the model can only judge level if it has evidence.
+    evidence = _research_swimmer(swimmer, event)
+    if evidence:
+        payload["research_evidence"] = evidence
+
+    system = (
+        "You are a swimming performance analyst. Given a swim + web research "
+        "evidence about the swimmer, write ONE short sentence (max 25 words) "
+        "putting the time in context FOR THIS SWIMMER'S LEVEL.\n"
+        "Hard rules:\n"
+        "- Output exactly one sentence. No questions, lists, markdown, "
+        "preamble, or quotes.\n"
+        "- Reason ONLY from the swim data + research_evidence given. "
+        "Never invent PBs, ages, clubs, rankings, or biographical claims.\n"
+        "- If research_evidence clearly identifies the swimmer as elite "
+        "(Olympic/Commonwealth/national finalist, GBR squad, county "
+        "record-holder), say so plainly and judge the swim against that "
+        "level — a county-level time may be 'a routine training swim for "
+        "a national-level athlete'.\n"
+        "- If research_evidence is empty or doesn't identify the swimmer, "
+        "write a neutral one-liner about the meet level only.\n"
+        "- Citations: if you reference research evidence, mention the "
+        "domain in parentheses, e.g. '(swimmingresults.org)'."
+    )
+    user = "Swim and research data (JSON):\n" + json.dumps(payload, ensure_ascii=False)
+    try:
+        out = generate(user, system=system, max_tokens=120).strip()
+    except Exception:
+        out = ""
+    if out:
+        # Keep only the first sentence the LLM produced.
+        for ln in out.splitlines():
+            ln = ln.strip().lstrip("-* ").strip()
+            if ln:
+                out = ln
+                break
+    if (not out
+        or out.startswith("Generated content unavailable")
+        or out.lower().startswith(("i need", "i'd need", "please provide",
+                                    "can you provide", "could you",
+                                    "i don't have"))):
+        out = ""
+    _perf_context_cache[cache_key] = out
+    return out
+
+
+def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> dict:
     """Build the "Why this card?" explanation dict for a ranked-achievement.
 
     Returns the explain_achievement() output, or a fallback dict when the
     explainer module is unavailable. Always returns a dict with the three
     expected keys so downstream code can render unconditionally.
+
+    When an LLM is configured, also enriches the result with a
+    ``performance_context`` field — a single-sentence judgement of whether
+    the time is good FOR THIS SWIMMER'S LEVEL (Olympic finalists swimming
+    county-level PBs no longer get described as "moderately good").
     """
     if _explain_achievement is None:
-        return {
+        exp = {
             "headline":     "Generated for: ranked top-N by overall score.",
             "bullets":      [],
             "source_lines": [],
         }
+    else:
+        try:
+            exp = _explain_achievement(
+                ra.get("achievement") or {},
+                ra.get("factors") or [],
+                rank=ra.get("rank"),
+            )
+        except Exception:
+            exp = {
+                "headline":     "Generated for: ranked top-N by overall score.",
+                "bullets":      [],
+                "source_lines": [],
+            }
+
+    # LLM-driven level context. Defensive: any failure is silent — the
+    # base grounded explanation is still rendered.
     try:
-        return _explain_achievement(
-            ra.get("achievement") or {},
-            ra.get("factors") or [],
-            rank=ra.get("rank"),
-        )
+        ctx = _llm_performance_context(ra.get("achievement") or {}, meet_context)
+        if ctx:
+            exp["performance_context"] = ctx
     except Exception:
-        return {
-            "headline":     "Generated for: ranked top-N by overall score.",
-            "bullets":      [],
-            "source_lines": [],
-        }
+        pass
+    return exp
 
 
 def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
@@ -191,6 +372,21 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
         if bullets_html else ""
     )
 
+    # LLM-derived performance context (Olympic-level vs county-level
+    # judgement). Rendered as a distinct callout so reviewers can see at a
+    # glance that this is the LLM's read, not a grounded factor.
+    perf_ctx = (exp.get("performance_context") or "").strip()
+    perf_block = ""
+    if perf_ctx:
+        perf_block = (
+            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(34,211,238,0.06);'
+            'border-left:2px solid #22D3EE;border-radius:4px">'
+            '<div style="font-size:10px;text-transform:uppercase;color:#22D3EE;letter-spacing:0.5px;'
+            'margin-bottom:2px">Performance context (AI)</div>'
+            f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(perf_ctx)}</div>'
+            '</div>'
+        )
+
     return f"""
 <details class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
   border:1px solid rgba(139,92,246,0.25);border-radius:8px">
@@ -201,6 +397,7 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
   <div style="margin-top:8px">
     <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
     {bullets_block}
+    {perf_block}
     <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
       margin-bottom:4px">Source lines (verbatim)</div>
     <ul style="list-style:none;margin:0;padding:0">{src_html}</ul>
@@ -4604,6 +4801,58 @@ Relay team broke club record"></textarea>
         return jsonify({"ok": True, "version": APP_VERSION,
                         "ts": datetime.now(timezone.utc).isoformat()})
 
+    @app.route("/healthz/deps")
+    def healthz_deps():
+        """Report whether image / motion rendering dependencies are available.
+
+        Surfaced as a small status block on /settings so users can tell at a
+        glance whether "Create graphic" and "Generate motion" buttons will
+        succeed in the current deployment. Silent failures of these in
+        production were the root of "images and videos aren't generating".
+        """
+        import shutil
+        import subprocess
+        deps: dict[str, dict] = {}
+        # Playwright + chromium browser
+        try:
+            from playwright.sync_api import sync_playwright  # noqa: F401
+            try:
+                with sync_playwright() as p:
+                    browser_path = p.chromium.executable_path
+                    chromium_ok = bool(browser_path and Path(browser_path).exists())
+            except Exception as e:
+                chromium_ok = False
+                deps["playwright"] = {"available": True, "chromium": False,
+                                      "error": str(e)[:200]}
+            else:
+                deps["playwright"] = {"available": True, "chromium": chromium_ok,
+                                      "executable": browser_path or ""}
+        except Exception as e:
+            deps["playwright"] = {"available": False, "error": str(e)[:200]}
+        # Node binary
+        node_path = shutil.which("node")
+        if node_path:
+            try:
+                v = subprocess.run([node_path, "--version"],
+                                   capture_output=True, text=True, timeout=5)
+                deps["node"] = {"available": True, "path": node_path,
+                                "version": (v.stdout or "").strip()}
+            except Exception as e:
+                deps["node"] = {"available": True, "path": node_path,
+                                "error": str(e)[:200]}
+        else:
+            deps["node"] = {"available": False}
+        # Remotion node_modules
+        remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
+        node_modules = remotion_dir / "node_modules" / "remotion"
+        deps["remotion"] = {
+            "available": node_modules.exists(),
+            "dir": str(remotion_dir),
+        }
+        ok = (deps["playwright"].get("chromium") and deps["node"].get("available")
+              and deps["remotion"].get("available"))
+        return jsonify({"ok": bool(ok), "deps": deps})
+
     # ---- /settings &mdash; user-supplied API keys ---------------------------
     @app.route("/settings", methods=["GET", "POST"])
     def settings_page():
@@ -5022,6 +5271,65 @@ Relay team broke club record"></textarea>
                 'No LLM provider errors recorded since startup.</p>'
             )
 
+        # Render-deps diagnostic block. Same data the /healthz/deps endpoint
+        # serves, inlined so users can SEE why a "Create graphic" or
+        # "Generate motion" button might return an error.
+        try:
+            import shutil
+            import subprocess
+            _pw_ok = False
+            _pw_detail = ""
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as _p:
+                    _pw_bin = _p.chromium.executable_path
+                    _pw_ok = bool(_pw_bin and Path(_pw_bin).exists())
+                    _pw_detail = _pw_bin or ""
+            except Exception as _e:
+                _pw_detail = str(_e)[:160]
+            _node_path = shutil.which("node")
+            _node_ver = ""
+            if _node_path:
+                try:
+                    _node_ver = subprocess.run(
+                        [_node_path, "--version"],
+                        capture_output=True, text=True, timeout=5,
+                    ).stdout.strip()
+                except Exception:
+                    _node_ver = ""
+            _remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
+            _remotion_ok = (_remotion_dir / "node_modules" / "remotion").exists()
+            def _dep_row(label: str, ok: bool, detail: str) -> str:
+                dot = "#2cc97f" if ok else "#f43f5e"
+                return (
+                    f'<li><span style="display:inline-block;width:8px;height:8px;'
+                    f'border-radius:50%;background:{dot};margin-right:6px"></span>'
+                    f'<strong>{_h(label)}</strong>: '
+                    f'<span class="muted" style="font-size:11px">'
+                    f'{_h(detail) if detail else ("present" if ok else "missing")}</span></li>'
+                )
+            render_deps_html = (
+                '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">'
+                'Render dependencies (image &amp; motion generation)</summary>'
+                '<ul style="margin-top:8px;font-size:12px;list-style:none;padding-left:0">'
+                + _dep_row("Playwright + Chromium",
+                          _pw_ok, _pw_detail if _pw_ok else (_pw_detail or "not installed"))
+                + _dep_row("Node",
+                          bool(_node_path),
+                          f"{_node_ver} ({_node_path})" if _node_path else "not installed")
+                + _dep_row("Remotion node_modules",
+                          _remotion_ok, str(_remotion_dir))
+                + '</ul>'
+                '<p class="muted" style="font-size:11px;margin-top:4px">'
+                'Red = the corresponding generator button on the review page '
+                'will return an error. In Render: bake into <code>buildCommand</code>. '
+                'Locally: <code>playwright install chromium</code> and '
+                '<code>cd src/mediahub/remotion && npm install</code>.'
+                '</p></details>'
+            )
+        except Exception:
+            render_deps_html = ""
+
         body = f"""
 <div class="card">
   <h1 style="margin-top:0">Settings</h1>
@@ -5100,6 +5408,7 @@ Relay team broke club record"></textarea>
     <li>Buffer: <strong>{buffer_status_text}</strong>{(' &middot; ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
   </ul>
   {llm_diag_html}
+  {render_deps_html}
 </div>
 
 {buffer_card}
@@ -5403,6 +5712,138 @@ Relay team broke club record"></textarea>
 """
         return _layout("Create", body, active="create")
 
+    @app.route("/spotlight/<run_id>/<path:swimmer_key>/build", methods=["POST"])
+    def spotlight_build(run_id, swimmer_key):
+        """Take the achievements the user has *approved* on the spotlight
+        page and turn them into a single composite post draft saved as a
+        stub pack. Lets the user pick which moments go into the post by
+        approving the relevant pills first."""
+        try:
+            from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
+            from mediahub.club_platform.stub_pack_store import save_pack
+        except ImportError:
+            return _layout("Spotlight",
+                           '<div class="card"><p class="muted">club_platform not available.</p></div>',
+                           active="create"), 501
+        run_data = _load_run(run_id)
+        if not run_data:
+            return _layout("Not found",
+                           '<div class="empty">Run not found.</div>'), 404
+        pack = build_spotlight_pack(run_data, swimmer_key)
+        if not pack:
+            return _layout("No data",
+                           f'<div class="empty">No achievements for "{_h(swimmer_key)}".</div>'), 404
+
+        wf_states = {}
+        try:
+            ws = _get_wf_store()
+            if ws:
+                wf_states = ws.load(run_id)
+        except Exception:
+            wf_states = {}
+
+        # Filter to approved/posted; treat absence as not-selected.
+        approved: list[dict] = []
+        for ra in pack["ranked_achievements"]:
+            a = ra.get("achievement", {})
+            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            st = wf_states.get(cid)
+            if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
+                approved.append(ra)
+
+        if not approved:
+            # Fall through gracefully with a clear message — don't run the LLM
+            # on an empty selection.
+            body = (
+                '<h1>Build spotlight post</h1>'
+                '<div class="card"><p class="muted">No achievements approved yet. '
+                'Click the pill on the achievements below to approve the ones '
+                'you want to include, then come back here.</p>'
+                f'<p><a class="btn secondary" href="{url_for("spotlight_view", run_id=run_id, swimmer_key=swimmer_key)}">&larr; Back to spotlight</a></p></div>'
+            )
+            return _layout("Build spotlight post", body, active="create"), 400
+
+        # Hand the approved achievements to Claude so the model decides
+        # how to weave them into one post. No hand-coded templating —
+        # Claude gets the list of facts + brand context and writes the
+        # composite draft. Falls back gracefully when Claude isn't
+        # configured (single-shot generate with the same prompt).
+        swimmer_name = pack["swimmer_name"]
+        meet_name = pack["meet_name"]
+        fact_list = []
+        for ra in approved[:8]:
+            a = ra.get("achievement", {})
+            fact = {k: v for k, v in {
+                "event":    a.get("event"),
+                "time":     a.get("time"),
+                "place":    a.get("place"),
+                "headline": a.get("headline"),
+                "type":     a.get("type"),
+                "is_pb":    a.get("pb"),
+            }.items() if v not in (None, "", [], {})}
+            fact_list.append(fact)
+
+        try:
+            from mediahub.media_ai.llm import is_available, generate
+        except Exception:
+            is_available = lambda: False  # noqa: E731
+            generate = None  # type: ignore[assignment]
+
+        composed_caption = ""
+        if is_available() and generate is not None:
+            system = (
+                "You are writing ONE single social-media post celebrating an "
+                "athlete spotlight. The user has hand-approved a list of "
+                "achievements they want featured. Weave them into one "
+                "natural-sounding caption: a hooky opener, a tight body "
+                "covering the picked moments, and a closing line. "
+                "Use the swimmer's first name. Don't invent facts. ~700 "
+                "characters max. Output the caption only — no preamble, "
+                "no markdown."
+            )
+            payload = {
+                "swimmer":   swimmer_name,
+                "meet":      meet_name,
+                "approved":  fact_list,
+            }
+            try:
+                composed_caption = generate(
+                    "Spotlight data (JSON):\n" + json.dumps(payload, ensure_ascii=False),
+                    system=system,
+                    max_tokens=600,
+                ).strip()
+            except Exception:
+                composed_caption = ""
+        if not composed_caption:
+            # Last-resort deterministic stitch — used only if no LLM at all.
+            bits = [f"Spotlight: {swimmer_name} at {meet_name}." ]
+            for f in fact_list:
+                hl = f.get("headline") or f.get("event") or ""
+                if hl:
+                    bits.append("• " + hl)
+            composed_caption = "\n".join(bits)
+
+        card = {
+            "platform":   "Instagram",
+            "caption":    composed_caption,
+            "hashtags":   ["#spotlight", "#swimming"],
+            "confidence": 0.9,
+            "notes":      f"Composed from {len(approved)} approved achievement(s) for {swimmer_name}.",
+            "status":     "queue",
+        }
+        saved = save_pack(
+            "free_text",  # reuses the stub-pack list; tagged in form_data
+            {"free_text":    f"Spotlight — {swimmer_name}",
+             "source":       "athlete_spotlight",
+             "swimmer_name": swimmer_name,
+             "meet_name":    meet_name,
+             "run_id":       run_id,
+             "swimmer_key":  swimmer_key,
+             "n_approved":   len(approved)},
+            [card],
+        )
+        return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
+
     # ---- /spotlight &mdash; Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
     def spotlight_landing():
@@ -5576,9 +6017,12 @@ Relay team broke club record"></textarea>
     <div class="stat"><div class="l" style="color:#A78BFA">Story</div><div class="v" style="color:#A78BFA">{pack["n_story"]}</div></div>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
-  <div style="margin-top:14px">
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content pack &rarr;</a>
-    <span class="muted" style="font-size:12px;margin-left:8px">Approve cards below to add them to the pack.</span>
+    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
+      <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
+    </form>
+    <span class="muted" style="font-size:12px">Approve the achievements below to choose which go into the post.</span>
   </div>
 </div>
 
@@ -5679,6 +6123,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         stub = StubCls()
         if request.method == "POST":
             form_data = request.form.to_dict(flat=True)
+            # Photo attachment (optional) — every stub form has this field.
+            # Save to DATA_DIR/uploads/stub_attachments/<uuid>.<ext> and
+            # record the relative path on form_data so the saved pack carries
+            # the reference forward to downstream visual generators.
+            photo = request.files.get("attached_photo")
+            if photo and getattr(photo, "filename", ""):
+                import uuid as _uuid
+                ext = Path(photo.filename).suffix.lower() or ".jpg"
+                if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                    ext = ".jpg"
+                att_dir = UPLOADS_DIR / "stub_attachments"
+                att_dir.mkdir(parents=True, exist_ok=True)
+                dest = att_dir / f"{_uuid.uuid4().hex[:16]}{ext}"
+                try:
+                    photo.save(str(dest))
+                    form_data["attached_photo_path"] = str(dest)
+                    form_data["attached_photo_filename"] = Path(photo.filename).name
+                except Exception:
+                    app.logger.exception("stub photo upload failed")
             try:
                 cards_payload = stub.generate_cards(form_data)
             except Exception:
@@ -5746,9 +6209,235 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_session_update():
         return _render_stub("SessionUpdateStub", "stub_session_update", "Session Update")
 
-    @app.route("/free-text", methods=["GET", "POST"])
-    def stub_free_text():
-        return _render_stub("FreeTextStub", "stub_free_text", "Free Text")
+    @app.route("/free-text/quick", methods=["GET", "POST"])
+    def stub_free_text_quick():
+        # One-shot single-textarea form (legacy). Kept under /quick because
+        # the primary /free-text experience is now the iterative chat.
+        return _render_stub("FreeTextStub", "stub_free_text_quick", "Free Text (quick)")
+
+    # ---- /free-text — Claude-driven chat brief builder -----------------------
+    @app.route("/free-text", methods=["GET"])
+    def free_text_chat_page():
+        from mediahub.free_text_chat.session import list_sessions
+        sessions = list_sessions(limit=20)
+        rows_html = ""
+        for it in sessions:
+            view_url = url_for("free_text_chat_view", chat_id=it["chat_id"])
+            ts = (it.get("updated_at") or "")[:19].replace("T", " ")
+            badge = ('<span class="tag good" style="font-size:10px">brief accepted</span>'
+                     if it.get("accepted") else
+                     '<span class="tag" style="font-size:10px">draft</span>')
+            rows_html += (
+                f'<tr><td><a href="{view_url}">{_h(it.get("title") or "Untitled chat")}</a></td>'
+                f'<td>{badge}</td>'
+                f'<td>{it.get("n_messages", 0)}</td>'
+                f'<td class="muted">{_h(ts)}</td></tr>'
+            )
+        new_url = url_for("free_text_chat_new")
+        body = f"""
+<h1>Free text — chat</h1>
+<p class="dim" style="max-width:680px">
+  Talk to Claude. Describe what you want to post, answer the assistant's
+  questions, and approve the brief when it's right. The assistant
+  researches the web on its own — names, venues, PBs, sponsor info — so
+  the brief is grounded in evidence, not invented.
+</p>
+
+<form method="post" action="{new_url}" style="margin-top:14px">
+  <button type="submit" class="btn">Start a new chat →</button>
+</form>
+
+<div class="card" style="margin-top:24px">
+  <h2 style="margin-top:0">Past chats</h2>
+  {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
+    '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
+   if rows_html else '<p class="muted">No chats yet.</p>'}
+</div>
+
+<p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
+  Prefer the one-shot form? <a href="{url_for('stub_free_text_quick')}">Use the legacy quick generator →</a>
+</p>
+"""
+        return _layout("Free text — chat", body, active="add_input")
+
+    @app.route("/free-text/chat/new", methods=["POST"])
+    def free_text_chat_new():
+        from mediahub.free_text_chat.session import create_session
+        s = create_session()
+        return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
+
+    @app.route("/free-text/chat/<chat_id>", methods=["GET"])
+    def free_text_chat_view(chat_id):
+        from mediahub.free_text_chat.session import load_session
+        s = load_session(chat_id)
+        if not s:
+            return _layout("Chat not found",
+                           '<div class="empty">Chat not found.</div>',
+                           active="add_input"), 404
+        # Pre-render messages for the initial paint; JS keeps it live.
+        msgs_html = ""
+        for m in s.messages:
+            if m.get("role") == "system_note":
+                continue  # internal — not shown to user
+            role = m.get("role", "")
+            text = _h(m.get("content", "") or "")
+            who = "You" if role == "user" else "Assistant"
+            bg = ("rgba(34,211,238,0.06)" if role == "user"
+                  else "rgba(139,92,246,0.06)")
+            msgs_html += (
+                f'<div class="chat-msg" data-role="{_h(role)}" '
+                f'style="margin-bottom:10px;padding:10px 12px;background:{bg};'
+                f'border-radius:8px;border:1px solid var(--border)">'
+                f'<div style="font-size:10px;text-transform:uppercase;'
+                f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:3px">{who}</div>'
+                f'<div style="font-size:13px;color:var(--ink);white-space:pre-wrap;'
+                f'line-height:1.45">{text}</div></div>'
+            )
+        # Pending brief card (if any)
+        brief_html = ""
+        if s.pending_brief and not s.accepted_brief:
+            try:
+                pretty = json.dumps(s.pending_brief, indent=2, ensure_ascii=False)
+            except Exception:
+                pretty = str(s.pending_brief)
+            brief_html = f"""
+<div id="pending-brief" class="card" style="margin-top:14px;border-color:rgba(74,222,128,0.35);background:rgba(74,222,128,0.04)">
+  <div style="font-size:10px;text-transform:uppercase;color:#4ade80;letter-spacing:0.5px;margin-bottom:4px">Proposed brief</div>
+  <pre style="font-size:12px;white-space:pre-wrap;margin:0">{_h(pretty)}</pre>
+  <div style="margin-top:14px;display:flex;gap:10px">
+    <form method="post" action="{url_for('free_text_chat_accept', chat_id=chat_id)}" style="display:inline">
+      <button type="submit" class="btn" style="background:#4ade80;color:#000;border:none">Accept &amp; generate</button>
+    </form>
+    <form method="post" action="{url_for('free_text_chat_decline', chat_id=chat_id)}" style="display:inline">
+      <button type="submit" class="btn secondary">Decline — keep refining</button>
+    </form>
+  </div>
+</div>
+"""
+        accepted_html = ""
+        if s.accepted_brief:
+            generate_url = url_for("free_text_chat_generate", chat_id=chat_id)
+            try:
+                pretty_a = json.dumps(s.accepted_brief, indent=2, ensure_ascii=False)
+            except Exception:
+                pretty_a = str(s.accepted_brief)
+            accepted_html = f"""
+<div class="card" style="margin-top:14px;border-color:rgba(34,211,238,0.35);background:rgba(34,211,238,0.04)">
+  <div style="font-size:10px;text-transform:uppercase;color:#22D3EE;letter-spacing:0.5px;margin-bottom:4px">Accepted brief</div>
+  <pre style="font-size:12px;white-space:pre-wrap;margin:0">{_h(pretty_a)}</pre>
+  <form method="post" action="{generate_url}" style="margin-top:12px">
+    <button type="submit" class="btn">Generate content from this brief →</button>
+  </form>
+</div>
+"""
+        send_url = url_for("free_text_chat_send", chat_id=chat_id)
+        title = _h(s.title or "New chat")
+        body = f"""
+<h1>{title}</h1>
+<p class="dim"><a href="{url_for('free_text_chat_page')}">← All chats</a></p>
+
+<div id="chat-log" style="margin-top:14px">
+  {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
+</div>
+
+{brief_html}
+{accepted_html}
+
+<form id="chat-form" method="post" action="{send_url}" style="margin-top:14px">
+  <textarea name="message" placeholder="Tell the assistant what you want to post about…"
+            style="width:100%;min-height:90px;padding:10px;font-size:13px" required></textarea>
+  <div style="margin-top:8px;display:flex;gap:10px;align-items:center">
+    <button type="submit" class="btn">Send</button>
+    <span class="muted" style="font-size:11px">The assistant uses Claude with web research tools.</span>
+  </div>
+</form>
+"""
+        return _layout(s.title or "Chat", body, active="add_input")
+
+    @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
+    def free_text_chat_send(chat_id):
+        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.agent import next_assistant_turn
+        s = load_session(chat_id)
+        if not s:
+            return _layout("Chat not found",
+                           '<div class="empty">Chat not found.</div>',
+                           active="add_input"), 404
+        msg = (request.form.get("message") or "").strip()
+        if msg:
+            s.add_user_message(msg)
+            save_session(s)
+            try:
+                next_assistant_turn(s)
+            except Exception as e:
+                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                save_session(s)
+        return redirect(url_for("free_text_chat_view", chat_id=chat_id))
+
+    @app.route("/free-text/chat/<chat_id>/accept", methods=["POST"])
+    def free_text_chat_accept(chat_id):
+        from mediahub.free_text_chat.session import load_session, save_session
+        s = load_session(chat_id)
+        if not s:
+            return redirect(url_for("free_text_chat_page"))
+        if s.pending_brief:
+            s.accepted_brief = s.pending_brief
+            s.pending_brief = None
+            s.messages.append({"role": "system_note",
+                               "content": "[user accepted the brief]",
+                               "ts": datetime.now(timezone.utc).isoformat()})
+            save_session(s)
+        return redirect(url_for("free_text_chat_view", chat_id=chat_id))
+
+    @app.route("/free-text/chat/<chat_id>/decline", methods=["POST"])
+    def free_text_chat_decline(chat_id):
+        from mediahub.free_text_chat.session import load_session, save_session
+        from mediahub.free_text_chat.agent import next_assistant_turn
+        s = load_session(chat_id)
+        if not s:
+            return redirect(url_for("free_text_chat_page"))
+        if s.pending_brief:
+            s.pending_brief = None
+            s.add_user_message(
+                "I'm not happy with that brief yet. Ask me what's missing or "
+                "propose a revised version."
+            )
+            save_session(s)
+            try:
+                next_assistant_turn(s)
+            except Exception as e:
+                s.add_assistant_message(f"Error: {e}", meta={"error": True})
+                save_session(s)
+        return redirect(url_for("free_text_chat_view", chat_id=chat_id))
+
+    @app.route("/free-text/chat/<chat_id>/generate", methods=["POST"])
+    def free_text_chat_generate(chat_id):
+        """Turn an accepted brief into a saved stub-pack so the existing
+        approval pills + export flow apply."""
+        from mediahub.free_text_chat.session import load_session
+        from mediahub.club_platform.stub_pack_store import save_pack
+        s = load_session(chat_id)
+        if not s or not s.accepted_brief:
+            return redirect(url_for("free_text_chat_view", chat_id=chat_id))
+        brief = s.accepted_brief
+        card = {
+            "platform":   brief.get("platform") or "Instagram",
+            "caption":    "\n\n".join([
+                p for p in [brief.get("headline", ""), brief.get("body", "")]
+                if p
+            ]).strip(),
+            "hashtags":   brief.get("hashtags") or [],
+            "confidence": 0.85,
+            "notes":      brief.get("visual_concept", "") or "",
+            "status":     "queue",
+        }
+        saved = save_pack(
+            "free_text",
+            {"free_text": s.title or "Chat brief",
+             "source": "chat", "chat_id": chat_id},
+            [card],
+        )
+        return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
