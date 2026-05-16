@@ -103,31 +103,212 @@ except ImportError:
     _explain_achievement = None
 
 
-def _build_card_explanation(ra: dict) -> dict:
+# Two-tier cache:
+#  - _swimmer_research_cache: keyed by swimmer name, holds the web-search
+#    evidence we'll feed to the LLM. Research is the slow step.
+#  - _perf_context_cache: keyed by (swimmer, event, time, meet level) and
+#    holds the final LLM sentence.
+_swimmer_research_cache: dict[str, list[dict]] = {}
+_perf_context_cache: dict[str, str] = {}
+
+
+def _research_swimmer(swimmer: str, event: str) -> list[dict]:
+    """Web-search for evidence about a swimmer + event. Returns list of
+    {title, url, snippet, domain} hits. Cached per swimmer for the
+    process lifetime so re-rendering a review page is cheap.
+
+    No source domains are hardcoded — the engine discovers swimmingresults.org,
+    Wikipedia, news articles, club bios, etc. via the existing
+    ResearchClient. The LLM then reasons from whatever evidence comes
+    back, exactly as the user asked.
+    """
+    key = swimmer.lower().strip()
+    if key in _swimmer_research_cache:
+        return _swimmer_research_cache[key]
+    hits: list[dict] = []
+    try:
+        from mediahub.context_engine.research import ResearchClient
+    except Exception:
+        _swimmer_research_cache[key] = hits
+        return hits
+    try:
+        client = ResearchClient(num_results=4)
+    except Exception:
+        _swimmer_research_cache[key] = hits
+        return hits
+    # Multi-query: the SR.org profile-style query gets official PBs; the
+    # generic query gets news/Wikipedia for elite-name recognition.
+    queries = [
+        f'swimmingresults.org "{swimmer}"',
+        f'{swimmer} swimmer {event} personal best',
+        f'{swimmer} swimmer national champion OR olympic OR GBR',
+    ]
+    seen_urls: set[str] = set()
+    for q in queries:
+        try:
+            results = client.search(q, num=3)
+        except Exception:
+            continue
+        for r in results:
+            url = (r.url or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            snippet = (r.snippet or "").strip()
+            if not snippet:
+                continue
+            hits.append({
+                "title":   (r.title or "")[:160],
+                "url":     url,
+                "snippet": snippet[:400],
+                "domain":  r.domain,
+            })
+            if len(hits) >= 8:
+                break
+        if len(hits) >= 8:
+            break
+    _swimmer_research_cache[key] = hits
+    return hits
+
+
+def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = None) -> str:
+    """Return a 1-sentence LLM judgement on whether this swim is good *for this swimmer's level*.
+
+    Research-grounded: searches the web for the swimmer (swimmingresults.org
+    profile pages, news articles, club bios) and passes the snippets to the
+    LLM as evidence. The LLM then writes a single contextual sentence based
+    on real evidence rather than a hardcoded "high-performing athlete" rule.
+
+    Empty string when no LLM is available, when research returned nothing
+    useful AND we have no recorded PB, or when the LLM refuses — callers
+    tolerate empty strings.
+    """
+    try:
+        from mediahub.media_ai.llm import is_available, generate
+    except Exception:
+        return ""
+    if not is_available():
+        return ""
+
+    swimmer = (achievement.get("swimmer_name") or "").strip()
+    event = (achievement.get("event") or "").strip()
+    time_s = (achievement.get("time") or "").strip()
+    if not (swimmer and event and time_s):
+        return ""
+
+    meet = meet_context or {}
+    cache_key = "|".join([
+        swimmer.lower(), event.lower(), time_s,
+        str(meet.get("level", "")), str(meet.get("governing_body", "")),
+    ])
+    cached = _perf_context_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    payload: dict[str, Any] = {
+        "swimmer": swimmer,
+        "event":   event,
+        "time":    time_s,
+    }
+    for k in ("place", "age_group", "course", "venue",
+              "recorded_pb", "pb_delta_seconds", "is_pb",
+              "asa_id", "club", "headline"):
+        v = achievement.get(k)
+        if v not in (None, "", [], {}):
+            payload[k] = v
+    if meet:
+        for k in ("name", "level", "governing_body", "venue"):
+            v = meet.get(k)
+            if v not in (None, "", [], {}):
+                payload[f"meet_{k}"] = v
+
+    # Research step — the model can only judge level if it has evidence.
+    evidence = _research_swimmer(swimmer, event)
+    if evidence:
+        payload["research_evidence"] = evidence
+
+    system = (
+        "You are a swimming performance analyst. Given a swim + web research "
+        "evidence about the swimmer, write ONE short sentence (max 25 words) "
+        "putting the time in context FOR THIS SWIMMER'S LEVEL.\n"
+        "Hard rules:\n"
+        "- Output exactly one sentence. No questions, lists, markdown, "
+        "preamble, or quotes.\n"
+        "- Reason ONLY from the swim data + research_evidence given. "
+        "Never invent PBs, ages, clubs, rankings, or biographical claims.\n"
+        "- If research_evidence clearly identifies the swimmer as elite "
+        "(Olympic/Commonwealth/national finalist, GBR squad, county "
+        "record-holder), say so plainly and judge the swim against that "
+        "level — a county-level time may be 'a routine training swim for "
+        "a national-level athlete'.\n"
+        "- If research_evidence is empty or doesn't identify the swimmer, "
+        "write a neutral one-liner about the meet level only.\n"
+        "- Citations: if you reference research evidence, mention the "
+        "domain in parentheses, e.g. '(swimmingresults.org)'."
+    )
+    user = "Swim and research data (JSON):\n" + json.dumps(payload, ensure_ascii=False)
+    try:
+        out = generate(user, system=system, max_tokens=120).strip()
+    except Exception:
+        out = ""
+    if out:
+        # Keep only the first sentence the LLM produced.
+        for ln in out.splitlines():
+            ln = ln.strip().lstrip("-* ").strip()
+            if ln:
+                out = ln
+                break
+    if (not out
+        or out.startswith("Generated content unavailable")
+        or out.lower().startswith(("i need", "i'd need", "please provide",
+                                    "can you provide", "could you",
+                                    "i don't have"))):
+        out = ""
+    _perf_context_cache[cache_key] = out
+    return out
+
+
+def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> dict:
     """Build the "Why this card?" explanation dict for a ranked-achievement.
 
     Returns the explain_achievement() output, or a fallback dict when the
     explainer module is unavailable. Always returns a dict with the three
     expected keys so downstream code can render unconditionally.
+
+    When an LLM is configured, also enriches the result with a
+    ``performance_context`` field — a single-sentence judgement of whether
+    the time is good FOR THIS SWIMMER'S LEVEL (Olympic finalists swimming
+    county-level PBs no longer get described as "moderately good").
     """
     if _explain_achievement is None:
-        return {
+        exp = {
             "headline":     "Generated for: ranked top-N by overall score.",
             "bullets":      [],
             "source_lines": [],
         }
+    else:
+        try:
+            exp = _explain_achievement(
+                ra.get("achievement") or {},
+                ra.get("factors") or [],
+                rank=ra.get("rank"),
+            )
+        except Exception:
+            exp = {
+                "headline":     "Generated for: ranked top-N by overall score.",
+                "bullets":      [],
+                "source_lines": [],
+            }
+
+    # LLM-driven level context. Defensive: any failure is silent — the
+    # base grounded explanation is still rendered.
     try:
-        return _explain_achievement(
-            ra.get("achievement") or {},
-            ra.get("factors") or [],
-            rank=ra.get("rank"),
-        )
+        ctx = _llm_performance_context(ra.get("achievement") or {}, meet_context)
+        if ctx:
+            exp["performance_context"] = ctx
     except Exception:
-        return {
-            "headline":     "Generated for: ranked top-N by overall score.",
-            "bullets":      [],
-            "source_lines": [],
-        }
+        pass
+    return exp
 
 
 def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
@@ -191,6 +372,21 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
         if bullets_html else ""
     )
 
+    # LLM-derived performance context (Olympic-level vs county-level
+    # judgement). Rendered as a distinct callout so reviewers can see at a
+    # glance that this is the LLM's read, not a grounded factor.
+    perf_ctx = (exp.get("performance_context") or "").strip()
+    perf_block = ""
+    if perf_ctx:
+        perf_block = (
+            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(34,211,238,0.06);'
+            'border-left:2px solid #22D3EE;border-radius:4px">'
+            '<div style="font-size:10px;text-transform:uppercase;color:#22D3EE;letter-spacing:0.5px;'
+            'margin-bottom:2px">Performance context (AI)</div>'
+            f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(perf_ctx)}</div>'
+            '</div>'
+        )
+
     return f"""
 <details class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
   border:1px solid rgba(139,92,246,0.25);border-radius:8px">
@@ -201,6 +397,7 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
   <div style="margin-top:8px">
     <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
     {bullets_block}
+    {perf_block}
     <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
       margin-bottom:4px">Source lines (verbatim)</div>
     <ul style="list-style:none;margin:0;padding:0">{src_html}</ul>
