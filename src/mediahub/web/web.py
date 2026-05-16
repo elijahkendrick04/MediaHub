@@ -5712,6 +5712,138 @@ Relay team broke club record"></textarea>
 """
         return _layout("Create", body, active="create")
 
+    @app.route("/spotlight/<run_id>/<path:swimmer_key>/build", methods=["POST"])
+    def spotlight_build(run_id, swimmer_key):
+        """Take the achievements the user has *approved* on the spotlight
+        page and turn them into a single composite post draft saved as a
+        stub pack. Lets the user pick which moments go into the post by
+        approving the relevant pills first."""
+        try:
+            from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
+            from mediahub.club_platform.stub_pack_store import save_pack
+        except ImportError:
+            return _layout("Spotlight",
+                           '<div class="card"><p class="muted">club_platform not available.</p></div>',
+                           active="create"), 501
+        run_data = _load_run(run_id)
+        if not run_data:
+            return _layout("Not found",
+                           '<div class="empty">Run not found.</div>'), 404
+        pack = build_spotlight_pack(run_data, swimmer_key)
+        if not pack:
+            return _layout("No data",
+                           f'<div class="empty">No achievements for "{_h(swimmer_key)}".</div>'), 404
+
+        wf_states = {}
+        try:
+            ws = _get_wf_store()
+            if ws:
+                wf_states = ws.load(run_id)
+        except Exception:
+            wf_states = {}
+
+        # Filter to approved/posted; treat absence as not-selected.
+        approved: list[dict] = []
+        for ra in pack["ranked_achievements"]:
+            a = ra.get("achievement", {})
+            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            st = wf_states.get(cid)
+            if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
+                approved.append(ra)
+
+        if not approved:
+            # Fall through gracefully with a clear message — don't run the LLM
+            # on an empty selection.
+            body = (
+                '<h1>Build spotlight post</h1>'
+                '<div class="card"><p class="muted">No achievements approved yet. '
+                'Click the pill on the achievements below to approve the ones '
+                'you want to include, then come back here.</p>'
+                f'<p><a class="btn secondary" href="{url_for("spotlight_view", run_id=run_id, swimmer_key=swimmer_key)}">&larr; Back to spotlight</a></p></div>'
+            )
+            return _layout("Build spotlight post", body, active="create"), 400
+
+        # Hand the approved achievements to Claude so the model decides
+        # how to weave them into one post. No hand-coded templating —
+        # Claude gets the list of facts + brand context and writes the
+        # composite draft. Falls back gracefully when Claude isn't
+        # configured (single-shot generate with the same prompt).
+        swimmer_name = pack["swimmer_name"]
+        meet_name = pack["meet_name"]
+        fact_list = []
+        for ra in approved[:8]:
+            a = ra.get("achievement", {})
+            fact = {k: v for k, v in {
+                "event":    a.get("event"),
+                "time":     a.get("time"),
+                "place":    a.get("place"),
+                "headline": a.get("headline"),
+                "type":     a.get("type"),
+                "is_pb":    a.get("pb"),
+            }.items() if v not in (None, "", [], {})}
+            fact_list.append(fact)
+
+        try:
+            from mediahub.media_ai.llm import is_available, generate
+        except Exception:
+            is_available = lambda: False  # noqa: E731
+            generate = None  # type: ignore[assignment]
+
+        composed_caption = ""
+        if is_available() and generate is not None:
+            system = (
+                "You are writing ONE single social-media post celebrating an "
+                "athlete spotlight. The user has hand-approved a list of "
+                "achievements they want featured. Weave them into one "
+                "natural-sounding caption: a hooky opener, a tight body "
+                "covering the picked moments, and a closing line. "
+                "Use the swimmer's first name. Don't invent facts. ~700 "
+                "characters max. Output the caption only — no preamble, "
+                "no markdown."
+            )
+            payload = {
+                "swimmer":   swimmer_name,
+                "meet":      meet_name,
+                "approved":  fact_list,
+            }
+            try:
+                composed_caption = generate(
+                    "Spotlight data (JSON):\n" + json.dumps(payload, ensure_ascii=False),
+                    system=system,
+                    max_tokens=600,
+                ).strip()
+            except Exception:
+                composed_caption = ""
+        if not composed_caption:
+            # Last-resort deterministic stitch — used only if no LLM at all.
+            bits = [f"Spotlight: {swimmer_name} at {meet_name}." ]
+            for f in fact_list:
+                hl = f.get("headline") or f.get("event") or ""
+                if hl:
+                    bits.append("• " + hl)
+            composed_caption = "\n".join(bits)
+
+        card = {
+            "platform":   "Instagram",
+            "caption":    composed_caption,
+            "hashtags":   ["#spotlight", "#swimming"],
+            "confidence": 0.9,
+            "notes":      f"Composed from {len(approved)} approved achievement(s) for {swimmer_name}.",
+            "status":     "queue",
+        }
+        saved = save_pack(
+            "free_text",  # reuses the stub-pack list; tagged in form_data
+            {"free_text":    f"Spotlight — {swimmer_name}",
+             "source":       "athlete_spotlight",
+             "swimmer_name": swimmer_name,
+             "meet_name":    meet_name,
+             "run_id":       run_id,
+             "swimmer_key":  swimmer_key,
+             "n_approved":   len(approved)},
+            [card],
+        )
+        return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
+
     # ---- /spotlight &mdash; Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
     def spotlight_landing():
@@ -5885,9 +6017,12 @@ Relay team broke club record"></textarea>
     <div class="stat"><div class="l" style="color:#A78BFA">Story</div><div class="v" style="color:#A78BFA">{pack["n_story"]}</div></div>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
-  <div style="margin-top:14px">
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content pack &rarr;</a>
-    <span class="muted" style="font-size:12px;margin-left:8px">Approve cards below to add them to the pack.</span>
+    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
+      <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
+    </form>
+    <span class="muted" style="font-size:12px">Approve the achievements below to choose which go into the post.</span>
   </div>
 </div>
 
