@@ -1983,7 +1983,7 @@ def create_app() -> Flask:
                 delete_href = url_for('privacy_delete_run', run_id=r['id'])
                 # V8.2: club profiles UI removed; show the stored club
                 # filter / profile_id slug as a friendly label.
-                prof_display = (r["profile_id"] or "&mdash;").replace("-", " ").replace("_", " ")
+                prof_display = (r["profile_id"] or "—").replace("-", " ").replace("_", " ")
                 if prof_display.startswith(" run "):
                     prof_display = "&mdash;"
                 rows_html += (
@@ -2517,10 +2517,10 @@ def create_app() -> Flask:
   <h2>Meet context</h2>
   <div class="kv">
     <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get('meet_level','open'))}</span></span>
-    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '&mdash;')}</span>
+    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '—')}</span>
     <span class="k">Has finals</span><span>{ctx_badge(mctx.get('has_finals'))}</span>
     <span class="k">Has age groups</span><span>{ctx_badge(mctx.get('has_age_groups'))}</span>
-    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '&mdash;')}</span>
+    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '—')}</span>
     <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get('research_available') else '<span class="tag warn">unavailable</span>'}</span>
   </div>
   {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + '</div>') if ctx_sources_html else ''}
@@ -2661,9 +2661,9 @@ def create_app() -> Flask:
                 f'<strong style="font-size:13px">{_h(c.get("headline", ""))}</strong>'
                 f'<div class="dim" style="margin-top:4px;font-size:12px">{_h(c.get("subhead", ""))}</div>'
                 f'<div class="grid-3" style="margin-top:10px;gap:10px">'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "&mdash;")}</div></div>'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "&mdash;")}</div></div>'
-                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "&mdash;")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "—")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "—")}</div></div>'
+                f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "—")}</div></div>'
                 f'</div></div>'
             )
 
@@ -2712,7 +2712,7 @@ def create_app() -> Flask:
                 for sa in _needs_verif_swimmers[:10]:
                     _sw_key = _h(sa.get('asa_id') or f"name:{sa.get('hy3_name','')}")
                     _hy3 = _h(sa.get('hy3_name', ''))
-                    _sr = _h(sa.get('sr_name') or '&mdash;')
+                    _sr = _h(sa.get('sr_name') or '—')
                     _asa = _h(sa.get('asa_id') or '?')
                     _verify_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=_sw_key)
                     rows += (
@@ -3007,18 +3007,18 @@ function turnMeetIntoPack() {{
             # Standard tones &mdash; always shown, always AI-generated on demand.
             # Order: AI (first, active) &rarr; Warm &rarr; Hype &rarr; Precise
             _STD_TONES = [
-                ("ai",        "&#x2726; AI",    True,  "tone-tab-ai",
+                ("ai",        "✦ AI", True,  "tone-tab-ai",
                  "rgba(139,92,246,0.15)", "#A78BFA",
                  "Live AI caption. Generates fresh each time."),
                 ("warm-club", "Warm",    False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Warm & community &mdash; friendly, first-name, inclusive."),
+                 "Warm & community — friendly, first-name, inclusive."),
                 ("hype",      "Hype",    False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Energetic & hype &mdash; race-day language, high energy."),
+                 "Energetic & hype — race-day language, high energy."),
                 ("data-led",  "Precise", False, "",
                  "rgba(34,211,238,0.15)", "var(--accent)",
-                 "Data-led &mdash; numbers first, sponsor-friendly, no fluff."),
+                 "Data-led — numbers first, sponsor-friendly, no fluff."),
             ]
 
             for t_key, t_label, is_active, extra_cls, active_bg, active_fg, title in _STD_TONES:
@@ -4147,8 +4147,8 @@ function addGraphicToPack(btn, visualId) {{
             rows += (
                 f'<tr>'
                 f'<td>{_h(sa.get("hy3_name",""))}</td>'
-                f'<td class="muted">{_h(sa.get("asa_id") or "&mdash;")}</td>'
-                f'<td>{_h(sa.get("sr_name") or "&mdash;")}</td>'
+                f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
+                f'<td>{_h(sa.get("sr_name") or "—")}</td>'
                 f'<td><span class="tag {method_cls}">{_h(method)}</span></td>'
                 f'<td>{n_dec}</td>'
                 f'<td style="color:#4ADE80">{n_conf}</td>'
@@ -4218,13 +4218,13 @@ function addGraphicToPack(btn, visualId) {{
         context_html = ""
         if target:
             ident = target.get("identity") or {}
-            hy3_name = _h(target.get("hy3_name") or "&mdash;")
-            sr_name = _h(target.get("sr_name") or "&mdash; (no record returned)")
-            method = _h(ident.get("method") or "&mdash;")
+            hy3_name = _h(target.get("hy3_name") or "—")
+            sr_name = _h(target.get("sr_name") or "— (no record returned)")
+            method = _h(ident.get("method") or "—")
             method_pill = {"asa_id_verified": "good", "needs_verification": "warn",
                           "asa_id_unverified": "warn", "no_id": "bad",
                           "manual_override": "info"}.get(ident.get("method", ""), "")
-            cur_asa = _h(target.get("asa_id") or "&mdash;")
+            cur_asa = _h(target.get("asa_id") or "—")
             notes_list = ident.get("notes") or []
             notes_html = "".join(f"<li>{_h(n)}</li>" for n in notes_list) or "<li class='muted'>No notes</li>"
             context_html = f"""
@@ -4410,7 +4410,7 @@ function addGraphicToPack(btn, visualId) {{
                 rows += (f'<tr><td>{_h(m.get("moment",""))}</td>'
                          f'<td><span class="tag {badge}">'
                          f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
-                         f'<td>{_h(m.get("matched_headline") or "&mdash;")}</td>'
+                         f'<td>{_h(m.get("matched_headline") or "—")}</td>'
                          f'<td>{_h(m.get("score",""))}</td></tr>')
             rep_html = f"""
 <div class="card">
@@ -4615,7 +4615,9 @@ Relay team broke club record"></textarea>
         from mediahub.web.secrets_store import (
             get_anthropic_key, set_secret, mask_key, get_secret,
             get_buffer_access_token, set_buffer_access_token,
+            secrets_path as _secrets_path,
         )
+        from mediahub.media_ai.llm import last_provider_errors as _last_llm_errors
         message_html = ""
         buffer_message_html = ""
         # Fall through to original handler logic (preserved below).
@@ -4986,6 +4988,40 @@ Relay team broke club record"></textarea>
                 'Clear stored key</button></form>'
             )
 
+        # Diagnostic: where do we write/read secrets, and what was the last
+        # LLM error per provider? This makes "I saved my key but the LLM
+        # falls back to heuristic" debuggable instead of silent.
+        _sec_path = _secrets_path()
+        _sec_exists = _sec_path.exists()
+        _errs = _last_llm_errors()
+        if _errs:
+            _err_rows = "".join(
+                f'<tr><td><code>{_h(prov)}</code></td>'
+                f'<td><strong>{_h(info.get("reason",""))}</strong></td>'
+                f'<td class="muted" style="font-size:11px">{_h(info.get("when","")[:19])}</td>'
+                f'<td style="font-size:11px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
+                f' title="{_h(info.get("detail",""))}"><code>{_h(info.get("detail","")[:160])}</code></td></tr>'
+                for prov, info in _errs.items()
+            )
+            llm_diag_html = (
+                '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">'
+                f'Last LLM provider error(s) &middot; {len(_errs)} recorded</summary>'
+                '<table style="margin-top:8px;font-size:12px;width:100%">'
+                '<thead><tr><th>Provider</th><th>Reason</th><th>When (UTC)</th><th>Detail</th></tr></thead>'
+                f'<tbody>{_err_rows}</tbody></table>'
+                '<p class="muted" style="font-size:11px;margin-top:6px">'
+                'Hover the detail cell to see the full server response. '
+                'Common reasons: <code>auth_failed</code> (rotate the key), '
+                '<code>rate_limited</code> (wait or upgrade tier), '
+                '<code>http_error</code> (outbound network blocked).'
+                '</p></details>'
+            )
+        else:
+            llm_diag_html = (
+                '<p class="muted" style="font-size:12px;margin-top:8px">'
+                'No LLM provider errors recorded since startup.</p>'
+            )
+
         body = f"""
 <div class="card">
   <h1 style="margin-top:0">Settings</h1>
@@ -5057,11 +5093,13 @@ Relay team broke club record"></textarea>
     <li>Anthropic key via environment: <strong>{'set' if env_key else 'not set'}</strong></li>
     <li>Anthropic key saved on disk: <strong>{'present' if stored_key else 'absent'}</strong></li>
     <li>Active key source: <strong>{('environment' if env_key else ('disk' if stored_key else 'none'))}</strong></li>
+    <li>Secrets file path: <code>{_h(str(_sec_path))}</code> &middot; <strong>{'exists' if _sec_exists else 'missing'}</strong></li>
     <li>Photoroom key: <strong>{photoroom_state}</strong>{photoroom_masked_html}</li>
     <li>Replicate token: <strong>{replicate_state}</strong>{replicate_masked_html}</li>
     <li>Cutout provider: <strong>{cutout_provider}</strong></li>
     <li>Buffer: <strong>{buffer_status_text}</strong>{(' &middot; ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
   </ul>
+  {llm_diag_html}
 </div>
 
 {buffer_card}
@@ -5659,7 +5697,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 app.logger.exception("stub save_pack failed")
             back = url_for(route_endpoint)
             actions_url = url_for("stub_pack_view", pack_id=saved["pack_id"]) if saved else None
-            body = _stubs_mod.render_cards_html(cards_payload, back, f"{title} &mdash; drafts")
+            # Wire the per-card approval pill when we have a saved pack_id.
+            _pack_id = saved["pack_id"] if saved else None
+            _status_api_base = None
+            if _pack_id:
+                _full = url_for("api_stub_pack_card_status",
+                                pack_id=_pack_id, card_idx=999999)
+                _status_api_base = _full.rsplit("/", 1)[0]
+            body = _stubs_mod.render_cards_html(
+                cards_payload, back, f"{title} — drafts",
+                pack_id=_pack_id, status_api_base=_status_api_base,
+            )
             if saved:
                 _packs_url = url_for("stub_packs_list")
                 body = body.replace(
@@ -5770,10 +5818,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
         # We pass back = saved-list so "Start over" goes somewhere sensible.
         back_url = url_for("stub_packs_list")
+        _full_status_url = url_for(
+            "api_stub_pack_card_status", pack_id=pack_id, card_idx=999999
+        )
+        _status_api_base = _full_status_url.rsplit("/", 1)[0]
         cards_html = render_cards_html(
             {"cards": rec.get("cards") or []},
             back_url,
             rec.get("title") or "Draft pack",
+            pack_id=pack_id,
+            status_api_base=_status_api_base,
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
@@ -5828,6 +5882,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.club_platform.stub_pack_store import delete_pack
         delete_pack(pack_id)
         return redirect(url_for("stub_packs_list"))
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/status",
+               methods=["POST"])
+    def api_stub_pack_card_status(pack_id, card_idx):
+        """Approve/reject a single card inside a saved stub pack.
+
+        Powers the inline status pill on Free Text / Event Preview / Sponsor
+        Post / Session Update card lists. The pill cycles
+        queue → approved → rejected and persists the state in the pack JSON
+        so reviewers can come back to it across sessions.
+        """
+        from mediahub.club_platform.stub_pack_store import update_card_status
+        status = (request.form.get("status") or "").strip().lower()
+        rec = update_card_status(pack_id, card_idx, status)
+        if not rec:
+            return jsonify({"ok": False, "error": "invalid_request"}), 400
+        cards = rec.get("cards") or []
+        card = cards[card_idx] if 0 <= card_idx < len(cards) else {}
+        return jsonify({
+            "ok": True,
+            "pack_id": pack_id,
+            "card_idx": card_idx,
+            "status": card.get("status", status),
+        })
 
     # ---- /add-input &mdash; multi-input landing page --------------------------
     @app.route("/add-input")
@@ -6240,10 +6318,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
                 f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "&mdash;"))}</b> words</div>'
-                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "&mdash;"))}</b> words</div>'
-                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "&mdash;"))}</b></div>'
-                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "&mdash;"))}</b></div>'
+                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
+                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
+                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
+                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
                 f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
                 f'</div>'
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
@@ -6334,7 +6412,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Palette</div>
       <div>{swatches or '<span class="dim" style="font-size:12px">(none detected)</span>'}</div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Typography hint</div>
-      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '&mdash;')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '—')}</p>
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Detected logo</div>
