@@ -58,7 +58,8 @@ RUN pip install -e /app
 RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
 
 # Create runtime dirs (mounted volumes will overlay these).
-RUN mkdir -p /app/runs_v4 /app/uploads_v4 /app/.cache
+RUN mkdir -p /app/runs_v4 /app/uploads_v4 /app/.cache \
+ && chmod +x /app/scripts/docker-entrypoint.sh
 
 EXPOSE 5000
 
@@ -66,4 +67,7 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT}/healthz || exit 1
 
-CMD ["sh", "-c", "gunicorn mediahub.web:app --bind 0.0.0.0:${PORT} --workers 1 --threads 4 --timeout 300"]
+# Entrypoint does the persistent-disk setup (mkdir + first-boot seed
+# from /app/data) then exec's gunicorn. Keeps the startup behaviour
+# in one place that's shared between local docker run and Render.
+CMD ["/app/scripts/docker-entrypoint.sh"]

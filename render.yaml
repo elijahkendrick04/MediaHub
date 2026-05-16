@@ -16,12 +16,11 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: starter
-    # The Dockerfile's CMD already starts gunicorn on $PORT. We override
-    # only to ensure the persistent-disk dirs exist before gunicorn runs.
-    dockerCommand: >-
-      sh -c "mkdir -p /var/mediahub/data /var/mediahub/runs_v4 /var/mediahub/uploads_v4
-      && cp -rn /app/data/. /var/mediahub/data/ 2>/dev/null || true
-      && exec gunicorn mediahub.web:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300"
+    # Startup behaviour (persistent-disk setup + gunicorn) lives in
+    # scripts/docker-entrypoint.sh, which the Dockerfile CMD invokes.
+    # Don't set dockerCommand here — Render passes its value as a
+    # single argv string, so multi-token shell pipelines fail with
+    # "sh: 1: <whole command>: not found" (see the May 2026 log).
     healthCheckPath: /healthz
     envVars:
       # AI providers — any of these unlocks the engine. Auto-routes via
