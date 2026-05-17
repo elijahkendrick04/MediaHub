@@ -62,7 +62,14 @@ def parse_description(description: str, *, hint: Optional[dict] = None) -> dict:
         f"Return ONLY the JSON."
     )
     fallback = _heuristic_parse(description, hint)
-    out = generate_json(prompt, system=sys, fallback=fallback)
+    try:
+        out = generate_json(prompt, system=sys, fallback=fallback)
+    except Exception:
+        # Post-rewrite, generate_json raises ClaudeUnavailableError when no
+        # provider is configured. The heuristic here is mechanical regex
+        # extraction (athlete names, venue keywords) — not "fake AI" —
+        # so it's a legitimate no-LLM path for tagging uploaded media.
+        out = fallback
     # If LLM returned empty / non-useful, prefer heuristic
     if not out or (not out.get("athletes") and not out.get("venue") and not out.get("event")):
         out = fallback

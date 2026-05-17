@@ -546,7 +546,7 @@ def _render_why_this_card(
             'letter-spacing:0.5px;margin-bottom:2px">AI unavailable</div>'
             f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(ai_error)}</div>'
             f'<div style="margin-top:6px;font-size:12px">'
-            f'<a href="{url_for("settings_page")}" style="color:#22D3EE">Open AI settings →</a>'
+            '<span style="color:var(--ink-dim)">AI features are configured by your administrator.</span>'
             '</div></div>'
         )
 
@@ -2079,7 +2079,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -2320,6 +2319,10 @@ def create_app() -> Flask:
         "organisation_setup",
         "organisation_setup_capture",
         "organisation_set_active",
+        # /settings now redirects to / so doesn't actually need exempting,
+        # but we keep the endpoint name in the allow-list so a directly-
+        # hit /settings URL doesn't get caught by the gate before reaching
+        # the redirect.
         "settings_page",
         "healthz",
         "healthz_deps",
@@ -4672,8 +4675,8 @@ function addGraphicToPack(btn, visualId) {{
                     "generated_at": now_iso,
                     "error": "no_key",
                     "message": (
-                        "Add a Gemini API key (free at aistudio.google.com) or "
-                        "Anthropic API key in Settings to generate live AI captions."
+                        "AI captions are unavailable on this deployment. "
+                        "Contact your administrator to enable them."
                     ),
                     "settings_url": url_for("settings_page"),
                     "explanation": explanation,
@@ -5314,726 +5317,49 @@ Relay team broke club record"></textarea>
               and deps["remotion"].get("available"))
         return jsonify({"ok": bool(ok), "deps": deps})
 
-    # ---- /settings &mdash; user-supplied API keys ---------------------------
-    @app.route("/settings", methods=["GET", "POST"])
+    # ---- /settings — REMOVED ----
+    #
+    # The settings page used to collect operator credentials (AI API
+    # keys, Buffer access token, cutout provider, LLM preference). All
+    # of these are now exclusively env-var configured at deploy time —
+    # see `.env.example` for the full list. The user-visible product
+    # has zero configuration surface; the operator sets env vars on
+    # their host once and never again.
+    #
+    # Old bookmarks redirect to home so they don't 404.
+    @app.route("/settings")
     def settings_page():
-        """Settings page &mdash; paste API keys + pick a cutout provider.
+        return redirect(url_for("home"))
 
-        V8.1 Issue 7 expanded this from Anthropic-only to also cover
-        Photoroom + Replicate cutout credentials and a provider selector.
-        """
-        from mediahub.web.secrets_store import (
-            get_anthropic_key, set_secret, mask_key, get_secret,
-            get_buffer_access_token, set_buffer_access_token,
-            secrets_path as _secrets_path,
-        )
-        from mediahub.media_ai.llm import last_provider_errors as _last_llm_errors
-        message_html = ""
-        buffer_message_html = ""
-        # Fall through to original handler logic (preserved below).
-        if request.method == "POST":
-            action = (request.form.get("action") or "").strip()
-            if action == "clear_anthropic":
-                set_secret("anthropic_api_key", None)
-                message_html = '<p class="tag good">Anthropic API key cleared.</p>'
-            elif action == "clear_photoroom":
-                set_secret("photoroom_api_key", None)
-                message_html = '<p class="tag good">Photoroom API key cleared.</p>'
-            elif action == "clear_replicate":
-                set_secret("replicate_api_token", None)
-                message_html = '<p class="tag good">Replicate API token cleared.</p>'
-            elif action == "clear_gemini":
-                set_secret("gemini_api_key", None)
-                message_html = '<p class="tag good">Gemini API key cleared.</p>'
-            elif action == "clear_openai":
-                set_secret("openai_api_key", None)
-                message_html = '<p class="tag good">OpenAI API key cleared.</p>'
-            elif action == "save_openai":
-                key = (request.form.get("openai_api_key") or "").strip()
-                if not key:
-                    message_html = '<p class="tag bad">No OpenAI key submitted.</p>'
-                elif not (key.startswith("sk-") and len(key) >= 20):
-                    message_html = (
-                        '<p class="tag bad">That doesn\'t look like an OpenAI API key. '
-                        'Keys start with <code>sk-</code>. Get one at '
-                        '<a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.</p>'
-                    )
-                else:
-                    set_secret("openai_api_key", key)
-                    message_html = (
-                        '<p class="tag good">OpenAI API key saved. '
-                        'Live AI captions are now enabled.</p>'
-                    )
-            elif action == "set_llm_provider":
-                from mediahub.ai_core import set_preferred_provider
-                choice = (request.form.get("llm_provider") or "auto").strip().lower()
-                try:
-                    set_preferred_provider(choice)
-                    message_html = (
-                        f'<p class="tag good">LLM provider preference set to '
-                        f'<code>{_h(choice)}</code>.</p>'
-                    )
-                except Exception as e:
-                    message_html = (
-                        f'<p class="tag bad">Could not save provider preference: {_h(str(e))}.</p>'
-                    )
-            elif action == "save_gemini":
-                key = (request.form.get("gemini_api_key") or "").strip()
-                if not key:
-                    message_html = '<p class="tag bad">No Gemini key submitted.</p>'
-                elif len(key) < 20:
-                    message_html = (
-                        '<p class="tag bad">That looks too short to be a Gemini API key. '
-                        'Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</p>'
-                    )
-                else:
-                    set_secret("gemini_api_key", key)
-                    message_html = (
-                        '<p class="tag good">Gemini API key saved. '
-                        'Live AI captions are now enabled (free tier).</p>'
-                    )
-            elif action == "set_cutout_provider":
-                choice = (request.form.get("cutout_provider") or "local").strip().lower()
-                if choice not in {"local", "replicate", "photoroom"}:
-                    choice = "local"
-                set_secret("mediahub_cutout_provider", choice)
-                message_html = (
-                    f'<p class="tag good">Cutout provider set to '
-                    f'<code>{choice}</code>.</p>'
-                )
-            elif action == "save_photoroom":
-                key = (request.form.get("photoroom_api_key") or "").strip()
-                if not key:
-                    message_html = '<p class="tag bad">No Photoroom key submitted.</p>'
-                elif len(key) < 8:
-                    message_html = (
-                        '<p class="tag bad">That looks too short to be a '
-                        'Photoroom API key.</p>'
-                    )
-                else:
-                    set_secret("photoroom_api_key", key)
-                    message_html = (
-                        '<p class="tag good">Photoroom API key saved.</p>'
-                    )
-            elif action == "save_replicate":
-                key = (request.form.get("replicate_api_token") or "").strip()
-                if not key:
-                    message_html = '<p class="tag bad">No Replicate token submitted.</p>'
-                elif not (key.startswith("r8_") and len(key) >= 16):
-                    message_html = (
-                        '<p class="tag bad">That doesn\'t look like a '
-                        'Replicate API token. Tokens start with <code>r8_</code>.</p>'
-                    )
-                else:
-                    set_secret("replicate_api_token", key)
-                    message_html = (
-                        '<p class="tag good">Replicate API token saved.</p>'
-                    )
-            elif action == "clear_buffer":
-                set_buffer_access_token(None)
-                buffer_message_html = (
-                    '<p class="tag good">Buffer access token cleared.</p>'
-                )
-            elif action == "save_buffer":
-                token = (request.form.get("buffer_access_token") or "").strip()
-                if not token:
-                    buffer_message_html = (
-                        '<p class="tag bad">No Buffer token submitted.</p>'
-                    )
-                elif len(token) < 10:
-                    buffer_message_html = (
-                        '<p class="tag bad">That looks too short to be a '
-                        'Buffer access token.</p>'
-                    )
-                else:
-                    set_buffer_access_token(token)
-                    buffer_message_html = (
-                        '<p class="tag good">Buffer access token saved.</p>'
-                    )
-            else:
-                # Default action: save Anthropic key.
-                key = (request.form.get("anthropic_api_key") or "").strip()
-                if not key:
-                    message_html = '<p class="tag bad">No key submitted.</p>'
-                elif not (key.startswith("sk-ant-") and len(key) >= 20):
-                    message_html = (
-                        '<p class="tag bad">That doesn\'t look like an Anthropic API key. '
-                        'Keys start with <code>sk-ant-</code>.</p>'
-                    )
-                else:
-                    set_secret("anthropic_api_key", key)
-                    message_html = (
-                        '<p class="tag good">Anthropic API key saved. '
-                        'Live AI captions are now enabled.</p>'
-                    )
-
-        # Re-read after any write
-        env_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-        stored_key = get_secret("anthropic_api_key")
-        active_key = get_anthropic_key()
-
-        # Gemini (free LLM) state
-        gemini_env = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
-        gemini_disk = get_secret("gemini_api_key")
-        gemini_active = (
-            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if gemini_env else gemini_disk
-        )
-        gemini_status_dot = "#2cc97f" if gemini_active else "#ffae3b"
-        gemini_status_text = "Gemini ENABLED" if gemini_active else "Gemini DISABLED"
-        if gemini_env:
-            gemini_source = "environment variable"
-        elif gemini_disk:
-            gemini_source = "saved key"
-        else:
-            gemini_source = "none &mdash; add a key below"
-        gemini_masked = _h(mask_key(gemini_active)) if gemini_active else "<em>none</em>"
-        gemini_confirm = "Remove the saved Gemini API key?"
-        gemini_clear_btn = ""
-        if gemini_disk:
-            gemini_clear_btn = (
-                '<form method="POST" style="display:inline-block;margin-left:0">'
-                '<input type="hidden" name="action" value="clear_gemini"/>'
-                '<button type="submit" class="btn secondary" '
-                f'onclick="return confirm({json.dumps(gemini_confirm)})">'
-                'Clear stored key</button></form>'
-            )
-
-        # V8.1 Issue 7 &mdash; cutout provider state ----------------------------
-        photoroom_env = bool(os.environ.get("PHOTOROOM_API_KEY"))
-        photoroom_disk = get_secret("photoroom_api_key")
-        photoroom_active = (
-            os.environ.get("PHOTOROOM_API_KEY") if photoroom_env else photoroom_disk
-        )
-        photoroom_state = (
-            "set (env)" if photoroom_env else ("set (disk)" if photoroom_disk else "absent")
-        )
-        photoroom_masked_html = (
-            f' &mdash; <code>{_h(mask_key(photoroom_active))}</code>'
-            if photoroom_active else ""
-        )
-
-        replicate_env = bool(os.environ.get("REPLICATE_API_TOKEN"))
-        replicate_disk = get_secret("replicate_api_token")
-        replicate_active = (
-            os.environ.get("REPLICATE_API_TOKEN") if replicate_env else replicate_disk
-        )
-        replicate_state = (
-            "set (env)" if replicate_env else ("set (disk)" if replicate_disk else "absent")
-        )
-        replicate_masked_html = (
-            f' &mdash; <code>{_h(mask_key(replicate_active))}</code>'
-            if replicate_active else ""
-        )
-
-        cutout_provider = (
-            os.environ.get("MEDIAHUB_CUTOUT_PROVIDER")
-            or os.environ.get("MEDIAHUB_BG_PROVIDER")
-            or get_secret("mediahub_cutout_provider")
-            or "local"
-        )
-
-        def _cutout_clear(action: str, label: str, present: bool) -> str:
-            if not present:
-                return ""
-            return (
-                '<form method="POST" style="display:inline-block;margin-left:8px">'
-                f'<input type="hidden" name="action" value="{action}"/>'
-                '<button type="submit" class="btn secondary" '
-                f'onclick="return confirm(\'Remove the saved {label}?\')">'
-                f'Clear {label}</button></form>'
-            )
-
-        photoroom_clear_btn = _cutout_clear(
-            "clear_photoroom", "Photoroom API key", bool(photoroom_disk)
-        )
-        replicate_clear_btn = _cutout_clear(
-            "clear_replicate", "Replicate API token", bool(replicate_disk)
-        )
-
-        # --- Buffer (publishing) state -----------------------------------
-        buffer_env = bool(os.environ.get("BUFFER_ACCESS_TOKEN"))
-        buffer_disk = get_secret("buffer_access_token")
-        buffer_active = get_buffer_access_token()
-        buffer_status_dot = "#2cc97f" if buffer_active else "#ffae3b"
-        buffer_status_text = "Connected" if buffer_active else "Not connected"
-        if buffer_env:
-            buffer_source = "environment variable"
-        elif buffer_disk:
-            buffer_source = "saved token"
-        else:
-            buffer_source = "none &mdash; paste a token below"
-        buffer_masked_html = (
-            f' &mdash; <code>{_h(mask_key(buffer_active))}</code>' if buffer_active else ""
-        )
-        # Probe Buffer for the live channel count so users see "Connected"
-        # + an actual number after a save+reload. Failures degrade silently
-        # to a "&mdash;" so a transient network blip doesn't look like a config
-        # problem.
-        buffer_channel_count: Optional[int] = None
-        buffer_probe_error = ""
-        if buffer_active:
-            try:
-                from mediahub.publishing.buffer import (
-                    list_channels as _buf_list,
-                    BufferError as _BufError,
-                )
-                buffer_channel_count = len(_buf_list(buffer_active))
-            except Exception as exc:
-                buffer_probe_error = str(exc)
-        buffer_count_html = (
-            f'<span class="tag good">{buffer_channel_count} '
-            f'channel{"s" if buffer_channel_count != 1 else ""}</span>'
-            if buffer_channel_count is not None else ""
-        )
-        buffer_probe_html = (
-            f'<p class="muted" style="font-size:12px;margin-top:6px">'
-            f'Could not list channels: {_h(buffer_probe_error)}</p>'
-            if buffer_probe_error else ""
-        )
-        buffer_clear_btn = ""
-        if buffer_disk:
-            buffer_clear_btn = (
-                '<form method="POST" style="display:inline-block;margin-left:8px">'
-                '<input type="hidden" name="action" value="clear_buffer"/>'
-                '<button type="submit" class="btn secondary" '
-                'onclick="return confirm(\'Remove the saved Buffer access token?\')">'
-                'Disconnect Buffer</button></form>'
-            )
-        buffer_card = (
-            '<div class="card" style="margin-top:16px">'
-            '<h2 style="margin-top:0">Buffer &mdash; schedule posts to your channels</h2>'
-            f'{buffer_message_html}'
-            '<p style="display:flex;align-items:center;gap:8px;margin:8px 0">'
-            f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{buffer_status_dot}"></span>'
-            f'<strong>{buffer_status_text}</strong>'
-            f'<span class="muted">&mdash; source: {buffer_source}</span>'
-            f'{buffer_count_html}'
-            '</p>'
-            f'<p>Current token: {_h(mask_key(buffer_active)) if buffer_active else "<em>none</em>"}</p>'
-            f'{buffer_probe_html}'
-            '<form method="POST" style="margin-top:12px">'
-            '<input type="hidden" name="action" value="save_buffer"/>'
-            '<label for="buffer_access_token" style="display:block;font-weight:600;margin-bottom:4px">'
-            'Paste your Buffer access token'
-            '</label>'
-            '<input type="password" id="buffer_access_token" name="buffer_access_token" '
-            'placeholder="1/xxxxxxxxxxxxx" autocomplete="off" spellcheck="false" '
-            'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
-            '<p class="muted" style="margin-top:6px;font-size:12px">'
-            'Generate a personal access token at '
-            '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener">publish.buffer.com/account/apps</a>. '
-            'MediaHub uses this only to list your channels and queue posts you explicitly schedule &mdash; no autopost.'
-            '</p>'
-            '<div style="margin-top:10px">'
-            '<button type="submit" class="btn">Save token</button>'
-            f'{buffer_clear_btn}'
-            '</div>'
-            '</form>'
-            '</div>'
-        )
-
-        def _opt(value: str) -> str:
-            sel = " selected" if value == cutout_provider else ""
-            return f'<option value="{value}"{sel}>{value}</option>'
-
-        cutout_card = (
-            '<div class="card" style="margin-top:16px">'
-            '<h2 style="margin-top:0">Cutout providers (background removal)</h2>'
-            '<p class="muted">Choose the engine that strips backgrounds from '
-            'athlete photos. <code>local</code> uses the bundled rembg '
-            '(free, decent). <code>replicate</code> uses '
-            '<code>851-labs/background-remover</code> (paid, premium edges). '
-            '<code>photoroom</code> uses the Photoroom API (paid, fastest).</p>'
-            '<form method="POST" style="margin-bottom:16px;display:flex;gap:8px;align-items:center">'
-            '<input type="hidden" name="action" value="set_cutout_provider"/>'
-            '<label for="cutout_provider" style="font-weight:600">Active provider:</label>'
-            f'<select id="cutout_provider" name="cutout_provider" style="padding:6px;border:1px solid var(--border);border-radius:6px">{_opt("local")}{_opt("replicate")}{_opt("photoroom")}</select>'
-            '<button type="submit" class="btn">Save</button>'
-            '</form>'
-
-            '<h3 style="margin-top:18px">Photoroom API key</h3>'
-            f'<p>Status: <strong>{photoroom_state}</strong>{photoroom_masked_html}</p>'
-            '<form method="POST" style="margin-top:8px">'
-            '<input type="hidden" name="action" value="save_photoroom"/>'
-            '<input type="password" name="photoroom_api_key" '
-            'placeholder="sandbox_xxx &hellip;" autocomplete="off" spellcheck="false" '
-            'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
-            '<p class="muted" style="margin-top:6px;font-size:12px">'
-            'Get a key from <a href="https://www.photoroom.com/api" target="_blank" rel="noopener">photoroom.com/api</a>.'
-            '</p>'
-            '<div style="margin-top:8px">'
-            '<button type="submit" class="btn">Save Photoroom key</button>'
-            f'{photoroom_clear_btn}'
-            '</div>'
-            '</form>'
-
-            '<h3 style="margin-top:18px">Replicate API token</h3>'
-            f'<p>Status: <strong>{replicate_state}</strong>{replicate_masked_html}</p>'
-            '<form method="POST" style="margin-top:8px">'
-            '<input type="hidden" name="action" value="save_replicate"/>'
-            '<input type="password" name="replicate_api_token" '
-            'placeholder="r8_&hellip;" autocomplete="off" spellcheck="false" '
-            'style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>'
-            '<p class="muted" style="margin-top:6px;font-size:12px">'
-            'Get a token from <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noopener">replicate.com</a>.'
-            '</p>'
-            '<div style="margin-top:8px">'
-            '<button type="submit" class="btn">Save Replicate token</button>'
-            f'{replicate_clear_btn}'
-            '</div>'
-            '</form>'
-            '</div>'
-        )
-        # Detect ALL providers (not just Anthropic key) so users see the
-        # status correctly when the claude CLI bridge is the active provider.
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available, active_provider
-            llm_live = _llm_available()
-            llm_provider = active_provider()
-        except Exception:
-            llm_live = bool(active_key)
-            llm_provider = "anthropic-api" if active_key else "heuristic"
-
-        _PROVIDER_LABEL = {
-            "anthropic-api": "Anthropic API key",
-            "gemini-api":    "Google Gemini (free tier)",
-            "claude-cli":    "Claude CLI (Claude Code session)",
-            "pplx-bridge":   "Computer LLM bridge",
-            "heuristic":     "Heuristic fallback only",
-        }
-        provider_pretty = _PROVIDER_LABEL.get(llm_provider, llm_provider)
-
-        status_dot = '#2cc97f' if llm_live else '#ffae3b'
-        status_text = (
-            "Live AI captions ENABLED" if llm_live else "Live AI captions DISABLED"
-        )
-        if active_key:
-            source = "environment variable" if env_key else "saved key"
-        elif llm_provider == "gemini-api":
-            source = "Gemini key (" + gemini_source + ")"
-        elif llm_provider == "claude-cli":
-            source = "claude CLI session (OAuth)"
-        elif llm_provider == "pplx-bridge":
-            source = "Computer LLM bridge"
-        else:
-            source = "none &mdash; add a key below"
-        masked = _h(mask_key(active_key)) if active_key else "<em>none</em>"
-
-        clear_btn = ""
-        if stored_key:
-            clear_btn = (
-                '<form method="POST" style="display:inline-block;margin-left:8px">'
-                '<input type="hidden" name="action" value="clear_anthropic"/>'
-                '<button type="submit" class="btn secondary" '
-                'onclick="return confirm(\'Remove the saved Anthropic API key?\')">'
-                'Clear stored key</button></form>'
-            )
-
-        # Diagnostic: where do we write/read secrets, and what was the last
-        # LLM error per provider? This makes "I saved my key but the LLM
-        # falls back to heuristic" debuggable instead of silent.
-        _sec_path = _secrets_path()
-        _sec_exists = _sec_path.exists()
-        _errs = _last_llm_errors()
-        if _errs:
-            _err_rows = "".join(
-                f'<tr><td><code>{_h(prov)}</code></td>'
-                f'<td><strong>{_h(info.get("reason",""))}</strong></td>'
-                f'<td class="muted" style="font-size:11px">{_h(info.get("when","")[:19])}</td>'
-                f'<td style="font-size:11px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
-                f' title="{_h(info.get("detail",""))}"><code>{_h(info.get("detail","")[:160])}</code></td></tr>'
-                for prov, info in _errs.items()
-            )
-            llm_diag_html = (
-                '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">'
-                f'Last LLM provider error(s) &middot; {len(_errs)} recorded</summary>'
-                '<table style="margin-top:8px;font-size:12px;width:100%">'
-                '<thead><tr><th>Provider</th><th>Reason</th><th>When (UTC)</th><th>Detail</th></tr></thead>'
-                f'<tbody>{_err_rows}</tbody></table>'
-                '<p class="muted" style="font-size:11px;margin-top:6px">'
-                'Hover the detail cell to see the full server response. '
-                'Common reasons: <code>auth_failed</code> (rotate the key), '
-                '<code>rate_limited</code> (wait or upgrade tier), '
-                '<code>http_error</code> (outbound network blocked).'
-                '</p></details>'
-            )
-        else:
-            llm_diag_html = (
-                '<p class="muted" style="font-size:12px;margin-top:8px">'
-                'No LLM provider errors recorded since startup.</p>'
-            )
-
-        # Render-deps diagnostic block. Same data the /healthz/deps endpoint
-        # serves, inlined so users can SEE why a "Create graphic" or
-        # "Generate motion" button might return an error.
-        try:
-            import shutil
-            import subprocess
-            _pw_ok = False
-            _pw_detail = ""
-            try:
-                from playwright.sync_api import sync_playwright
-                with sync_playwright() as _p:
-                    _pw_bin = _p.chromium.executable_path
-                    _pw_ok = bool(_pw_bin and Path(_pw_bin).exists())
-                    _pw_detail = _pw_bin or ""
-            except Exception as _e:
-                _pw_detail = str(_e)[:160]
-            _node_path = shutil.which("node")
-            _node_ver = ""
-            if _node_path:
-                try:
-                    _node_ver = subprocess.run(
-                        [_node_path, "--version"],
-                        capture_output=True, text=True, timeout=5,
-                    ).stdout.strip()
-                except Exception:
-                    _node_ver = ""
-            _remotion_dir = Path(__file__).resolve().parents[1] / "remotion"
-            _remotion_ok = (_remotion_dir / "node_modules" / "remotion").exists()
-            def _dep_row(label: str, ok: bool, detail: str) -> str:
-                dot = "#2cc97f" if ok else "#f43f5e"
-                return (
-                    f'<li><span style="display:inline-block;width:8px;height:8px;'
-                    f'border-radius:50%;background:{dot};margin-right:6px"></span>'
-                    f'<strong>{_h(label)}</strong>: '
-                    f'<span class="muted" style="font-size:11px">'
-                    f'{_h(detail) if detail else ("present" if ok else "missing")}</span></li>'
-                )
-            render_deps_html = (
-                '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">'
-                'Render dependencies (image &amp; motion generation)</summary>'
-                '<ul style="margin-top:8px;font-size:12px;list-style:none;padding-left:0">'
-                + _dep_row("Playwright + Chromium",
-                          _pw_ok, _pw_detail if _pw_ok else (_pw_detail or "not installed"))
-                + _dep_row("Node",
-                          bool(_node_path),
-                          f"{_node_ver} ({_node_path})" if _node_path else "not installed")
-                + _dep_row("Remotion node_modules",
-                          _remotion_ok, str(_remotion_dir))
-                + '</ul>'
-                '<p class="muted" style="font-size:11px;margin-top:4px">'
-                'Red = the corresponding generator button on the review page '
-                'will return an error. In Render: bake into <code>buildCommand</code>. '
-                'Locally: <code>playwright install chromium</code> and '
-                '<code>cd src/mediahub/remotion && npm install</code>.'
-                '</p></details>'
-            )
-        except Exception:
-            render_deps_html = ""
-
-        # AI provider preference + status (Claude / OpenAI / Gemini)
-        from mediahub.ai_core import list_provider_status as _ai_status
-        _ai_provider_status = _ai_status()
-        _ai_active = next((p["provider"] for p in _ai_provider_status if p["active"]), None)
-        _ai_pref = (get_secret("mediahub_llm_provider") or "auto").strip().lower()
-        def _ai_pref_radio(value: str, label: str, hint: str) -> str:
-            checked = "checked" if _ai_pref == value else ""
-            return (
-                '<label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">'
-                f'<input type="radio" name="llm_provider" value="{value}" {checked} style="margin-top:3px"/>'
-                f'<span><strong>{_h(label)}</strong>'
-                f'<span class="muted" style="display:block;font-size:11px">{_h(hint)}</span></span>'
-                '</label>'
-            )
-        _ai_dots = "".join(
-            f'<span style="display:inline-flex;align-items:center;gap:6px;'
-            f'margin-right:14px;font-size:12px">'
-            f'<span style="width:8px;height:8px;border-radius:50%;background:'
-            f'{"#2cc97f" if p["configured"] else "#444"}"></span>'
-            f'<strong>{_h(p["provider"])}</strong>'
-            + (' <span class="tag good" style="font-size:10px">active</span>' if p["active"] else '')
-            + '</span>'
-            for p in _ai_provider_status
-        )
-        # OpenAI state
-        openai_disk = get_secret("openai_api_key")
-        openai_env = bool(os.environ.get("OPENAI_API_KEY"))
-        openai_active = os.environ.get("OPENAI_API_KEY") if openai_env else openai_disk
-        openai_status_dot = "#2cc97f" if openai_active else "#ffae3b"
-        openai_status_text = "OpenAI ENABLED" if openai_active else "OpenAI DISABLED"
-        openai_source = (
-            "environment variable" if openai_env else
-            "saved key" if openai_disk else
-            "none &mdash; add a key below"
-        )
-        openai_masked = _h(mask_key(openai_active)) if openai_active else "<em>none</em>"
-        openai_clear_btn = ""
-        if openai_disk:
-            openai_clear_btn = (
-                '<form method="POST" style="display:inline-block;margin-left:0">'
-                '<input type="hidden" name="action" value="clear_openai"/>'
-                '<button type="submit" class="btn secondary" '
-                'onclick="return confirm(\'Remove the saved OpenAI API key?\')">'
-                'Clear stored key</button></form>'
-            )
-
-        body = f"""
-<div class="card">
-  <h1 style="margin-top:0">Settings</h1>
-  <p class="muted">Configure provider credentials. Keys are stored on disk with
-     restricted permissions and never sent anywhere except the provider you've configured.</p>
-  {message_html}
-</div>
-
-<div class="card" style="margin-top:16px;border-color:rgba(139,92,246,0.35)">
-  <h2 style="margin-top:0">AI provider preference</h2>
-  <p class="muted" style="font-size:13px">Pick which model MediaHub uses
-    for reasoning (captions, chat brief builder, "Why this card?"
-    context, etc.). "Auto" picks the first configured one in the order
-    Claude → ChatGPT → Gemini.</p>
-  <p style="margin:8px 0">{_ai_dots or '<span class="muted">No providers configured yet.</span>'}</p>
-  <form method="POST" style="margin-top:8px">
-    <input type="hidden" name="action" value="set_llm_provider"/>
-    {_ai_pref_radio("auto",   "Auto (recommended)", "Use whichever provider has a key, prefer Claude.")}
-    {_ai_pref_radio("claude", "Claude (Anthropic)", "Best reasoning + native tool-use. Paid.")}
-    {_ai_pref_radio("openai", "ChatGPT (OpenAI)",   "GPT-4o with function calling. Paid.")}
-    {_ai_pref_radio("gemini", "Gemini (Google)",    "Free tier (15 RPM / 1,500 RPD).")}
-    <button type="submit" class="btn" style="margin-top:6px">Save preference</button>
-  </form>
-</div>
-
-<div class="card" style="margin-top:16px;border-color:rgba(34,197,94,0.25)">
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-    <h2 style="margin:0">Google Gemini &mdash; free AI captions</h2>
-    <span class="tag good" style="font-size:11px">Recommended (free)</span>
-  </div>
-  <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
-    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{gemini_status_dot}"></span>
-    <strong>{gemini_status_text}</strong>
-    <span class="muted">&mdash; source: {gemini_source}</span>
-  </p>
-  <p>Current key: {gemini_masked}</p>
-  <form method="POST" style="margin-top:12px">
-    <input type="hidden" name="action" value="save_gemini"/>
-    <label for="gemini_api_key" style="display:block;font-weight:600;margin-bottom:4px">
-      Paste your Gemini API key
-    </label>
-    <input type="password" id="gemini_api_key" name="gemini_api_key"
-           placeholder="AIza&hellip;" autocomplete="off" spellcheck="false"
-           style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
-    <p class="muted" style="margin-top:6px;font-size:12px">
-      Get a <strong>free</strong> key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a>
-      &mdash; no credit card required. Free tier: 15 requests/min, 1,500/day with Gemini 2.0 Flash.
-    </p>
-    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-      <button type="submit" class="btn">Save Gemini key</button>
-      {gemini_clear_btn}
-    </div>
-  </form>
-</div>
-
-<div class="card" style="margin-top:16px">
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-    <h2 style="margin:0">OpenAI (ChatGPT) &mdash; paid AI captions</h2>
-  </div>
-  <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
-    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{openai_status_dot}"></span>
-    <strong>{openai_status_text}</strong>
-    <span class="muted">&mdash; source: {openai_source}</span>
-  </p>
-  <p>Current key: {openai_masked}</p>
-  <form method="POST" style="margin-top:12px">
-    <input type="hidden" name="action" value="save_openai"/>
-    <label for="openai_api_key" style="display:block;font-weight:600;margin-bottom:4px">
-      Paste your OpenAI API key
-    </label>
-    <input type="password" id="openai_api_key" name="openai_api_key"
-           placeholder="sk-&hellip;" autocomplete="off" spellcheck="false"
-           style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
-    <p class="muted" style="margin-top:6px;font-size:12px">
-      Get a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.
-      Used for GPT-4o-class responses with native function calling.
-    </p>
-    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-      <button type="submit" class="btn">Save OpenAI key</button>
-      {openai_clear_btn}
-    </div>
-  </form>
-</div>
-
-<div class="card" style="margin-top:16px">
-  <h2 style="margin-top:0">Anthropic (Claude) &mdash; paid AI captions</h2>
-  <p style="display:flex;align-items:center;gap:8px;margin:8px 0">
-    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{status_dot}"></span>
-    <strong>{status_text}</strong>
-    <span class="muted">&mdash; source: {source}</span>
-  </p>
-  <p>Current key: {masked}</p>
-  <form method="POST" style="margin-top:12px">
-    <label for="anthropic_api_key" style="display:block;font-weight:600;margin-bottom:4px">
-      Paste your Anthropic API key
-    </label>
-    <input type="password" id="anthropic_api_key" name="anthropic_api_key"
-           placeholder="sk-ant-&hellip;" autocomplete="off" spellcheck="false"
-           style="width:100%;max-width:560px;padding:8px;border:1px solid var(--border);border-radius:6px;font-family:monospace"/>
-    <p class="muted" style="margin-top:6px;font-size:12px">
-      Higher-quality model, but paid. Get a key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-      Used in preference to Gemini if both are configured.
-    </p>
-    <div style="margin-top:10px">
-      <button type="submit" class="btn">Save key</button>
-      {clear_btn}
-    </div>
-  </form>
-</div>
-
-<div class="card" style="margin-top:16px">
-  <h2 style="margin-top:0">Status check</h2>
-  <ul>
-    <li>Active LLM provider: <strong>{_h(provider_pretty)}</strong></li>
-    <li>Anthropic key via environment: <strong>{'set' if env_key else 'not set'}</strong></li>
-    <li>Anthropic key saved on disk: <strong>{'present' if stored_key else 'absent'}</strong></li>
-    <li>Active key source: <strong>{('environment' if env_key else ('disk' if stored_key else 'none'))}</strong></li>
-    <li>Secrets file path: <code>{_h(str(_sec_path))}</code> &middot; <strong>{'exists' if _sec_exists else 'missing'}</strong></li>
-    <li>Photoroom key: <strong>{photoroom_state}</strong>{photoroom_masked_html}</li>
-    <li>Replicate token: <strong>{replicate_state}</strong>{replicate_masked_html}</li>
-    <li>Cutout provider: <strong>{cutout_provider}</strong></li>
-    <li>Buffer: <strong>{buffer_status_text}</strong>{(' &middot; ' + str(buffer_channel_count) + ' channels') if buffer_channel_count is not None else ''}</li>
-  </ul>
-  {llm_diag_html}
-  {render_deps_html}
-</div>
-
-{buffer_card}
-
-{cutout_card}
-"""
-        return _layout("Settings", body, active="settings")
-
+    # ---- /api/settings/llm-status ----
+    #
+    # Kept as a stable read-only status endpoint so the captions UI
+    # JavaScript can still colour the AI-tab dot. Operator config
+    # happens at deploy time; this endpoint just reports "is AI live
+    # right now or are we in heuristic mode".
     @app.route("/api/settings/llm-status")
     def api_llm_status():
-        """Lightweight endpoint used by caption UI to colour the AI tab dot."""
-        from mediahub.web.secrets_store import has_anthropic_key, get_anthropic_key, mask_key
-        from mediahub.media_ai.llm import is_available as _llm_available, active_provider
-        has_key = has_anthropic_key()
-        provider = active_provider()  # 'anthropic-api' | 'claude-cli' | 'pplx-bridge' | 'heuristic'
-        live = _llm_available()  # True for any real provider
-        # Map internal provider names to the stable PUBLIC api names that
-        # existing clients & tests depend on (backwards compatible).
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available, active_provider
+        except Exception:
+            return jsonify({"live": False, "provider": None, "provider_label": None})
+        provider = active_provider()
+        live = _llm_available()
+        # Public, stable provider names — gemini (default/free) and
+        # anthropic (paid, operator-set). Anything else returns None.
         public_provider = {
-            "anthropic-api": "anthropic",
             "gemini-api":    "gemini",
-            "claude-cli":    "claude-cli",
-            "pplx-bridge":   "pplx",
-            "heuristic":     None,
-        }.get(provider, provider if live else None)
+            "anthropic-api": "anthropic",
+        }.get(provider) if live else None
         provider_label = {
-            "anthropic-api": "Anthropic API key",
-            "gemini-api":    "Google Gemini (free tier)",
-            "claude-cli":    "Claude CLI (OAuth)",
-            "pplx-bridge":   "Computer LLM bridge",
-            "heuristic":     None,
-        }.get(provider)
+            "gemini-api":    "Google Gemini",
+            "anthropic-api": "Anthropic (Claude)",
+        }.get(provider) if live else None
         return jsonify({
             "live": live,
             "provider": public_provider,
             "provider_label": provider_label,
-            "masked": mask_key(get_anthropic_key()) if has_key else "",
-            "settings_url": url_for("settings_page"),
         })
-
 
     # ---- Buffer publishing -------------------------------------------
     @app.route("/api/buffer/channels")
@@ -6054,7 +5380,7 @@ Relay team broke club record"></textarea>
                 "connected": False,
                 "channels": [],
                 "error": "no_token",
-                "message": "Connect Buffer in Settings to schedule posts.",
+                "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
                 "settings_url": url_for("settings_page"),
             }), 401
         try:
@@ -6170,7 +5496,7 @@ Relay team broke club record"></textarea>
             return jsonify({
                 "ok": False,
                 "error": "no_token",
-                "message": "Connect Buffer in Settings before scheduling.",
+                "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
                 "settings_url": url_for("settings_page"),
                 "caption": caption,
             }), 401
@@ -6543,9 +5869,10 @@ Relay team broke club record"></textarea>
         except ProviderNotConfigured as e:
             err_html = (
                 '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
-                '<h2 style="margin-top:0">No AI provider configured</h2>'
-                f'<p>Spotlight posts are written by your AI provider. {_h(str(e))}</p>'
-                f'<p><a class="btn" href="{url_for("settings_page")}">Open settings →</a></p>'
+                '<h2 style="margin-top:0">AI features unavailable</h2>'
+                f'<p>Spotlight posts require AI. {_h(str(e))}</p>'
+                '<p class="muted">Contact your administrator to enable AI on '
+                'this deployment.</p>'
                 '</div>'
             )
             return _layout("Build spotlight post", err_html, active="create"), 503
@@ -6553,12 +5880,10 @@ Relay team broke club record"></textarea>
             err_html = (
                 '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
                 '<h2 style="margin-top:0">AI provider error</h2>'
-                f'<p>The configured AI provider couldn\'t finish the spotlight draft: '
+                f'<p>The AI provider couldn\'t finish the spotlight draft: '
                 f'<code>{_h(str(e))}</code>.</p>'
                 '<p class="muted">Try again in a moment (rate limits typically '
-                'clear within seconds), or configure a second provider on '
-                f'<a href="{url_for("settings_page")}">/settings</a> so MediaHub '
-                'can route around the failing one.</p>'
+                'clear within seconds).</p>'
                 '</div>'
             )
             return _layout("Build spotlight post", err_html, active="create"), 502
@@ -6567,8 +5892,7 @@ Relay team broke club record"></textarea>
                 '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
                 '<h2 style="margin-top:0">AI returned no caption</h2>'
                 '<p>The provider responded but produced an empty caption. '
-                'Try regenerating, or pick a different provider on '
-                f'<a href="{url_for("settings_page")}">/settings</a>.</p>'
+                'Try regenerating.</p>'
                 '</div>'
             )
             return _layout("Build spotlight post", err_html, active="create"), 502
@@ -6906,9 +6230,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if isinstance(e, ProviderNotConfigured):
                     err_html = (
                         '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
-                        '<h2 style="margin-top:0">No AI provider configured</h2>'
+                        '<h2 style="margin-top:0">AI features unavailable</h2>'
                         f'<p>{_h(str(e))}</p>'
-                        f'<p><a class="btn" href="{url_for("settings_page")}">Open settings →</a></p>'
+                        '<p class="muted">Contact your administrator to enable '
+                        'AI on this deployment.</p>'
                         '</div>'
                     )
                     return _layout(title, err_html, active=active_tab)
@@ -6917,8 +6242,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
                         '<h2 style="margin-top:0">AI provider error</h2>'
                         f'<p>{_h(str(e))}</p>'
-                        '<p class="muted">Check the provider status on '
-                        f'<a href="{url_for("settings_page")}">/settings</a>.</p>'
+                        '<p class="muted">Try again in a moment (rate limits '
+                        'typically clear within seconds).</p>'
                         '</div>'
                     )
                     return _layout(title, err_html, active=active_tab)

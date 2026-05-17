@@ -109,10 +109,13 @@ class TestExemptRoutesReachable:
         resp = c.get("/organisation")
         assert resp.status_code == 200
 
-    def test_settings_loads(self, gated_client):
+    def test_settings_redirects_to_home(self, gated_client):
+        """The settings page was removed in the operator-config rewrite.
+        Old bookmarks redirect to home — they don't 404, and the gate
+        doesn't intercept them (it lets the redirect through)."""
         c, _ = gated_client
-        resp = c.get("/settings")
-        assert resp.status_code == 200
+        resp = c.get("/settings", follow_redirects=False)
+        assert resp.status_code in (301, 302, 303, 307, 308)
 
     def test_healthz_loads(self, gated_client):
         c, _ = gated_client

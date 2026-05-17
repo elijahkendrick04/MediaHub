@@ -238,62 +238,6 @@ def app(tmp_path, monkeypatch):
     return a
 
 
-def test_settings_get_shows_buffer_section(app):
-    c = app.test_client()
-    r = c.get("/settings")
-    assert r.status_code == 200
-    body = r.get_data(as_text=True)
-    assert "Buffer" in body
-    assert "Not connected" in body
-    assert "buffer_access_token" in body
-
-
-def test_settings_post_persists_buffer_token(app, monkeypatch):
-    # The settings GET re-render probes Buffer for a channel count;
-    # short-circuit it so the test doesn't hit the network.
-    monkeypatch.setattr(
-        "mediahub.publishing.buffer.list_channels",
-        lambda token: [{"id": "1", "service": "instagram",
-                        "service_username": "@x", "formatted_username": "X",
-                        "avatar": None, "default": True}],
-    )
-    c = app.test_client()
-    token = "1/abcdefghijklmno"
-    r = c.post("/settings", data={
-        "action": "save_buffer",
-        "buffer_access_token": token,
-    })
-    assert r.status_code == 200
-    assert "Buffer access token saved" in r.get_data(as_text=True)
-    assert secrets_store.get_secret("buffer_access_token") == token
-
-    # Re-render now shows "Connected" + channel count
-    r2 = c.get("/settings")
-    body = r2.get_data(as_text=True)
-    assert "Connected" in body
-    assert "1 channel" in body
-
-
-def test_settings_clear_buffer(app):
-    secrets_store.set_secret("buffer_access_token", "1/some-token")
-    c = app.test_client()
-    r = c.post("/settings", data={"action": "clear_buffer"})
-    assert r.status_code == 200
-    assert "Buffer access token cleared" in r.get_data(as_text=True)
-    assert secrets_store.get_secret("buffer_access_token") is None
-
-
-def test_settings_rejects_short_buffer_token(app):
-    c = app.test_client()
-    r = c.post("/settings", data={
-        "action": "save_buffer",
-        "buffer_access_token": "short",
-    })
-    assert r.status_code == 200
-    assert "too short" in r.get_data(as_text=True)
-    assert secrets_store.get_secret("buffer_access_token") is None
-
-
 def test_api_buffer_channels_no_token_returns_401(app):
     c = app.test_client()
     r = c.get("/api/buffer/channels")
@@ -301,12 +245,12 @@ def test_api_buffer_channels_no_token_returns_401(app):
     j = r.get_json()
     assert j["connected"] is False
     assert j["error"] == "no_token"
-    assert "Settings" in j["message"]
-    assert j["settings_url"].endswith("/settings")
+    assert "administrator" in j["message"].lower()
+    # settings_url still points at /settings but that route now redirects to home
 
 
 def test_api_buffer_channels_returns_channels(app, monkeypatch):
-    secrets_store.set_secret("buffer_access_token", "1/test-token")
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test-token")
     monkeypatch.setattr(
         "mediahub.publishing.buffer.list_channels",
         lambda token: [
@@ -328,7 +272,7 @@ def test_api_buffer_channels_returns_channels(app, monkeypatch):
 
 
 def test_api_buffer_channels_auth_error_returns_401(app, monkeypatch):
-    secrets_store.set_secret("buffer_access_token", "1/bad-token")
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/bad-token")
 
     def boom(token):
         raise BufferAuthError("Buffer rejected the access token.")
@@ -355,8 +299,8 @@ def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
     assert j["caption"] == "My edited caption"
 
 
-def test_api_schedule_rejects_empty_channels(app):
-    secrets_store.set_secret("buffer_access_token", "1/test")
+def test_api_schedule_rejects_empty_channels(app, monkeypatch):
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",
@@ -366,8 +310,8 @@ def test_api_schedule_rejects_empty_channels(app):
     assert r.get_json()["error"] == "no_channels"
 
 
-def test_api_schedule_rejects_empty_caption(app):
-    secrets_store.set_secret("buffer_access_token", "1/test")
+def test_api_schedule_rejects_empty_caption(app, monkeypatch):
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",
@@ -378,7 +322,7 @@ def test_api_schedule_rejects_empty_caption(app):
 
 
 def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
-    secrets_store.set_secret("buffer_access_token", "1/test")
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
     monkeypatch.setattr(
         "mediahub.publishing.buffer.schedule_post",
         lambda **kw: {"ok": True, "update_id": "u-1", "channel_id": kw["channel_id"], "raw": {}},
@@ -412,7 +356,7 @@ def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
 def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
     app, monkeypatch
 ):
-    secrets_store.set_secret("buffer_access_token", "1/test")
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
 
     def fail(**kw):
         raise BufferAPIError("Profile has reached its queue limit.")
@@ -437,8 +381,8 @@ def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
     assert state.schedule_error and "queue limit" in state.schedule_error
 
 
-def test_api_schedule_bad_iso_time_returns_400(app):
-    secrets_store.set_secret("buffer_access_token", "1/test")
+def test_api_schedule_bad_iso_time_returns_400(app, monkeypatch):
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",

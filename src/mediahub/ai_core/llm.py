@@ -53,7 +53,11 @@ class ToolConversation:
 # Provider registry
 # ---------------------------------------------------------------------------
 
-_PROVIDERS = ("claude", "openai", "gemini")
+# Provider order: Gemini first (free default), Claude as paid quality option.
+# OpenAI was deliberately removed in the operator-config rewrite — the
+# product is Gemini-first per the dissertation's cost model, with Anthropic
+# as an explicit operator override via MEDIAHUB_LLM_PROVIDER=claude.
+_PROVIDERS = ("gemini", "claude")
 
 
 def _resolve_key(env_names: tuple[str, ...], secret_name: str) -> Optional[str]:
@@ -72,8 +76,6 @@ def _resolve_key(env_names: tuple[str, ...], secret_name: str) -> Optional[str]:
 def _key_for(provider: str) -> Optional[str]:
     if provider == "claude":
         return _resolve_key(("ANTHROPIC_API_KEY",), "anthropic_api_key")
-    if provider == "openai":
-        return _resolve_key(("OPENAI_API_KEY",), "openai_api_key")
     if provider == "gemini":
         return _resolve_key(("GEMINI_API_KEY", "GOOGLE_API_KEY"), "gemini_api_key")
     return None
@@ -124,7 +126,7 @@ def active_provider() -> Optional[str]:
     """Return the provider that will actually be used for the next call.
 
     Honours the user's pref if its key is configured, otherwise falls
-    through the default order (claude → openai → gemini) and returns the
+    through the default order (gemini → claude) and returns the
     first configured one. None if nothing is configured.
     """
     pref = _preferred_pref()
@@ -234,129 +236,8 @@ def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
 
 
 # ---------------------------------------------------------------------------
-# OpenAI (ChatGPT) — text + native tool-use
+# Gemini (Google) — text + native tool-use; free-tier default
 # ---------------------------------------------------------------------------
-
-_openai_client = None
-_openai_client_key = None
-
-
-def _openai_client_for(key: str):
-    global _openai_client, _openai_client_key
-    if _openai_client is not None and _openai_client_key == key:
-        return _openai_client
-    try:
-        from openai import OpenAI
-    except ImportError as e:
-        raise ProviderError(f"openai SDK not installed: {e}")
-    _openai_client = OpenAI(api_key=key)
-    _openai_client_key = key
-    return _openai_client
-
-
-def _openai_model() -> str:
-    return os.environ.get("MEDIAHUB_OPENAI_MODEL", "gpt-4o")
-
-
-def _ask_openai(system: str, user: str, max_tokens: int) -> str:
-    key = _key_for("openai")
-    if not key:
-        raise ProviderNotConfigured("OpenAI API key not configured.")
-    client = _openai_client_for(key)
-    try:
-        resp = client.chat.completions.create(
-            model=_openai_model(),
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-        )
-    except Exception as e:
-        raise ProviderError(f"OpenAI call failed: {e}") from e
-    try:
-        return (resp.choices[0].message.content or "").strip()
-    except (AttributeError, IndexError):
-        return ""
-
-
-def _ask_openai_with_tools(system: str, user: str, tools: list[dict],
-                            on_tool_call: Callable[[str, dict], str],
-                            max_tokens: int, max_rounds: int) -> ToolConversation:
-    """OpenAI Chat Completions with function calling.
-
-    `tools` arrives in the Anthropic schema; we translate to OpenAI's
-    {"type":"function","function":{name,description,parameters}}. This
-    means callers can pass one tools list and either provider works.
-    """
-    import json
-    key = _key_for("openai")
-    if not key:
-        raise ProviderNotConfigured("OpenAI API key not configured.")
-    client = _openai_client_for(key)
-    model = _openai_model()
-    # Translate tool schema once.
-    oa_tools = [{"type": "function", "function": {
-        "name":        t["name"],
-        "description": t.get("description", ""),
-        "parameters":  t.get("input_schema") or t.get("parameters")
-                        or {"type": "object", "properties": {}},
-    }} for t in tools]
-    messages: list[dict] = [
-        {"role": "system", "content": system},
-        {"role": "user",   "content": user},
-    ]
-    convo = ToolConversation(text="", provider="openai")
-    for _ in range(max_rounds):
-        try:
-            resp = client.chat.completions.create(
-                model=model, messages=messages,
-                tools=oa_tools, max_tokens=max_tokens,
-            )
-        except Exception as e:
-            raise ProviderError(f"OpenAI tool call failed: {e}") from e
-        msg = resp.choices[0].message
-        tool_calls = getattr(msg, "tool_calls", None) or []
-        # Append the assistant turn so the next call sees it.
-        messages.append({
-            "role":       "assistant",
-            "content":    msg.content or "",
-            "tool_calls": [
-                {"id": tc.id, "type": "function",
-                 "function": {"name": tc.function.name,
-                              "arguments": tc.function.arguments}}
-                for tc in tool_calls
-            ] if tool_calls else None,
-        })
-        if not tool_calls:
-            convo.text = (msg.content or "").strip()
-            return convo
-        for tc in tool_calls:
-            name = tc.function.name
-            try:
-                args = json.loads(tc.function.arguments or "{}")
-            except Exception:
-                args = {}
-            try:
-                r = on_tool_call(name, args)
-            except Exception as e:
-                r = f"(tool {name!r} failed: {e})"
-            convo.tool_calls.append(ToolCallRecord(
-                name=name, input=args, result=r, provider="openai",
-            ))
-            messages.append({
-                "role":         "tool",
-                "tool_call_id": tc.id,
-                "content":      r,
-            })
-    convo.text = "(ChatGPT is still gathering evidence; try a smaller question.)"
-    return convo
-
-
-# ---------------------------------------------------------------------------
-# Google Gemini — text + native function calling
-# ---------------------------------------------------------------------------
-
 def _gemini_model() -> str:
     return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.0-flash")
 
@@ -483,7 +364,6 @@ def _ask_gemini_with_tools(system: str, user: str, tools: list[dict],
 
 _DISPATCH = {
     "claude": (_ask_claude, _ask_claude_with_tools),
-    "openai": (_ask_openai, _ask_openai_with_tools),
     "gemini": (_ask_gemini, _ask_gemini_with_tools),
 }
 
@@ -491,8 +371,8 @@ _DISPATCH = {
 def _fallback_chain(primary: Optional[str]) -> list[str]:
     """Return the provider order to try, starting with `primary` (if
     configured) then the remaining configured providers. Lets a rate-
-    limited Gemini call fall through to OpenAI / Claude instead of
-    erroring at the user."""
+    limited Gemini call fall through to Claude instead of erroring
+    at the user."""
     chain: list[str] = []
     if primary and _key_for(primary):
         chain.append(primary)
@@ -534,8 +414,9 @@ def ask(system: str, user: str, *, max_tokens: int = 800,
     chain = _fallback_chain(primary) if primary else []
     if not chain:
         raise ProviderNotConfigured(
-            "No LLM provider is configured. Add a Claude, OpenAI, or "
-            "Gemini key in /settings."
+            "AI features are unavailable on this deployment. The "
+            "operator has not configured a Gemini or Anthropic API key. "
+            "Contact your administrator."
         )
     last_err: Optional[Exception] = None
     for p in chain:
@@ -562,8 +443,9 @@ def ask_with_tools(system: str, user: str, *, tools: list[dict],
     chain = _fallback_chain(primary) if primary else []
     if not chain:
         raise ProviderNotConfigured(
-            "No LLM provider is configured. Add a Claude, OpenAI, or "
-            "Gemini key in /settings."
+            "AI features are unavailable on this deployment. The "
+            "operator has not configured a Gemini or Anthropic API key. "
+            "Contact your administrator."
         )
     last_err: Optional[Exception] = None
     for p in chain:

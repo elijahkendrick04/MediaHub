@@ -364,7 +364,9 @@ class TestWebRoutes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._make_app(tmp)
             client = app.test_client()
-            for path in ("/upload", "/organisation", "/settings"):
+            # /settings now redirects to home (operator-config rewrite);
+            # the routes here are the ones that still render 200.
+            for path in ("/upload", "/organisation"):
                 r = client.get(path)
                 self.assertEqual(r.status_code, 200, f"{path} != 200")
 

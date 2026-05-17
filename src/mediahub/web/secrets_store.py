@@ -1,93 +1,76 @@
-"""swim_content_v4/secrets_store.py — User-supplied secrets persistence.
+"""mediahub/web/secrets_store.py — operator credential resolution.
 
-Stores user-provided API keys in `data/secrets.json` with file-mode 0600.
-Currently used for:
-    - anthropic_api_key  (for live AI captions, set via /settings)
+Post-rewrite: all credentials are **operator-controlled via env vars**
+at deploy time. The settings page is gone. The user never sees a key.
 
-This module DOES NOT read environment variables. It is the dedicated
-on-disk fallback that the LLM layer consults when no env key is present.
+This module remains as a thin facade with the same public API the rest
+of the codebase imports, so callers don't break. Its job is now:
+
+  • `get_*` / `get_secret(key)` reads from the relevant env var first;
+    falls back to the on-disk `secrets.json` for ONE release so that
+    self-hosted installs that pre-date this rewrite don't lose their
+    keys overnight. A startup-time warning is logged when the disk
+    fallback fires, telling the operator to migrate to env vars.
+
+  • `set_*` / `set_secret(key, value)` and `save_secrets(...)` are now
+    no-ops that log a warning. They exist so that any stragglers in
+    the codebase that still call them don't error out — but they
+    never persist anything new. The settings page that used to call
+    them is gone.
+
+The on-disk fallback will be deleted in the next major release.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
-import stat
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
+
+log = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-# Legacy in-package path (kept ONLY so we can migrate old saves forward).
 _LEGACY_SECRETS_PATH = _ROOT / "data" / "secrets.json"
 
 
 def _resolve_secrets_path() -> Path:
-    """Resolve the on-disk path for `secrets.json`.
-
-    Honour DATA_DIR (same env var the rest of the app uses for runs, uploads,
-    cache, etc. — see web.py:238). On Render / Docker / any deployment with a
-    persistent disk mounted at DATA_DIR, saved API keys must land there so
-    they survive container restarts and re-deploys. The old hardcoded
-    in-package path got wiped every deploy, which is why users reported
-    "I saved my Gemini key but the LLM keeps falling back to heuristic".
-    """
+    """Resolve the on-disk secrets fallback path. DATA_DIR-aware."""
     data_dir = os.environ.get("DATA_DIR", "").strip()
     if data_dir:
         return Path(data_dir) / "secrets.json"
     return _LEGACY_SECRETS_PATH
 
 
-# Resolved at import time; deliberate — tests that mutate DATA_DIR per call
-# should call `_resolve_secrets_path()` directly. Web routes import this
-# module once at startup, by which time DATA_DIR is fixed for the process.
 _SECRETS_PATH = _resolve_secrets_path()
 
 
 def secrets_path() -> Path:
-    """Public accessor for the active secrets path (used by /settings diag)."""
+    """Return the legacy fallback path (still consulted for reads)."""
     return _SECRETS_PATH
 
 
-def _ensure_dir() -> None:
-    _SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _migrate_legacy_secrets() -> None:
-    """One-shot copy of the in-package secrets file to the DATA_DIR path.
-
-    Runs lazily inside load_secrets() when the new path is empty but a legacy
-    file exists. Idempotent: skips if the destination already has a file.
-    """
-    if _SECRETS_PATH == _LEGACY_SECRETS_PATH:
-        return
-    if _SECRETS_PATH.exists():
-        return
-    if not _LEGACY_SECRETS_PATH.exists():
-        return
-    try:
-        _ensure_dir()
-        with _LEGACY_SECRETS_PATH.open("r", encoding="utf-8") as src:
-            payload = src.read()
-        tmp = _SECRETS_PATH.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as dst:
-            dst.write(payload)
-        tmp.replace(_SECRETS_PATH)
-        try:
-            os.chmod(_SECRETS_PATH, stat.S_IRUSR | stat.S_IWUSR)
-        except Exception:
-            pass
-    except Exception:
-        # Migration is best-effort. If it fails, fall through to a fresh store.
-        return
+# Env-var mapping for every credential the codebase currently reads via
+# `get_secret(name)`. The disk-fallback path consults this table so that
+# even a generic `get_secret("photoroom_api_key")` call hits the env
+# first. The names match the existing on-disk JSON keys.
+_SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "anthropic_api_key":       ("ANTHROPIC_API_KEY",),
+    "gemini_api_key":          ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "buffer_access_token":     ("BUFFER_ACCESS_TOKEN",),
+    "photoroom_api_key":       ("PHOTOROOM_API_KEY",),
+    "replicate_api_token":     ("REPLICATE_API_TOKEN",),
+    "mediahub_cutout_provider": ("MEDIAHUB_CUTOUT_PROVIDER",),
+    "mediahub_llm_provider":   ("MEDIAHUB_LLM_PROVIDER",),
+}
 
 
 def load_secrets() -> dict:
-    """Return the secrets dict, or {} if absent / unreadable."""
-    if not _SECRETS_PATH.exists():
-        _migrate_legacy_secrets()
+    """Return the on-disk secrets dict (one-release fallback). May be empty."""
     if not _SECRETS_PATH.exists():
         return {}
     try:
@@ -99,45 +82,79 @@ def load_secrets() -> dict:
 
 
 def save_secrets(secrets: dict) -> None:
-    """Persist the secrets dict to disk with 0600 permissions."""
-    _ensure_dir()
-    tmp = _SECRETS_PATH.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(secrets, f, indent=2, sort_keys=True)
-    tmp.replace(_SECRETS_PATH)
-    try:
-        os.chmod(_SECRETS_PATH, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        # On some platforms (e.g. Windows) chmod is best-effort.
-        pass
+    """NO-OP. Operator credentials are env-var-only now.
+
+    Kept as a no-op so any legacy caller doesn't error. Logs a warning so
+    the operator sees that an in-app save was attempted but discarded.
+    """
+    log.warning(
+        "secrets_store.save_secrets() is a no-op — operator credentials "
+        "are env-var-only since the settings-page removal. The attempted "
+        "save has been discarded. Configure credentials via env vars at "
+        "deploy time."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public read API
+# ---------------------------------------------------------------------------
+
+_WARNED_FOR: set[str] = set()
 
 
 def get_secret(key: str) -> Optional[str]:
-    """Return a single secret value, or None if missing/blank."""
+    """Resolve a secret value, env-first.
+
+    1. If an env var mapped to this key has a non-blank value, return it.
+    2. Otherwise, read from the legacy on-disk `secrets.json` and emit a
+       one-time-per-key warning telling the operator to migrate.
+    3. Return None when neither path has a value.
+    """
+    env_names = _SECRET_ENV_NAMES.get(key, ())
+    for env_name in env_names:
+        v = os.environ.get(env_name, "")
+        if v and v.strip():
+            return v.strip()
+    # Disk fallback — only fires when env is unset. One-release deprecation.
     val = load_secrets().get(key)
     if isinstance(val, str) and val.strip():
+        if key not in _WARNED_FOR:
+            _WARNED_FOR.add(key)
+            log.warning(
+                "secrets_store: using legacy on-disk value for %r — set "
+                "the equivalent env var (%s) on this deployment to "
+                "silence this warning. Disk fallback will be removed "
+                "in the next major release.",
+                key, "/".join(env_names) or "?",
+            )
         return val.strip()
     return None
 
 
 def set_secret(key: str, value: Optional[str]) -> None:
-    """Set/clear a single secret. Empty/None deletes the key."""
-    s = load_secrets()
-    if value is None or not str(value).strip():
-        s.pop(key, None)
-    else:
-        s[key] = str(value).strip()
-    save_secrets(s)
+    """NO-OP. See module docstring.
 
+    Logs a one-time warning the first time it's called with a non-None
+    value, pointing the operator at the env-var path.
+    """
+    if value is not None and str(value).strip():
+        if key not in _WARNED_FOR:
+            _WARNED_FOR.add(key)
+            env_names = _SECRET_ENV_NAMES.get(key, ())
+            log.warning(
+                "secrets_store.set_secret(%r) is a no-op — operator "
+                "credentials are env-var-only since the settings-page "
+                "removal. Configure %s in the deployment environment "
+                "instead.",
+                key, "/".join(env_names) or "the relevant env var",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Typed helpers (back-compat — kept for callers across the codebase)
+# ---------------------------------------------------------------------------
 
 def get_anthropic_key() -> Optional[str]:
-    """Return the live Anthropic API key from env or on-disk store.
-
-    Precedence: ANTHROPIC_API_KEY env > data/secrets.json key.
-    """
-    env = os.environ.get("ANTHROPIC_API_KEY")
-    if env and env.strip():
-        return env.strip()
     return get_secret("anthropic_api_key")
 
 
@@ -146,15 +163,6 @@ def has_anthropic_key() -> bool:
 
 
 def get_buffer_access_token() -> Optional[str]:
-    """Return the user's Buffer access token, from env or on-disk store.
-
-    Precedence: BUFFER_ACCESS_TOKEN env > data/secrets.json key.
-    Used by the publishing layer (src/mediahub/publishing/buffer.py) to
-    schedule approved content cards to the user's connected social channels.
-    """
-    env = os.environ.get("BUFFER_ACCESS_TOKEN")
-    if env and env.strip():
-        return env.strip()
     return get_secret("buffer_access_token")
 
 
@@ -163,12 +171,12 @@ def has_buffer_access_token() -> bool:
 
 
 def set_buffer_access_token(token: Optional[str]) -> None:
-    """Store the Buffer access token. Empty/None clears it."""
+    """NO-OP. See set_secret docstring."""
     set_secret("buffer_access_token", token)
 
 
 def mask_key(key: Optional[str]) -> str:
-    """Render a partially-masked key for UI display."""
+    """Render a partially-masked key for any remaining diagnostic UI."""
     if not key:
         return ""
     k = key.strip()
@@ -183,5 +191,5 @@ __all__ = [
     "get_anthropic_key", "has_anthropic_key",
     "get_buffer_access_token", "has_buffer_access_token",
     "set_buffer_access_token",
-    "mask_key",
+    "mask_key", "secrets_path",
 ]

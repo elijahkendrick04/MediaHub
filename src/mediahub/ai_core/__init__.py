@@ -17,10 +17,9 @@ Per product direction it is also:
   ``ProviderError`` and surface that to the user — no silent fake
   output from template strings.
 
-Provider selection precedence (overridable in /settings):
-  1. MEDIAHUB_LLM_PROVIDER env var ∈ {claude, gemini, openai, auto}
-  2. The "preferred provider" setting saved on disk
-  3. "auto" → first configured among claude → openai → gemini
+Provider selection (operator-controlled at deploy time, env vars only):
+  1. MEDIAHUB_LLM_PROVIDER env var ∈ {claude, gemini, auto}
+  2. "auto" (the default) → Gemini first if configured, then Claude
 """
 from .llm import (
     ProviderNotConfigured,
