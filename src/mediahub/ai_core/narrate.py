@@ -36,9 +36,8 @@ _MEDAL_PHRASES = {
 }
 
 
-def _achievement_kind(a: dict) -> str:
-    """Pick a human noun phrase for the achievement type, or empty."""
-    t = (a.get("type") or "").strip()
+def _default_kind(t: str) -> str:
+    """Hardcoded default noun phrase for an achievement type."""
     if t in _PB_PHRASES:
         return _PB_PHRASES[t]
     if t in _MEDAL_PHRASES:
@@ -51,8 +50,34 @@ def _achievement_kind(a: dict) -> str:
     return ""
 
 
-def narrate_achievement(a: dict, *, meet: Optional[dict] = None) -> str:
-    """Build a single-paragraph English description of a single achievement."""
+def _achievement_kind(a: dict, profile=None) -> str:
+    """Pick a human noun phrase for the achievement type. When the
+    profile carries an AI-derived per-type phrase, prefer that;
+    otherwise use the default phrase."""
+    t = (a.get("type") or "").strip()
+    default = _default_kind(t)
+    if profile is None:
+        return default
+    try:
+        from mediahub.brand.derived import type_phrase_for
+    except Exception:
+        return default
+    return type_phrase_for(profile, t, default)
+
+
+def narrate_achievement(
+    a: dict,
+    *,
+    meet: Optional[dict] = None,
+    profile=None,
+) -> str:
+    """Build a single-paragraph English description of a single achievement.
+
+    When ``profile`` is supplied and carries an AI-derived operating
+    profile, the noun phrase used to refer to the achievement type will
+    reflect this organisation's preferred language; otherwise the
+    default phrasing is used.
+    """
     if not a:
         return ""
     swimmer = (a.get("swimmer_name") or "").strip()
@@ -67,7 +92,7 @@ def narrate_achievement(a: dict, *, meet: Optional[dict] = None) -> str:
     recorded_pb = (a.get("recorded_pb") or "").strip()
     is_pb = bool(a.get("pb") or a.get("is_pb"))
     headline = (a.get("headline") or "").strip()
-    kind = _achievement_kind(a)
+    kind = _achievement_kind(a, profile=profile)
 
     parts: list[str] = []
     subject = swimmer or "the swimmer"

@@ -7414,6 +7414,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         social_edits[key] = v
                 if social_edits or (request.form.get("social_links_edited") == "1"):
                     existing.social_links = social_edits
+                # Re-derive the AI operating profile whenever the user
+                # edits the org. Single LLM call; consumers cache-read.
+                try:
+                    from mediahub.brand.derived import derive_operating_profile
+                    existing.brand_operating_profile = derive_operating_profile(existing)
+                except Exception:
+                    existing.brand_operating_profile = {
+                        "tone_prose": {}, "achievement_priorities": {},
+                        "type_phrases": {}, "artefact_voice": {},
+                        "status": "error",
+                    }
                 save_profile(existing)
                 # Pin into session so the routing gate unlocks and so
                 # the next session lands on the same org.
@@ -8168,6 +8179,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     }
                 for k, v in g_payload.items():
                     setattr(prof, k, v)
+
+        # ---- AI-derive operating profile from the assembled context ----
+        # One LLM call here means zero LLM calls per page render. The
+        # derived dict carries the org-specific tone prose, ranking
+        # weights, type phrases and artefact intents that every content
+        # tool consults via the lookup helpers in brand.derived.
+        try:
+            from mediahub.brand.derived import derive_operating_profile
+            prof.brand_operating_profile = derive_operating_profile(prof)
+        except Exception as e:
+            # Never block save on a derivation failure — consumers
+            # transparently fall back to the hardcoded defaults.
+            prof.brand_operating_profile = {
+                "tone_prose": {}, "achievement_priorities": {},
+                "type_phrases": {}, "artefact_voice": {},
+                "status": f"error: {e}",
+            }
 
         save_profile(prof)
         session["active_profile_id"] = prof.profile_id

@@ -56,9 +56,15 @@ def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str
         raise ClaudeUnavailableError(str(e)) from e
 
 
-# A short English description of each tone — given to the model verbatim
-# as part of the system prompt. No JSON, no rules-as-code. The model
-# interprets these descriptors itself.
+# Default tone descriptors. These ship as fallbacks for the case where
+# the org hasn't had its operating profile derived yet (older profiles,
+# new installs, no-LLM environments). When the org HAS been derived,
+# brand.derived.tone_descriptor_for() returns the org-specific prose
+# instead — see the resolution inside generate_caption_for_tone below.
+#
+# Adding a new tone slug here is a deliberate code change because every
+# downstream consumer that wants to use it needs to know it exists; we
+# don't let the LLM invent tones.
 _TONE_DESCRIPTORS: dict[str, str] = {
     "ai":         "a balanced sports social-media voice — natural, "
                   "specific, mildly warm, no jargon.",
@@ -73,6 +79,19 @@ _TONE_DESCRIPTORS: dict[str, str] = {
 }
 
 KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
+
+
+def _resolve_tone_descriptor(club_profile, tone: str) -> str:
+    """Return the tone descriptor for this org, falling back to the
+    hardcoded default. The derived path lets each org's tone prose
+    reflect their brand context (audience, voice, guidelines) rather
+    than every org sharing the same generic phrasing."""
+    default = _TONE_DESCRIPTORS.get(tone, _TONE_DESCRIPTORS["ai"])
+    try:
+        from mediahub.brand.derived import tone_descriptor_for
+    except Exception:
+        return default
+    return tone_descriptor_for(club_profile, tone, default)
 
 
 def _resolve_voice_profile(club_profile) -> Optional[dict]:
@@ -172,7 +191,7 @@ def generate_caption_for_tone(
     """
     from mediahub.ai_core import narrate_achievement, narrate_brand
 
-    tone_desc = _TONE_DESCRIPTORS.get(tone, _TONE_DESCRIPTORS["ai"])
+    tone_desc = _resolve_tone_descriptor(club_profile, tone)
     resolved_vp = (_resolve_voice_profile(club_profile)
                    or (voice_profile if isinstance(voice_profile, dict) else None))
     vp_prose = _voice_profile_prose(resolved_vp)
@@ -203,7 +222,7 @@ def generate_caption_for_tone(
 
     # User message is a single English paragraph describing the swim — no
     # JSON envelope, no field names. The model writes from this prose.
-    user_prose = narrate_achievement(achievement_dict)
+    user_prose = narrate_achievement(achievement_dict, profile=club_profile)
     if not user_prose.strip():
         raise ClaudeUnavailableError("not enough detail to generate a caption")
     # Tiny random suffix breaks identical-output caching at the provider's

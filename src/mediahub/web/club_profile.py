@@ -124,6 +124,17 @@ class ClubProfile:
     brand_guidelines_extractor: str = ""
     brand_guidelines_byte_size: int = 0
 
+    # ---- Derived operating profile (one-shot LLM derivation, cached) ----
+    # Populated by brand.derived.derive_operating_profile at profile-save
+    # time. Contains per-org tone prose, achievement priority weights,
+    # achievement type phrases, and per-artefact creative intents.
+    # Consumers go through brand.derived.<helper>_for(profile, key,
+    # default) so when this cache is missing (older profiles, no LLM
+    # configured), the hardcoded constants in the consumer modules are
+    # used as fallbacks. This keeps the system AI-driven where context
+    # exists, deterministic where it doesn't.
+    brand_operating_profile: dict = field(default_factory=dict)
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)
@@ -169,11 +180,43 @@ class ClubProfile:
     # ---- V7 helpers ----
 
     def get_achievement_priority(self, achievement_type: str) -> float:
-        """Return the club-configured priority multiplier for an achievement type."""
-        priorities = self.achievement_priorities
-        if not priorities:
-            return 1.0
-        return float(priorities.get(achievement_type, priorities.get("_default", 1.0)))
+        """Return the club-configured priority multiplier for an achievement type.
+
+        Resolution order — AI-derived wins at every level so that any
+        org with a derived operating profile gets the AI's judgment over
+        the legacy hardcoded weights:
+
+          1. ``brand_operating_profile.achievement_priorities[type]``
+          2. ``brand_operating_profile.achievement_priorities['_default']``
+          3. ``self.achievement_priorities[type]``         (legacy override)
+          4. ``self.achievement_priorities['_default']``   (legacy default)
+          5. ``1.0``
+        """
+        def _as_float(v) -> Optional[float]:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        derived = (self.brand_operating_profile or {}).get("achievement_priorities") or {}
+        if achievement_type in derived:
+            f = _as_float(derived[achievement_type])
+            if f is not None:
+                return f
+        if "_default" in derived:
+            f = _as_float(derived["_default"])
+            if f is not None:
+                return f
+        priorities = self.achievement_priorities or {}
+        if achievement_type in priorities:
+            f = _as_float(priorities[achievement_type])
+            if f is not None:
+                return f
+        if "_default" in priorities:
+            f = _as_float(priorities["_default"])
+            if f is not None:
+                return f
+        return 1.0
 
     def get_brand_kit(self):
         """Return a BrandKit instance synthesised from this profile's data."""
