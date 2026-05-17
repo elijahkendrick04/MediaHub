@@ -14,4 +14,3 @@ rembg>=2.0
 onnxruntime>=1.16
 anthropic>=0.30
 replicate>=0.25
-colorthief>=0.2.1

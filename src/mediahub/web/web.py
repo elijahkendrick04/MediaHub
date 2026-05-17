@@ -39,7 +39,7 @@ from typing import Any, Dict, Optional
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    jsonify, abort, send_file, Response, session,
+    jsonify, abort, send_file, Response, session, make_response,
 )
 from markupsafe import escape as _h
 
@@ -2114,6 +2114,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
+    <a href="{{ url_for('status_page') }}" class="{{ 'active' if active=='status' else '' }}">Status</a>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -2415,6 +2416,17 @@ def create_app() -> Flask:
         "settings_page",
         "healthz",
         "healthz_deps",
+        # /health is the deep dep-checking probe; it must also be
+        # reachable without an active org (and outside the API prefix
+        # allowlist below — it returns HTML/JSON, not JSON-only).
+        "health",
+        # Phase 1.5 — public status page, JSON twin, and operator usage
+        # dashboard must be reachable without an active org. The first
+        # two are public trust signals; the last is operator-only by
+        # virtue of living under /healthz/* alongside /healthz/deps.
+        "status_page",
+        "api_status_json",
+        "healthz_usage",
         "static",
     })
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -2642,6 +2654,7 @@ def create_app() -> Flask:
             return " ".join(parts)
 
         rows_html = ""
+        n_errored = 0
         for r in rows:
             badge = {"done": "good", "running": "info", "queued": "info",
                      "error": "bad"}.get(r["status"], "")
@@ -2660,6 +2673,29 @@ def create_app() -> Flask:
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
                 f'</form></td></tr>'
             )
+            # Phase 1.5 — "Why did this run fail?" surfacing. Errored runs
+            # get a second row with the persisted error message so an
+            # operator (or pilot club) can see what went wrong without
+            # clicking through to the broken review page.
+            if r["status"] == "error" and r["error"]:
+                n_errored += 1
+                err_text = str(r["error"])
+                # Trim absurdly long stack traces — keep the first ~600 chars.
+                truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
+                rows_html += (
+                    '<tr class="run-error-row">'
+                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
+                    'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                    '<details>'
+                    '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
+                    'color:#ffbcc3">Why did this run fail?</summary>'
+                    '<pre style="margin:8px 0 0;padding:10px 12px;'
+                    'background:rgba(0,0,0,0.25);border-radius:6px;'
+                    'font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f'{_h(truncated)}</pre>'
+                    '</details>'
+                    '</td></tr>'
+                )
 
         # Recent posting activity panel — bottom-of-page, collapsed by
         # default when empty; expanded when there's something to see so
@@ -2701,10 +2737,25 @@ def create_app() -> Flask:
                 '</table></div>'
             )
 
+        # Phase 1.5 — surface the number of failed runs at the top of the
+        # page so an operator triaging issues sees the scope before reading
+        # individual rows.
+        failure_callout = ""
+        if n_errored:
+            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
+            failure_callout = (
+                '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
+                'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                f'<b>{_h(label)}</b> in the last 100 runs. '
+                'Expand <i>Why did this run fail?</i> on each row below to '
+                'see the pipeline error.</div>'
+            )
+
         body = (
             f'<h1 style="margin-bottom:6px">Activity</h1>'
             f'<p class="dim" style="margin-bottom:24px">Recent runs for '
             f'<b>{_h(prof.display_name)}</b>.</p>'
+            f'{failure_callout}'
             '<div class="card"><table>'
             '<thead><tr><th>Input</th><th>Status</th>'
             '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
@@ -5339,16 +5390,47 @@ Relay team broke club record"></textarea>
             "checks": checks,
         }
 
+    def _record_heartbeat_safe(source: str, ok: bool, started_at: float,
+                               error: Optional[str] = None) -> None:
+        """Best-effort heartbeat write — never raises into a health probe."""
+        try:
+            import time as _time
+            from mediahub.observability import uptime as _uptime
+            _uptime.record_heartbeat(
+                ok=ok, source=source,
+                response_ms=(_time.monotonic() - started_at) * 1000.0,
+                error=error,
+            )
+        except Exception:
+            pass
+
     @app.route("/health")
     def health():
+        import time as _time
+        started = _time.monotonic()
         payload = _health_payload()
+        # Surface the deep health result into the heartbeat log so /status
+        # can count real failures, not just "did the request answer".
+        first_error: Optional[str] = None
+        if not payload["ok"]:
+            for name, check in (payload.get("checks") or {}).items():
+                if not check.get("ok"):
+                    first_error = f"{name}: {check.get('error', 'failed')}"
+                    break
+        _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         return jsonify(payload), (200 if payload["ok"] else 503)
 
     @app.route("/healthz")
     def healthz():
-        # Cheap liveness probe (no disk/db work)
-        return jsonify({"ok": True, "version": APP_VERSION,
-                        "ts": datetime.now(timezone.utc).isoformat()})
+        # Cheap liveness probe (no disk/db work). We still record a
+        # heartbeat row so external monitors and Render's own platform
+        # probe contribute to /status's uptime number.
+        import time as _time
+        started = _time.monotonic()
+        payload = {"ok": True, "version": APP_VERSION,
+                   "ts": datetime.now(timezone.utc).isoformat()}
+        _record_heartbeat_safe("healthz", True, started)
+        return jsonify(payload)
 
     @app.route("/healthz/deps")
     def healthz_deps():
@@ -5403,7 +5485,418 @@ Relay team broke club record"></textarea>
               and deps["remotion"].get("available"))
         return jsonify({"ok": bool(ok), "deps": deps})
 
-    # ---- /settings — REMOVED ----
+    # ---- /status -------------------------------------------------------
+    #
+    # Phase 1.5 — public uptime / status page. No org gate, no auth,
+    # because:
+    #   1. It's a marketable trust signal — the dissertation flagged
+    #      reliability as a real wedge against Ocoya / Predis.
+    #   2. The data it surfaces is operational, not tenant-scoped: how
+    #      many heartbeats arrived in the last 24h, when the last gap
+    #      was, what the backend version is.
+    #   3. It must be reachable when the org gate would otherwise
+    #      redirect — a deploy with no organisations yet should still
+    #      be able to prove it's alive.
+    #
+    # The numbers come from the SQLite uptime log; honest behaviour
+    # when no data exists yet is to say so, not fake 100%.
+    def _format_uptime_pct(stats: dict) -> str:
+        if not stats.get("has_data"):
+            return "&mdash;"
+        pct = float(stats.get("uptime_pct") or 0.0) * 100.0
+        if pct >= 99.995:
+            return "100%"
+        if pct >= 99.9:
+            return f"{pct:.3f}%"
+        if pct >= 95.0:
+            return f"{pct:.2f}%"
+        return f"{pct:.1f}%"
+
+    def _humanize_duration(seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            mins = seconds // 60
+            return f"{mins} min"
+        if seconds < 86400:
+            hrs = seconds // 3600
+            mins = (seconds % 3600) // 60
+            return f"{hrs}h {mins}m" if mins else f"{hrs}h"
+        days = seconds // 86400
+        hrs = (seconds % 86400) // 3600
+        return f"{days}d {hrs}h" if hrs else f"{days}d"
+
+    def _humanize_when(ts: Optional[str]) -> str:
+        if not ts:
+            return "&mdash;"
+        try:
+            parsed = ts
+            if parsed.endswith("Z"):
+                parsed = parsed[:-1] + "+00:00"
+            from datetime import datetime as _dt
+            then = _dt.fromisoformat(parsed)
+            delta = datetime.now(timezone.utc) - then
+            secs = int(delta.total_seconds())
+            if secs < 0:
+                return _h(ts[:19])
+            if secs < 60:
+                return f"{secs}s ago"
+            if secs < 3600:
+                return f"{secs // 60} min ago"
+            if secs < 86400:
+                return f"{secs // 3600}h ago"
+            return f"{secs // 86400}d ago"
+        except (ValueError, TypeError):
+            return _h(ts[:19])
+
+    @app.route("/status")
+    def status_page():
+        from mediahub.observability import uptime as _uptime
+
+        # Pull three windows so the page reads "24h / 7d / 30d uptime"
+        # straight off the database, with no aggregation in the view.
+        s24 = _uptime.uptime_stats(window_hours=24)
+        s7d = _uptime.uptime_stats(window_hours=24 * 7)
+        s30 = _uptime.uptime_stats(window_hours=24 * 30)
+        latest = _uptime.latest_heartbeat()
+        gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+
+        # Current pill — green if last heartbeat < 5 min ago AND ok.
+        pill_class = "muted"
+        pill_label = "no data yet"
+        pill_color = "#7a7a7a"
+        if latest is not None:
+            try:
+                ts_raw = latest["ts"]
+                if ts_raw.endswith("Z"):
+                    ts_raw = ts_raw[:-1] + "+00:00"
+                from datetime import datetime as _dt
+                last_ts = _dt.fromisoformat(ts_raw)
+                age_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
+            except (ValueError, TypeError):
+                age_s = 99999
+            if not latest.get("ok"):
+                pill_label = "degraded"
+                pill_color = "#ffaa3a"
+            elif age_s <= 300:
+                pill_label = "operational"
+                pill_color = "#2cc97f"
+            elif age_s <= 1800:
+                pill_label = "stale (no heartbeat in 5–30 min)"
+                pill_color = "#ffaa3a"
+            else:
+                pill_label = "unknown (last heartbeat > 30 min ago)"
+                pill_color = "#ff5d6c"
+
+        # Most recent gap → "Last incident" callout.
+        last_incident_html = (
+            '<p class="dim" style="margin:0">No incidents recorded in the last 30 days.</p>'
+        )
+        if gaps:
+            top = gaps[0]
+            duration = _humanize_duration(top["duration_seconds"])
+            when = _humanize_when(top["to_ts"])
+            last_incident_html = (
+                f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
+                f'(silent for {_h(duration)})</p>'
+                f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
+                f'Detected from a gap in heartbeats between '
+                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+            )
+
+        # Build a compact incident table so operators can see the
+        # five longest gaps without a separate /status/incidents page.
+        if gaps:
+            gap_rows = ""
+            for g in gaps:
+                gap_rows += (
+                    f'<tr><td class="muted" style="font-size:12px">'
+                    f'{_h(g["to_ts"][:19])} UTC</td>'
+                    f'<td>{_h(_humanize_duration(g["duration_seconds"]))}</td>'
+                    f'<td class="muted" style="font-size:12px">'
+                    f'gap started {_h(g["from_ts"][:19])} UTC</td></tr>'
+                )
+            incidents_html = (
+                '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
+                'Recent incidents</h2>'
+                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
+                'Gaps longer than 5 minutes between heartbeats. The 5-minute '
+                'grace window matches the platform ping cadence.</p>'
+                '<div class="card"><table>'
+                '<thead><tr><th>Resolved</th><th>Duration</th><th>Window</th></tr></thead>'
+                f'<tbody>{gap_rows}</tbody></table></div>'
+            )
+        else:
+            incidents_html = ""
+
+        # Pull APP_VERSION from the closure scope.
+        version_label = APP_VERSION
+
+        body = (
+            '<h1 style="margin-bottom:6px">Status</h1>'
+            '<p class="dim" style="margin-bottom:24px">Live operational health '
+            'of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
+
+            '<div class="card" style="display:flex;align-items:center;gap:14px;'
+            'padding:18px 22px;margin-bottom:20px">'
+            f'<span style="display:inline-block;width:14px;height:14px;'
+            f'border-radius:50%;background:{pill_color};flex:0 0 auto"></span>'
+            f'<div style="flex:1"><div style="font-size:18px;font-weight:600">'
+            f'Backend &mdash; {_h(pill_label)}</div>'
+            f'<div class="dim" style="font-size:13px;margin-top:2px">'
+            f'Version <code>{_h(version_label)}</code>'
+            + (f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
+               f'({_h((latest.get("source") or "").lower())})'
+               if latest else "")
+            + '</div></div></div>'
+
+            '<div class="card" style="padding:18px 22px;margin-bottom:20px">'
+            '<table style="width:100%"><thead>'
+            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
+            '<th>Downtime</th></tr></thead><tbody>'
+            f'<tr><td><b>24 hours</b></td>'
+            f'<td>{_format_uptime_pct(s24)}</td>'
+            f'<td>{_h(s24.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
+            f'<tr><td><b>7 days</b></td>'
+            f'<td>{_format_uptime_pct(s7d)}</td>'
+            f'<td>{_h(s7d.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
+            f'<tr><td><b>30 days</b></td>'
+            f'<td>{_format_uptime_pct(s30)}</td>'
+            f'<td>{_h(s30.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
+            '</tbody></table></div>'
+
+            f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
+            f'{last_incident_html}</div>'
+
+            f'{incidents_html}'
+
+            '<p class="dim" style="margin-top:30px;font-size:12px">'
+            'Uptime is derived from heartbeat density: each platform ping or '
+            'health check inserts one row, and gaps over 5 minutes are counted '
+            'as downtime. Raw data at '
+            f'<a href="{url_for("api_status_json")}">/api/status</a>.</p>'
+        )
+        html = _layout("Status", body, active="status")
+        resp = make_response(html)
+        # Auto-refresh: the page is intentionally a low-traffic informational
+        # surface; refreshing every 60s keeps the number live without
+        # JavaScript polling.
+        resp.headers["Refresh"] = "60"
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @app.route("/api/status")
+    def api_status_json():
+        """JSON shape of the public status page — for external monitors
+        and dashboards that want the raw uptime numbers."""
+        from mediahub.observability import uptime as _uptime
+        return jsonify({
+            "ok": True,
+            "version": APP_VERSION,
+            "latest_heartbeat": _uptime.latest_heartbeat(),
+            "windows": {
+                "24h":  _uptime.uptime_stats(window_hours=24),
+                "7d":   _uptime.uptime_stats(window_hours=24 * 7),
+                "30d":  _uptime.uptime_stats(window_hours=24 * 30),
+            },
+            "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
+        })
+
+    # ---- /healthz/usage ------------------------------------------------
+    #
+    # Operator-facing LLM usage dashboard. Lives under /healthz/* (same
+    # trust boundary as /healthz/deps — an operations endpoint, not a
+    # user-facing surface) so it's reachable without going through the
+    # org-setup gate. Single-instance operators see their own usage;
+    # there is no tenant aggregation because each MediaHub deployment
+    # belongs to one operator.
+    #
+    # Surfaces:
+    #   1. Today's LLM call count, broken down by provider.
+    #   2. Rough USD cost estimate from public list pricing.
+    #   3. Gemini free-tier headroom (1,500 req/day ceiling).
+    #   4. Most recent LLM error message (so the operator can diagnose
+    #      a quietly-failing provider without grepping logs).
+    #   5. 7-day posting-log roll-up.
+    @app.route("/healthz/usage")
+    def healthz_usage():
+        from mediahub.observability import llm_usage as _u
+        today = _u.usage_for_window(window_hours=24)
+        seven_d = _u.usage_for_window(window_hours=24 * 7)
+        thirty_d = _u.daily_usage(days=30)
+        last_err = _u.last_error()
+
+        # Per-provider rows for the "Today" card.
+        if today["by_provider"]:
+            prov_rows = ""
+            for b in today["by_provider"]:
+                cost_disp = f"${b['est_cost_usd']:.4f}"
+                if b["provider"] == "gemini" and b["est_cost_usd"] == 0:
+                    cost_disp = "$0.00 (free tier)"
+                prov_rows += (
+                    f'<tr><td><b>{_h(b["provider"])}</b></td>'
+                    f'<td>{_h(b["calls"])}</td>'
+                    f'<td>{_h(b["ok"])}</td>'
+                    f'<td>{_h(b["failed"])}</td>'
+                    f'<td>{_h(b.get("tokens_in", 0))}</td>'
+                    f'<td>{_h(b.get("tokens_out", 0))}</td>'
+                    f'<td>{_h(cost_disp)}</td></tr>'
+                )
+            providers_html = (
+                '<div class="card"><table style="width:100%">'
+                '<thead><tr><th>Provider</th><th>Calls</th><th>OK</th>'
+                '<th>Failed</th><th>Tokens in</th><th>Tokens out</th>'
+                '<th>Est. cost</th></tr></thead>'
+                f'<tbody>{prov_rows}</tbody></table></div>'
+            )
+        else:
+            providers_html = (
+                '<div class="card empty">No LLM calls in the last 24 hours.</div>'
+            )
+
+        # Gemini free-tier headroom callout.
+        if today["gemini_free_tier_headroom"] is not None:
+            from mediahub.observability.llm_usage import GEMINI_FREE_TIER_DAILY_REQ
+            headroom = today["gemini_free_tier_headroom"]
+            used = GEMINI_FREE_TIER_DAILY_REQ - headroom
+            pct = (used / GEMINI_FREE_TIER_DAILY_REQ) * 100.0 if GEMINI_FREE_TIER_DAILY_REQ else 0
+            bar_color = "#2cc97f"
+            if pct > 80:
+                bar_color = "#ffaa3a"
+            if pct >= 100:
+                bar_color = "#ff5d6c"
+            headroom_html = (
+                '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
+                '<div style="display:flex;justify-content:space-between;'
+                'align-items:baseline;margin-bottom:6px">'
+                f'<div><b>Gemini free-tier today</b> &mdash; '
+                f'{_h(used)} / {GEMINI_FREE_TIER_DAILY_REQ} calls</div>'
+                f'<div class="dim" style="font-size:12px">{_h(headroom)} remaining</div>'
+                '</div>'
+                '<div style="height:10px;background:rgba(255,255,255,0.08);'
+                'border-radius:6px;overflow:hidden">'
+                f'<div style="height:100%;width:{min(pct,100):.1f}%;'
+                f'background:{bar_color}"></div></div>'
+                '</div>'
+            )
+        else:
+            headroom_html = ""
+
+        # Most recent LLM error (if any) — surfaced front and centre.
+        if last_err:
+            err_html = (
+                '<div class="card" style="padding:16px 22px;margin-bottom:18px;'
+                'border-left:3px solid #ff5d6c">'
+                f'<div style="font-weight:600;margin-bottom:4px">'
+                f'Last LLM error &mdash; {_h(last_err.get("provider", "unknown"))}</div>'
+                f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
+                f'{_h(last_err.get("ts", "")[:19])} UTC'
+                + (f' &middot; {_h(last_err.get("error_kind"))}' if last_err.get("error_kind") else "")
+                + '</div>'
+                f'<code style="font-size:12px">'
+                f'{_h(last_err.get("error_message", "")[:300])}</code>'
+                '</div>'
+            )
+        else:
+            err_html = ""
+
+        # 7-day posting log roll-up.
+        try:
+            from mediahub.publishing import posting_log as _plog
+            # We don't have a profile-scoped count here because /healthz/usage
+            # is operator-facing across all tenants on this instance. For a
+            # single-org deploy that's the right answer. For a future
+            # multi-tenant deploy, expand into per-tenant rows.
+            conn = sqlite3.connect(str(_plog.DB_PATH))
+            cur = conn.execute(
+                "SELECT status, COUNT(*) AS n FROM posting_attempts "
+                "WHERE attempted_at >= datetime('now', '-7 days') "
+                "GROUP BY status"
+            )
+            counts = {r[0]: int(r[1]) for r in cur.fetchall()}
+            conn.close()
+        except Exception:
+            counts = {}
+        post_ok = int(counts.get("ok", 0))
+        post_fail = int(counts.get("failed", 0))
+        post_total = post_ok + post_fail
+        post_html = (
+            '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
+            f'<div style="font-weight:600;margin-bottom:6px">'
+            f'Publishing (7d) &mdash; {post_total} attempts</div>'
+            f'<div style="display:flex;gap:18px;font-size:13px">'
+            f'<span><span class="tag good" style="font-size:11px">{post_ok} ok</span></span>'
+            f'<span><span class="tag bad" style="font-size:11px">{post_fail} failed</span></span>'
+            '</div></div>'
+        )
+
+        # 30-day daily breakdown.
+        if thirty_d:
+            day_rows = ""
+            for d in reversed(thirty_d):
+                cost = f"${d['est_cost_usd']:.4f}" if d["est_cost_usd"] else "$0.00"
+                day_rows += (
+                    f'<tr><td class="muted" style="font-size:12px">{_h(d["date"])}</td>'
+                    f'<td>{_h(d["calls"])}</td>'
+                    f'<td>{_h(d["ok"])}</td>'
+                    f'<td>{_h(d["failed"])}</td>'
+                    f'<td>{_h(cost)}</td></tr>'
+                )
+            thirty_html = (
+                '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
+                'Last 30 days</h2>'
+                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
+                'Per-day LLM call counts. Estimated cost uses public list '
+                'pricing &mdash; not a billing source of truth.</p>'
+                '<div class="card"><table style="width:100%">'
+                '<thead><tr><th>Date (UTC)</th><th>Calls</th><th>OK</th>'
+                '<th>Failed</th><th>Est. cost</th></tr></thead>'
+                f'<tbody>{day_rows}</tbody></table></div>'
+            )
+        else:
+            thirty_html = ""
+
+        # 7-day totals headline.
+        seven_total = seven_d["total_calls"]
+        seven_cost = seven_d["est_cost_usd_total"]
+        body = (
+            '<h1 style="margin-bottom:6px">Usage</h1>'
+            '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
+            'LLM call counts, free-tier headroom, recent provider errors, '
+            'and publishing roll-up for this MediaHub deployment.</p>'
+
+            f'{err_html}'
+            f'{headroom_html}'
+            f'{post_html}'
+
+            '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
+            'Today (last 24h)</h2>'
+            '<p class="dim" style="margin-bottom:14px;font-size:13px">'
+            f'{_h(today["total_calls"])} calls &middot; '
+            f'<b>${today["est_cost_usd_total"]:.4f}</b> estimated cost &middot; '
+            f'{_h(today["failed_count"])} failed'
+            '</p>'
+            f'{providers_html}'
+
+            '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
+            'Last 7 days</h2>'
+            '<p class="dim" style="margin-bottom:14px;font-size:13px">'
+            f'{_h(seven_total)} calls &middot; '
+            f'<b>${seven_cost:.4f}</b> estimated cost.</p>'
+
+            f'{thirty_html}'
+
+            '<p class="dim" style="margin-top:30px;font-size:12px">'
+            'Estimated cost is derived from published list pricing for each '
+            'provider and is not a substitute for a real billing source. '
+            'Gemini free tier (1,500 req/day on gemini-2.0-flash) is treated '
+            'as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>'
+        )
+        return _layout("Usage", body, active="usage")
     #
     # The settings page used to collect operator credentials (AI API
     # keys, Buffer access token, cutout provider, LLM preference). All

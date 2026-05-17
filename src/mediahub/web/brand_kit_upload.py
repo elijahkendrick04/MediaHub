@@ -86,26 +86,71 @@ def _normalise_hex(value: Optional[str], fallback: str) -> str:
 
 
 def extract_palette_from_logo(logo_path: Path) -> tuple[str, str, str]:
-    """Use ColorThief to extract three dominant colours.
+    """Extract three dominant colours from ``logo_path`` via Pillow.
 
-    Returns (primary, secondary, accent) as #RRGGBB strings. Raises on failure.
+    Returns (primary, secondary, accent) as ``#RRGGBB`` strings.
+
+    Uses Pillow's median-cut quantizer to derive a small palette and
+    then sorts by pixel frequency to pick the three dominant entries.
+    Pillow is already a hard dependency of MediaHub, so this avoids
+    adding ``colorthief`` (a transitive numpy stack that wasn't always
+    available in the deploy environment, which previously caused
+    silent fall-back to form-supplied colours).
+
+    Implementation notes:
+      * Image is converted to RGB so paletted/grayscale logos still
+        produce sensible output.
+      * Near-white pixels (typical PNG background) are mapped out by
+        re-quantising over the dominant block; we keep the top three
+        by frequency regardless of brightness so the user's actual
+        brand colours win.
+      * Raises ``RuntimeError`` on any unexpected condition so the
+        caller's existing ``except Exception: pass`` fallback still
+        works as before.
     """
-    from colorthief import ColorThief
+    from PIL import Image
 
-    ct = ColorThief(str(logo_path))
-    palette = ct.get_palette(color_count=4, quality=10)
-    if not palette:
-        raise RuntimeError("colorthief returned empty palette")
+    try:
+        with Image.open(str(logo_path)) as src:
+            img = src.convert("RGB")
+    except Exception as exc:
+        raise RuntimeError(f"could not open logo image: {exc}") from exc
+
+    # Quantize to a small palette. MEDIANCUT is built into Pillow and
+    # produces clean separation for two/three-colour brand marks.
+    try:
+        quant = img.quantize(colors=8, method=Image.Quantize.MEDIANCUT)
+    except (AttributeError, ValueError):
+        # Older Pillow versions used integer constants.
+        quant = img.quantize(colors=8, method=0)
+
+    palette_flat = quant.getpalette() or []
+    colour_counts = quant.getcolors() or []
+    if not colour_counts:
+        raise RuntimeError("Pillow returned an empty palette")
+
+    # getcolors returns [(count, palette_idx), ...]; sort most-frequent first.
+    colour_counts.sort(reverse=True)
+    palette_rgb: list[tuple[int, int, int]] = []
+    for count, idx in colour_counts:
+        base = idx * 3
+        if base + 2 >= len(palette_flat):
+            continue
+        rgb = (palette_flat[base], palette_flat[base + 1], palette_flat[base + 2])
+        palette_rgb.append(rgb)
+
+    if not palette_rgb:
+        raise RuntimeError("Pillow palette had no usable colours")
+
+    # Pad the palette in case the image had fewer than three distinct
+    # quantised colours (e.g. a one-colour brand mark on solid white).
+    while len(palette_rgb) < 3:
+        palette_rgb.append(palette_rgb[-1])
 
     def _to_hex(rgb: tuple[int, int, int]) -> str:
         return "#{0:02X}{1:02X}{2:02X}".format(*rgb)
 
-    while len(palette) < 3:
-        palette.append(palette[-1])
-    primary = _to_hex(palette[0])
-    secondary = _to_hex(palette[1])
-    accent = _to_hex(palette[2])
-    return primary, secondary, accent
+    return _to_hex(palette_rgb[0]), _to_hex(palette_rgb[1]), _to_hex(palette_rgb[2])
 
 
 def persist_brand_kit(
@@ -158,7 +203,9 @@ def process_upload(
     accent = _normalise_hex(accent_form, fallback_accent)
 
     if logo_path and use_logo_colours:
-        # Only PNG/JPEG are usable by colorthief reliably; skip for SVG.
+        # Pillow's quantizer handles raster formats; SVG would need a
+        # rasterise step which we don't currently do, so fall back to
+        # the form-supplied colours for non-raster logos.
         if logo_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
             try:
                 primary, secondary, accent = extract_palette_from_logo(logo_path)

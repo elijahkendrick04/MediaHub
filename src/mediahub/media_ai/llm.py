@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,34 @@ log = logging.getLogger(__name__)
 
 class ClaudeUnavailableError(RuntimeError):
     """Raised when no LLM provider can answer. Name kept for back-compat."""
+
+
+# ---------------------------------------------------------------------------
+# Usage logging — Phase 1.5 observability. Every successful or failed
+# provider call lands one row in observability.llm_usage so the
+# operator-facing /healthz/usage dashboard has real data.
+#
+# Recording is best-effort: a logging failure must NEVER fail an LLM
+# call. We catch broadly here because the LLM path is hot and the cost
+# of any logging exception leaking is higher than the cost of a missed
+# data point.
+# ---------------------------------------------------------------------------
+
+def _log_call(*, provider: str, ok: bool, model: Optional[str] = None,
+              tokens_in: Optional[int] = None, tokens_out: Optional[int] = None,
+              duration_ms: Optional[float] = None,
+              error_kind: Optional[str] = None,
+              error_message: Optional[str] = None) -> None:
+    try:
+        from mediahub.observability import llm_usage as _u
+        _u.record_call(
+            provider=provider, ok=ok, model=model,
+            tokens_in=tokens_in, tokens_out=tokens_out,
+            duration_ms=duration_ms,
+            error_kind=error_kind, error_message=error_message,
+        )
+    except Exception:
+        pass
 
 
 # Anthropic models — kept as module-level constants so other code that
@@ -159,7 +188,9 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
     if not client:
         return None
     use_model = model or DEFAULT_MODEL
+    last_err: Optional[Exception] = None
     for attempt_model in (use_model, ALT_MODEL):
+        started = time.monotonic()
         try:
             kwargs = {
                 "model": attempt_model,
@@ -170,9 +201,28 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
                 kwargs["system"] = system
             resp = client.messages.create(**kwargs)
             parts = [b.text for b in resp.content if hasattr(b, "text")]
-            return "".join(parts).strip() or None
+            text = "".join(parts).strip() or None
+            usage = getattr(resp, "usage", None)
+            tin = getattr(usage, "input_tokens", None) if usage else None
+            tout = getattr(usage, "output_tokens", None) if usage else None
+            _log_call(
+                provider="anthropic", ok=bool(text), model=attempt_model,
+                tokens_in=tin, tokens_out=tout,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+                error_kind=None if text else "empty_response",
+                error_message=None if text else "Anthropic returned no text",
+            )
+            if text:
+                return text
         except Exception as e:
+            last_err = e
             log.warning("anthropic call failed (%s): %s", attempt_model, e)
+            _log_call(
+                provider="anthropic", ok=False, model=attempt_model,
+                duration_ms=(time.monotonic() - started) * 1000.0,
+                error_kind=type(e).__name__,
+                error_message=str(e),
+            )
             continue
     return None
 
@@ -218,6 +268,7 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{_GEMINI_MODEL}:generateContent?key={key}"
     )
+    started = time.monotonic()
     try:
         r = requests.post(
             url,
@@ -227,31 +278,71 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         )
     except Exception as e:
         log.warning("gemini transport failed: %s", e)
+        _log_call(
+            provider="gemini", ok=False, model=_GEMINI_MODEL,
+            duration_ms=(time.monotonic() - started) * 1000.0,
+            error_kind="transport",
+            error_message=str(e),
+        )
         return None
-    if r.status_code == 401 or r.status_code == 403:
+    dur_ms = (time.monotonic() - started) * 1000.0
+    if r.status_code in (401, 403):
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="auth",
+                  error_message=f"HTTP {r.status_code}")
         return None
     if r.status_code == 429:
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="rate_limited",
+                  error_message="HTTP 429")
         return None
     if not r.ok:
         log.warning("gemini non-ok (%s): %s", r.status_code, r.text[:300])
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind=f"http_{r.status_code}",
+                  error_message=(r.text or "")[:300])
         return None
     try:
         data = r.json()
     except ValueError:
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="parse",
+                  error_message="response was not JSON")
         return None
     candidates = data.get("candidates") if isinstance(data, dict) else None
     if not candidates:
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="no_candidates",
+                  error_message="response had no candidates")
         return None
     first = candidates[0] if isinstance(candidates, list) else None
     if not isinstance(first, dict):
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="malformed",
+                  error_message="first candidate not a dict")
         return None
     content = first.get("content") or {}
     parts = content.get("parts") if isinstance(content, dict) else None
     if not isinstance(parts, list):
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=dur_ms, error_kind="malformed",
+                  error_message="content.parts not a list")
         return None
     texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
     out = "".join(texts).strip()
-    return out or None
+    if out:
+        usage = data.get("usageMetadata") if isinstance(data, dict) else None
+        tin = (usage or {}).get("promptTokenCount") if isinstance(usage, dict) else None
+        tout = (usage or {}).get("candidatesTokenCount") if isinstance(usage, dict) else None
+        _log_call(
+            provider="gemini", ok=True, model=_GEMINI_MODEL,
+            tokens_in=tin, tokens_out=tout, duration_ms=dur_ms,
+        )
+        return out
+    _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+              duration_ms=dur_ms, error_kind="empty_response",
+              error_message="Gemini returned no text")
+    return None
 
 
 def _call_gemini_vision(image_paths: list[str], prompt: str,

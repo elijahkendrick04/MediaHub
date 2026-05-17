@@ -41,6 +41,10 @@ rembg>=2.0
 onnxruntime>=1.16
 anthropic>=0.30
 replicate>=0.25
-colorthief>=0.2.1
 
 ```
+
+> Phase 1.5: `colorthief` was removed. Logo palette extraction now
+> uses Pillow's built-in `Image.quantize(MEDIANCUT)` so there's no
+> extra binary dependency. See `src/mediahub/web/brand_kit_upload.py`
+> `extract_palette_from_logo`.

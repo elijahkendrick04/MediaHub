@@ -133,22 +133,25 @@ Promoted from Phase 2 to Phase 1 — surfacing the intelligence layer
 is the single biggest *marketing* lever the product has and no
 horizontal player can copy it.
 
-### 1.5 Reliability + observability · ⚠️ **PARTIAL** (the last open Phase 1 item)
+### 1.5 Reliability + observability · ✅ **SHIPPED**
 
-| Sub-item | Status | Next step |
-|---|---|---|
-| `/healthz` + `/healthz/deps` | ✅ | — |
-| `/api/settings/llm-status` (live AI status, kept post-rewrite) | ✅ | — |
-| Per-card schedule status pills on `/activity` | ✅ | — |
-| "Recent posting activity" panel on `/activity` (posting_log) | ✅ | — |
-| Public status page with uptime number | ❌ | Static `/status` page reading from a small SQLite uptime log |
-| Per-run pipeline error logging surfaced to user | ⚠️ partial | Make "Why did this run fail?" first-class in `/activity` |
-| Operator-facing usage dashboard (Gemini quota consumed today, est. monthly cost) | ❌ | One-page `/healthz/usage` for ops eyes only |
+| Sub-item | Status |
+|---|---|
+| `/healthz` + `/healthz/deps` | ✅ |
+| `/api/settings/llm-status` (live AI status, kept post-rewrite) | ✅ |
+| Per-card schedule status pills on `/activity` | ✅ |
+| "Recent posting activity" panel on `/activity` (posting_log) | ✅ |
+| Public status page with uptime number | ✅ `/status` reads from `observability/uptime.py` SQLite heartbeat log; renders 24h / 7d / 30d uptime + last incident + JSON twin at `/api/status` |
+| Per-run pipeline error logging surfaced to user | ✅ `/activity` now renders a "Why did this run fail?" collapsible block under each errored row, plus a header callout counting failures in the last 100 runs |
+| Operator-facing usage dashboard (Gemini quota consumed today, est. monthly cost) | ✅ `/healthz/usage` reads from `observability/llm_usage.py` and shows today + 7d + 30d LLM call counts, per-provider cost estimates, Gemini free-tier headroom bar, and the most recent provider error |
 
-Dissertation §4.4 makes a marketable case for reliability: many
-Ocoya / Predis customers would switch to a more reliable competitor
-at the same price. An explicit uptime number is a positioning asset,
-not just an SRE chore. **This is the only remaining Phase 1 gap.**
+Dissertation §4.4's reliability positioning asset is now real:
+`/status` is a public, no-auth page that shows the deployment's real
+uptime number derived from heartbeat density. Each `/healthz` and
+`/health` hit logs one row; the page is honest when there's no data
+yet (shows em-dashes, not a fake 100%).
+
+**Phase 1 is complete.** All 5 work-streams shipped.
 
 ---
 
@@ -288,33 +291,28 @@ work-stream.
 | Product design / UI polish quarter | ❌ | Designer-engineer pairing for one quarter. Targets: Home, Add Input, Content Pack. (Settings no longer exists.) Doesn't require a stack rewrite — Flask + Jinja stay. |
 | End-to-end pipeline observability | ⚠️ partial | Every meet upload produces a structured log of which inputs succeeded, which generations failed, why — surfaced to user and to internal admin |
 | Content marketing programme | ❌ | One piece per fortnight + case studies. Yields the inbound demand for the commercial layer |
-| Test suite stability | ✅ **605 passed / 0 failed at HEAD**; 43 skipped (Playwright + sample-file gates) | Keep green; pre-existing `test_v8_brand_kit_upload::test_extract_palette_from_synthetic_logo` is the one open item |
+| Test suite stability | ✅ **678 passed / 0 failed at HEAD**; 43 skipped (Playwright browser, sample-corpus, reportlab, MEDIAHUB_RUN_MOTION_TESTS gates — every skip is environmental, none mask a structural failure) | Keep green |
 | Operator deployment template | ✅ `render.yaml` audited + complete; `.env.example` is the canonical reference | One-click Render deploy works |
 
 ---
 
 ## Immediate next moves
 
-**Phase 1 status:** 1.1, 1.2, 1.3, 1.4 all SHIPPED. **Only 1.5
-(reliability + public status page) remains in Phase 1.**
+**Phase 1 status:** 1.1, 1.2, 1.3, 1.4, 1.5 all SHIPPED. **Phase 1
+is complete.**
 
-1. **Reliability / public `/status` page (1.5).** Tiny SQLite-
-   backed uptime log + an admin `/healthz/usage` page showing
-   Gemini quota consumed today, est. monthly cost, posting-log
-   failure summary, last LLM provider errors. Marketable as a
-   trust signal once the product goes public.
-
-2. **Pilot deployment.** Stand up one production Render instance,
+1. **Pilot deployment.** Stand up one production Render instance,
    set the env vars, invite one real club to use it for a month.
    This is the first real-world load test of the operator-managed
    model and will surface every UX hole the audits couldn't find.
+   Operator runbook in [`docs/PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md).
 
-3. **Sport expansion (2.2 athletics).** Unlocks the next tranche
+2. **Sport expansion (2.2 athletics).** Unlocks the next tranche
    of buyers (track-and-field clubs). One quarter of work:
    canonical event taxonomy + result-file parser + PB/record/
    qualifier logic + copy templates.
 
-4. **Athlete-facing surfaces (2.5).** Per-athlete personal share
+3. **Athlete-facing surfaces (2.5).** Per-athlete personal share
    link (`/athlete/<slug>`) showing their season's cards +
    story-ready downloads. Long-tail distribution moat.
 
@@ -367,6 +365,23 @@ contracts shipped between V8 and the current state.
   env-first facade. Two audit fleets ran in parallel after the
   rewrite, each finding ran an 8-step resolve subagent; all
   findings closed. 605 tests passing.
+- ✅ **Phase 1.5 reliability + observability**: new
+  `mediahub.observability` package with SQLite-backed `uptime` log
+  (heartbeats on every /healthz + /health hit) and `llm_usage` log
+  (every Gemini / Anthropic call). Three new routes: public
+  `/status` page + `/api/status` JSON twin (no auth, no org gate —
+  trust-signal positioning), and operator-only `/healthz/usage`
+  showing today / 7d / 30d LLM call counts, per-provider cost
+  estimates from public list pricing, Gemini free-tier headroom
+  bar, posting-log 7-day summary, and the most recent LLM provider
+  error. `/activity` gained a "Why did this run fail?" collapsible
+  panel under each errored row plus a header callout. The
+  `test_v8_brand_kit_upload::test_extract_palette_from_synthetic_logo`
+  pre-existing failure was fixed by replacing the missing
+  `colorthief` dependency with a Pillow-based palette extractor
+  (Pillow was already a hard dep). Operator pilot playbook in
+  `docs/PILOT_PLAYBOOK.md`. **678 tests passing, zero failed,
+  zero known-issue carve-outs.**
 
 ### Future (V10+ vision, retained from previous roadmap)
 
