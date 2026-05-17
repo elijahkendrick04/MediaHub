@@ -114,7 +114,7 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     The model gets a natural-language description of the swim (no JSON
     blob) plus a `research_web` tool it can call on its own to verify
     elite recognition. Honours the user's provider preference
-    (Claude / ChatGPT / Gemini); empty string when none is configured.
+    (Claude / Gemini); empty string when none is configured.
     """
     try:
         from mediahub.ai_core import (
@@ -379,8 +379,8 @@ def _build_source_lines_from_evidence(achievement: dict) -> list[dict]:
 def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> dict:
     """Build the "Why this card?" explanation dict for a ranked-achievement.
 
-    Headline + bullets are written by the active LLM (Claude / ChatGPT
-    / Gemini) using a `submit_explanation` tool — no template strings,
+    Headline + bullets are written by the active LLM (Claude /
+    Gemini) using a `submit_explanation` tool — no template strings,
     no hardcoded type-phrase dictionary. Source lines remain verbatim
     quotes from evidence (no LLM reasoning involved). Performance
     context is the LLM's level-context sentence.
@@ -534,7 +534,8 @@ def _render_why_this_card(
     # AI-unavailable callout. When the explanation couldn't be generated
     # (no provider configured, rate-limit on every provider, etc.) the
     # explainer attaches an `ai_error`. We render an honest red callout
-    # with a link to /settings instead of inventing a fake explanation.
+    # pointing the user at the administrator (AI keys are env-var
+    # configured at deploy time) instead of inventing a fake explanation.
     ai_error = (exp.get("ai_error") or "").strip()
     ai_error_block = ""
     if ai_error:
@@ -914,8 +915,8 @@ def _schedule_modal_html() -> str:
 
     The modal is populated by mhScheduleOpen() with channel checkboxes
     fetched from /api/buffer/channels. When the token is missing the
-    fetch returns 401 and the open-handler shows "Connect Buffer in
-    Settings" instead of opening the dialog.
+    fetch returns 401 and the open-handler shows an alert directing the
+    user to contact their administrator, then closes the dialog.
     """
     return """
 <div id="mh-sched-modal" class="no-print"
@@ -971,8 +972,11 @@ def _schedule_modal_html() -> str:
 def _schedule_modal_js() -> str:
     """Return the JS that drives the Buffer schedule modal.
 
-    Pulls channels from /api/buffer/channels (401 &rarr; redirect to /settings),
-    POSTs to /api/runs/<id>/card/<cid>/schedule, and preserves the user's
+    Pulls channels from /api/buffer/channels (401 or not-connected
+    surfaces a "contact administrator" alert and closes the modal —
+    Buffer credentials are env-var configured at deploy time, no
+    in-app redirect to a settings page exists), POSTs to
+    /api/runs/<id>/card/<cid>/schedule, and preserves the user's
     edited caption when Buffer returns an error.
     """
     return """
@@ -1036,9 +1040,9 @@ def _schedule_modal_js() -> str:
       return r.json().then(function(j){ return {status:r.status, body:j}; });
     }).then(function(o){
       if (o.status === 401 || !o.body.connected) {
-        var settings = (o.body && o.body.settings_url) || (API_BASE + '/settings');
-        alert((o.body && o.body.message) || 'Connect Buffer in Settings first.');
-        window.location.href = settings;
+        alert((o.body && o.body.message) || 'Buffer is not configured. Contact your administrator to enable Buffer scheduling.');
+        var modalEl = document.getElementById('mh-sched-modal');
+        if (modalEl) modalEl.style.display = 'none';
         return;
       }
       if (o.status >= 400) {
@@ -2214,8 +2218,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       var caption = (o.body && o.body.caption) || '';
       if (o.body && o.body.error === 'no_key') {
         panel.innerHTML = '<strong style="color:#f59e0b">AI is in heuristic mode.</strong> '
-          + '<a href="' + ((o.body && o.body.settings_url) || '/settings') + '" style="color:#22D3EE">Add an API key</a>'
-          + ' to use this feature.';
+          + '<span>Contact your administrator to enable AI.</span>';
         return;
       }
       if (caption) {
@@ -2416,8 +2419,8 @@ def create_app() -> Flask:
         #   1. The organisation banner (morphs between "set up" and
         #      "edit" depending on whether a ready profile is pinned).
         #   2. The "how it works" explainer.
-        # Everything else (Create, Add Input, Activity, Settings, etc.)
-        # lives in the top nav.
+        # Everything else (Create, Add Input, Activity, etc.) lives
+        # in the top nav.
         prof = _active_profile()
         is_setup = bool(prof and prof.is_ready())
         org_name = (prof.display_name if prof else "")
@@ -2444,7 +2447,7 @@ def create_app() -> Flask:
                 '<div style="flex:1;min-width:240px">'
                 '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation first</h2>'
                 '<p style="margin:0">MediaHub needs to know who you are before it can write in your voice. '
-                'Paste your website or social links &mdash; the AI does the rest.</p>'
+                'Paste your website or social links &mdash; MediaHub reads each one and learns your brand voice.</p>'
                 '</div>'
                 f'<a class="btn" href="{url_for("organisation_setup")}">Set up organisation &rarr;</a>'
                 '</div>'
@@ -4025,14 +4028,12 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
       var fallbackNote = '';
-      // No-key or LLM unavailable state &mdash; prompt to add a key.
+      // No-key or LLM unavailable state &mdash; AI features disabled by the operator.
       if (j.live === false) {{
-        var settingsHref = j.settings_url || ((window._API_BASE || '') + '/settings');
         if (captionDiv) {{
           captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
-            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions need an API key</div>'
-            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Add a Gemini API key (free at aistudio.google.com) or Anthropic key in Settings.') + '</div>'
-            + '<div style="margin-top:8px"><a href="' + settingsHref + '" style="color:var(--accent);font-size:11px;text-decoration:underline">Open Settings &rarr;</a></div>'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions are unavailable</div>'
+            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Contact your administrator to enable AI.') + '</div>'
             + '</div>';
         }}
         document.querySelectorAll('.ai-status-dot').forEach(function(d){{ d.style.background='#ff5d6c'; }});
@@ -4678,7 +4679,6 @@ function addGraphicToPack(btn, visualId) {{
                         "AI captions are unavailable on this deployment. "
                         "Contact your administrator to enable them."
                     ),
-                    "settings_url": url_for("settings_page"),
                     "explanation": explanation,
                 }), 200
             try:
@@ -4735,7 +4735,6 @@ function addGraphicToPack(btn, visualId) {{
                         f"AI provider error: {e}. "
                         "Add a Gemini API key (free) or Anthropic key in Settings."
                     ),
-                    "settings_url": url_for("settings_page"),
                     "explanation": explanation,
                 }), 200
         else:
@@ -5269,7 +5268,8 @@ Relay team broke club record"></textarea>
     def healthz_deps():
         """Report whether image / motion rendering dependencies are available.
 
-        Surfaced as a small status block on /settings so users can tell at a
+        Exposed at /healthz/deps (and read by /api/settings/llm-status
+        for the captions-tab status dot) so operators can tell at a
         glance whether "Create graphic" and "Generate motion" buttons will
         succeed in the current deployment. Silent failures of these in
         production were the root of "images and videos aren't generating".
@@ -5366,8 +5366,8 @@ Relay team broke club record"></textarea>
     def api_buffer_channels():
         """List the user's connected Buffer channels.
 
-        Returns 401 when no token is configured so the UI can show
-        "Connect Buffer in Settings" instead of opening the modal.
+        Returns 401 when no token is configured so the UI can show an
+        administrator-facing message instead of opening the modal.
         """
         from mediahub.web.secrets_store import get_buffer_access_token
         from mediahub.publishing.buffer import (
@@ -5381,7 +5381,6 @@ Relay team broke club record"></textarea>
                 "channels": [],
                 "error": "no_token",
                 "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
-                "settings_url": url_for("settings_page"),
             }), 401
         try:
             channels = _buf_list(token)
@@ -5391,7 +5390,6 @@ Relay team broke club record"></textarea>
                 "channels": [],
                 "error": "auth",
                 "message": str(exc),
-                "settings_url": url_for("settings_page"),
             }), 401
         except BufferAPIError as exc:
             return jsonify({
@@ -5497,7 +5495,6 @@ Relay team broke club record"></textarea>
                 "ok": False,
                 "error": "no_token",
                 "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
-                "settings_url": url_for("settings_page"),
                 "caption": caption,
             }), 401
 
@@ -7786,7 +7783,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px">
   <button type="submit" class="btn">Build my brand &rarr;</button>
   <span class="muted" style="font-size:12px">
-    Takes 10&ndash;30 seconds. The AI does the reading.
+    Takes 10&ndash;30 seconds. MediaHub analyses each link to learn your tone and style.
   </span>
 </div>
 </form>
@@ -9129,7 +9126,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 _add_input_url = url_for('add_input_page')
                 empty_body = f"""
 <h1>Media library</h1>
-<p class="dim">Store reusable photos for your organisation so the AI can pull them into content cards.</p>
+<p class="dim">Store reusable photos for your organisation so they can be pulled into branded content cards.</p>
 <div class="card" style="text-align:center;padding:48px 32px">
   <div style="font-size:48px;margin-bottom:16px">&#128247;</div>
   <h2 style="margin-bottom:8px">No organisation set up yet</h2>
@@ -9504,11 +9501,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # ---- 2. Generate the sponsor-acknowledging caption ----
         caption_text = ""
         caption_error = ""
+        caption_unavailable = False
         try:
             from mediahub.brand.sponsor import generate_sponsor_caption
             caption_text = generate_sponsor_caption(ach, profile=profile)
         except Exception as e:
-            caption_error = str(e)
+            # Detect "no LLM provider configured" by class name rather than
+            # importing ClaudeUnavailableError directly — keeps this surface
+            # resilient if the exception module moves.
+            if type(e).__name__ == "ClaudeUnavailableError":
+                caption_unavailable = True
+            else:
+                caption_error = str(e)
 
         # ---- 3. Render the page ----
         _pack_url = url_for("content_pack_grouped", run_id=run_id)
@@ -9518,20 +9522,32 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
             '</div>'
         )
-        caption_block = (
-            f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
-            f'padding:12px;border:1px solid var(--border);border-radius:8px;'
-            f'background:var(--bg);color:var(--ink);font-family:inherit">'
-            f'{_h(caption_text)}</textarea>'
-            f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
-            f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
-            f'this.textContent=\'Copied&hairsp;✓\'">Copy caption</button>'
-        ) if caption_text else (
-            f'<div class="empty" style="text-align:left;padding:14px">'
-            f'<strong style="color:var(--warn)">Caption not available.</strong>'
-            f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
-            '</div>'
-        )
+        if caption_text:
+            caption_block = (
+                f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
+                f'padding:12px;border:1px solid var(--border);border-radius:8px;'
+                f'background:var(--bg);color:var(--ink);font-family:inherit">'
+                f'{_h(caption_text)}</textarea>'
+                f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
+                f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
+                f'this.textContent=\'Copied&hairsp;✓\'">Copy caption</button>'
+            )
+        elif caption_unavailable:
+            caption_block = (
+                '<div class="empty" style="text-align:left;padding:14px">'
+                '<strong>AI captions are unavailable on this deployment.</strong>'
+                '<br><span class="muted" style="font-size:13px">'
+                'The sponsor-branded visual is still ready to download. '
+                'Contact your administrator to enable AI captions.'
+                '</span></div>'
+            )
+        else:
+            caption_block = (
+                f'<div class="empty" style="text-align:left;padding:14px">'
+                f'<strong style="color:var(--warn)">Caption not available.</strong>'
+                f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
+                '</div>'
+            )
         swimmer = _h(ach.get("swimmer_name") or "")
         event = _h(ach.get("event") or "")
         body = f"""

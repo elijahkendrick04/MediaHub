@@ -3,8 +3,8 @@ ai_caption.py — Generate captions via the multi-provider ai_core.
 
 User direction: replace JSON-shaped prompts and hardcoded fallback
 templates with natural-language prompts the model can reason about.
-Captions are written by Claude / ChatGPT / Gemini (whichever the user
-has selected). There is NO heuristic fallback — if no provider is
+Captions are written by Claude / Gemini (whichever the operator has
+configured via env vars). There is NO heuristic fallback — if no provider is
 configured the caller gets ``ClaudeUnavailableError`` and the UI
 surfaces a clear "configure a provider" message instead of pretending
 to generate a fake caption.
@@ -44,7 +44,7 @@ class ClaudeUnavailableError(RuntimeError):
 
 def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str:
     """Thin wrapper kept for tests + back-compat. Delegates to ai_core
-    so the active provider (Claude / OpenAI / Gemini) actually runs."""
+    so the active provider (Claude / Gemini) actually runs."""
     from mediahub.ai_core import (
         ask, ProviderNotConfigured, ProviderError,
     )

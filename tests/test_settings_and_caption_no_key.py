@@ -127,6 +127,8 @@ def test_caption_endpoint_no_key_returns_live_false(app, tmp_path, monkeypatch):
     # The new copy steers the user to their administrator, NOT a settings page.
     assert "administrator" in j["message"].lower()
     assert "Settings" not in j["message"]
+    # The orphaned settings_url field must not be emitted — /settings is gone.
+    assert "settings_url" not in j
 
 
 # ---------------------------------------------------------------------------
@@ -158,3 +160,67 @@ def test_no_env_no_provider(app):
     assert _llm._has_gemini_key() is False
     assert _llm.is_available() is False
     assert _llm.active_provider() == "heuristic"
+
+
+# ---------------------------------------------------------------------------
+# Rendered-page invariant — no clickable /settings link anywhere in the
+# inline JS shell. Pins the fix for the three stale "Open Settings" /
+# "Add an API key" / Buffer-redirect JS sites that used to surface a
+# dead /settings link in the no-key / no-buffer flows.
+# ---------------------------------------------------------------------------
+
+def test_rendered_page_has_no_clickable_settings_link(app):
+    """After the settings-page rewrite, every JS message in the shell
+    must steer the user to their administrator. The page must NOT render
+    a clickable anchor or `window.location.href = '/settings'`-style
+    redirect to /settings."""
+    import re
+    c = app.test_client()
+    r = c.get("/", follow_redirects=True)
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    # No <a href="/settings"> anchor (the dead "Open Settings" pattern).
+    assert not re.search(r"""<a[^>]+href\s*=\s*["']/settings["']""", html)
+    # No window.location redirect to /settings (the schedule-modal fallback).
+    assert not re.search(r"""window\.location\.href\s*=\s*['"]/settings['"]""", html)
+    assert "API_BASE + '/settings'" not in html
+    # No JSON-consumer fallback that hardcoded '/settings' as a link.
+    assert "settings_url || " not in html
+    assert "j.settings_url" not in html
+    # The replacement copy is present in the shell JS.
+    assert "Contact your administrator" in html
+
+
+def test_no_api_key_message_does_not_steer_to_settings_page(app, monkeypatch):
+    """When the caption endpoint returns no_key, the JSON payload must
+    not contain a settings_url or any 'in Settings' wording. The user-
+    visible affordance is admin contact, not a settings page."""
+    from mediahub.web import web as _web
+    fake_run = {
+        "profile_display": "Test Club",
+        "meet": {"name": "Test Meet"},
+        "recognition_report": {
+            "ranked_achievements": [{
+                "achievement": {
+                    "swim_id": "abc123",
+                    "swimmer_name": "Jane Doe",
+                    "event": "100 Free",
+                    "time": "1:02.34",
+                    "pb": True,
+                    "place": 1,
+                    "type": "PB",
+                    "headline": "First place",
+                },
+            }],
+        },
+    }
+    monkeypatch.setattr(_web, "_load_run", lambda rid: fake_run)
+    c = app.test_client()
+    r = c.post("/api/runs/test_run/swim/abc123/caption?tone=ai")
+    j = r.get_json()
+    assert j["error"] == "no_key"
+    # No settings_url field — /settings is gone.
+    assert "settings_url" not in j
+    # No "in Settings" stale wording in the message.
+    assert "in Settings" not in j["message"]
+    assert "settings page" not in j["message"].lower()

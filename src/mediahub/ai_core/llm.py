@@ -1,4 +1,4 @@
-"""Provider-agnostic Claude/Gemini/ChatGPT interface for ai_core.
+"""Provider-agnostic Claude (Anthropic) + Gemini interface for ai_core.
 
 Public API:
 
@@ -82,7 +82,8 @@ def _key_for(provider: str) -> Optional[str]:
 
 
 def list_provider_status() -> list[dict]:
-    """For /settings: which providers are configured + which is active."""
+    """For /api/settings/llm-status (read-only operator status endpoint):
+    which providers are configured + which is active."""
     active = active_provider()
     out = []
     for p in _PROVIDERS:

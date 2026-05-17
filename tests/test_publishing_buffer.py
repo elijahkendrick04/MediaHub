@@ -68,11 +68,21 @@ def _patch_requests(monkeypatch, *, get=None, post=None):
 def test_list_channels_missing_token_raises_auth_error():
     with pytest.raises(BufferAuthError) as exc:
         list_channels("")
-    assert "Connect Buffer" in str(exc.value)
+    assert "administrator" in str(exc.value)
     with pytest.raises(BufferAuthError):
         list_channels(None)  # type: ignore[arg-type]
     with pytest.raises(BufferAuthError):
         list_channels("   ")
+
+
+def test_missing_token_error_points_to_administrator_not_settings():
+    """Pin the post-rewrite invariant: the no-token error must direct users
+    to an administrator, not to a deleted Settings page."""
+    with pytest.raises(BufferAuthError) as exc:
+        list_channels("")
+    message = str(exc.value)
+    assert "administrator" in message
+    assert "Settings" not in message
 
 
 def test_list_channels_success(monkeypatch):
@@ -246,7 +256,8 @@ def test_api_buffer_channels_no_token_returns_401(app):
     assert j["connected"] is False
     assert j["error"] == "no_token"
     assert "administrator" in j["message"].lower()
-    # settings_url still points at /settings but that route now redirects to home
+    # settings_url is no longer emitted — /settings route only redirects to home
+    assert "settings_url" not in j
 
 
 def test_api_buffer_channels_returns_channels(app, monkeypatch):
@@ -284,6 +295,8 @@ def test_api_buffer_channels_auth_error_returns_401(app, monkeypatch):
     j = r.get_json()
     assert j["connected"] is False
     assert "rejected" in j["message"].lower()
+    # settings_url is no longer emitted — /settings route only redirects to home
+    assert "settings_url" not in j
 
 
 def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
@@ -297,6 +310,8 @@ def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
     assert j["ok"] is False
     assert j["error"] == "no_token"
     assert j["caption"] == "My edited caption"
+    # settings_url is no longer emitted — /settings route only redirects to home
+    assert "settings_url" not in j
 
 
 def test_api_schedule_rejects_empty_channels(app, monkeypatch):

@@ -262,3 +262,44 @@ class TestPackPageSurfacesSponsorButton:
                 body = resp.get_data(as_text=True)
                 assert "/runs/run-3/card/swim-1/sponsor-variant" in body
                 assert "Sponsor variant" in body
+
+
+# ---------------------------------------------------------------------------
+# 5. Friendly fallback when the LLM is unavailable
+# ---------------------------------------------------------------------------
+
+class TestSponsorVariantFriendlyLLMFallback:
+    """When `generate_sponsor_caption` raises ClaudeUnavailableError because
+    no LLM provider is configured, the page must NOT dump the raw exception
+    class name to the user. It must render a friendly inline message and
+    keep the sponsor-branded visual block intact (the visual is rendered by
+    a separate pipeline that doesn't depend on the LLM)."""
+
+    def test_friendly_message_when_llm_unavailable(self, gated_app, monkeypatch):
+        app, tmp = gated_app
+        _seed_run(tmp, "run-llm-off", "city-aquatics", sponsor="Acme Sports")
+
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        def _raise(*_a, **_kw):
+            raise ClaudeUnavailableError("no provider configured")
+
+        # Patch the symbol the route imports at call-time, inside the
+        # sponsor module.
+        monkeypatch.setattr(
+            "mediahub.brand.sponsor.generate_sponsor_caption", _raise,
+        )
+
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "city-aquatics"})
+            resp = c.get("/runs/run-llm-off/card/swim-1/sponsor-variant")
+            assert resp.status_code == 200
+            body = resp.get_data(as_text=True)
+            # Friendly message present (one of these tokens must appear)
+            lower = body.lower()
+            assert ("administrator" in lower) or ("unavailable" in lower)
+            # Raw exception class name MUST NOT leak to the user
+            assert "ClaudeUnavailableError" not in body
+            # The visual block (rendered by a separate pipeline) is still
+            # there — the sponsor-variant page heading is rendered.
+            assert "Sponsor variant" in body
