@@ -88,19 +88,19 @@ implemented and tested (472 tests passing).
 Dissertation §6.1.3 recommends Buffer integration first (faster moat,
 weaker but adequate); native publish in Phase 2. Following that.
 
-### 1.4 Commercial layer · ❌ **NOT STARTED**
+### 1.4 Visible intelligence · ⚠️ **PARTIAL**
 
 | Sub-item | Status | Next step |
 |---|---|---|
-| Public `/pricing` page | ❌ | Three tiers: free (1 meet/mo), small club £30-50/mo, governing-body custom |
-| Self-serve signup (email + password) | ❌ | Use existing Flask session; persist to `users.json` or new SQLite table |
-| Stripe billing | ❌ | Stripe Checkout for the small-club tier; webhook to flip `ClubProfile.tier` |
-| Free-tier quota enforcement | ❌ | Count runs per `profile_id` per calendar month; soft-block at quota |
-| Sales-led onboarding flow for enterprise tier | ❌ | "Contact sales" CTA + intake form; manual provisioning for the first 10 customers |
+| `explain_achievement()` produces `{headline, bullets, source_lines}` | ✅ `recognition/explainer.py` (now profile-aware via derived type phrases) | — |
+| "Why this card?" UI present on cards | ⚠️ `_render_why_this_card` exists, surfaced inconsistently | **Make it default-visible on every card across review, pack, content-pack-grouped** |
+| One-click insert "why this matters" into the caption | ❌ | Add a "use this in caption" button in the explainer UI that re-prompts the LLM with the explanation as required content |
+| Confidence-band visualisation in pack list | ⚠️ tag exists | Promote into a sortable, filterable column |
 
-The dissertation explicitly says (§6.1.4): ship this **concurrent**
-with the rest of Phase 1, not at the end. Public pricing pressure
-during product iteration is healthier than a big-bang launch.
+Promoted from Phase 2 to Phase 1 — surfacing the intelligence layer
+is the single biggest *marketing* lever the product has and no
+horizontal player can copy it. It's a higher-priority Parity item
+than commercial bringup, which moves to Phase 2 (see 2.1).
 
 ### 1.5 Reliability + observability · ⚠️ **PARTIAL**
 
@@ -124,18 +124,24 @@ not just an SRE chore.
 **Goal:** convert MediaHub's vertical advantages into visible,
 marketable product surfaces. Win one geography + one governing body.
 
-### 2.1 Visible intelligence · ⚠️ **PARTIAL**
+### 2.1 Commercial layer · ❌ **DEFERRED to pre-launch**
 
 | Sub-item | Status | Next step |
 |---|---|---|
-| `explain_achievement()` produces `{headline, bullets, source_lines}` | ✅ `recognition/explainer.py` (now profile-aware via derived type phrases) | — |
-| "Why this card?" UI present on cards | ⚠️ `_render_why_this_card` exists, surfaced inconsistently | **Make it default-visible on every card across review, pack, content-pack-grouped** |
-| One-click insert "why this matters" into the caption | ❌ | Add a "use this in caption" button in the explainer UI that re-prompts the LLM with the explanation as required content |
-| Confidence-band visualisation in pack list | ⚠️ tag exists | Promote into a sortable, filterable column |
+| Public `/pricing` page | ❌ | Three tiers: free (1 meet/mo), small club £30-50/mo, governing-body custom |
+| Self-serve signup (email + password) | ❌ | Use existing Flask session; persist to `users.json` or new SQLite table |
+| Stripe billing | ❌ | Stripe Checkout for the small-club tier; webhook to flip `ClubProfile.tier` |
+| Free-tier quota enforcement | ❌ | Count runs per `profile_id` per calendar month; soft-block at quota |
+| Sales-led onboarding flow for enterprise tier | ❌ | "Contact sales" CTA + intake form; manual provisioning for the first 10 customers |
 
-This is the single biggest *marketing* lever in Phase 2 — the
-dissertation argues every horizontal player lacks the data
-grounding to produce this UI honestly.
+**Deliberately deferred.** Payment options only go in once the app
+is ready to go live to customers — that's one of the last things
+shipped before launch. The dissertation's §6.1.4 argument for
+shipping commercial concurrent with Phase 1 is overruled here:
+shipping a paywall before the product is ready for paying customers
+is a bigger UX hazard than the lack of pricing pressure during
+iteration. Schedule: completes Phase 2 immediately before public
+launch.
 
 ### 2.2 Sport expansion · ❌ **NOT STARTED**
 
@@ -243,25 +249,33 @@ work-stream.
 Out of the phase-1 gaps above, these have the highest leverage and
 fewest dependencies. They should be the next 4 PRs.
 
-1. **Publishing layer end-to-end via Buffer (1.3).** Settings panel
+1. **Output surface — newsletter export + motion-as-export (1.2).**
+   Wrap the existing Turn-Into `parent_newsletter` builder with a
+   first-class `/api/runs/<id>/newsletter` endpoint (HTML email +
+   plaintext). Surface the existing motion / reel endpoints as
+   pack-page download buttons rather than API-only.
+2. **Publishing layer end-to-end via Buffer (1.3).** Settings panel
    to connect a Buffer account → store token → list channels →
-   schedule a card → track success/failure. This closes the
-   single most visible functional gap with horizontal players.
-2. **Commercial layer minimum (1.4).** `/pricing` page + Stripe
-   Checkout for the small-club tier + free-tier quota counter.
-   No marketing site rebuild needed; one new route plus a webhook.
-3. **Make "Why this card?" default-visible everywhere (2.1).**
+   schedule a card → track success/failure. Closes the single most
+   visible functional gap with horizontal players.
+3. **Visible intelligence — "Why this card?" default-visible (1.4).**
    The explainer is already in code; this is a UI consistency
    pass — replace conditional rendering with always-show across
-   review, pack, pack-grouped. Single biggest *marketing* win
-   because no horizontal player can match it.
-4. **Newsletter as a first-class export (1.2).** Wrap the existing
-   Turn-Into `parent_newsletter` builder with `/api/runs/<id>/
-   newsletter` that returns standalone HTML email + plaintext.
+   review, pack, pack-grouped. Biggest *marketing* win because no
+   horizontal player can match it.
+4. **Sponsor-templated content variants (1.2 continued).** New
+   artefact type: sponsor-branded result card + sponsor-thanks
+   caption variant for each top-ranked card, using `sponsor_name`
+   and the captured palette.
 
 After those four, the priority is **sport expansion (2.2 athletics)**
-because it unlocks the next tranche of buyers, and **athlete-facing
-surfaces (2.5)** because it's a long-tail distribution moat.
+because it unlocks the next tranche of buyers, **athlete-facing
+surfaces (2.5)** because it's a long-tail distribution moat, and
+**reliability / status page (1.5)** because the dissertation makes
+a marketable case for explicit uptime numbers.
+
+Commercial layer (now 2.1) is deliberately scheduled last — only
+when the app is ready to go live to customers, not before.
 
 ---
 
