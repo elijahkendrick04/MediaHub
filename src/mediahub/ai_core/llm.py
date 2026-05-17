@@ -510,12 +510,57 @@ def _legacy_backstop(system: str, user: str, max_tokens: int) -> Optional[str]:
     return None
 
 
+def _fallback_chain(primary: Optional[str]) -> list[str]:
+    """Return the provider order to try, starting with `primary` (if
+    configured) then the remaining configured providers. Lets a rate-
+    limited Gemini call fall through to OpenAI / Claude instead of
+    erroring at the user."""
+    chain: list[str] = []
+    if primary and _key_for(primary):
+        chain.append(primary)
+    for p in _PROVIDERS:
+        if p != primary and _key_for(p):
+            chain.append(p)
+    return chain
+
+
+def _is_transient(err_msg: str) -> bool:
+    """Heuristic: should we retry on the next configured provider?
+    Auth errors, rate limits, and HTTP 5xx warrant trying another
+    provider; everything else is the model returning legit nonsense
+    and won't fix on a retry."""
+    s = err_msg.lower()
+    return (
+        "429" in s or "rate" in s
+        or "401" in s or "403" in s
+        or "auth" in s
+        or " 500" in s or "502" in s or "503" in s or "504" in s
+        or "timeout" in s or "timed out" in s
+        or "overloaded" in s
+    )
+
+
 def ask(system: str, user: str, *, max_tokens: int = 800,
         provider: Optional[str] = None) -> str:
-    """Plain-text in, plain-text out. Active provider unless overridden."""
-    p = (provider or active_provider() or "").lower()
-    if p in _DISPATCH:
-        return _DISPATCH[p][0](system, user, max_tokens)
+    """Plain-text in, plain-text out. Tries the active provider first,
+    falls through to any other configured provider on a transient
+    failure (rate limit, auth, 5xx)."""
+    primary = (provider or active_provider() or "").lower() or None
+    chain = _fallback_chain(primary) if primary else []
+    last_err: Optional[Exception] = None
+    for p in chain:
+        try:
+            return _DISPATCH[p][0](system, user, max_tokens)
+        except ProviderError as e:
+            last_err = e
+            if not _is_transient(str(e)) or p == chain[-1]:
+                raise
+            # else: try the next configured provider
+            log.warning("provider %s transient error, falling through: %s",
+                        p, str(e)[:200])
+            continue
+    if last_err is not None:
+        raise last_err
     backstop = _legacy_backstop(system, user, max_tokens)
     if backstop is not None:
         return backstop
@@ -529,14 +574,26 @@ def ask_with_tools(system: str, user: str, *, tools: list[dict],
                     on_tool_call: Callable[[str, dict], str],
                     max_tokens: int = 1200, max_rounds: int = 5,
                     provider: Optional[str] = None) -> ToolConversation:
-    """Tool-using conversation. Same call across providers — the wrapper
-    translates the Anthropic-shaped `tools` list to each provider's
-    native function-calling schema."""
-    p = (provider or active_provider() or "").lower()
-    if p not in _DISPATCH:
+    """Tool-using conversation. Same fallback semantics as ask()."""
+    primary = (provider or active_provider() or "").lower() or None
+    chain = _fallback_chain(primary) if primary else []
+    if not chain:
         raise ProviderNotConfigured(
             "No LLM provider is configured. Add a Claude, OpenAI, or "
             "Gemini key in /settings."
         )
-    return _DISPATCH[p][1](system, user, tools, on_tool_call,
-                            max_tokens, max_rounds)
+    last_err: Optional[Exception] = None
+    for p in chain:
+        try:
+            return _DISPATCH[p][1](system, user, tools, on_tool_call,
+                                    max_tokens, max_rounds)
+        except ProviderError as e:
+            last_err = e
+            if not _is_transient(str(e)) or p == chain[-1]:
+                raise
+            log.warning("provider %s transient tool error, falling through: %s",
+                        p, str(e)[:200])
+            continue
+    if last_err is not None:
+        raise last_err
+    raise ProviderError("All configured providers failed.")

@@ -2149,10 +2149,12 @@ def create_app() -> Flask:
     app.config["SECRET_KEY"] = _secret
 
     # Apply SCRIPT_NAME middleware so url_for generates prefixed URLs when
-    # running behind a reverse-proxy. In the published pplx.app environment,
-    # the backend is reached via /port/5000/... &mdash; default to that unless
-    # explicitly overridden.
-    _script_name = os.environ.get("SCRIPT_NAME", "/port/5000").rstrip("/")
+    # running behind a reverse-proxy that mounts the app at a sub-path
+    # (e.g. the pplx.app dev environment serves us under /port/5000/...).
+    # Default is empty so production deployments — including Render —
+    # generate clean root-relative URLs. Set SCRIPT_NAME=/port/5000 in
+    # dev to restore the old behaviour.
+    _script_name = os.environ.get("SCRIPT_NAME", "").rstrip("/")
     if _script_name:
         _real_wsgi = app.wsgi_app
 
@@ -6809,11 +6811,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
         regenerate_url = url_for({
-            "free_text":       "stub_free_text",
+            "free_text":       "free_text_chat_page",
             "weekend_preview": "stub_weekend_preview",
             "sponsor_post":    "stub_sponsor_post",
             "session_update":  "stub_session_update",
-        }.get(stub_type, "stub_free_text"))
+        }.get(stub_type, "free_text_chat_page"))
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
             f'<a class="btn" href="{export_url}">Export as text</a>'
@@ -6971,7 +6973,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '</svg>'
                 ),
                 "status": "live",
-                "endpoint": "stub_free_text",
+                "endpoint": "free_text_chat_page",
             },
         ]
 
