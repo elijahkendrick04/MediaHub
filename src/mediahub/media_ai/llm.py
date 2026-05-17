@@ -50,27 +50,6 @@ ALT_MODEL = "claude-3-5-sonnet-20241022"
 
 
 # ---------------------------------------------------------------------------
-# Provider error log (operator-visible via /healthz/deps if surfaced)
-# ---------------------------------------------------------------------------
-
-_LAST_PROVIDER_ERROR: dict[str, dict[str, str]] = {}
-
-
-def _record_provider_error(provider: str, reason: str, detail: str = "") -> None:
-    from datetime import datetime, timezone
-    _LAST_PROVIDER_ERROR[provider] = {
-        "when": datetime.now(timezone.utc).isoformat(),
-        "reason": str(reason)[:120],
-        "detail": str(detail)[:500],
-    }
-
-
-def last_provider_errors() -> dict[str, dict[str, str]]:
-    """Return a copy of the last-error log keyed by provider name."""
-    return {k: dict(v) for k, v in _LAST_PROVIDER_ERROR.items()}
-
-
-# ---------------------------------------------------------------------------
 # Key resolution — env-first, with one-release on-disk fallback for self-
 # hosted installs that pre-date the env-only migration. Disk fallback is
 # slated for removal in the next major.
@@ -194,7 +173,6 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
             return "".join(parts).strip() or None
         except Exception as e:
             log.warning("anthropic call failed (%s): %s", attempt_model, e)
-            _record_provider_error("anthropic-api", f"call_failed_{attempt_model}", str(e))
             continue
     return None
 
@@ -249,22 +227,17 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         )
     except Exception as e:
         log.warning("gemini transport failed: %s", e)
-        _record_provider_error("gemini-api", "transport", str(e))
         return None
     if r.status_code == 401 or r.status_code == 403:
-        _record_provider_error("gemini-api", "auth_failed", r.text[:300])
         return None
     if r.status_code == 429:
-        _record_provider_error("gemini-api", "rate_limited", r.text[:300])
         return None
     if not r.ok:
         log.warning("gemini non-ok (%s): %s", r.status_code, r.text[:300])
-        _record_provider_error("gemini-api", f"http_{r.status_code}", r.text[:300])
         return None
     try:
         data = r.json()
-    except ValueError as e:
-        _record_provider_error("gemini-api", "bad_json", str(e))
+    except ValueError:
         return None
     candidates = data.get("candidates") if isinstance(data, dict) else None
     if not candidates:
@@ -310,11 +283,9 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
     )
     try:
         r = requests.post(url, json=payload, timeout=_GEMINI_TIMEOUT)
-    except Exception as e:
-        _record_provider_error("gemini-api", "vision_transport", str(e))
+    except Exception:
         return None
     if not r.ok:
-        _record_provider_error("gemini-api", f"vision_http_{r.status_code}", r.text[:300])
         return None
     try:
         data = r.json()
@@ -386,7 +357,6 @@ def _call_anthropic_vision(image_paths: list[str], prompt: str,
         return "".join(parts).strip() or None
     except Exception as e:
         log.debug("anthropic vision failed: %s", e)
-        _record_provider_error("anthropic-api", "vision_failed", str(e))
         return None
 
 
@@ -528,7 +498,7 @@ def call_claude(system: str, user: str, model: Optional[str] = None,
 
 __all__ = [
     "generate", "generate_json", "generate_vision", "is_available",
-    "active_provider", "last_provider_errors", "call_claude",
+    "active_provider", "call_claude",
     "ClaudeUnavailableError",
     "DEFAULT_MODEL", "ALT_MODEL",
 ]

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from mediahub.media_ai import generate_vision, generate_json
+from mediahub.media_ai.llm import ClaudeUnavailableError
 
 
 _DEFAULT = {
@@ -44,7 +45,14 @@ def analyse_exemplar(image_path: str) -> dict:
         "Describe the layout shape, typography pairing, colour palette and treatment. "
         "Do NOT identify any individuals. Return ONLY the JSON object."
     )
-    raw = generate_vision([image_path], prompt, system=sys, max_tokens=800)
+    try:
+        raw = generate_vision([image_path], prompt, system=sys, max_tokens=800)
+    except ClaudeUnavailableError:
+        # No vision-capable provider configured on this deployment.
+        return dict(_DEFAULT)
+    except Exception:
+        # Vision payload / transport errors must not propagate to callers.
+        return dict(_DEFAULT)
     parsed = _try_extract_json(raw)
     if not parsed:
         return dict(_DEFAULT)

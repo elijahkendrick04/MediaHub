@@ -4468,7 +4468,7 @@ function addGraphicToPack(btn, visualId) {{
         var providerLabel = j.provider_label || 'Anthropic key';
         var title = j.live
           ? ('Live AI enabled &mdash; provider: ' + providerLabel)
-          : 'Live AI DISABLED &mdash; add Anthropic key in Settings, or use this UI inside a Claude Code session.';
+          : 'Live AI DISABLED &mdash; contact your administrator to enable AI captions.';
         dots.forEach(function(d){{
           d.style.background = color;
           var btn = d.closest('button');
@@ -4732,8 +4732,8 @@ function addGraphicToPack(btn, visualId) {{
                     "generated_at": now_iso,
                     "error": "llm_unavailable",
                     "message": (
-                        f"AI provider error: {e}. "
-                        "Add a Gemini API key (free) or Anthropic key in Settings."
+                        "AI captions are unavailable on this deployment. "
+                        "Contact your administrator to enable them."
                     ),
                     "explanation": explanation,
                 }), 200

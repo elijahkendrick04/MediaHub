@@ -29,8 +29,6 @@ from .llm import (
     ask,
     ask_with_tools,
     active_provider,
-    set_preferred_provider,
-    list_provider_status,
 )
 from .narrate import (
     narrate_achievement,
@@ -46,8 +44,6 @@ __all__ = [
     "ask",
     "ask_with_tools",
     "active_provider",
-    "set_preferred_provider",
-    "list_provider_status",
     "narrate_achievement",
     "narrate_brand",
     "narrate_meet",

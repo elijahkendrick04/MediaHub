@@ -286,7 +286,7 @@ def run_pipeline_v4(
         _llm_provider = "heuristic"
     _skip_pb_discovery = (_llm_provider == "heuristic")
     if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
-        step("Skipping PB discovery: no LLM provider configured (configure Gemini or Anthropic in Settings to enable).")
+        step("Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable).")
     if fetch_pbs and our_results and effective_filter and not _skip_pb_discovery:
         try:
             pb_snapshots = _enrich_pbs_via_discovery(

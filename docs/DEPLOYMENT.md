@@ -48,9 +48,17 @@ blueprint:
 render blueprint apply
 ```
 
-Set the secrets in Render's dashboard (`ANTHROPIC_API_KEY`,
-`REPLICATE_API_TOKEN`, `PHOTOROOM_API_KEY`). The blueprint mounts a 1 GB
-persistent disk at `/opt/render/project/src/data`.
+Set the secrets in Render's dashboard, in roughly this order of importance:
+
+- `GEMINI_API_KEY` — default LLM provider; required for caption generation.
+- `BUFFER_ACCESS_TOKEN` — required for the `/activity` scheduling surface.
+- `ANTHROPIC_API_KEY` — optional Anthropic fallback (set
+  `MEDIAHUB_LLM_PROVIDER=anthropic` to prefer it).
+- `REPLICATE_API_TOKEN` — image generation provider.
+- `PHOTOROOM_API_KEY` — cutout provider.
+
+The blueprint mounts a 1 GB persistent disk at
+`/opt/render/project/src/data`.
 
 ## Fly.io
 

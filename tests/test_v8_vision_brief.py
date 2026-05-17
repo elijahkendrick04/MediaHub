@@ -164,3 +164,38 @@ def test_returns_none_for_too_short_response(isolated_cache, fake_photo):
                 str(fake_photo), asset_id="a", brand_id="b",
             )
     assert out is None
+
+
+# ---------------------------------------------------------------------------
+# exemplar_analyser.analyse_exemplar — LLM failures must map to _DEFAULT dict,
+# never propagate up to whatever endpoint is consuming the analysis.
+# ---------------------------------------------------------------------------
+
+from mediahub.inspiration import exemplar_analyser as _exemplar_mod
+from mediahub.inspiration.exemplar_analyser import analyse_exemplar
+from mediahub.media_ai.llm import ClaudeUnavailableError
+
+
+def test_analyse_exemplar_returns_default_when_llm_unavailable(fake_photo):
+    """ClaudeUnavailableError from generate_vision must yield the _DEFAULT dict."""
+    with mock.patch.object(
+        _exemplar_mod, "generate_vision",
+        side_effect=ClaudeUnavailableError("no provider"),
+    ):
+        out = analyse_exemplar(str(fake_photo))
+    assert isinstance(out, dict)
+    # Must match the _DEFAULT shape exactly.
+    assert set(out.keys()) == set(_exemplar_mod._DEFAULT.keys())
+    assert out == _exemplar_mod._DEFAULT
+
+
+def test_analyse_exemplar_returns_default_on_generic_exception(fake_photo):
+    """Any other exception (e.g. vision payload error) also maps to _DEFAULT."""
+    with mock.patch.object(
+        _exemplar_mod, "generate_vision",
+        side_effect=RuntimeError("vision payload boom"),
+    ):
+        out = analyse_exemplar(str(fake_photo))
+    assert isinstance(out, dict)
+    assert set(out.keys()) == set(_exemplar_mod._DEFAULT.keys())
+    assert out == _exemplar_mod._DEFAULT

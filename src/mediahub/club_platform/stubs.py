@@ -532,7 +532,7 @@ def render_cards_html(
         return (
             f'<h1>{_h(title)}</h1>'
             '<div class="card"><p class="muted">No cards generated — '
-            'check Settings to make sure a provider is configured, '
+            'contact your administrator to make sure a provider is configured, '
             'and try again with a bit more detail.</p>'
             f'<p style="margin-top:12px"><a class="btn secondary" href="{_h(back_url)}">← Try again</a></p></div>'
         )

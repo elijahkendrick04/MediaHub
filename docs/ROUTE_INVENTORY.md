@@ -45,7 +45,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `review` | `GET` | `/review/<run_id>` |
 | `run_status` | `GET` | `/runs/<run_id>` |
 | `stub_session_update` | `GET` | `/session-update` |
-| `settings_page` | `GET,POST` | `/settings` |
+| `settings_page` | `GET` | `/settings` |
 | `stub_sponsor_post` | `GET` | `/sponsor-post` |
 | `spotlight_landing` | `GET` | `/spotlight` |
 | `spotlight_view` | `GET` | `/spotlight/<run_id>/<path:swimmer_key>` |
@@ -53,3 +53,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `upload` | `GET,POST` | `/upload` |
 | `upload_configure` | `GET,POST` | `/upload/configure` |
 | `stub_weekend_preview` | `GET` | `/weekend-preview` |
+
+> **Note:** `/settings` is now GET-only and redirects to home. The settings
+> page was removed in the operator-config rewrite; all configuration is now
+> environment-variable driven (see `docs/ENV_INVENTORY.md`).

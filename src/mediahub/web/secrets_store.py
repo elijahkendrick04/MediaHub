@@ -12,11 +12,18 @@ of the codebase imports, so callers don't break. Its job is now:
     keys overnight. A startup-time warning is logged when the disk
     fallback fires, telling the operator to migrate to env vars.
 
-  • `set_*` / `set_secret(key, value)` and `save_secrets(...)` are now
-    no-ops that log a warning. They exist so that any stragglers in
-    the codebase that still call them don't error out — but they
-    never persist anything new. The settings page that used to call
-    them is gone.
+  • `set_*` / `set_secret(key, value)` are now no-ops that log a
+    warning. They exist so that any stragglers in the codebase that
+    still call them don't error out — but they never persist anything
+    new. The settings page that used to call them is gone.
+
+  • `save_secrets(...)` was the disk-writing back-compat shim and is
+    DEPRECATED — kept only as a no-op stub to be deleted in the next
+    release once we've confirmed no callers remain.
+
+  • `_load_secrets_legacy()` (formerly `load_secrets`) is a private
+    helper used internally by `get_secret` for the one-release disk-
+    fallback path. Public callers should use `get_secret(key)`.
 
 The on-disk fallback will be deleted in the next major release.
 """
@@ -69,8 +76,14 @@ _SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
 }
 
 
-def load_secrets() -> dict:
-    """Return the on-disk secrets dict (one-release fallback). May be empty."""
+def _load_secrets_legacy() -> dict:
+    """Return the on-disk secrets dict (one-release fallback). May be empty.
+
+    Private helper for `get_secret`'s disk-fallback path. Renamed from
+    the public `load_secrets` name as part of the dead-code cleanup —
+    there are no external callers, and the next major release will
+    remove the disk-fallback entirely along with this function.
+    """
     if not _SECRETS_PATH.exists():
         return {}
     try:
@@ -82,16 +95,20 @@ def load_secrets() -> dict:
 
 
 def save_secrets(secrets: dict) -> None:
-    """NO-OP. Operator credentials are env-var-only now.
+    """DEPRECATED no-op back-compat shim — scheduled for removal.
 
-    Kept as a no-op so any legacy caller doesn't error. Logs a warning so
-    the operator sees that an in-app save was attempted but discarded.
+    Operator credentials are env-var-only now. This function previously
+    persisted the settings-page form submissions to `secrets.json`; the
+    settings page is gone, so this is a no-op. Logs a warning so any
+    surviving caller surfaces in operator logs and can be removed.
+    Will be deleted in the next major release.
     """
     log.warning(
-        "secrets_store.save_secrets() is a no-op — operator credentials "
-        "are env-var-only since the settings-page removal. The attempted "
-        "save has been discarded. Configure credentials via env vars at "
-        "deploy time."
+        "secrets_store.save_secrets() is a deprecated no-op — operator "
+        "credentials are env-var-only since the settings-page removal. "
+        "The attempted save has been discarded. Configure credentials "
+        "via env vars at deploy time. This shim will be removed in the "
+        "next major release."
     )
 
 
@@ -116,7 +133,7 @@ def get_secret(key: str) -> Optional[str]:
         if v and v.strip():
             return v.strip()
     # Disk fallback — only fires when env is unset. One-release deprecation.
-    val = load_secrets().get(key)
+    val = _load_secrets_legacy().get(key)
     if isinstance(val, str) and val.strip():
         if key not in _WARNED_FOR:
             _WARNED_FOR.add(key)
@@ -175,21 +192,11 @@ def set_buffer_access_token(token: Optional[str]) -> None:
     set_secret("buffer_access_token", token)
 
 
-def mask_key(key: Optional[str]) -> str:
-    """Render a partially-masked key for any remaining diagnostic UI."""
-    if not key:
-        return ""
-    k = key.strip()
-    if len(k) <= 12:
-        return "•" * len(k)
-    return f"{k[:6]}…{k[-4:]} ({len(k)} chars)"
-
-
 __all__ = [
-    "load_secrets", "save_secrets",
+    "save_secrets",
     "get_secret", "set_secret",
     "get_anthropic_key", "has_anthropic_key",
     "get_buffer_access_token", "has_buffer_access_token",
     "set_buffer_access_token",
-    "mask_key", "secrets_path",
+    "secrets_path",
 ]

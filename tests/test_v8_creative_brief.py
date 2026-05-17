@@ -3,8 +3,12 @@
 """
 from __future__ import annotations
 
+from unittest import mock
+
 from mediahub.brand.kit import BrandKit
 from mediahub.creative_brief.generator import CreativeBrief, generate
+from mediahub.creative_brief import generator as gen_mod
+from mediahub.media_ai.llm import ClaudeUnavailableError
 from mediahub.media_requirements.evaluator import EvaluationResult
 
 
@@ -93,3 +97,56 @@ def test_generate_serializable():
     assert isinstance(d["text_layers"], dict)
     assert isinstance(d["palette"], dict)
     assert "warm_club" == brief.tone
+
+
+# ---------------------------------------------------------------------------
+# _generate_why_this_design — LLM failures must map to the heuristic fallback,
+# never propagate up and 500 the /create-graphic endpoint.
+# ---------------------------------------------------------------------------
+
+def test_why_this_design_falls_back_when_llm_unavailable():
+    """If the LLM raises ClaudeUnavailableError, the brief still gets a
+    human-readable why_this_design string built from the heuristic parts."""
+    item = {
+        "id": "ci-llm-down",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+        },
+    }
+    # Force the _llm_available gate open so we exercise the try/except wrap.
+    with mock.patch.object(gen_mod, "_llm_available", return_value=True):
+        with mock.patch(
+            "mediahub.media_ai.generate",
+            side_effect=ClaudeUnavailableError("no provider"),
+        ):
+            brief = generate(item, _eval(), _brand(), profile_id="test")
+    # Contract: never raise; always produce a non-empty rationale string.
+    assert isinstance(brief.why_this_design, str)
+    assert len(brief.why_this_design) > 10
+    # Heuristic fallback mentions the chosen pattern label.
+    assert "Pattern" in brief.why_this_design
+
+
+def test_why_this_design_falls_back_on_generic_exception():
+    """Any non-ClaudeUnavailableError exception from the LLM call also maps
+    to the heuristic fallback — never propagates."""
+    item = {
+        "id": "ci-llm-boom",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Owen Davies",
+            "event_name": "100m Butterfly",
+            "result_time": "55.12",
+        },
+    }
+    with mock.patch.object(gen_mod, "_llm_available", return_value=True):
+        with mock.patch(
+            "mediahub.media_ai.generate",
+            side_effect=RuntimeError("transport error"),
+        ):
+            brief = generate(item, _eval(), _brand(), profile_id="test")
+    assert isinstance(brief.why_this_design, str)
+    assert len(brief.why_this_design) > 10

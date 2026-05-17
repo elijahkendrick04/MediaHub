@@ -316,7 +316,11 @@ def _generate_why_this_design(angle: str, evaluation, pattern: dict,
         f"Explain in one short paragraph why this design choice fits."
     )
     from mediahub.media_ai import generate as _gen
-    out = _gen(prompt, system=sys, max_tokens=200)
+    try:
+        out = _gen(prompt, system=sys, max_tokens=200)
+    except Exception:
+        # Any LLM failure (no provider, network, payload error) → safe fallback.
+        return fb
     if out and "fallback" not in out.lower() and len(out) > 30:
         return out.strip()
     return fb

@@ -81,21 +81,6 @@ def _key_for(provider: str) -> Optional[str]:
     return None
 
 
-def list_provider_status() -> list[dict]:
-    """For /api/settings/llm-status (read-only operator status endpoint):
-    which providers are configured + which is active."""
-    active = active_provider()
-    out = []
-    for p in _PROVIDERS:
-        key = _key_for(p)
-        out.append({
-            "provider":   p,
-            "configured": bool(key),
-            "active":     (p == active),
-        })
-    return out
-
-
 def _preferred_pref() -> str:
     """Read the user's preferred provider. 'auto' = use the first configured."""
     env = os.environ.get("MEDIAHUB_LLM_PROVIDER", "").strip().lower()
@@ -109,18 +94,6 @@ def _preferred_pref() -> str:
     except Exception:
         pass
     return "auto"
-
-
-def set_preferred_provider(provider: str) -> None:
-    """Persist the user's choice. Pass 'auto' to clear."""
-    p = (provider or "").strip().lower()
-    if p not in _PROVIDERS + ("auto",):
-        raise ValueError(f"unknown provider: {provider!r}")
-    try:
-        from mediahub.web.secrets_store import set_secret
-        set_secret("mediahub_llm_provider", None if p == "auto" else p)
-    except Exception as e:
-        raise ProviderError(f"could not persist provider choice: {e}") from e
 
 
 def active_provider() -> Optional[str]:
