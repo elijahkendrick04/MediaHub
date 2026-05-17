@@ -2005,6 +2005,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('add_input_page') }}" class="{{ 'active' if active=='add_input' else '' }}">Add Input</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
+    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
@@ -2293,77 +2294,43 @@ def create_app() -> Flask:
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
     def home():
-        conn = _db()
-        rows = conn.execute(
-            "SELECT id, created_at, finished_at, status, profile_id, "
-            "meet_name, our_swims, n_cards, n_queue, error, file_name "
-            "FROM runs ORDER BY created_at DESC LIMIT 25"
-        ).fetchall()
-        conn.close()
+        # The front page intentionally shows only two things:
+        #   1. The organisation banner (morphs between "set up" and
+        #      "edit" depending on whether a ready profile is pinned).
+        #   2. The "how it works" explainer.
+        # Everything else (Create, Add Input, Activity, Settings, etc.)
+        # lives in the top nav.
+        prof = _active_profile()
+        is_setup = bool(prof and prof.is_ready())
+        org_name = (prof.display_name if prof else "")
 
-        # Build the Holo-style home page. Hero + how-it-works + templates
-        # are shared between empty and populated states; recent activity table
-        # only appears when there are runs.
-        _setup_url = url_for('organisation_setup')
-        _org_url = url_for('organisation_page')
-        _settings_url = url_for('settings_page')
-        # If no organisation is set up yet, the primary CTA must be
-        # "Set up your organisation" — the content-creation routes are
-        # gated until the AI knows who you are.
-        _ready_prof = _active_profile()
-        _is_setup = bool(_ready_prof and _ready_prof.is_ready())
-        _add_input_url = url_for('add_input_page') if _is_setup else _setup_url
-        _primary_cta_label = ("Create content &rarr;" if _is_setup
-                              else "Set up your organisation &rarr;")
-
-        # Detect active LLM provider for the live status pill.
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available, active_provider as _ap
-            _llm_live = _llm_available()
-            _llm_provider = _ap()
-        except Exception:
-            _llm_live = False
-            _llm_provider = "heuristic"
-        _PROVIDER_PRETTY = {
-            "anthropic-api": "Anthropic (Claude)",
-            "gemini-api":    "Google Gemini",
-            "claude-cli":    "Claude CLI",
-            "pplx-bridge":   "Computer bridge",
-        }
-        _provider_pretty = _PROVIDER_PRETTY.get(_llm_provider, "")
-        if _llm_live:
-            provider_badge_html = (
-                f'<div class="mh-provider-badge">'
-                f'<span class="mh-provider-dot"></span>'
-                f'<span><strong>Content engine live</strong> &mdash; powered by {_h(_provider_pretty)}</span>'
-                f'</div>'
+        if is_setup:
+            banner_html = (
+                '<div class="card" style="border-color:rgba(44,201,127,0.35);'
+                'margin-bottom:28px;display:flex;align-items:center;gap:20px;'
+                'flex-wrap:wrap;background:rgba(44,201,127,0.04)">'
+                '<div style="flex:1;min-width:240px">'
+                f'<h2 style="margin-top:0;margin-bottom:6px">{_h(org_name)}</h2>'
+                '<p style="margin:0">MediaHub is set up to write in your voice. '
+                'Use <b>Create</b> in the top bar to start a new piece of content '
+                'or <b>Activity</b> to revisit recent runs.</p>'
+                '</div>'
+                f'<a class="btn secondary" href="{url_for("organisation_page")}">Edit organisation &rarr;</a>'
+                '</div>'
             )
         else:
-            provider_badge_html = (
-                f'<div class="mh-provider-badge warn">'
-                f'<span class="mh-provider-dot"></span>'
-                f'<span><strong>Heuristic mode</strong> &mdash; '
-                f'<a href="{_settings_url}">add a free Gemini key</a> to enable live AI content</span>'
-                f'</div>'
+            banner_html = (
+                '<div class="card" style="border-color:rgba(34,211,238,0.35);'
+                'margin-bottom:28px;display:flex;align-items:center;gap:20px;'
+                'flex-wrap:wrap;background:rgba(34,211,238,0.04)">'
+                '<div style="flex:1;min-width:240px">'
+                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation first</h2>'
+                '<p style="margin:0">MediaHub needs to know who you are before it can write in your voice. '
+                'Paste your website or social links &mdash; the AI does the rest.</p>'
+                '</div>'
+                f'<a class="btn" href="{url_for("organisation_setup")}">Set up organisation &rarr;</a>'
+                '</div>'
             )
-
-        hero_html = (
-            '<section class="mh-hero">'
-            '<div class="mh-hero-eyebrow"><span class="mh-pulse-dot"></span> The content engine for clubs and teams</div>'
-            '<h1>Turn every result into <span class="mh-gradient-text">ready-to-post content</span> in minutes</h1>'
-            '<p class="mh-hero-sub">Upload results, paste an update, or describe a moment. MediaHub finds the moments worth celebrating, drafts on-brand captions, and stops nothing falling through the cracks. Human approval before anything goes out.</p>'
-            f'<div class="mh-hero-ctas">'
-            f'<a class="btn" href="{_add_input_url}">{_primary_cta_label}</a>'
-            f'<a class="btn secondary" href="{_org_url}">Edit organisation</a>'
-            f'</div>'
-            '<div class="mh-hero-trust">'
-            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Source-grounded captions</span>'
-            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Confidence scoring</span>'
-            '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Human approval before posting</span>'
-            '</div>'
-            f'<div style="margin-top:24px;display:flex;justify-content:center">{provider_badge_html}</div>'
-            '</section>'
-        )
 
         steps_html = (
             '<div class="mh-section-eyebrow">How it works</div>'
@@ -2380,97 +2347,69 @@ def create_app() -> Flask:
             '</div>'
         )
 
-        # Content template gallery (live content types only)
-        templates_html = ""
-        try:
-            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
-        except ImportError:
-            _CT_REGISTRY = {}
-        tile_html = ""
-        for _ct, _meta in (_CT_REGISTRY or {}).items():
-            if not getattr(_meta, "is_implemented", False):
-                continue
-            try:
-                _tile_url = url_for(_meta.primary_route_endpoint)
-            except Exception:
-                _tile_url = "#"
-            _icon = _meta.icon_svg.replace('width="28" height="28"', 'width="22" height="22"')
-            tile_html += (
-                f'<a class="mh-template" href="{_tile_url}">'
-                f'<div class="mh-template-icon">{_icon}</div>'
-                f'<h3>{_h(_meta.title)}</h3>'
-                f'<p>{_h(_meta.description)}</p>'
-                f'<span class="mh-template-cta">Start &rarr;</span>'
-                f'</a>'
-            )
-        if tile_html:
-            templates_html = (
-                '<div class="mh-section-eyebrow">Content templates</div>'
-                "<h2 class=\"mh-section-title\">Pick a format and we'll do the rest</h2>"
-                f'<div class="mh-template-grid">{tile_html}</div>'
-            )
+        return _layout("Home", banner_html + steps_html, active="home")
 
-        # Set-up-org callout — shown whenever no ready organisation exists.
-        _org_cta = ""
-        if not _is_setup:
-            _org_cta = (
-                '<div class="card" style="border-color:rgba(34,211,238,0.3);'
-                'margin-bottom:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">'
-                '<div style="flex:1;min-width:240px">'
-                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation first</h2>'
-                '<p style="margin:0">MediaHub needs to know who you are before it can write in your voice. '
-                'Paste your website or social links &mdash; the AI does the rest.</p>'
-                '</div>'
-                f'<a class="btn" href="{_setup_url}">Set up organisation &rarr;</a>'
-                '</div>'
-            )
+    # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
+    @app.route("/activity")
+    def activity_page():
+        prof = _active_profile()
+        # The gate ensures we only land here with a ready profile; the
+        # extra guard keeps the page honest if invoked under TESTING mode.
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
 
-        # Empty state: just hero + steps + templates + org-cta. No table.
+        conn = _db()
+        rows = conn.execute(
+            "SELECT id, created_at, finished_at, status, profile_id, "
+            "meet_name, our_swims, n_cards, n_queue, error, file_name "
+            "FROM runs WHERE profile_id = ? "
+            "ORDER BY created_at DESC LIMIT 100",
+            (prof.profile_id,),
+        ).fetchall()
+        conn.close()
+
         if not rows:
-            empty_body = hero_html + _org_cta + steps_html + templates_html
-            return _layout("Home", empty_body, active="home")
+            empty_body = (
+                f'<h1 style="margin-bottom:6px">Activity</h1>'
+                f'<p class="dim" style="margin-bottom:24px">Runs for '
+                f'<b>{_h(prof.display_name)}</b>.</p>'
+                '<div class="card empty">No runs yet for this organisation. '
+                f'<a href="{url_for("add_input_page")}">Create your first piece of content &rarr;</a>'
+                '</div>'
+            )
+            return _layout("Activity", empty_body, active="activity")
 
         rows_html = ""
-        if not rows:
-            rows_html = ('<tr><td colspan="7" class="muted">No runs yet. '
-                         '<a href="' + url_for('upload') + '">Upload your first meet &rarr;</a></td></tr>')
-        else:
-            for r in rows:
-                badge = {"done": "good", "running": "info", "queued": "info",
-                         "error": "bad"}.get(r["status"], "")
-                review_href = url_for('review', run_id=r['id'])
-                delete_href = url_for('privacy_delete_run', run_id=r['id'])
-                # V8.2: club profiles UI removed; show the stored club
-                # filter / profile_id slug as a friendly label.
-                prof_display = (r["profile_id"] or "—").replace("-", " ").replace("_", " ")
-                if prof_display.startswith(" run "):
-                    prof_display = "&mdash;"
-                rows_html += (
-                    f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                    f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                    f'<td>{_h(prof_display)}</td>'
-                    f'<td>{_h(r["our_swims"] or 0)}</td>'
-                    f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                    f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
-                    f'<td><form method="post" action="{delete_href}" '
-                    f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
-                    f'<button class="btn danger" type="submit" '
-                    f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                    f'</form></td></tr>'
-                )
+        for r in rows:
+            badge = {"done": "good", "running": "info", "queued": "info",
+                     "error": "bad"}.get(r["status"], "")
+            review_href = url_for('review', run_id=r['id'])
+            delete_href = url_for('privacy_delete_run', run_id=r['id'])
+            rows_html += (
+                f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
+                f'<td>{_h(r["our_swims"] or 0)}</td>'
+                f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
+                f'<td><form method="post" action="{delete_href}" '
+                f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                f'<button class="btn danger" type="submit" '
+                f'style="font-size:11px;padding:4px 10px">Delete</button>'
+                f'</form></td></tr>'
+            )
 
-        recent_html = (
-            '<div class="mh-section-eyebrow">Your activity</div>'
-            '<h2 class="mh-section-title">Recent runs</h2>'
+        body = (
+            f'<h1 style="margin-bottom:6px">Activity</h1>'
+            f'<p class="dim" style="margin-bottom:24px">Recent runs for '
+            f'<b>{_h(prof.display_name)}</b>.</p>'
             '<div class="card"><table>'
-            '<thead><tr><th>Input</th><th>Status</th><th>Organisation</th>'
+            '<thead><tr><th>Input</th><th>Status</th>'
             '<th>Matched items</th><th>Queue / Total</th><th>Started</th><th></th></tr></thead>'
             f'<tbody>{rows_html}</tbody>'
             '</table></div>'
         )
+        return _layout("Activity", body, active="activity")
 
-        body = hero_html + _org_cta + steps_html + templates_html + recent_html
-        return _layout("Home", body, active="home")
 
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
