@@ -311,7 +311,11 @@ class TestWebRoutes(unittest.TestCase):
         import importlib
         import mediahub.web.web as wm
         importlib.reload(wm)
-        return wm.create_app()
+        app = wm.create_app()
+        # Bypass the first-run organisation gate — these tests assert
+        # behaviour of downstream routes and don't seed a profile.
+        app.config["TESTING"] = True
+        return app
 
     def test_post_turn_into_then_view_pack(self):
         with tempfile.TemporaryDirectory() as tmp:
