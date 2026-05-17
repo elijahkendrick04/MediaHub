@@ -62,9 +62,21 @@ _TYPE_PHRASE = {
 }
 
 
-def _achievement_phrase(a_type: str) -> str:
-    """Plain English noun phrase for an achievement type."""
-    return _TYPE_PHRASE.get(a_type, (a_type or "a notable swim").replace("_", " "))
+def _achievement_phrase(a_type: str, profile=None) -> str:
+    """Plain English noun phrase for an achievement type.
+
+    When ``profile`` carries an AI-derived ``brand_operating_profile``
+    with a per-type phrase override, that wins. Otherwise we fall back
+    to the hardcoded default and finally to a slug-prettified version.
+    """
+    default = _TYPE_PHRASE.get(a_type, (a_type or "a notable swim").replace("_", " "))
+    if profile is None:
+        return default
+    try:
+        from mediahub.brand.derived import type_phrase_for
+    except Exception:
+        return default
+    return type_phrase_for(profile, a_type, default)
 
 
 def _factor_dict(f: Any) -> dict:
@@ -109,9 +121,9 @@ def _significant_factors(factors: list[dict]) -> list[dict]:
     return out
 
 
-def _build_headline(achievement: dict, sig_factors: list[dict]) -> str:
+def _build_headline(achievement: dict, sig_factors: list[dict], profile=None) -> str:
     """Compose a 15-25 word headline using the achievement type + top factors."""
-    phrase = _achievement_phrase(achievement.get("type", ""))
+    phrase = _achievement_phrase(achievement.get("type", ""), profile=profile)
     confidence_label = (achievement.get("confidence_label") or "").lower()
     swimmer = (achievement.get("swimmer_name") or "").strip()
     event = (achievement.get("event") or "").strip()
@@ -226,6 +238,7 @@ def explain_achievement(
     factors: list[Any] | None,
     *,
     rank: int | None = None,
+    profile=None,
 ) -> dict:
     """Build a plain-English "Why this card?" explanation.
 
@@ -263,7 +276,7 @@ def explain_achievement(
         }
 
     return {
-        "headline":     _build_headline(a, sig_factors),
+        "headline":     _build_headline(a, sig_factors, profile=profile),
         "bullets":      _build_bullets(a, sig_factors),
         "source_lines": source_lines,
     }

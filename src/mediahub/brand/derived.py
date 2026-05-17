@@ -1,0 +1,400 @@
+"""brand/derived.py — derive operating profile from brand context.
+
+The previous hardcoded constants (`_TONE_DESCRIPTORS`, `_DEFAULT_PRIORITIES`,
+`_TYPE_PHRASE`, `_PB_PHRASES`, `_MEDAL_PHRASES`, `_ARTEFACT_INTENTS`) were
+all making the same shape of decision: *given an organisation's brand,
+what should X be?* That decision is judgment, not infrastructure, so the
+audit flagged them all for AI replacement.
+
+This module makes the AI replacement viable in production by following
+one rule: **derive once, cache on the profile, never per-request.**
+
+When the user saves an organisation:
+
+    derive_operating_profile(profile) -> dict
+
+is called. That dict is persisted on `ClubProfile.brand_operating_profile`.
+At request time, callers consult the cache via thin helpers in this
+module (`tone_descriptor_for`, `priority_for`, `type_phrase_for`,
+`artefact_intent_for`). When the cache is empty (a profile that hasn't
+been re-saved since this feature shipped) or no LLM is configured, the
+helpers transparently fall back to the original hardcoded constants —
+which keep living in their original modules as defaults.
+
+This satisfies the cross-cutting risks identified in the audit:
+  • Determinism — same profile always produces the same operating data
+    until the user edits the profile.
+  • Latency — exactly one LLM call per profile edit, zero per render.
+  • Cost — bounded by user edits, not by traffic.
+  • Graceful degradation — every helper falls back to a working default.
+  • Test stability — existing tests that don't touch a profile still
+    see the same hardcoded behaviour they always saw.
+
+The schema returned by `derive_operating_profile()`:
+
+    {
+      "tone_prose": {
+        "warm-club": "english prose describing how 'warm-club' should
+                      feel FOR THIS ORG specifically",
+        "hype":      "...",
+        "data-led":  "...",
+        "ai":        "..."         # the default neutral tone
+      },
+      "achievement_priorities": {
+        "pb_confirmed": 1.6,        # multiplier override
+        "medal_gold":   0.9,
+        ...
+        "_default":     1.0
+      },
+      "type_phrases": {
+        "pb_confirmed": "a personal best",   # how this org would say it
+        "medal_gold":   "a gold medal",
+        ...
+      },
+      "artefact_voice": {
+        "meet_recap":        "tone-specific intent block for this org",
+        "swimmer_spotlight": "...",
+        ...
+      },
+      "derived_at":  "ISO8601",
+      "status":      "ok" | "ok_heuristic" | "no_context" | "error"
+    }
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Canonical inventories
+#
+# These are the keys the rest of the codebase already knows about. The
+# AI is asked to produce values for THESE keys — we don't let it invent
+# new tones or achievement types, because that would break every
+# downstream consumer. Adding a new key here is a deliberate code
+# change, not an LLM call.
+# ---------------------------------------------------------------------------
+
+CANONICAL_TONES: tuple[str, ...] = ("ai", "warm-club", "hype", "data-led")
+
+CANONICAL_ACHIEVEMENT_TYPES: tuple[str, ...] = (
+    "official_pb_confirmed",
+    "pb_confirmed",
+    "pb_likely",
+    "pb_magnitude_huge",
+    "pb_magnitude_big",
+    "pb_magnitude_notable",
+    "first_sub_barrier",
+    "medal_gold",
+    "medal_silver",
+    "medal_bronze",
+    "relay_medal_gold",
+    "relay_medal_silver",
+    "relay_medal_bronze",
+    "qual_hit_in_window",
+    "qual_hit_out_of_window",
+    "top_of_field_top_3",
+    "top_of_field_top_5",
+    "top_of_field_top_10",
+    "multi_pb_weekend",
+    "biggest_drop_candidate",
+    "biggest_drop_of_meet",
+    "return_to_form",
+    "fastest_since",
+    "fastest_since_date",
+    "heat_to_final_drop",
+    "final_appearance",
+    "qualifying_time",
+)
+
+CANONICAL_ARTEFACTS: tuple[str, ...] = (
+    "meet_recap",
+    "swimmer_spotlight",
+    "data_thread_post",
+    "linkedin_long",
+    "instagram_long",
+    "parent_newsletter",
+    "sponsor_thank_you",
+    "coach_quote",
+    "next_meet_preview",
+)
+
+
+# ---------------------------------------------------------------------------
+# LLM call
+# ---------------------------------------------------------------------------
+
+_LLM_SYSTEM = (
+    "You configure another AI system that will write social-media "
+    "content for a specific sports club, society or team. You will be "
+    "given a brand context block describing the organisation. Produce a "
+    "single JSON object that captures, FOR THIS ORG SPECIFICALLY: "
+    "(1) how each tone should feel, (2) which achievement types matter "
+    "more or less to them, (3) the exact noun phrase they would use for "
+    "each achievement type, and (4) the per-artefact creative intent. "
+    "Be faithful to the brand context — never invent values you can't "
+    "ground in the brief. When the brief is silent on something, leave "
+    "that key out (the downstream system has sensible defaults)."
+)
+
+
+def _build_prompt(brand_context: str) -> str:
+    tones = ", ".join(f'"{t}"' for t in CANONICAL_TONES)
+    ach_types = ", ".join(f'"{t}"' for t in CANONICAL_ACHIEVEMENT_TYPES)
+    artefacts = ", ".join(f'"{a}"' for a in CANONICAL_ARTEFACTS)
+    return (
+        "Brand context for this organisation:\n\n"
+        "===== BEGIN CONTEXT =====\n"
+        f"{brand_context}\n"
+        "===== END CONTEXT =====\n\n"
+        "Return a SINGLE JSON object with EXACTLY these top-level keys "
+        "(no prose, no fences):\n\n"
+        f"  tone_prose: object keyed by the tone slugs ({tones}). Each "
+        "value is a one-sentence English description of how THAT tone "
+        "should feel for THIS organisation specifically. Reflect their "
+        "voice, audience, prohibited words, and any guidelines you saw.\n\n"
+        f"  achievement_priorities: object keyed by achievement type "
+        f"({ach_types}). Each value is a number between 0.3 and 2.0 "
+        "expressing how much THIS organisation cares about that type "
+        "of moment relative to others. Use 1.0 as neutral. A community "
+        "club might boost \"first_sub_barrier\" and \"pb_confirmed\"; an "
+        "elite team might boost \"medal_gold\". Also include a "
+        "\"_default\" key (typically 1.0) for types you don't have an "
+        "opinion on. Only include types where the brief gives you "
+        "reason to deviate from 1.0 — silence means \"use the default\".\n\n"
+        f"  type_phrases: object keyed by achievement type. Each value "
+        "is the SHORT noun phrase (3-6 words) this org would naturally "
+        "use to refer to that achievement when narrating it. E.g. for "
+        "\"pb_confirmed\" a community club might say \"a brand-new "
+        "personal best\" but a data-led elite team might say \"a "
+        "verified PB\". Only include types where the brief gives you "
+        "language guidance — silence means \"use the default phrase\".\n\n"
+        f"  artefact_voice: object keyed by artefact type ({artefacts}). "
+        "Each value is a 1-2 sentence creative intent: what should this "
+        "org's version of that artefact feel like? Lead with the angle, "
+        "not the format constraints (the format constraints are handled "
+        "elsewhere). Only include artefacts where the brief gives you "
+        "an opinion — silence means \"use the default intent\".\n"
+    )
+
+
+def _call_llm(brand_context: str) -> Optional[dict]:
+    try:
+        from mediahub.media_ai.llm import generate_json, is_available
+    except Exception:
+        return None
+    if not is_available():
+        return None
+    prompt = _build_prompt(brand_context)
+    try:
+        return generate_json(
+            prompt,
+            system=_LLM_SYSTEM,
+            max_tokens=3_000,
+            fallback={},
+        )
+    except Exception as e:
+        log.debug("derived operating-profile LLM call failed: %s", e)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Normalisation
+# ---------------------------------------------------------------------------
+
+def _norm_str(v, cap: int) -> str:
+    return str(v).strip()[:cap] if isinstance(v, str) and v.strip() else ""
+
+
+def _norm_tone_prose(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for k, v in raw.items():
+        if k in CANONICAL_TONES:
+            cleaned = _norm_str(v, 400)
+            if cleaned:
+                out[k] = cleaned
+    return out
+
+
+def _norm_priorities(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    allowed = set(CANONICAL_ACHIEVEMENT_TYPES) | {"_default"}
+    for k, v in raw.items():
+        if k not in allowed:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        # Clamp to a sane band so a hallucinated 50× weight can't tank
+        # the ranker.
+        f = max(0.3, min(2.0, f))
+        out[k] = f
+    return out
+
+
+def _norm_type_phrases(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for k, v in raw.items():
+        if k not in CANONICAL_ACHIEVEMENT_TYPES:
+            continue
+        cleaned = _norm_str(v, 120)
+        if cleaned:
+            out[k] = cleaned
+    return out
+
+
+def _norm_artefact_voice(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for k, v in raw.items():
+        if k not in CANONICAL_ARTEFACTS:
+            continue
+        cleaned = _norm_str(v, 500)
+        if cleaned:
+            out[k] = cleaned
+    return out
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def derive_operating_profile(profile) -> dict:
+    """Run one LLM call to convert a profile's brand context into a
+    cached operating profile (tone prose, priority weights, type
+    phrases, artefact voice).
+
+    Args:
+        profile: a ClubProfile (or dict).
+
+    Returns:
+        A dict in the shape documented at the top of this module. Always
+        returns; never raises. When the brand context is empty or no
+        LLM is available, returns a stub with status "no_context" /
+        "ok_heuristic" so callers can detect that and fall back to the
+        hardcoded constants without crashing.
+    """
+    empty = {
+        "tone_prose": {},
+        "achievement_priorities": {},
+        "type_phrases": {},
+        "artefact_voice": {},
+        "derived_at": _now_iso(),
+        "status": "no_context",
+    }
+    try:
+        from mediahub.brand.context import brand_context_for_llm
+    except Exception:
+        return empty
+    ctx = brand_context_for_llm(profile)
+    if not ctx.strip():
+        return empty
+    raw = _call_llm(ctx)
+    if not raw:
+        # No LLM available — return an empty operating profile so
+        # callers fall back to the hardcoded constants.
+        return {**empty, "status": "ok_heuristic"}
+    out = {
+        "tone_prose": _norm_tone_prose(raw.get("tone_prose")),
+        "achievement_priorities": _norm_priorities(raw.get("achievement_priorities")),
+        "type_phrases": _norm_type_phrases(raw.get("type_phrases")),
+        "artefact_voice": _norm_artefact_voice(raw.get("artefact_voice")),
+        "derived_at": _now_iso(),
+        "status": "ok",
+    }
+    # If the LLM returned nothing usable across all four sections, mark
+    # as heuristic so callers fall back rather than emitting empty
+    # strings.
+    if not any((out["tone_prose"], out["achievement_priorities"],
+                out["type_phrases"], out["artefact_voice"])):
+        out["status"] = "ok_heuristic"
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Lookup helpers — used by every downstream consumer
+# ---------------------------------------------------------------------------
+
+def _get_op_profile(profile) -> dict:
+    if profile is None:
+        return {}
+    if isinstance(profile, dict):
+        op = profile.get("brand_operating_profile") or {}
+    else:
+        op = getattr(profile, "brand_operating_profile", None) or {}
+    return op if isinstance(op, dict) else {}
+
+
+def tone_descriptor_for(profile, tone_slug: str, default: str) -> str:
+    """Return the per-org tone prose for ``tone_slug``, or ``default``
+    if the org hasn't been re-derived or didn't get this slug."""
+    op = _get_op_profile(profile)
+    val = (op.get("tone_prose") or {}).get(tone_slug)
+    if isinstance(val, str) and val.strip():
+        return val
+    return default
+
+
+def priority_for(profile, ach_type: str, default: float) -> float:
+    """Return this org's priority multiplier for ``ach_type``, or
+    ``default`` (and ultimately the global default of 1.0)."""
+    op = _get_op_profile(profile)
+    prio = op.get("achievement_priorities") or {}
+    if ach_type in prio:
+        try:
+            return float(prio[ach_type])
+        except (TypeError, ValueError):
+            pass
+    if "_default" in prio:
+        try:
+            return float(prio["_default"])
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def type_phrase_for(profile, ach_type: str, default: str) -> str:
+    """Return the noun phrase this org would use for ``ach_type``."""
+    op = _get_op_profile(profile)
+    val = (op.get("type_phrases") or {}).get(ach_type)
+    if isinstance(val, str) and val.strip():
+        return val
+    return default
+
+
+def artefact_intent_for(profile, artefact_key: str, default: str) -> str:
+    """Return the creative intent for ``artefact_key`` as this org would
+    voice it."""
+    op = _get_op_profile(profile)
+    val = (op.get("artefact_voice") or {}).get(artefact_key)
+    if isinstance(val, str) and val.strip():
+        return val
+    return default
+
+
+__all__ = [
+    "CANONICAL_TONES",
+    "CANONICAL_ACHIEVEMENT_TYPES",
+    "CANONICAL_ARTEFACTS",
+    "derive_operating_profile",
+    "tone_descriptor_for",
+    "priority_for",
+    "type_phrase_for",
+    "artefact_intent_for",
+]

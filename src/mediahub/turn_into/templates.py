@@ -141,24 +141,38 @@ def _gen_caption(
     intent_key: str,
     deterministic: bool,
     fallback_text: str,
+    profile=None,
 ) -> str:
     """Generate one caption via the existing primitive, or return fallback.
 
     The function is deliberately defensive — any exception falls back to
     the deterministic text, so the pipeline never crashes if the LLM is
-    flaky."""
+    flaky.
+
+    The artefact intent is resolved through ``brand.derived`` so a
+    derived operating profile can override the hardcoded default with
+    org-specific creative direction. Falls back to the hardcoded
+    default when no derived intent exists.
+    """
     if deterministic:
         return fallback_text
     try:
         from mediahub.web.ai_caption import generate_caption_for_tone
     except Exception:
         return fallback_text
-    intent = _ARTEFACT_INTENTS.get(intent_key, "")
+    default_intent = _ARTEFACT_INTENTS.get(intent_key, "")
+    try:
+        from mediahub.brand.derived import artefact_intent_for
+        intent = artefact_intent_for(profile, intent_key, default_intent)
+    except Exception:
+        intent = default_intent
     enriched = dict(payload)
     if intent:
         enriched["_artefact_intent"] = intent
     try:
-        text = generate_caption_for_tone(enriched, club_brand, tone=tone)
+        text = generate_caption_for_tone(
+            enriched, club_brand, tone=tone, club_profile=profile,
+        )
     except Exception:
         return fallback_text
     text = (text or "").strip()
@@ -244,6 +258,7 @@ def build_meet_recap(
         payload, club_brand,
         tone=tone, intent_key="meet_recap",
         deterministic=deterministic, fallback_text=fallback_default,
+        profile=profile,
     )
     default_caption = _apply_sign_off(voice_profile, default_caption)
 
@@ -257,6 +272,7 @@ def build_meet_recap(
         payload, club_brand,
         tone=tone, intent_key="instagram_long",
         deterministic=deterministic, fallback_text=fallback_ig,
+        profile=profile,
     )
     ig_caption = _apply_sign_off(voice_profile, ig_caption)
     if len(ig_caption) > 2200:
@@ -321,6 +337,7 @@ def build_swimmer_spotlights(
             payload, club_brand,
             tone=tone, intent_key="swimmer_spotlight",
             deterministic=deterministic, fallback_text=fallback,
+            profile=profile,
         )
         caption = _apply_sign_off(voice_profile, caption)
         key = f"swimmer_{idx}"
@@ -385,6 +402,7 @@ def build_data_thread(
         club_brand,
         tone=tone, intent_key="data_thread_post",
         deterministic=deterministic, fallback_text=intro_fallback,
+        profile=profile,
     )
     posts.append(_truncate(intro, 280))
 
@@ -399,6 +417,7 @@ def build_data_thread(
             payload, club_brand,
             tone=tone, intent_key="data_thread_post",
             deterministic=deterministic, fallback_text=fb,
+            profile=profile,
         )
         # Always prepend numbering so threading is unambiguous even when LLM
         # forgets it.
@@ -429,6 +448,7 @@ def build_data_thread(
         club_brand,
         tone=tone, intent_key="linkedin_long",
         deterministic=deterministic, fallback_text=li_fallback,
+        profile=profile,
     )
 
     return {
@@ -490,6 +510,7 @@ def build_parent_newsletter(
         club_brand,
         tone=tone, intent_key="parent_newsletter",
         deterministic=deterministic, fallback_text=fallback_plain,
+        profile=profile,
     )
     plain = _apply_sign_off(voice_profile, plain)
 
@@ -550,6 +571,7 @@ def build_sponsor_thank_you(
         club_brand,
         tone=tone, intent_key="sponsor_thank_you",
         deterministic=deterministic, fallback_text=fallback,
+        profile=profile,
     )
     caption = _apply_sign_off(voice_profile, caption)
 
@@ -604,6 +626,7 @@ def build_coach_quote(
         club_brand,
         tone=tone, intent_key="coach_quote",
         deterministic=deterministic, fallback_text=fallback_quote,
+        profile=profile,
     )
 
     flag = "DRAFT — review with coach before publishing"
@@ -693,6 +716,7 @@ def build_next_meet_preview(
         club_brand,
         tone=tone, intent_key="next_meet_preview",
         deterministic=deterministic, fallback_text=fallback,
+        profile=profile,
     )
     caption = _apply_sign_off(voice_profile, caption)
 
