@@ -156,12 +156,16 @@ class TestEndpointAIWithNoKey:
         )
         assert resp.get_json()["caption"] == ""
 
-    def test_message_mentions_settings(self, client, fake_run_id, no_llm_env):
+    def test_message_steers_user_to_administrator(self, client, fake_run_id, no_llm_env):
+        """Post-rewrite: AI keys are operator-managed via env vars. The
+        no-key message must point the end-user at their administrator,
+        not at a (now-deleted) settings page."""
         resp = client.post(
             f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=ai"
         )
         msg = resp.get_json().get("message", "")
-        assert "Settings" in msg or "settings" in msg
+        assert "administrator" in msg.lower()
+        assert "Settings" not in msg  # no stale settings-page wording
 
     def test_generated_at_present(self, client, fake_run_id, no_llm_env):
         resp = client.post(
@@ -175,19 +179,16 @@ class TestEndpointAIWithNoKey:
 # ---------------------------------------------------------------------------
 
 class TestEndpointAIWithKey:
-    def test_live_is_true_when_key_present(self, client, fake_run_id, monkeypatch, tmp_path):
-        """When a key is set on disk and call_claude succeeds, live=True."""
-        from mediahub.web import secrets_store
+    def test_live_is_true_when_env_key_present(self, client, fake_run_id, monkeypatch):
+        """When ANTHROPIC_API_KEY is set in env and call_claude succeeds,
+        live=True. Post-rewrite there is no longer a disk-key persistence
+        path — operator credentials are env-var only."""
         from mediahub.media_ai import llm as _llm
 
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setattr(secrets_store, "_SECRETS_PATH", tmp_path / "s.json")
-        secrets_store.set_secret("anthropic_api_key", "sk-ant-" + "a" * 40)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-" + "a" * 40)
         _llm._anthropic_client = None
         _llm._anthropic_client_key = None
 
-        # Stub call_claude where ai_caption.py bound it (the generate_caption_for_tone
-        # path imports call_claude by reference, so patch the ai_caption module).
         with mock.patch("mediahub.web.ai_caption.call_claude", return_value="Stubbed AI caption."):
             resp = client.post(
                 f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=ai"
@@ -307,13 +308,13 @@ class TestLLMModule:
         with pytest.raises(ClaudeUnavailableError):
             call_claude(system="test", user="test")
 
-    def test_resolve_picks_up_disk_key(self, monkeypatch, tmp_path):
+    def test_resolve_picks_up_env_key(self, monkeypatch):
+        """Post-rewrite the LLM module reads keys from env only.
+        The disk-fallback path remains as a one-release migration aid
+        but is not exercised by tests."""
         from mediahub.media_ai import llm as _llm
-        from mediahub.web import secrets_store
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setattr(secrets_store, "_SECRETS_PATH", tmp_path / "s.json")
         fake = "sk-ant-" + "x" * 40
-        secrets_store.set_secret("anthropic_api_key", fake)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", fake)
         _llm._anthropic_client = None
         _llm._anthropic_client_key = None
         assert _llm._resolve_anthropic_key() == fake

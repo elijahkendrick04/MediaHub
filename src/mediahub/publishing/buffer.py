@@ -21,8 +21,8 @@ Endpoints used (https://api.bufferapp.com):
 
 Authentication: Buffer API v1 accepts the access_token either as a query
 parameter or in the POST body — we send it as `access_token=...` on the
-POST body / GET query string. OAuth flow is deferred to a later step;
-for now users paste a personal access token on /settings.
+POST body / GET query string. Authentication is operator-controlled
+via the BUFFER_ACCESS_TOKEN environment variable.
 
 All HTTP calls flow through `requests` (already a project dependency).
 A missing or blank token raises `BufferAuthError` rather than silently
@@ -91,7 +91,7 @@ class _PreparedToken:
     def require(cls, token: Optional[str]) -> "_PreparedToken":
         if not token or not str(token).strip():
             raise BufferAuthError(
-                "No Buffer access token configured. Connect Buffer in Settings."
+                "Buffer is not configured on this deployment. Contact your administrator."
             )
         return cls(token=str(token).strip())
 
@@ -130,7 +130,7 @@ def list_channels(token: str) -> list[dict]:
 
     if resp.status_code in (401, 403):
         raise BufferAuthError(
-            "Buffer rejected the access token. Re-paste it in Settings."
+            "Buffer rejected the access token on this deployment. Contact your administrator to rotate it."
         )
     if resp.status_code == 429:
         retry = _parse_retry_after(resp)
@@ -240,7 +240,7 @@ def schedule_post(
 
     if resp.status_code in (401, 403):
         raise BufferAuthError(
-            "Buffer rejected the access token. Re-paste it in Settings."
+            "Buffer rejected the access token on this deployment. Contact your administrator to rotate it."
         )
     if resp.status_code == 429:
         retry = _parse_retry_after(resp)

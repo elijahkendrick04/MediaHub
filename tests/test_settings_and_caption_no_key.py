@@ -1,37 +1,41 @@
-"""V8.1 Issue 3 — Settings page + non-masquerading caption endpoint.
+"""Settings-page-removal + caption-no-key behaviour.
 
-Verifies:
-  * /settings GET renders and shows the no-key state
-  * POST /settings with a fake key persists to data/secrets.json
-  * /api/settings/llm-status reports {live: bool}
-  * Live caption endpoint with tone=ai and NO key returns
-    {live: false, error: "no_key"} \u2014 i.e. no fake AI output.
-  * llm._resolve_anthropic_key() picks up disk-stored key.
+The settings page is gone — operator credentials are now exclusively
+env-var configured at deploy time. This test file pins what's left:
+
+  • /settings 302-redirects to home so old bookmarks don't 404
+  • /api/settings/llm-status remains a read-only status endpoint
+  • The caption endpoint with no LLM key returns
+    {live: false, error: "no_key", message: <admin-facing copy>}
+  • env-var key resolution still works for the LLM layer
 """
 from __future__ import annotations
 
-import json
-import os
+import sys
 from pathlib import Path
 
 import pytest
 
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
 from mediahub.web.web import create_app
-from mediahub.web import secrets_store
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    # Redirect secrets to a temp file so tests don't touch real data.
-    fake_secrets = tmp_path / "secrets.json"
-    monkeypatch.setattr(secrets_store, "_SECRETS_PATH", fake_secrets)
-    # Ensure no env key leaks in.
+    """Clean env so no LLM provider leaks in from the host."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("PPLX_TOOL_BRIDGE_LOCAL_URL", raising=False)
-    monkeypatch.delenv("PPLX_TOOL_BRIDGE_TOKEN", raising=False)
-    # Disable the claude-CLI bridge (added v9.1).
-    monkeypatch.setenv("MEDIAHUB_DISABLE_CLAUDE_CLI", "1")
-    # Reset cached anthropic client so the next call rebuilds.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    # Point the disk-fallback at a non-existent path so secrets_store
+    # is genuinely empty.
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Force re-resolution of cached module-level paths.
+    import importlib
+    import mediahub.web.secrets_store as _ss
+    importlib.reload(_ss)
+    # Reset the cached anthropic client.
     from mediahub.media_ai import llm as _llm
     _llm._anthropic_client = None
     _llm._anthropic_client_key = None
@@ -40,17 +44,24 @@ def app(tmp_path, monkeypatch):
     return a
 
 
-def test_settings_get_renders(app):
+# ---------------------------------------------------------------------------
+# /settings now redirects to home
+# ---------------------------------------------------------------------------
+
+def test_settings_redirects_to_home(app):
     c = app.test_client()
-    r = c.get("/settings")
-    assert r.status_code == 200
-    body = r.get_data(as_text=True)
-    assert "Settings" in body
-    assert "Anthropic" in body
-    assert "Live AI captions DISABLED" in body
+    r = c.get("/settings", follow_redirects=False)
+    assert r.status_code in (301, 302, 303, 307, 308)
+    # The redirect target must be home.
+    location = r.headers.get("Location", "")
+    assert location.endswith("/") or location == "" or location.endswith("/home")
 
 
-def test_llm_status_no_key(app):
+# ---------------------------------------------------------------------------
+# /api/settings/llm-status — read-only status endpoint
+# ---------------------------------------------------------------------------
+
+def test_llm_status_no_key_reports_offline(app):
     c = app.test_client()
     r = c.get("/api/settings/llm-status")
     assert r.status_code == 200
@@ -59,56 +70,39 @@ def test_llm_status_no_key(app):
     assert j["provider"] is None
 
 
-def test_settings_post_persists_key(app):
+def test_llm_status_with_gemini_env_reports_live(app, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-fake-test-key-1234567890")
     c = app.test_client()
-    fake = "sk-ant-" + "x" * 40
-    r = c.post("/settings", data={"anthropic_api_key": fake},
-               follow_redirects=False)
-    assert r.status_code == 200
-    assert "saved" in r.get_data(as_text=True).lower()
-    # Stored on disk
-    assert secrets_store.get_secret("anthropic_api_key") == fake
-    # File mode 0600 where supported
-    p = secrets_store._SECRETS_PATH
-    if os.name == "posix":
-        mode = oct(p.stat().st_mode)[-3:]
-        assert mode == "600", f"expected 0600, got {mode}"
-
-    # Status flips to live=True
-    r2 = c.get("/api/settings/llm-status")
-    j = r2.get_json()
+    r = c.get("/api/settings/llm-status")
+    j = r.get_json()
     assert j["live"] is True
+    assert j["provider"] == "gemini"
+
+
+def test_llm_status_with_anthropic_env_reports_live(app, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-test-key-1234567890")
+    c = app.test_client()
+    r = c.get("/api/settings/llm-status")
+    j = r.get_json()
+    assert j["live"] is True
+    # Gemini default-prefers; with only Anthropic configured, Anthropic wins.
     assert j["provider"] == "anthropic"
-    assert "x" not in j["masked"][:6]  # masked, not echoed in full
 
 
-def test_settings_post_rejects_garbage(app):
-    c = app.test_client()
-    r = c.post("/settings", data={"anthropic_api_key": "garbage"})
-    assert r.status_code == 200
-    assert secrets_store.get_secret("anthropic_api_key") is None
-
-
-def test_settings_clear_key(app):
-    c = app.test_client()
-    fake = "sk-ant-" + "y" * 40
-    secrets_store.set_secret("anthropic_api_key", fake)
-    assert secrets_store.get_secret("anthropic_api_key") == fake
-    r = c.post("/settings", data={"action": "clear_anthropic"})
-    assert r.status_code == 200
-    assert secrets_store.get_secret("anthropic_api_key") is None
-
+# ---------------------------------------------------------------------------
+# Caption endpoint with no key — surface "contact administrator" honestly
+# ---------------------------------------------------------------------------
 
 def test_caption_endpoint_no_key_returns_live_false(app, tmp_path, monkeypatch):
-    """The masquerade-killer test \u2014 spec demands no fake AI output."""
-    # Stub a run with one ranked achievement so the endpoint can find it.
+    """No silent fake captions. When the operator hasn't configured a
+    provider, the user sees an honest "AI features unavailable" message."""
     from mediahub.web import web as _web
     fake_run = {
         "profile_display": "Test Club",
         "meet": {"name": "Test Meet"},
         "recognition_report": {
-            "ranked_achievements": [
-                {"achievement": {
+            "ranked_achievements": [{
+                "achievement": {
                     "swim_id": "abc123",
                     "swimmer_name": "Jane Doe",
                     "event": "100 Free",
@@ -117,8 +111,8 @@ def test_caption_endpoint_no_key_returns_live_false(app, tmp_path, monkeypatch):
                     "place": 1,
                     "type": "PB",
                     "headline": "First place",
-                }}
-            ]
+                },
+            }],
         },
     }
     monkeypatch.setattr(_web, "_load_run", lambda rid: fake_run)
@@ -127,17 +121,106 @@ def test_caption_endpoint_no_key_returns_live_false(app, tmp_path, monkeypatch):
     assert r.status_code == 200
     j = r.get_json()
     assert j["tone"] == "ai"
-    assert j["live"] is False, f"expected live=False with no key, got: {j!r}"
+    assert j["live"] is False
     assert j["error"] == "no_key"
     assert j["caption"] == ""
-    assert "Settings" in j["message"]
+    # The new copy steers the user to their administrator, NOT a settings page.
+    assert "administrator" in j["message"].lower()
+    assert "Settings" not in j["message"]
+    # The orphaned settings_url field must not be emitted — /settings is gone.
+    assert "settings_url" not in j
 
 
-def test_llm_resolve_picks_up_disk_key(app):
-    """media_ai.llm._resolve_anthropic_key reads disk store when env empty."""
+# ---------------------------------------------------------------------------
+# env-var key resolution still works through the new chain
+# ---------------------------------------------------------------------------
+
+def test_env_anthropic_key_picked_up(app, monkeypatch):
+    """The LLM module reads ANTHROPIC_API_KEY from env directly."""
     from mediahub.media_ai import llm as _llm
-    fake = "sk-ant-" + "z" * 40
-    secrets_store.set_secret("anthropic_api_key", fake)
-    assert _llm._resolve_anthropic_key() == fake
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-env-key-abcdef12345")
+    assert _llm._resolve_anthropic_key() == "sk-ant-fake-env-key-abcdef12345"
     assert _llm._has_anthropic_key() is True
     assert _llm.is_available() is True
+
+
+def test_env_gemini_key_picked_up(app, monkeypatch):
+    """The LLM module reads GEMINI_API_KEY (or GOOGLE_API_KEY) from env."""
+    from mediahub.media_ai import llm as _llm
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-fake-env-key-xyz")
+    assert _llm._resolve_gemini_key() == "AIza-fake-env-key-xyz"
+    assert _llm._has_gemini_key() is True
+    assert _llm.is_available() is True
+
+
+def test_no_env_no_provider(app):
+    """With no env keys and an empty disk store, is_available is False."""
+    from mediahub.media_ai import llm as _llm
+    assert _llm._has_anthropic_key() is False
+    assert _llm._has_gemini_key() is False
+    assert _llm.is_available() is False
+    assert _llm.active_provider() == "heuristic"
+
+
+# ---------------------------------------------------------------------------
+# Rendered-page invariant — no clickable /settings link anywhere in the
+# inline JS shell. Pins the fix for the three stale "Open Settings" /
+# "Add an API key" / Buffer-redirect JS sites that used to surface a
+# dead /settings link in the no-key / no-buffer flows.
+# ---------------------------------------------------------------------------
+
+def test_rendered_page_has_no_clickable_settings_link(app):
+    """After the settings-page rewrite, every JS message in the shell
+    must steer the user to their administrator. The page must NOT render
+    a clickable anchor or `window.location.href = '/settings'`-style
+    redirect to /settings."""
+    import re
+    c = app.test_client()
+    r = c.get("/", follow_redirects=True)
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    # No <a href="/settings"> anchor (the dead "Open Settings" pattern).
+    assert not re.search(r"""<a[^>]+href\s*=\s*["']/settings["']""", html)
+    # No window.location redirect to /settings (the schedule-modal fallback).
+    assert not re.search(r"""window\.location\.href\s*=\s*['"]/settings['"]""", html)
+    assert "API_BASE + '/settings'" not in html
+    # No JSON-consumer fallback that hardcoded '/settings' as a link.
+    assert "settings_url || " not in html
+    assert "j.settings_url" not in html
+    # The replacement copy is present in the shell JS.
+    assert "Contact your administrator" in html
+
+
+def test_no_api_key_message_does_not_steer_to_settings_page(app, monkeypatch):
+    """When the caption endpoint returns no_key, the JSON payload must
+    not contain a settings_url or any 'in Settings' wording. The user-
+    visible affordance is admin contact, not a settings page."""
+    from mediahub.web import web as _web
+    fake_run = {
+        "profile_display": "Test Club",
+        "meet": {"name": "Test Meet"},
+        "recognition_report": {
+            "ranked_achievements": [{
+                "achievement": {
+                    "swim_id": "abc123",
+                    "swimmer_name": "Jane Doe",
+                    "event": "100 Free",
+                    "time": "1:02.34",
+                    "pb": True,
+                    "place": 1,
+                    "type": "PB",
+                    "headline": "First place",
+                },
+            }],
+        },
+    }
+    monkeypatch.setattr(_web, "_load_run", lambda rid: fake_run)
+    c = app.test_client()
+    r = c.post("/api/runs/test_run/swim/abc123/caption?tone=ai")
+    j = r.get_json()
+    assert j["error"] == "no_key"
+    # No settings_url field — /settings is gone.
+    assert "settings_url" not in j
+    # No "in Settings" stale wording in the message.
+    assert "in Settings" not in j["message"]
+    assert "settings page" not in j["message"].lower()

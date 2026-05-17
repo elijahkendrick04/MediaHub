@@ -117,8 +117,8 @@ def ready_app(tmp_path, monkeypatch):
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_json))
 
-    # Store a Buffer access token via the helper.
-    secrets_store.set_buffer_access_token("test-token")
+    # Buffer access token — operator-managed via env var post-rewrite.
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "test-token")
     assert secrets_store.get_buffer_access_token() == "test-token"
 
     # Build the app with both TESTING and ENFORCE_ORG_GATE on so the
