@@ -167,6 +167,11 @@ def _gen_caption(
     except Exception:
         intent = default_intent
     enriched = dict(payload)
+    # Tag the payload with the artefact key + intent so the caption
+    # pipeline can (a) inject the AI-derived creative intent into the
+    # system prompt, and (b) look up the platform format rules for
+    # this artefact via brand.derived.platform_format_for.
+    enriched["_artefact_key"] = intent_key
     if intent:
         enriched["_artefact_intent"] = intent
     try:

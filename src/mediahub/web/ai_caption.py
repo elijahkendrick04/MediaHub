@@ -218,6 +218,31 @@ def generate_caption_for_tone(
         system_parts.append(dna_prose)
     elif vp_prose:
         system_parts.append("Voice profile from past captions: " + vp_prose)
+    # Per-artefact creative intent (AI-derived per org via brand.derived,
+    # falls back to the hardcoded intent) — surfaces here so the LLM
+    # actually receives it. This was previously written onto the
+    # achievement payload but never read; that bug is fixed here.
+    artefact_intent = (achievement_dict or {}).get("_artefact_intent") or ""
+    if artefact_intent:
+        system_parts.append("Creative intent for this piece: " + artefact_intent)
+    # Per-platform mechanical format rules. NOT AI-derived — these are
+    # platform product rules (character caps, hashtag conventions, link
+    # behaviour) that the LLM has no business reinventing per render.
+    artefact_key = (achievement_dict or {}).get("_artefact_key") or ""
+    if artefact_key:
+        try:
+            from mediahub.brand.derived import platform_format_for
+            fmt = platform_format_for(artefact_key)
+            if fmt:
+                system_parts.append(fmt)
+        except Exception:
+            pass
+    # Any caller-supplied extra instructions get appended last so they
+    # take precedence over generic guidance. Used by the sponsor-variant
+    # generator to inject "acknowledge sponsor X" requirements.
+    extra = (achievement_dict or {}).get("_extra_instructions") or ""
+    if extra:
+        system_parts.append("Additional requirement for this caption: " + extra)
     system = "\n\n".join(system_parts)
 
     # User message is a single English paragraph describing the swim — no

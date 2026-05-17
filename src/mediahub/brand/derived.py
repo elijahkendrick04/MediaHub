@@ -125,6 +125,76 @@ CANONICAL_ARTEFACTS: tuple[str, ...] = (
 
 
 # ---------------------------------------------------------------------------
+# Per-platform format constraints
+#
+# Mechanical, code-controlled rules — NOT AI-derived. These are platform
+# product rules (character limits, link behaviour, hashtag conventions)
+# that the LLM has no business reinventing every render. The audit's
+# separation principle: *creative direction* → AI; *format constraints*
+# → code. So tone/intent goes through ``artefact_voice`` (which IS
+# AI-derived per org), while these format rules stay fixed.
+#
+# The constants are referenced by ``platform_format_for(artefact_key)``
+# below, which the caption pipeline prepends to its system prompt
+# alongside the AI-derived intent and brand context.
+# ---------------------------------------------------------------------------
+
+PLATFORM_FORMATS: dict[str, str] = {
+    "instagram": (
+        "Instagram format rules: keep total length under 2,200 characters; "
+        "break into 2-4 short paragraphs separated by blank lines; "
+        "hashtags grouped at the very end (not inline); at most 5 hashtags; "
+        "no URLs in body (Instagram strips them); no @ mentions of accounts "
+        "the user hasn't explicitly listed."
+    ),
+    "x": (
+        "X (Twitter) format rules: STRICT 280-character cap per post — "
+        "if you write longer it will be truncated; hashtags may appear "
+        "inline; URLs count as 23 characters regardless of length; "
+        "do not use line-break-heavy formatting; one or two emoji "
+        "maximum unless the voice profile explicitly says no emoji."
+    ),
+    "linkedin": (
+        "LinkedIn format rules: 150-300 words; professional register; "
+        "open with a hook line that stands alone; one short paragraph "
+        "per idea; hashtags at the end, 3-5 maximum; URLs render with "
+        "a preview card so place them on their own line; never use "
+        "Twitter-style abbreviation."
+    ),
+    "tiktok": (
+        "TikTok caption format rules: keep under 150 characters so the "
+        "full caption is visible on first tap; hashtags integrated at "
+        "the end; lead with a hook; this is the caption beneath the "
+        "video, not the video script."
+    ),
+    "facebook": (
+        "Facebook format rules: 1-3 short paragraphs; hashtags at the "
+        "end and limited to 2-3; URLs render with preview cards; "
+        "longer-form than Instagram but shorter than LinkedIn."
+    ),
+    "email": (
+        "Email/newsletter format rules: paragraphs separated by blank "
+        "lines; no inline hashtags (they make email look like social "
+        "spam); URLs allowed; sign off with a short close; treat this "
+        "as something a parent reads on their phone over breakfast."
+    ),
+    "generic": (
+        "Format: standard social-post shape — one or two short "
+        "paragraphs, hashtags at the end if any, no platform-specific "
+        "tricks."
+    ),
+}
+
+# Artefact-key → platform mapping. Anything not listed defaults to "generic".
+ARTEFACT_PLATFORM: dict[str, str] = {
+    "instagram_long":    "instagram",
+    "data_thread_post":  "x",
+    "linkedin_long":     "linkedin",
+    "parent_newsletter": "email",
+}
+
+
+# ---------------------------------------------------------------------------
 # LLM call
 # ---------------------------------------------------------------------------
 
@@ -388,13 +458,32 @@ def artefact_intent_for(profile, artefact_key: str, default: str) -> str:
     return default
 
 
+def platform_format_for(artefact_key: str) -> str:
+    """Return the mechanical platform-format rules for an artefact.
+
+    Unlike the other helpers, this is intentionally NOT profile-aware
+    and NOT AI-derived: the format constraints are platform product
+    rules (character limits, hashtag conventions, link behaviour) that
+    don't change between organisations. Mixing them into the AI-derived
+    voice would let the LLM forget about a character cap during a
+    "creative" rewrite.
+
+    Returns the rules string or "" when no platform is known.
+    """
+    platform = ARTEFACT_PLATFORM.get(artefact_key, "generic")
+    return PLATFORM_FORMATS.get(platform, PLATFORM_FORMATS["generic"])
+
+
 __all__ = [
     "CANONICAL_TONES",
     "CANONICAL_ACHIEVEMENT_TYPES",
     "CANONICAL_ARTEFACTS",
+    "PLATFORM_FORMATS",
+    "ARTEFACT_PLATFORM",
     "derive_operating_profile",
     "tone_descriptor_for",
     "priority_for",
     "type_phrase_for",
     "artefact_intent_for",
+    "platform_format_for",
 ]

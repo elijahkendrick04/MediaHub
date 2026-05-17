@@ -8643,6 +8643,96 @@ function copyWhyCard(btn, taId) {{
         save_pack(pack, run_id, base_dir=base)
         return jsonify({"ok": True})
 
+    # ------------------------------------------------------------------
+    # Newsletter export — Phase 1.2 (output surface)
+    # ------------------------------------------------------------------
+    #
+    # The Turn-Into pipeline already produces a `parent_newsletter`
+    # artefact, but it lives inside a generated pack and isn't usable
+    # as an actual email body. This endpoint wraps the same builder
+    # standalone, renders it through brand.newsletter_renderer, and
+    # streams it in the requested format so the user can:
+    #   - preview the email in a browser              (GET ?format=html)
+    #   - copy the plaintext into Mailchimp / etc.    (GET ?format=text)
+    #   - download a ZIP with both files              (GET ?format=zip)
+    #
+    # All formats use the org's brand colours + logo + display name
+    # pulled from the active profile, so the rendered email is
+    # on-brand without requiring an extra config step.
+    @app.route("/api/runs/<run_id>/newsletter", methods=["GET"])
+    def api_run_newsletter(run_id: str):
+        fmt = (request.args.get("format") or "html").strip().lower()
+        if fmt not in ("html", "text", "zip"):
+            return jsonify({"error": "format must be html|text|zip"}), 400
+        download = request.args.get("download") == "1"
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        profile_id = run_data.get("profile_id") or ""
+        profile = load_profile(profile_id) if profile_id else None
+        # Fall back to the session-pinned active profile so a run with
+        # no stored profile_id still renders with the user's branding.
+        if profile is None:
+            profile = _active_profile()
+
+        # Build the newsletter artefact directly — avoids the cost of
+        # generating the full Turn-Into pack just for this one output.
+        try:
+            from mediahub.turn_into import templates as _ti
+            from mediahub.turn_into.pipeline import _meet_summary, _resolve_voice_profile
+            meet_summary = _meet_summary(run_data)
+            rr = run_data.get("recognition_report") or {}
+            ranked = rr.get("ranked_achievements") or []
+            voice_profile = _resolve_voice_profile(profile_id) if profile_id else None
+            brand_kit = None
+            try:
+                if profile is not None:
+                    brand_kit = profile.get_brand_kit()
+            except Exception:
+                brand_kit = None
+            artefact = _ti.build_parent_newsletter(
+                meet_summary, ranked,
+                profile=profile, voice_profile=voice_profile,
+                brand_kit=brand_kit, deterministic=False,
+            )
+        except Exception as e:
+            return jsonify({"error": f"newsletter_build_failed: {e}"}), 500
+
+        from mediahub.brand.newsletter_renderer import (
+            render_email_html, render_plaintext, render_zip,
+            safe_filename_for,
+        )
+        slug = safe_filename_for(
+            (run_data.get("meet") or {}).get("name") or run_id
+        )
+
+        if fmt == "text":
+            body = render_plaintext(artefact)
+            resp = Response(body, mimetype="text/plain; charset=utf-8")
+            if download:
+                resp.headers["Content-Disposition"] = (
+                    f'attachment; filename="{slug}-newsletter.txt"'
+                )
+            return resp
+        if fmt == "zip":
+            body = render_zip(artefact, profile=profile, meet_summary=meet_summary,
+                              base_name=f"{slug}-newsletter")
+            resp = Response(body, mimetype="application/zip")
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{slug}-newsletter.zip"'
+            )
+            return resp
+        # html (default)
+        body = render_email_html(artefact, profile=profile, meet_summary=meet_summary)
+        resp = Response(body, mimetype="text/html; charset=utf-8")
+        if download:
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="{slug}-newsletter.html"'
+            )
+        return resp
+
     @app.route("/runs/<run_id>/pack/<pack_id>")
     def turn_into_pack_view(run_id, pack_id):
         """Render a saved Turn-Into pack with the 7 artefacts."""
@@ -8892,6 +8982,9 @@ function tiRegenerate() {{
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
         _reel_url = url_for("api_run_reel", run_id=run_id)
+        _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
+        _newsletter_text_url = _newsletter_html_url + "?format=text"
+        _newsletter_zip_url = _newsletter_html_url + "?format=zip"
 
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
@@ -8950,6 +9043,37 @@ function tiRegenerate() {{
                     f'onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \'g-{card_uuid}\')">'
                     f'Schedule&hellip;</button>'
                 ) if card_id_raw else ""
+                # Per-card motion download — the endpoint renders (or
+                # serves cached) MP4. New tab so the user lands on the
+                # video preview rather than blocking the pack page.
+                motion_btn = ""
+                if card_id_raw:
+                    _motion_url = url_for(
+                        "api_card_motion", run_id=run_id, card_id=str(card_id_raw),
+                    )
+                    motion_btn = (
+                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
+                        f'title="Render a 6-second branded story-format MP4 for this card. '
+                        f'First time can take 30-90s while Remotion runs.">'
+                        f'&#x25B6; Motion video</a>'
+                    )
+                # Per-card sponsor variant — Phase 1.2 deliverable.
+                # Sponsor-branded result-card graphic + sponsor-
+                # acknowledging caption rendered in a single page.
+                sponsor_btn = ""
+                if card_id_raw:
+                    _sponsor_url = url_for(
+                        "sponsor_variant_view",
+                        run_id=run_id, card_id=str(card_id_raw),
+                    )
+                    sponsor_btn = (
+                        f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
+                        f'href="{_h(_sponsor_url)}" target="_blank" rel="noopener" '
+                        f'title="Render a sponsor-branded variant: sponsor-tile graphic + '
+                        f'sponsor-acknowledging caption for this card.">'
+                        f'&#x2605; Sponsor variant</a>'
+                    )
                 _ra_for_why = {
                     "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
                     "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
@@ -8979,6 +9103,8 @@ function tiRegenerate() {{
     <textarea id="cap-{card_id}-2" style="display:none">{cap_hash}</textarea>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-3')">Copy full brief</button>
     <textarea id="cap-{card_id}-3" style="display:none">{cap_full}</textarea>
+    {motion_btn}
+    {sponsor_btn}
     {schedule_btn}
   </div>
 </div>"""
@@ -9070,6 +9196,19 @@ function tiRegenerate() {{
           onclick="generateReelGrouped(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
 </div>
 <div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
+
+<div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
+    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
+  </div>
+</div>
 
 {visuals_strip}
 
@@ -9445,6 +9584,191 @@ function generateReelGrouped(btn, reelUrl) {{
             "explanation": explanation,
             **res,
         })
+
+    # ------------------------------------------------------------------
+    # Sponsor variant — Phase 1.2 (output surface)
+    # ------------------------------------------------------------------
+    #
+    # Per top-ranked card we can produce a sponsor-flavoured variant:
+    #   • visual:  the existing graphic_renderer's `sponsor_branded`
+    #              layout family, which is unlocked by passing
+    #              sponsor_name through create_visual_for_item;
+    #   • caption: a sponsor-acknowledging caption generated via
+    #              brand.sponsor.generate_sponsor_caption, which goes
+    #              through the regular caption pipeline so brand DNA
+    #              + voice profile + guidelines all flow through, with
+    #              an explicit "acknowledge sponsor X" requirement on
+    #              top.
+    # The page is a small server-rendered preview the user can copy
+    # from (caption) and download from (visual PNG link via the
+    # existing /api/visual/<vid>/png/... route).
+    def _load_run_for_card(run_id: str, card_id: str):
+        """Shared resolver for the per-card visual / sponsor routes."""
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_dir = RUNS_DIR / run_id
+            rj = run_dir / "run.json"
+            if rj.exists():
+                try:
+                    run_data = json.loads(rj.read_text())
+                except Exception:
+                    return None, None
+        if run_data is None:
+            return None, None
+        rr = run_data.get("recognition_report") or {}
+        for ra in (rr.get("ranked_achievements") or []):
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                return run_data, ra
+        for c in (run_data.get("cards") or []):
+            if c.get("swim_id") == card_id or c.get("id") == card_id:
+                return run_data, {"achievement": c}
+        return run_data, None
+
+    @app.route("/runs/<run_id>/card/<card_id>/sponsor-variant")
+    def sponsor_variant_view(run_id: str, card_id: str):
+        """Server-rendered sponsor variant page for one card."""
+        run_data, target = _load_run_for_card(run_id, card_id)
+        if run_data is None:
+            return _layout(
+                "Not found",
+                '<div class="empty">Run not found.</div>',
+                active="home",
+            ), 404
+        if target is None:
+            return _layout(
+                "Not found",
+                '<div class="empty">Card not found in this run.</div>',
+                active="home",
+            ), 404
+
+        # Profile resolution: run's profile_id → session-pinned active.
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ""
+        profile = load_profile(profile_id) if profile_id else None
+        if profile is None:
+            profile = _active_profile()
+        sponsor_name = (getattr(profile, "sponsor_name", "") if profile else "").strip()
+        if not sponsor_name:
+            body = (
+                f'<p class="dim"><a href="{url_for("content_pack_grouped", run_id=run_id)}">'
+                f'&larr; Back to content pack</a></p>'
+                '<h1>Sponsor variant unavailable</h1>'
+                '<div class="card empty">'
+                '<p>No sponsor is configured for this organisation.</p>'
+                f'<p><a class="btn" href="{url_for("organisation_page")}">'
+                'Add a sponsor name on the Organisation page &rarr;</a></p>'
+                '</div>'
+            )
+            return _layout("Sponsor variant", body, active="home")
+
+        ach = target.get("achievement") or {}
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+
+        # ---- 1. Render the sponsor-branded visual via the existing pipeline ----
+        visual_html = ""
+        visual_error = ""
+        if _v8_ok and _v8_create_visual_for_item is not None:
+            try:
+                item = {
+                    "id": ach.get("swim_id") or card_id,
+                    "swim_id": ach.get("swim_id") or card_id,
+                    "achievement": ach,
+                    "post_angle": ach.get("post_angle"),
+                    "meet_name": meet_name,
+                    "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
+                }
+                resolved_pid = profile_id or "_run_" + run_id
+                resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or ("_run_" + run_id)
+                brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
+                media_assets = []
+                try:
+                    store = _v8_get_media_store()
+                    assets = store.list(profile_id=resolved_pid)
+                    media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+                except Exception:
+                    pass
+                res = _v8_create_visual_for_item(
+                    item, brand_kit,
+                    profile_id=resolved_pid, run_id=run_id,
+                    media_assets=media_assets,
+                    sponsor_name=sponsor_name,
+                    variation_seed=0,
+                )
+                visuals = res.get("visuals") or []
+                if visuals:
+                    v0 = visuals[0]
+                    vid = v0.get("id") or v0.get("brief_id")
+                    fmt = v0.get("format_name") or "feed_portrait"
+                    if vid:
+                        img_url = url_for(
+                            "api_visual_png", vid=vid, format_name=fmt,
+                        )
+                        visual_html = (
+                            f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
+                            f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
+                        )
+                    else:
+                        visual_error = "Visual rendered but no asset id returned."
+                else:
+                    errs = res.get("errors") or []
+                    visual_error = (
+                        "Sponsor-branded visual could not be rendered: "
+                        + (errs[0] if errs else "no visuals returned")
+                    )
+            except Exception as e:
+                visual_error = f"render_failed: {e}"
+        else:
+            visual_error = "Visual pipeline unavailable in this environment."
+
+        # ---- 2. Generate the sponsor-acknowledging caption ----
+        caption_text = ""
+        caption_error = ""
+        try:
+            from mediahub.brand.sponsor import generate_sponsor_caption
+            caption_text = generate_sponsor_caption(ach, profile=profile)
+        except Exception as e:
+            caption_error = str(e)
+
+        # ---- 3. Render the page ----
+        _pack_url = url_for("content_pack_grouped", run_id=run_id)
+        visual_block = visual_html if visual_html else (
+            f'<div class="empty" style="text-align:left;padding:14px">'
+            f'<strong style="color:var(--warn)">Visual not available.</strong>'
+            f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
+            '</div>'
+        )
+        caption_block = (
+            f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
+            f'padding:12px;border:1px solid var(--border);border-radius:8px;'
+            f'background:var(--bg);color:var(--ink);font-family:inherit">'
+            f'{_h(caption_text)}</textarea>'
+            f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
+            f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
+            f'this.textContent=\'Copied&hairsp;✓\'">Copy caption</button>'
+        ) if caption_text else (
+            f'<div class="empty" style="text-align:left;padding:14px">'
+            f'<strong style="color:var(--warn)">Caption not available.</strong>'
+            f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
+            '</div>'
+        )
+        swimmer = _h(ach.get("swimmer_name") or "")
+        event = _h(ach.get("event") or "")
+        body = f"""
+<p class="dim"><a href="{_pack_url}">&larr; Back to content pack</a></p>
+<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' &middot; ' + event) if event else ''}</h1>
+<p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+  <div class="card">
+    <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-branded visual</h3>
+    {visual_block}
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor-acknowledging caption</h3>
+    {caption_block}
+  </div>
+</div>
+"""
+        return _layout(f"Sponsor variant &mdash; {swimmer}", body, active="home")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):
