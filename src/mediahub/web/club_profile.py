@@ -135,6 +135,25 @@ class ClubProfile:
     # exists, deterministic where it doesn't.
     brand_operating_profile: dict = field(default_factory=dict)
 
+    # ---- Per-org Buffer access token (multi-tenant publishing) ----
+    # Each ClubProfile carries its OWN Buffer personal access token.
+    # This is the multi-tenant-safe model: when MediaHub serves many
+    # clubs from one deployment, each club connects their own Buffer
+    # account — content is NEVER channelled through a shared Buffer
+    # account (which would violate Buffer's TOS and conflate every
+    # club's posting queue).
+    #
+    # Single-tenant self-hosted deployments may set BUFFER_ACCESS_TOKEN
+    # in the environment instead; the resolver in web.py falls back to
+    # the env var when this field is empty. That model is safe because
+    # operator IS the user.
+    #
+    # Connection happens inline inside the schedule modal, never in a
+    # settings page (per the operator-config rewrite). Users who don't
+    # use Buffer at all can fall through to the download-and-post-
+    # manually path.
+    buffer_access_token: str = ""
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)

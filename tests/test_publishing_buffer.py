@@ -249,13 +249,21 @@ def app(tmp_path, monkeypatch):
 
 
 def test_api_buffer_channels_no_token_returns_401(app):
+    """No token configured for the active org (and no env-var fallback)
+    surfaces the inline-connect choice. Post-multi-tenant-rewrite the
+    message steers the user at the connect form, not at an administrator."""
     c = app.test_client()
     r = c.get("/api/buffer/channels")
     assert r.status_code == 401
     j = r.get_json()
     assert j["connected"] is False
     assert j["error"] == "no_token"
-    assert "administrator" in j["message"].lower()
+    # The message points the user at the inline connect form.
+    assert "buffer" in j["message"].lower()
+    # The 401 carries the connect endpoint URL so the modal can render
+    # the inline "Paste your Buffer access token" form.
+    assert "connect_url" in j
+    assert j["connect_url"].endswith("/api/organisation/connect-buffer")
     # settings_url is no longer emitted — /settings route only redirects to home
     assert "settings_url" not in j
 

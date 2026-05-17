@@ -1040,9 +1040,40 @@ def _schedule_modal_js() -> str:
       return r.json().then(function(j){ return {status:r.status, body:j}; });
     }).then(function(o){
       if (o.status === 401 || !o.body.connected) {
-        alert((o.body && o.body.message) || 'Buffer is not configured. Contact your administrator to enable Buffer scheduling.');
-        var modalEl = document.getElementById('mh-sched-modal');
-        if (modalEl) modalEl.style.display = 'none';
+        // Per-profile Buffer: show the inline "Connect your Buffer
+        // account" form right inside the modal — paste a personal
+        // access token and we save it on this org's profile. Also
+        // offer the no-Buffer download alternative so clubs without
+        // Buffer aren't blocked from getting their content out.
+        var runIdForDl = document.getElementById('mh-sched-run-id').value;
+        var cardIdForDl = document.getElementById('mh-sched-card-id').value;
+        var capForDl = encodeURIComponent(
+          document.getElementById('mh-sched-caption').value || ''
+        );
+        var dlUrl = API_BASE + '/api/runs/' + encodeURIComponent(runIdForDl)
+          + '/card/' + encodeURIComponent(cardIdForDl)
+          + '/download?caption=' + capForDl;
+        chWrap.innerHTML =
+          '<div style="font-size:13px;line-height:1.5;margin-bottom:10px">'
+          + ((o.body && o.body.message) || 'Buffer is not connected for this organisation.')
+          + '</div>'
+          + '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">'
+          +   '<label for="mh-buf-token" style="font-size:12px;font-weight:600">Buffer access token</label>'
+          +   '<input id="mh-buf-token" type="password" '
+          +     'placeholder="1/..." autocomplete="off" '
+          +     'style="padding:8px;border:1px solid var(--border,#252a36);'
+          +     'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>'
+          +   '<button id="mh-buf-connect" class="btn" style="font-size:13px;padding:6px 12px;align-self:flex-start"'
+          +     ' onclick="mhConnectBufferFromModal()">Connect Buffer for this org</button>'
+          +   '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
+          +     'style="font-size:11px;color:var(--accent)">Where do I get a Buffer access token? &rarr;</a>'
+          + '</div>'
+          + '<div style="border-top:1px solid var(--border,#252a36);padding-top:10px;margin-top:10px">'
+          +   '<div style="font-size:12px;color:var(--muted,#7a8597);margin-bottom:6px">No Buffer? Download the post for manual sharing:</div>'
+          +   '<a class="btn secondary" style="font-size:13px;padding:6px 12px" href="'
+          +     dlUrl + '">Download caption + visual (.zip)</a>'
+          + '</div>';
+        modal.style.display = 'flex';
         return;
       }
       if (o.status >= 400) {
@@ -2197,6 +2228,61 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   };
 
   // Phase 1.4 — "Use in next caption". Re-runs the caption LLM with
+  // Multi-tenant Buffer connect — called from the inline form that
+  // the schedule modal renders when /api/buffer/channels returns 401.
+  // POSTs the pasted access token to /api/organisation/connect-buffer
+  // which validates against Buffer and persists on the active org's
+  // ClubProfile. On success, the modal silently retries the channel
+  // listing so the user lands in the normal schedule flow.
+  window.mhConnectBufferFromModal = function() {
+    var API_BASE = window._API_BASE || '';
+    var input = document.getElementById('mh-buf-token');
+    var btn = document.getElementById('mh-buf-connect');
+    if (!input || !btn) return;
+    var token = (input.value || '').trim();
+    if (!token) {
+      input.focus();
+      return;
+    }
+    var origLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    fetch(API_BASE + '/api/organisation/connect-buffer', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({buffer_access_token: token}),
+    }).then(function(r){
+      return r.json().then(function(j){ return {status: r.status, body: j}; });
+    }).then(function(o){
+      btn.disabled = false;
+      btn.textContent = origLabel;
+      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) {
+        // Token saved. Re-run the channel listing — it'll succeed now.
+        var runId = document.getElementById('mh-sched-run-id').value;
+        var cardId = document.getElementById('mh-sched-card-id').value;
+        var pillId = document.getElementById('mh-sched-pill-id').value;
+        if (typeof window.mhScheduleOpen === 'function') {
+          window.mhScheduleOpen(runId, cardId, pillId);
+        }
+        return;
+      }
+      var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
+      var err = document.getElementById('mh-sched-error');
+      if (err) {
+        err.style.display = 'block';
+        err.textContent = msg;
+      } else if (window.MH && typeof window.MH.toast === 'function') {
+        window.MH.toast(msg, 'error');
+      } else {
+        alert(msg);
+      }
+    }).catch(function(e){
+      btn.disabled = false;
+      btn.textContent = origLabel;
+      alert('Network error: ' + (e && e.message || e));
+    });
+  };
+
   // the visible explainer text injected as a required content
   // instruction. The result lands in a small panel below the
   // explainer (panel_id), preserving the user's reading flow rather
@@ -5362,25 +5448,64 @@ Relay team broke club record"></textarea>
         })
 
     # ---- Buffer publishing -------------------------------------------
+    #
+    # Multi-tenant publishing model (post-rewrite):
+    #
+    #   1. **Per-profile Buffer token** — each ClubProfile carries its
+    #      own optional `buffer_access_token`. Set via /api/organisation/
+    #      connect-buffer (inline in the publishing flow, no settings
+    #      page). This is the safe multi-tenant pattern: each club
+    #      authenticates with their own Buffer account; content never
+    #      flows through a shared account.
+    #
+    #   2. **Env-var fallback** — `BUFFER_ACCESS_TOKEN` env var is
+    #      consulted only when the active profile has no token. This
+    #      stays as a convenience for single-tenant self-hosted
+    #      deployments where operator IS the user (one club running
+    #      MediaHub on their own infra). It is NOT the multi-tenant
+    #      story.
+    #
+    #   3. **No-Buffer path** — clubs that don't have Buffer can fall
+    #      through to /api/runs/<run>/card/<id>/download which packages
+    #      the caption + visual as a ZIP for manual posting.
+    #
+    # This resolver picks 1 → 2 in priority order. Returns "" when no
+    # token is reachable for the active org; callers surface the
+    # connect-or-download choice.
+    def _resolve_buffer_token() -> str:
+        prof = _active_profile()
+        if prof is not None:
+            tok = (getattr(prof, "buffer_access_token", "") or "").strip()
+            if tok:
+                return tok
+        # Env fallback for single-tenant self-hosted operators.
+        from mediahub.web.secrets_store import get_buffer_access_token
+        return (get_buffer_access_token() or "").strip()
+
     @app.route("/api/buffer/channels")
     def api_buffer_channels():
         """List the user's connected Buffer channels.
 
-        Returns 401 when no token is configured so the UI can show an
-        administrator-facing message instead of opening the modal.
+        Returns 401 when neither the active profile nor the env var
+        has a token, so the UI can show the inline Connect Buffer +
+        Copy/Download alternative instead of opening the schedule modal.
         """
-        from mediahub.web.secrets_store import get_buffer_access_token
         from mediahub.publishing.buffer import (
             list_channels as _buf_list,
             BufferAuthError, BufferAPIError,
         )
-        token = get_buffer_access_token()
+        token = _resolve_buffer_token()
         if not token:
             return jsonify({
                 "connected": False,
                 "channels": [],
                 "error": "no_token",
-                "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
+                "message": (
+                    "Buffer isn't connected for this organisation. Paste "
+                    "your Buffer access token to enable scheduling, or "
+                    "use the download option to post manually."
+                ),
+                "connect_url": url_for("api_connect_buffer"),
             }), 401
         try:
             channels = _buf_list(token)
@@ -5404,6 +5529,183 @@ Relay team broke club record"></textarea>
             "count": len(channels),
         })
 
+    @app.route("/api/organisation/connect-buffer", methods=["POST"])
+    def api_connect_buffer():
+        """Save a Buffer access token onto the **active organisation**.
+
+        This is the multi-tenant-safe Buffer connection path: each club
+        pastes their own personal access token, which is persisted on
+        their ClubProfile (not in a shared env var, not in a shared
+        secrets file). Their content then flows through THEIR Buffer
+        account, never a shared operator account.
+
+        The token is validated by attempting a `list_channels` probe
+        before saving — a token that Buffer rejects is not persisted,
+        so the user gets immediate feedback rather than a silent fail
+        at schedule time.
+
+        POST body (form or JSON):
+            { "buffer_access_token": "1/..." }
+
+        Returns 200 on success with the connected channel count, or
+        4xx on validation / auth failures.
+        """
+        prof = _active_profile()
+        if prof is None:
+            return jsonify({
+                "ok": False,
+                "error": "no_active_profile",
+                "message": "Set up your organisation before connecting Buffer.",
+            }), 409
+        # Accept both form-data and JSON for browser-form + fetch use.
+        token = ""
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+            token = str(body.get("buffer_access_token") or "").strip()
+        if not token:
+            token = (request.form.get("buffer_access_token") or "").strip()
+        if not token:
+            return jsonify({
+                "ok": False,
+                "error": "missing_token",
+                "message": "Paste your Buffer access token to connect.",
+            }), 400
+        if len(token) < 10:
+            return jsonify({
+                "ok": False,
+                "error": "short_token",
+                "message": "That doesn't look like a Buffer access token (too short).",
+            }), 400
+
+        # Validate by probing Buffer for the connected channels. If Buffer
+        # rejects the token we never persist it.
+        from mediahub.publishing.buffer import (
+            list_channels as _buf_list,
+            BufferAuthError, BufferAPIError,
+        )
+        try:
+            channels = _buf_list(token)
+        except BufferAuthError as exc:
+            return jsonify({
+                "ok": False,
+                "error": "auth",
+                "message": str(exc),
+            }), 401
+        except BufferAPIError as exc:
+            return jsonify({
+                "ok": False,
+                "error": "api",
+                "message": str(exc),
+            }), 502
+
+        # Persist on the profile.
+        prof.buffer_access_token = token
+        save_profile(prof)
+        return jsonify({
+            "ok": True,
+            "channel_count": len(channels),
+            "profile_id": prof.profile_id,
+        })
+
+    @app.route("/api/organisation/disconnect-buffer", methods=["POST"])
+    def api_disconnect_buffer():
+        """Clear the Buffer access token on the active organisation."""
+        prof = _active_profile()
+        if prof is None:
+            return jsonify({"ok": False, "error": "no_active_profile"}), 409
+        prof.buffer_access_token = ""
+        save_profile(prof)
+        return jsonify({"ok": True})
+
+    @app.route(
+        "/api/runs/<run_id>/card/<path:card_id>/download",
+        methods=["GET"],
+    )
+    def api_card_download(run_id, card_id):
+        """Download a card's caption + visual as a ZIP for manual posting.
+
+        The Buffer-free path: clubs that don't have Buffer (or don't
+        want to use it) can grab a ZIP containing the caption text
+        and the generated visual, then post manually to whatever
+        platform they like. This is the always-safe option — no
+        third-party API touched, no TOS to violate, no scheduler
+        dependency.
+        """
+        from flask import send_file
+        import io
+        import zipfile
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Find the achievement / card.
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in (run_data.get("cards") or []):
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+
+        ach = target.get("achievement") or {}
+        swimmer = (ach.get("swimmer_name") or "swimmer").strip()
+        event = (ach.get("event") or "").strip()
+        slug = re.sub(r"[^A-Za-z0-9]+", "-",
+                      f"{swimmer} {event}").strip("-").lower() or "card"
+
+        # Caption text from the caller (preferred — preserves edits)
+        # or fall back to the achievement headline.
+        caption = (request.args.get("caption") or
+                   ach.get("headline") or
+                   f"{swimmer} — {event}").strip()
+
+        # Try to locate the rendered PNG for this card. Best-effort:
+        # not every card has a generated visual yet.
+        png_bytes: Optional[bytes] = None
+        png_name = ""
+        try:
+            visuals = (target.get("visuals") or
+                       (ach.get("visuals") if isinstance(ach, dict) else None) or [])
+            for v in visuals:
+                fp = v.get("file_path") or v.get("path") or ""
+                if fp and Path(fp).exists():
+                    png_bytes = Path(fp).read_bytes()
+                    png_name = Path(fp).name
+                    break
+        except Exception:
+            png_bytes = None
+
+        # Build the ZIP in memory.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{slug}-caption.txt", caption)
+            if png_bytes:
+                zf.writestr(png_name or f"{slug}.png", png_bytes)
+            zf.writestr("README.txt", (
+                "MediaHub card export.\n\n"
+                "- The .txt file contains the ready-to-post caption.\n"
+                "- The .png (if present) is the branded visual; if not,\n"
+                "  open the card in the content pack and click 'Create\n"
+                "  graphic' first.\n\n"
+                "Post the visual + caption to your chosen platform\n"
+                "manually. No Buffer / third-party scheduler required.\n"
+            ))
+        buf.seek(0)
+        return send_file(
+            buf, mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{slug}.zip",
+        )
+
     @app.route(
         "/api/runs/<run_id>/card/<path:card_id>/schedule",
         methods=["POST"],
@@ -5424,7 +5726,6 @@ Relay team broke club record"></textarea>
         user's edited caption is echoed back in `caption` so the UI
         can preserve it even after a failure.
         """
-        from mediahub.web.secrets_store import get_buffer_access_token
         from mediahub.publishing.buffer import (
             schedule_post as _buf_schedule,
             BufferAuthError, BufferAPIError, BufferRateLimitError,
@@ -5489,13 +5790,18 @@ Relay team broke club record"></textarea>
                     "caption": caption,
                 }), 400
 
-        token = get_buffer_access_token()
+        token = _resolve_buffer_token()
         if not token:
             return jsonify({
                 "ok": False,
                 "error": "no_token",
-                "message": "Buffer is not connected on this deployment. Contact your administrator to enable scheduling.",
+                "message": (
+                    "Buffer isn't connected for this organisation. Paste "
+                    "your Buffer access token to enable scheduling, or "
+                    "use the download option to post manually."
+                ),
                 "caption": caption,
+                "connect_url": url_for("api_connect_buffer"),
             }), 401
 
         ws = _get_wf_store()
