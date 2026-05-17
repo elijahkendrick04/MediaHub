@@ -438,8 +438,11 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
     """
     msgs = messages if messages else [{"role": "user", "content": prompt}]
 
-    # Provider order: pplx bridge → Anthropic SDK → Gemini (free tier)
-    # → claude CLI (Claude Code dev only) → heuristic.
+    # Provider order: pplx bridge → Anthropic SDK → Gemini → claude CLI.
+    # When none of those reach a real LLM, raise — there is no hardcoded
+    # heuristic fallback anywhere in MediaHub by design. Callers should
+    # surface the failure to the user with a "configure an AI provider"
+    # message instead of pretending fake output is a real answer.
     out = _call_pplx_bridge(msgs, system, max_tokens)
     if out:
         return out
@@ -452,16 +455,22 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
     out = _call_claude_cli(msgs, system, max_tokens)
     if out:
         return out
-
-    # Heuristic fallback
-    return _heuristic_response(prompt, system)
+    raise ClaudeUnavailableError(
+        "No AI provider could answer this request. Configure a Claude, "
+        "OpenAI, or Gemini key on /settings — there is no hardcoded "
+        "fallback output in MediaHub by design."
+    )
 
 
 def generate_json(prompt: str, *, system: Optional[str] = None, max_tokens: int = 1024,
                   fallback: Optional[dict] = None) -> dict:
-    """Generate JSON. Strips fences, falls back gracefully.
+    """Generate a JSON dict.
 
-    On failure or unparseable output: returns `fallback` if given, else {}.
+    Raises ``ClaudeUnavailableError`` when no AI provider can answer —
+    callers must catch and surface to the user. The ``fallback`` arg is
+    used ONLY when the provider DID answer but produced unparseable
+    output (rare); it is no longer used to mask "no provider configured"
+    (the user explicitly wants that surfaced honestly).
     """
     sys_with_json = (system or "") + (
         "\n\nReturn ONLY a JSON object. No prose, no fences."
@@ -491,7 +500,11 @@ def generate_vision(image_paths: list[str], prompt: str, *, system: Optional[str
         out = _call_gemini_vision(image_paths, prompt, system, max_tokens)
         if out:
             return out
-    return _heuristic_response(prompt, system)
+    raise ClaudeUnavailableError(
+        "No AI provider with vision support could answer this request. "
+        "Configure a Claude or Gemini key on /settings — there is no "
+        "hardcoded fallback in MediaHub by design."
+    )
 
 
 def _read_image_for_vision(path: str) -> tuple[Optional[str], Optional[str]]:
@@ -618,81 +631,13 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
-def _heuristic_response(prompt: str, system: Optional[str]) -> str:
-    """Deterministic fallback when no LLM is reachable.
-
-    Tries to detect intent from system+prompt and emit something usable.
-    Tests for absence/presence of specific words depend on this output
-    so keep it stable.
-    """
-    full = ((system or "") + "\n" + (prompt or "")).lower()
-    sys_lower = (system or "").lower()
-
-    # JSON structured output — only when the SYSTEM prompt explicitly asks
-    # for JSON. The user prompt commonly contains "Achievement data (JSON):"
-    # as a label for data, which must NOT route the response to '{}'.
-    if "return only a json" in sys_lower or "respond with json" in sys_lower or "output json" in sys_lower:
-        return "{}"
-    # Alt text
-    if "alt text" in full or "alt-text" in full or "accessibility" in full:
-        return _heuristic_alt(prompt)
-    # Caption generation
-    if "caption" in full or "instagram" in full or "social" in full or "post" in full:
-        return _heuristic_caption(prompt)
-    return "Generated content unavailable — using deterministic fallback."
-
-
-def _heuristic_caption(prompt: str) -> str:
-    """Simple template caption from the prompt fields if recognisable.
-
-    ai_caption._build_user_message emits JSON like
-        {"swimmer_first": "Hannah", "swimmer_name": "Hannah Smith",
-         "event": "100 Free", "time": "1:02.34", ...}
-    so we try JSON-shaped keys first. The old `swimmer:` / `event:` regex
-    never matched that payload and produced "Strong swim from the swimmer
-    in the event" — the symptom users reported when the LLM was down.
-    """
-    name = ""
-    event = ""
-    result = ""
-
-    m = re.search(r'"swimmer_first"\s*:\s*"([^"]+)"', prompt)
-    if m:
-        name = m.group(1).strip()
-    if not name:
-        m = re.search(r'"swimmer_name"\s*:\s*"([^"]+)"', prompt)
-        if m:
-            name = m.group(1).strip().split()[0] if m.group(1).strip() else ""
-    m = re.search(r'"event"\s*:\s*"([^"]+)"', prompt)
-    if m:
-        event = m.group(1).strip()
-    m = re.search(r'"time"\s*:\s*"([^"]+)"', prompt)
-    if m:
-        result = m.group(1).strip()
-
-    if not name:
-        m = re.search(r"(?:swimmer|athlete)\s*[:=]\s*([^\n,]+)", prompt, re.I)
-        if m:
-            name = m.group(1).strip()
-    if not event:
-        m = re.search(r"event\s*[:=]\s*([^\n,]+)", prompt, re.I)
-        if m:
-            event = m.group(1).strip()
-    if not result:
-        m = re.search(r"(?:result|time)\s*[:=]\s*([^\n,]+)", prompt, re.I)
-        if m:
-            result = m.group(1).strip()
-
-    name = name or "the swimmer"
-    event_phrase = f"the {event}" if event else "their event"
-    if result:
-        return f"Massive swim from {name} — {result} in {event_phrase}. One for the grid."
-    return f"Strong swim from {name} in {event_phrase}. Proud of the work."
-
-
-def _heuristic_alt(prompt: str) -> str:
-    return ("Branded social graphic celebrating a swimming achievement, "
-            "featuring an athlete photo with bold typography and club colours.")
+# The heuristic / template fallbacks (_heuristic_response,
+# _heuristic_caption, _heuristic_alt) were deleted in the
+# Claude-driven-core refactor. By product direction MediaHub has no
+# hardcoded substitute output anywhere — every reasoning call goes to a
+# configured AI provider, and unavailable providers surface to the user
+# as an actionable error ("configure an AI key in /settings") rather
+# than silently producing fake captions/alt-text.
 
 
 # ---------------------------------------------------------------------------

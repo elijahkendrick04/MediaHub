@@ -97,10 +97,10 @@ except ImportError as _v73_err:
     _save_voice_profile = None
 
 # V9: "Why this card?" explainer.
-try:
-    from mediahub.recognition.explainer import explain_achievement as _explain_achievement
-except ImportError:
-    _explain_achievement = None
+# The legacy rule-based explainer (recognition/explainer.py) is no longer
+# called — _build_card_explanation now requires an AI provider and surfaces
+# an honest "AI unavailable: configure a provider" message when none is
+# configured, instead of falling back to a hardcoded type-phrase template.
 
 
 # LLM-derived performance-context sentence, keyed by
@@ -231,24 +231,28 @@ _explanation_cache: dict[str, dict] = {}
 
 def _llm_build_explanation(achievement: dict, factors: list,
                             rank: Optional[int] = None,
-                            meet_context: Optional[dict] = None) -> Optional[dict]:
+                            meet_context: Optional[dict] = None
+                            ) -> tuple[Optional[dict], Optional[str]]:
     """Have the LLM write the headline + bullets for "Why this card?"
-    based on the achievement and the ranker's factors. Returns
-    ``{"headline": str, "bullets": [str]}`` or None if no provider is
-    configured or the call fails. Uses a `submit_explanation` tool so
-    we never have to parse JSON out of free-text output.
+    based on the achievement and the ranker's factors.
+
+    Returns (result, error). ``result`` is ``{"headline", "bullets"}``
+    on success; ``error`` is a human-readable string explaining WHY the
+    AI didn't answer (no provider configured, rate-limit, etc.) so the
+    UI can show "your AI is unavailable: configure a provider in
+    Settings" instead of falling back to a hardcoded template.
     """
     try:
         from mediahub.ai_core import (
             ask_with_tools, narrate_achievement, narrate_meet,
             ProviderNotConfigured, ProviderError,
         )
-    except Exception:
-        return None
+    except Exception as e:
+        return None, f"ai_core import failed: {e}"
     a = achievement or {}
     swim_prose = narrate_achievement(a, meet=meet_context or None)
     if not swim_prose:
-        return None
+        return None, "not enough achievement detail to narrate"
 
     # English summary of the factors — no JSON dump.
     factor_lines: list[str] = []
@@ -328,16 +332,18 @@ def _llm_build_explanation(achievement: dict, factors: list,
             tools=tool, on_tool_call=_tool,
             max_tokens=500, max_rounds=2,
         )
-    except (ProviderNotConfigured, ProviderError):
-        return None
-    except Exception:
-        return None
+    except ProviderNotConfigured as e:
+        return None, str(e)
+    except ProviderError as e:
+        return None, f"AI provider error: {e}"
+    except Exception as e:
+        return None, f"AI call failed: {e}"
     if not captured.get("headline"):
-        return None
-    return {
+        return None, "AI returned no explanation."
+    return ({
         "headline": captured["headline"],
         "bullets":  captured.get("bullets") or [],
-    }
+    }, None)
 
 
 def _build_source_lines_from_evidence(achievement: dict) -> list[dict]:
@@ -407,28 +413,22 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
             pass
         return exp
 
-    llm_exp = _llm_build_explanation(achievement, factors, rank, meet_context)
+    llm_exp, llm_error = _llm_build_explanation(achievement, factors, rank, meet_context)
     if llm_exp is not None:
         exp = {
             "headline":     llm_exp["headline"],
             "bullets":      llm_exp["bullets"],
             "source_lines": _build_source_lines_from_evidence(achievement),
         }
-    elif _explain_achievement is not None:
-        # Legacy rule-based explainer for environments with no LLM at all.
-        try:
-            exp = _explain_achievement(achievement, factors, rank=rank)
-        except Exception:
-            exp = {
-                "headline":     "Generated for: ranked top-N by overall score.",
-                "bullets":      [],
-                "source_lines": _build_source_lines_from_evidence(achievement),
-            }
     else:
+        # No hardcoded template here — the user explicitly wants the AI
+        # to do the reasoning, full stop. If no provider can answer we
+        # tell them why and how to fix it.
         exp = {
-            "headline":     "Generated for: ranked top-N by overall score.",
+            "headline":     "AI explanation unavailable.",
             "bullets":      [],
             "source_lines": _build_source_lines_from_evidence(achievement),
+            "ai_error":     llm_error or "No AI provider is configured.",
         }
     _explanation_cache[cache_key] = exp
 
@@ -517,6 +517,25 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
             '</div>'
         )
 
+    # AI-unavailable callout. When the explanation couldn't be generated
+    # (no provider configured, rate-limit on every provider, etc.) the
+    # explainer attaches an `ai_error`. We render an honest red callout
+    # with a link to /settings instead of inventing a fake explanation.
+    ai_error = (exp.get("ai_error") or "").strip()
+    ai_error_block = ""
+    if ai_error:
+        ai_error_block = (
+            '<div style="margin:8px 0 10px 0;padding:10px 12px;'
+            'background:rgba(244,63,94,0.06);border-left:2px solid #f43f5e;'
+            'border-radius:4px">'
+            '<div style="font-size:10px;text-transform:uppercase;color:#f43f5e;'
+            'letter-spacing:0.5px;margin-bottom:2px">AI unavailable</div>'
+            f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(ai_error)}</div>'
+            f'<div style="margin-top:6px;font-size:12px">'
+            f'<a href="{url_for("settings_page")}" style="color:#22D3EE">Open AI settings →</a>'
+            '</div></div>'
+        )
+
     return f"""
 <details class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
   border:1px solid rgba(139,92,246,0.25);border-radius:8px">
@@ -527,6 +546,7 @@ def _render_why_this_card(ra: dict, *, card_uuid: str) -> str:
   <div style="margin-top:8px">
     <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
     {bullets_block}
+    {ai_error_block}
     {perf_block}
     <div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;
       margin-bottom:4px">Source lines (verbatim)</div>
@@ -6063,30 +6083,51 @@ Relay team broke club record"></textarea>
               "and a closing line. Use the swimmer's first name. Don't "
               "invent facts. ~700 characters max. Output the caption only."
         )
-        composed_caption = ""
+        # Spotlight composite — pure AI, no template stitch. If the AI is
+        # unavailable, render a clear "AI unavailable" page rather than
+        # pretending to compose a post out of bullet points.
+        from mediahub.ai_core import (
+            ask, ProviderNotConfigured, ProviderError,
+        )
         try:
-            from mediahub.ai_core import (
-                ask, ProviderNotConfigured, ProviderError,
-            )
             composed_caption = (ask(
                 "You are MediaHub's spotlight-post writer. Output only the "
                 "caption text, no preamble or markdown.",
                 brief,
                 max_tokens=600,
             ) or "").strip()
-        except (ProviderNotConfigured, ProviderError):
-            composed_caption = ""
-        except Exception:
-            composed_caption = ""
-        if not composed_caption:
-            # Honest message when no provider is configured — no fake
-            # template stitch that pretends to be AI output.
-            composed_caption = (
-                f"Spotlight draft for {swimmer_name} at {meet_name} could "
-                f"not be generated — no AI provider is configured. "
-                f"Approved moments:\n"
-                + "\n".join(f"• {l}" for l in moment_lines)
+        except ProviderNotConfigured as e:
+            err_html = (
+                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<h2 style="margin-top:0">No AI provider configured</h2>'
+                f'<p>Spotlight posts are written by your AI provider. {_h(str(e))}</p>'
+                f'<p><a class="btn" href="{url_for("settings_page")}">Open settings →</a></p>'
+                '</div>'
             )
+            return _layout("Build spotlight post", err_html, active="create"), 503
+        except ProviderError as e:
+            err_html = (
+                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<h2 style="margin-top:0">AI provider error</h2>'
+                f'<p>The configured AI provider couldn\'t finish the spotlight draft: '
+                f'<code>{_h(str(e))}</code>.</p>'
+                '<p class="muted">Try again in a moment (rate limits typically '
+                'clear within seconds), or configure a second provider on '
+                f'<a href="{url_for("settings_page")}">/settings</a> so MediaHub '
+                'can route around the failing one.</p>'
+                '</div>'
+            )
+            return _layout("Build spotlight post", err_html, active="create"), 502
+        if not composed_caption:
+            err_html = (
+                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<h2 style="margin-top:0">AI returned no caption</h2>'
+                '<p>The provider responded but produced an empty caption. '
+                'Try regenerating, or pick a different provider on '
+                f'<a href="{url_for("settings_page")}">/settings</a>.</p>'
+                '</div>'
+            )
+            return _layout("Build spotlight post", err_html, active="create"), 502
 
         card = {
             "platform":   "Instagram",

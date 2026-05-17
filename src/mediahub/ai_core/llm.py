@@ -488,28 +488,6 @@ _DISPATCH = {
 }
 
 
-def _legacy_backstop(system: str, user: str, max_tokens: int) -> Optional[str]:
-    """Dev/test backstop — use the legacy media_ai.llm.generate() when no
-    API-key provider is configured but its multi-tier (e.g. claude-cli)
-    happens to be reachable. Keeps developer environments working without
-    re-wiring tests. Returns None in production where nothing's reachable.
-    """
-    try:
-        from mediahub.media_ai import llm as _legacy
-    except Exception:
-        return None
-    try:
-        if not _legacy.is_available():
-            return None
-        out = _legacy.generate(user, system=system, max_tokens=max_tokens)
-        if isinstance(out, str) and out.strip() and not out.startswith(
-                "Generated content unavailable"):
-            return out.strip()
-    except Exception:
-        return None
-    return None
-
-
 def _fallback_chain(primary: Optional[str]) -> list[str]:
     """Return the provider order to try, starting with `primary` (if
     configured) then the remaining configured providers. Lets a rate-
@@ -542,11 +520,23 @@ def _is_transient(err_msg: str) -> bool:
 
 def ask(system: str, user: str, *, max_tokens: int = 800,
         provider: Optional[str] = None) -> str:
-    """Plain-text in, plain-text out. Tries the active provider first,
-    falls through to any other configured provider on a transient
-    failure (rate limit, auth, 5xx)."""
+    """Plain-text in, plain-text out.
+
+    Tries the active provider first; on a *transient* failure (429, 401,
+    403, 5xx, timeout) it walks through any other configured AI provider
+    so the user isn't blocked by one model's rate limit. There is no
+    fallback to hardcoded templates / heuristics anywhere in the
+    codebase — when every configured AI fails, the caller gets the raw
+    ProviderError so the UI can surface "your AI is unavailable
+    because X; fix it by Y" instead of silently producing fake content.
+    """
     primary = (provider or active_provider() or "").lower() or None
     chain = _fallback_chain(primary) if primary else []
+    if not chain:
+        raise ProviderNotConfigured(
+            "No LLM provider is configured. Add a Claude, OpenAI, or "
+            "Gemini key in /settings."
+        )
     last_err: Optional[Exception] = None
     for p in chain:
         try:
@@ -555,19 +545,12 @@ def ask(system: str, user: str, *, max_tokens: int = 800,
             last_err = e
             if not _is_transient(str(e)) or p == chain[-1]:
                 raise
-            # else: try the next configured provider
             log.warning("provider %s transient error, falling through: %s",
                         p, str(e)[:200])
             continue
     if last_err is not None:
         raise last_err
-    backstop = _legacy_backstop(system, user, max_tokens)
-    if backstop is not None:
-        return backstop
-    raise ProviderNotConfigured(
-        "No LLM provider is configured. Add a Claude, OpenAI, or "
-        "Gemini key in /settings."
-    )
+    raise ProviderError("All configured providers failed.")
 
 
 def ask_with_tools(system: str, user: str, *, tools: list[dict],

@@ -204,14 +204,20 @@ class TestEndpointAIWithKey:
 # ---------------------------------------------------------------------------
 
 class TestVoiceTones:
-    @pytest.mark.parametrize("voice_id", ["warm_club", "hype", "data_led"])
+    # `hype` (no separator) is an AI tone — it goes through the LLM, not
+    # voice rendering — and is covered by TestEndpointAIWithKey /
+    # TestEndpointAIWithNoKey. Voice-only tones use underscores.
+    @pytest.mark.parametrize("voice_id", ["warm_club", "data_led"])
     def test_voice_tone_returns_200(self, client, fake_run_id, voice_id):
         resp = client.post(
             f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone={voice_id}"
         )
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("voice_id", ["warm_club", "hype", "data_led"])
+    # `hype` (no separator) is an AI tone — it goes through the LLM, not
+    # voice rendering — and is covered by TestEndpointAIWithKey /
+    # TestEndpointAIWithNoKey. Voice-only tones use underscores.
+    @pytest.mark.parametrize("voice_id", ["warm_club", "data_led"])
     def test_voice_tone_returns_caption(self, client, fake_run_id, voice_id):
         resp = client.post(
             f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone={voice_id}"
@@ -219,14 +225,20 @@ class TestVoiceTones:
         data = resp.get_json()
         assert data["caption"].strip() != ""
 
-    @pytest.mark.parametrize("voice_id", ["warm_club", "hype", "data_led"])
+    # `hype` (no separator) is an AI tone — it goes through the LLM, not
+    # voice rendering — and is covered by TestEndpointAIWithKey /
+    # TestEndpointAIWithNoKey. Voice-only tones use underscores.
+    @pytest.mark.parametrize("voice_id", ["warm_club", "data_led"])
     def test_voice_tone_returns_correct_tone_field(self, client, fake_run_id, voice_id):
         resp = client.post(
             f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone={voice_id}"
         )
         assert resp.get_json()["tone"] == voice_id
 
-    @pytest.mark.parametrize("voice_id", ["warm_club", "hype", "data_led"])
+    # `hype` (no separator) is an AI tone — it goes through the LLM, not
+    # voice rendering — and is covered by TestEndpointAIWithKey /
+    # TestEndpointAIWithNoKey. Voice-only tones use underscores.
+    @pytest.mark.parametrize("voice_id", ["warm_club", "data_led"])
     def test_voice_tone_fallback_false(self, client, fake_run_id, voice_id):
         resp = client.post(
             f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone={voice_id}"
@@ -235,14 +247,12 @@ class TestVoiceTones:
 
 
 class TestDifferentVoicesProduceDifferentOutput:
-    def test_hype_vs_data_led_differ(self, client, fake_run_id):
-        a = client.post(f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=hype").get_json()["caption"]
-        b = client.post(f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=data_led").get_json()["caption"]
-        assert a != b
-
-    def test_warm_club_vs_hype_differ(self, client, fake_run_id):
+    # The voice-rendering layer produces deterministic per-voice output
+    # for the underscore-named voices (warm_club / data_led). The
+    # `hype` AI tone is covered separately with a mocked LLM.
+    def test_warm_club_vs_data_led_differ(self, client, fake_run_id):
         a = client.post(f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=warm_club").get_json()["caption"]
-        b = client.post(f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=hype").get_json()["caption"]
+        b = client.post(f"/api/runs/{fake_run_id}/swim/test_swim_001/caption?tone=data_led").get_json()["caption"]
         assert a != b
 
 
