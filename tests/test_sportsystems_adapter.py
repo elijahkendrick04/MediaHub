@@ -155,6 +155,8 @@ def test_home_renders_without_profiles():
 
         from mediahub.web.web import create_app
         app = create_app()
+        # Bypass the first-run organisation gate (no profile is seeded).
+        app.config["TESTING"] = True
         c = app.test_client()
         r = c.get("/")
         assert r.status_code == 200

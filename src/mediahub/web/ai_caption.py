@@ -86,6 +86,36 @@ def _resolve_voice_profile(club_profile) -> Optional[dict]:
     return vp if isinstance(vp, dict) and vp else None
 
 
+def _brand_dna_prose(club_profile) -> str:
+    """Turn the captured brand-DNA fields on a ClubProfile into natural-
+    language guidance for the caption LLM. Reads only fields the social /
+    website ingestion populates — never invents content.
+    """
+    if club_profile is None:
+        return ""
+    def _get(name: str):
+        if isinstance(club_profile, dict):
+            return club_profile.get(name)
+        return getattr(club_profile, name, None)
+    summary = (_get("brand_voice_summary") or "").strip()
+    use = list(_get("brand_phrases_to_use") or [])[:5]
+    avoid = list(_get("brand_phrases_to_avoid") or [])[:5]
+    keywords = list(_get("brand_keywords") or [])[:8]
+    bits: list[str] = []
+    if summary:
+        bits.append("About this organisation: " + summary)
+    if keywords:
+        bits.append("Words and themes this org uses about itself: "
+                   + ", ".join(keywords) + ".")
+    if use:
+        bits.append("Phrases that sound like them — borrow from these where natural: "
+                   + "; ".join(f'"{p}"' for p in use) + ".")
+    if avoid:
+        bits.append("Phrases that would feel off-brand — do not use: "
+                   + "; ".join(f'"{p}"' for p in avoid) + ".")
+    return " ".join(bits)
+
+
 def _voice_profile_prose(vp: Optional[dict]) -> str:
     """Turn a learned voice_profile dict into natural-language guidance."""
     if not vp:
@@ -176,6 +206,9 @@ def generate_caption_for_tone(
     brand_prose = narrate_brand(club_brand)
     if brand_prose:
         system_parts.append("Brand voice: " + brand_prose)
+    dna_prose = _brand_dna_prose(club_profile)
+    if dna_prose:
+        system_parts.append("Brand DNA (captured from this org's website / social profiles): " + dna_prose)
     if vp_prose:
         system_parts.append("Voice profile from past captions: " + vp_prose)
     system = "\n\n".join(system_parts)

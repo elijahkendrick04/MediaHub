@@ -106,6 +106,11 @@ class ClubProfile:
     brand_captured_at: str = ""
     brand_capture_status: str = ""
 
+    # ---- Social links (used by brand.social_dna for first-run setup) ----
+    # Keys: instagram | facebook | twitter | tiktok | linkedin.
+    # Values are full URLs. Empty/missing keys are simply not used.
+    social_links: dict = field(default_factory=dict)
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)
@@ -176,6 +181,31 @@ class ClubProfile:
         """Return the active Tone enum for this profile."""
         from mediahub.brand.tone import tone_from_str
         return tone_from_str(self.tone or self.caption_tone or "warm-club")
+
+    def is_ready(self) -> bool:
+        """True when the AI has enough context to generate on-brand content.
+
+        Requires a real organisation name plus at least one of:
+        - a captured brand voice summary (from website / socials),
+        - an analysed voice_profile,
+        - pasted voice_examples (>=3),
+        - a non-default tone_notes block.
+
+        This is what the routing gate consults before unlocking content
+        production. The point is to stop the user from generating
+        anonymous, generic content before the AI knows who they are.
+        """
+        name_ok = bool((self.display_name or "").strip())
+        if not name_ok:
+            return False
+        brand_ok = bool(
+            (self.brand_voice_summary or "").strip()
+            or self.brand_palette_extracted
+            or self.brand_keywords
+        )
+        voice_ok = bool(self.voice_profile) or len(self.voice_examples or []) >= 3
+        notes_ok = len((self.tone_notes or "").strip()) >= 30
+        return brand_ok or voice_ok or notes_ok
 
 
 # ---------------------------------------------------------------------

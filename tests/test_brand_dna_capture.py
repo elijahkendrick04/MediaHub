@@ -323,8 +323,10 @@ class TestOrganisationRoute:
         r = client.get("/organisation")
         assert r.status_code == 200
         body = r.get_data(as_text=True)
-        assert "Capture from website" in body
         assert "brand_source_url" in body
+        # The capture card must still be present (label was generalised
+        # from "Capture from website" to cover both websites and socials).
+        assert "Re-analyse brand" in body or "Capture from website" in body
 
     def test_capture_action_unreachable_url_shows_error(self, isolated_data_dir, monkeypatch):
         """An unreachable URL must produce a clear error, not a 500."""

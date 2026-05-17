@@ -39,7 +39,7 @@ from typing import Any, Dict, Optional
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    jsonify, abort, send_file, Response,
+    jsonify, abort, send_file, Response, session,
 )
 from markupsafe import escape as _h
 
@@ -2187,6 +2187,109 @@ def create_app() -> Flask:
 
         app.wsgi_app = _script_name_middleware  # type: ignore[assignment]
 
+    # ---- Active organisation: session memory + first-run gate ----------
+    #
+    # The AI engine cannot produce on-brand content without knowing who
+    # the organisation is. Until that's set up we block content-production
+    # routes and steer the user to /organisation/setup. The active profile
+    # id is cached in the Flask session so the user doesn't have to
+    # re-select it every time — and the profile itself lives on disk
+    # (DATA_DIR/club_profiles/<id>.json) so it survives container
+    # restarts.
+
+    # Routes that are always reachable even when no organisation is set up.
+    _SETUP_EXEMPT_ENDPOINTS = frozenset({
+        "home",
+        "organisation_page",
+        "organisation_setup",
+        "organisation_setup_capture",
+        "organisation_set_active",
+        "settings_page",
+        "healthz",
+        "healthz_deps",
+        "static",
+    })
+    # API endpoints that should return a JSON 409 instead of redirecting.
+    _SETUP_EXEMPT_API_PREFIXES = (
+        "/api/llm",
+        "/api/health",
+        "/api/organisation",
+    )
+
+    def _active_profile_id() -> Optional[str]:
+        """Return the currently-selected organisation id, or None."""
+        # 1. Explicit session pin (set when the user saves an org).
+        pid = session.get("active_profile_id")
+        if pid:
+            prof = load_profile(pid)
+            if prof:
+                return prof.profile_id
+            # Stale pin — drop it and fall through.
+            session.pop("active_profile_id", None)
+        # 2. Fall back to the most-recent profile on disk so a returning
+        #    user on a new session still finds their org.
+        profs = list_profiles()
+        if not profs:
+            return None
+        # list_profiles() sorts alphabetically; prefer the file with the
+        # most recent mtime so "last edited" wins.
+        try:
+            from .club_profile import _profiles_dir
+            d = _profiles_dir()
+            best = max(profs, key=lambda p: (d / f"{p.profile_id}.json").stat().st_mtime)
+        except Exception:
+            best = profs[0]
+        session["active_profile_id"] = best.profile_id
+        return best.profile_id
+
+    def _active_profile() -> Optional[ClubProfile]:
+        pid = _active_profile_id()
+        return load_profile(pid) if pid else None
+
+    # Expose the helpers as app-level functions so other routes can reach
+    # them without re-implementing the lookup. (Routes defined later in
+    # create_app() close over these via the enclosing scope.)
+    app.active_profile_id = _active_profile_id  # type: ignore[attr-defined]
+    app.active_profile = _active_profile        # type: ignore[attr-defined]
+
+    @app.before_request
+    def _gate_until_org_ready():
+        # Tests bypass the gate by default — they assert specific
+        # behaviour of downstream routes and shouldn't have to seed a
+        # profile. Tests that exercise the gate set TESTING=False on
+        # the app explicitly (see test_org_setup_gate.py).
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_ORG_GATE"):
+            return None
+        ep = request.endpoint or ""
+        # Always allow static, the home page, settings, health, and the
+        # organisation routes themselves.
+        if ep in _SETUP_EXEMPT_ENDPOINTS:
+            return None
+        path = request.path or ""
+        # JSON-style endpoints get a 409 instead of a redirect so the
+        # browser fetch() call can show a friendly inline error.
+        is_api = path.startswith("/api/")
+        if is_api and any(path.startswith(p) for p in _SETUP_EXEMPT_API_PREFIXES):
+            return None
+        prof = _active_profile()
+        if prof is not None and prof.is_ready():
+            return None
+        if is_api:
+            return (
+                jsonify({
+                    "ok": False,
+                    "error": "organisation_not_ready",
+                    "message": (
+                        "Set up your organisation before producing content. "
+                        "MediaHub needs to know who you are first."
+                    ),
+                    "setup_url": url_for("organisation_setup"),
+                }),
+                409,
+            )
+        # Browser request — redirect to the first-run flow.
+        return redirect(url_for("organisation_setup"))
+
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
     def home():
@@ -2201,9 +2304,17 @@ def create_app() -> Flask:
         # Build the Holo-style home page. Hero + how-it-works + templates
         # are shared between empty and populated states; recent activity table
         # only appears when there are runs.
-        _add_input_url = url_for('add_input_page')
+        _setup_url = url_for('organisation_setup')
         _org_url = url_for('organisation_page')
         _settings_url = url_for('settings_page')
+        # If no organisation is set up yet, the primary CTA must be
+        # "Set up your organisation" — the content-creation routes are
+        # gated until the AI knows who you are.
+        _ready_prof = _active_profile()
+        _is_setup = bool(_ready_prof and _ready_prof.is_ready())
+        _add_input_url = url_for('add_input_page') if _is_setup else _setup_url
+        _primary_cta_label = ("Create content &rarr;" if _is_setup
+                              else "Set up your organisation &rarr;")
 
         # Detect active LLM provider for the live status pill.
         try:
@@ -2242,8 +2353,8 @@ def create_app() -> Flask:
             '<h1>Turn every result into <span class="mh-gradient-text">ready-to-post content</span> in minutes</h1>'
             '<p class="mh-hero-sub">Upload results, paste an update, or describe a moment. MediaHub finds the moments worth celebrating, drafts on-brand captions, and stops nothing falling through the cracks. Human approval before anything goes out.</p>'
             f'<div class="mh-hero-ctas">'
-            f'<a class="btn" href="{_add_input_url}">Create content &rarr;</a>'
-            f'<a class="btn secondary" href="{_org_url}">Set up your club</a>'
+            f'<a class="btn" href="{_add_input_url}">{_primary_cta_label}</a>'
+            f'<a class="btn secondary" href="{_org_url}">Edit organisation</a>'
             f'</div>'
             '<div class="mh-hero-trust">'
             '<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Source-grounded captions</span>'
@@ -2299,19 +2410,18 @@ def create_app() -> Flask:
                 f'<div class="mh-template-grid">{tile_html}</div>'
             )
 
-        # Set-up-org callout (only if no profiles yet)
-        _has_org = bool(list_profiles())
+        # Set-up-org callout — shown whenever no ready organisation exists.
         _org_cta = ""
-        if not _has_org:
+        if not _is_setup:
             _org_cta = (
                 '<div class="card" style="border-color:rgba(34,211,238,0.3);'
                 'margin-bottom:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">'
                 '<div style="flex:1;min-width:240px">'
-                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation</h2>'
-                '<p style="margin:0">Tell MediaHub about your club, tone of voice, and sponsor &mdash; '
-                'content will land in your style automatically.</p>'
+                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation first</h2>'
+                '<p style="margin:0">MediaHub needs to know who you are before it can write in your voice. '
+                'Paste your website or social links &mdash; the AI does the rest.</p>'
                 '</div>'
-                f'<a class="btn" href="{_org_url}">Set up organisation &rarr;</a>'
+                f'<a class="btn" href="{_setup_url}">Set up organisation &rarr;</a>'
                 '</div>'
             )
 
@@ -7164,6 +7274,75 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         )
                 profile = existing
 
+            elif action == "capture_socials":
+                # ---- Brand DNA capture from website + social links ----
+                target_url = (request.form.get("brand_source_url") or "").strip()
+                social_links: dict[str, str] = {}
+                for key in ("instagram", "facebook", "twitter", "tiktok", "linkedin"):
+                    v = (request.form.get(f"social_{key}") or "").strip()
+                    if v:
+                        social_links[key] = v
+                if not target_url and not social_links:
+                    capture_error = (
+                        '<p class="tag bad" style="margin-bottom:20px">'
+                        'Enter a website URL or at least one social link to analyse.</p>'
+                    )
+                    profile = existing
+                else:
+                    try:
+                        from mediahub.brand.social_dna import capture_from_socials
+                        result = capture_from_socials(
+                            social_links=social_links,
+                            website_url=target_url,
+                            force=False,
+                        )
+                    except Exception as e:
+                        result = {"brand_capture_status": f"error: {e}"}
+                    status = (result or {}).get("brand_capture_status", "")
+                    if status in ("ok", "ok_heuristic"):
+                        for k in (
+                            "brand_voice_summary", "brand_keywords",
+                            "brand_palette_extracted", "brand_logo_url",
+                            "brand_typography_hint", "brand_phrases_to_avoid",
+                            "brand_phrases_to_use", "brand_source_url",
+                            "brand_captured_at", "brand_capture_status",
+                        ):
+                            if k in result:
+                                setattr(existing, k, result[k])
+                        vp = result.get("voice_profile") or {}
+                        if isinstance(vp, dict) and vp:
+                            existing.voice_profile = vp
+                        existing.social_links = social_links
+                        pal = result.get("brand_palette_extracted") or {}
+                        if pal.get("primary") and existing.brand_primary in ("", "#0A2540", "#A30D2D"):
+                            existing.brand_primary = pal["primary"]
+                        if pal.get("secondary") and existing.brand_secondary in ("", "#000000"):
+                            existing.brand_secondary = pal["secondary"]
+                        note = (
+                            "Re-analysed from website + socials &mdash; review below "
+                            "and click Save organisation to persist."
+                            if status == "ok"
+                            else "Re-analysed (no LLM available, heuristic fallback). Edit and save."
+                        )
+                        capture_preview = (
+                            f'<p class="tag info" style="margin-bottom:20px">'
+                            f'{_h(note)}</p>'
+                        )
+                    else:
+                        reason = {
+                            "no_sources": "Add a website URL or at least one social link.",
+                            "fetch_failed_all": (
+                                "None of the links could be read &mdash; "
+                                "they may be blocked or behind login. Try a "
+                                "different combination or paste captions manually below."
+                            ),
+                        }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
+                        capture_error = (
+                            f'<p class="tag bad" style="margin-bottom:20px">'
+                            f'{_h(reason)}</p>'
+                        )
+                profile = existing
+
             elif action == "analyse_voice":
                 # ---- Voice imitation analysis ----
                 raw_examples = (request.form.get("voice_examples") or "").strip()
@@ -7288,11 +7467,27 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         '<p class="tag good" style="margin-bottom:20px">'
                         'Organisation saved.</p>'
                     )
+                # Persist any social-link edits made on the full form.
+                social_edits: dict[str, str] = {}
+                for key in ("instagram", "facebook", "twitter", "tiktok", "linkedin"):
+                    v = (request.form.get(f"social_{key}") or "").strip()
+                    if v:
+                        social_edits[key] = v
+                if social_edits or (request.form.get("social_links_edited") == "1"):
+                    existing.social_links = social_edits
                 save_profile(existing)
+                # Pin into session so the routing gate unlocks and so
+                # the next session lands on the same org.
+                session["active_profile_id"] = existing.profile_id
                 profile = existing
         else:
-            profiles = list_profiles()
-            profile = profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
+            # GET: prefer the session-pinned profile; fall back to the
+            # most-recent on disk, then to a blank one for the empty state.
+            pid_pin = _active_profile_id()
+            profile = (load_profile(pid_pin) if pid_pin else None)
+            if profile is None:
+                profiles = list_profiles()
+                profile = profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
 
         # Build select/checkbox HTML helpers
         def _opt(val, label, selected):
@@ -7520,16 +7715,48 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <p class="dim" style="margin-bottom:24px">Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
 
 <div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(34,211,238,0.04)">
-  <h2 style="margin-top:0">Capture from website</h2>
-  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and MediaHub will extract the palette, logo, voice and keywords automatically. The result appears below &mdash; review and click Save organisation to persist.</p>
-  <form method="POST" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <input type="hidden" name="action" value="capture"/>
+  <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
+  <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and/or social profile links. MediaHub reads each link, extracts the palette, tone of voice, characteristic phrases and recent captions, and updates the brand profile below. AI-driven &mdash; no manual style guide needed.</p>
+  <form method="POST">
+    <input type="hidden" name="action" value="capture_socials"/>
     <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
-    <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
-           placeholder="https://your-club.example"
-           style="{_input_style};max-width:520px;flex:1" required/>
-    <button type="submit" class="btn">Analyse &rarr;</button>
+    <div style="margin-bottom:10px">
+      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Website</label>
+      <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
+             placeholder="https://your-club.example" style="{_input_style};max-width:600px"/>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;max-width:780px">
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Instagram</label>
+        <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get('instagram',''))}"
+               placeholder="https://instagram.com/your-club" style="{_input_style}"/>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Facebook</label>
+        <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get('facebook',''))}"
+               placeholder="https://facebook.com/your-club" style="{_input_style}"/>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Twitter / X</label>
+        <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get('twitter',''))}"
+               placeholder="https://x.com/your-club" style="{_input_style}"/>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">TikTok</label>
+        <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get('tiktok',''))}"
+               placeholder="https://tiktok.com/@your-club" style="{_input_style}"/>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">LinkedIn</label>
+        <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get('linkedin',''))}"
+               placeholder="https://linkedin.com/company/your-club" style="{_input_style}"/>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <button type="submit" class="btn">Re-analyse &rarr;</button>
+      <span class="muted" style="margin-left:8px;font-size:12px">Takes 10&ndash;30 seconds.</span>
+    </div>
   </form>
 </div>
 
@@ -7674,6 +7901,295 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </form>
 """
         return _layout("Organisation", body, active="organisation")
+
+    # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
+    #
+    # Required before any content can be produced. Three sections on one
+    # page: identity (name/type/country), sources (website + 5 social
+    # links), and AI build (one click that hands everything to the LLM
+    # and shows the result for confirmation). On save the org is pinned
+    # into session so the user never sees this page again unless they
+    # ask to re-run it.
+    @app.route("/organisation/setup", methods=["GET"])
+    def organisation_setup():
+        prof = _active_profile()
+        # Pre-fill from any existing profile so refreshing the page doesn't
+        # wipe what the user just typed.
+        pid = (prof.profile_id if prof else "")
+        display_name = (prof.display_name if prof else "")
+        org_type = (prof.org_type if prof else "other")
+        country = (prof.country if prof else "")
+        governing_body = (prof.governing_body if prof else "")
+        website_url = (prof.brand_source_url if prof else "")
+        social = dict(prof.social_links) if prof and prof.social_links else {}
+
+        # --- Preview block (only when the AI has already run once) ---
+        preview_html = ""
+        if prof and prof.is_ready():
+            kw_chips = "".join(
+                f'<span style="display:inline-block;padding:3px 10px;'
+                f'margin:2px 4px 2px 0;border:1px solid var(--border);'
+                f'border-radius:999px;font-size:12px;color:var(--ink-dim)">'
+                f'{_h(k)}</span>'
+                for k in (prof.brand_keywords or [])[:10]
+            )
+            pal = prof.brand_palette_extracted or {}
+            sw = "".join(
+                f'<span title="{_h(pal[k])}" style="display:inline-block;'
+                f'width:22px;height:22px;border-radius:4px;margin-right:6px;'
+                f'background:{_h(pal[k])};border:1px solid rgba(255,255,255,0.15);'
+                f'vertical-align:middle"></span>'
+                for k in ("primary", "secondary", "accent") if pal.get(k)
+            )
+            preview_html = f"""
+<div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
+     background:rgba(34,211,238,0.04)">
+  <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
+  <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
+    {_h(prof.brand_voice_summary or '(no voice summary yet — capture again from a richer source)')}</p>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Keywords</div>
+  <div style="margin-bottom:10px">{kw_chips or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Palette</div>
+  <div style="margin-bottom:10px">{sw or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
+  <p class="muted" style="font-size:12px;margin:8px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  <div style="margin-top:14px">
+    <a class="btn" href="{url_for('add_input_page')}">Looks right &mdash; start creating &rarr;</a>
+    <span class="muted" style="margin-left:12px;font-size:12px">Or refine the inputs below and re-analyse.</span>
+  </div>
+</div>
+"""
+
+        _input_style = (
+            "width:100%;padding:9px 11px;border:1px solid var(--border);"
+            "border-radius:6px;background:var(--bg);color:var(--ink);"
+            "font-size:14px;font-family:inherit"
+        )
+
+        # Social link inputs — one row per platform, all optional.
+        _PLATFORMS = [
+            ("instagram", "Instagram",  "https://instagram.com/your-club"),
+            ("facebook",  "Facebook",   "https://facebook.com/your-club"),
+            ("twitter",   "Twitter / X","https://x.com/your-club"),
+            ("tiktok",    "TikTok",     "https://tiktok.com/@your-club"),
+            ("linkedin",  "LinkedIn",   "https://linkedin.com/company/your-club"),
+        ]
+        social_inputs = ""
+        for key, label, placeholder in _PLATFORMS:
+            val = social.get(key, "") or ""
+            social_inputs += (
+                f'<div style="margin-bottom:10px">'
+                f'<label style="display:block;font-size:13px;color:var(--ink-dim);'
+                f'margin-bottom:4px">{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></label>'
+                f'<input type="url" name="social_{key}" value="{_h(val)}" '
+                f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
+                f'</div>'
+            )
+
+        _ORG_TYPES = [
+            ("other", "Other / general"),
+            ("swimming_club", "Swimming club"),
+            ("athletics", "Athletics club"),
+            ("football", "Football / rugby / team sport"),
+            ("university_society", "University society or sports club"),
+            ("corporate_team", "Corporate team"),
+        ]
+        org_type_opts = "".join(
+            f'<option value="{_h(v)}"{" selected" if v == org_type else ""}>{_h(l)}</option>'
+            for v, l in _ORG_TYPES
+        )
+
+        capture_url = url_for("organisation_setup_capture")
+        body = f"""
+<div style="max-width:760px;margin:0 auto">
+<div class="mh-section-eyebrow">Step 1 of 1 &middot; First-run setup</div>
+<h1 style="margin-top:6px">Tell MediaHub about your organisation</h1>
+<p class="dim" style="font-size:15px;line-height:1.5;margin-bottom:28px">
+  The content engine learns who you are from your existing online
+  presence &mdash; your website and social profiles. Paste whichever
+  links you have and click <b>Build my brand</b>. The AI reads your
+  posts, palette, tone of voice, and what you talk about, and uses
+  that on every caption it writes. You can come back any time to
+  re-run it.
+</p>
+
+{preview_html}
+
+<form method="POST" action="{capture_url}">
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Identity</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
+    <div>
+      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+        Organisation name <span style="color:var(--accent)">*</span>
+      </label>
+      <input type="text" name="display_name" required value="{_h(display_name)}"
+             placeholder="e.g. City Aquatics Swimming Club"
+             style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+        Type
+      </label>
+      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+        Country
+      </label>
+      <input type="text" name="country" value="{_h(country)}"
+             placeholder="e.g. United Kingdom"
+             style="{_input_style}"/>
+    </div>
+    <div>
+      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+        Governing body <span class="muted" style="font-size:11px">(optional)</span>
+      </label>
+      <input type="text" name="governing_body" value="{_h(governing_body)}"
+             placeholder="e.g. Swim England, UKA, BUCS"
+             style="{_input_style}"/>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Where can the AI read you?</h2>
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
+    All optional, but paste at least one. The AI reads each link, picks
+    up your palette, tone of voice, characteristic phrases and the
+    things you actually talk about, and uses that on every caption it
+    writes &mdash; so you never have to explain "this is how we sound".
+  </p>
+  <div style="margin-bottom:14px">
+    <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+      Club website
+    </label>
+    <input type="url" name="website_url" value="{_h(website_url)}"
+           placeholder="https://your-club.example"
+           style="{_input_style}"/>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">
+    {social_inputs}
+  </div>
+</div>
+
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px">
+  <button type="submit" class="btn">Build my brand &rarr;</button>
+  <span class="muted" style="font-size:12px">
+    Takes 10&ndash;30 seconds. The AI does the reading.
+  </span>
+</div>
+</form>
+</div>
+"""
+        return _layout("Set up your organisation", body, active="organisation")
+
+    @app.route("/organisation/setup/capture", methods=["POST"])
+    def organisation_setup_capture():
+        """Run the AI ingestion on the submitted URLs, save the profile,
+        pin it into session, and bounce back to the setup page so the
+        user can see what was learned before they click through."""
+        display_name = (request.form.get("display_name") or "").strip()
+        if not display_name:
+            # The HTML form already requires it, but defend in depth.
+            return redirect(url_for("organisation_setup"))
+
+        # Slug the org name into a stable, filesystem-safe profile id.
+        # If the user already has an active profile, reuse its id so
+        # we don't pile up duplicates when they re-run setup.
+        existing = _active_profile()
+        if existing and existing.display_name.strip().lower() == display_name.lower():
+            profile_id = existing.profile_id
+        else:
+            raw = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
+            profile_id = raw[:48] or "default"
+            # Avoid clobbering a different org with the same slug.
+            if load_profile(profile_id) and (not existing or existing.profile_id != profile_id):
+                # Add a short suffix to keep the existing one intact.
+                profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        prof = load_profile(profile_id) or ClubProfile(
+            profile_id=profile_id,
+            display_name=display_name,
+        )
+        prof.display_name = display_name
+        prof.org_type = (request.form.get("org_type") or "other").strip()
+        prof.country = (request.form.get("country") or "").strip()
+        prof.governing_body = (request.form.get("governing_body") or "").strip()
+
+        website_url = (request.form.get("website_url") or "").strip()
+        social_links: dict[str, str] = {}
+        for key in ("instagram", "facebook", "twitter", "tiktok", "linkedin"):
+            v = (request.form.get(f"social_{key}") or "").strip()
+            if v:
+                social_links[key] = v
+        prof.social_links = social_links
+
+        # ---- AI capture (handles its own errors, never raises) ----
+        try:
+            from mediahub.brand.social_dna import capture_from_socials
+            result = capture_from_socials(
+                social_links=social_links,
+                website_url=website_url,
+                force=False,
+            )
+        except Exception as e:
+            result = {"brand_capture_status": f"error: {e}"}
+
+        status = (result or {}).get("brand_capture_status", "")
+        if status in ("ok", "ok_heuristic"):
+            for k in (
+                "brand_voice_summary", "brand_keywords",
+                "brand_palette_extracted", "brand_logo_url",
+                "brand_typography_hint", "brand_phrases_to_avoid",
+                "brand_phrases_to_use", "brand_source_url",
+                "brand_captured_at", "brand_capture_status",
+            ):
+                if k in result:
+                    setattr(prof, k, result[k])
+            vp = result.get("voice_profile") or {}
+            if isinstance(vp, dict) and vp:
+                prof.voice_profile = vp
+            pal = result.get("brand_palette_extracted") or {}
+            if pal.get("primary") and prof.brand_primary in ("", "#0A2540", "#A30D2D"):
+                prof.brand_primary = pal["primary"]
+            if pal.get("secondary") and prof.brand_secondary in ("", "#000000"):
+                prof.brand_secondary = pal["secondary"]
+        elif status == "no_sources":
+            # User submitted no links at all — keep the identity fields
+            # and let them try again. The gate will keep them here until
+            # is_ready() returns True.
+            pass
+        else:
+            # Any other status: still save what we have so we don't lose
+            # the identity fields the user just typed.
+            prof.brand_capture_status = status
+
+        save_profile(prof)
+        session["active_profile_id"] = prof.profile_id
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/api/organisation/active", methods=["GET", "POST"])
+    def organisation_set_active():
+        """Read or change the currently-pinned organisation. POST takes
+        ``profile_id`` and pins it into the session; GET returns the
+        current pin as JSON."""
+        if request.method == "POST":
+            pid = (request.form.get("profile_id") or "").strip()
+            if not pid and request.is_json:
+                body = request.get_json(silent=True) or {}
+                pid = str(body.get("profile_id") or "").strip()
+            if not pid or not load_profile(pid):
+                return jsonify({"ok": False, "error": "unknown_profile"}), 404
+            session["active_profile_id"] = pid
+            return jsonify({"ok": True, "profile_id": pid})
+        pid = _active_profile_id()
+        prof = _active_profile()
+        return jsonify({
+            "ok": True,
+            "profile_id": pid,
+            "display_name": (prof.display_name if prof else ""),
+            "is_ready": bool(prof and prof.is_ready()),
+        })
 
     # ---- /pack/<run_id> &mdash; content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
