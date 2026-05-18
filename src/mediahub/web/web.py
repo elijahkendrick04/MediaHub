@@ -688,6 +688,16 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 # In-process run registry (active progress) + persisted run metadata.
 # ---------------------------------------------------------------------
 
+# Both dicts are in-memory progress trackers — the source of truth for
+# runs is the SQLite `runs` table + `runs_v4/<id>.json`; for Turn-Into
+# jobs it's the pack file on disk. The dicts keep transient state (live
+# log lines, in-flight status) and must NOT grow unbounded — Render
+# free-tier is 512 MB and a slow leak here is one of the things that
+# causes the ~6-minute container restarts the user reported in the
+# gunicorn logs. Bound both with FIFO eviction.
+_active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
+_turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
+_active_lock = threading.Lock()
 # In-process registry of running pipeline uploads. Bounded LRU so a
 # leaking worker can't accumulate run dicts on Render's 512MB starter
 # plan. The /api/runs/<id>/status endpoint falls back to the SQLite row
@@ -702,6 +712,53 @@ _turn_into_jobs: BoundedCache = BoundedCache(max_size=32)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
+
+# When either dict exceeds the threshold, the oldest finished entries
+# are pruned to bring it back to the target. "Finished" = status in
+# (done, error). Running rows are never evicted while in flight.
+_ACTIVE_RUNS_LIMIT = 60
+_ACTIVE_RUNS_TARGET = 40
+_TURN_INTO_LIMIT = 30
+_TURN_INTO_TARGET = 20
+# Bound each run's log to the last N lines. A long pipeline emits ~20
+# messages but a bug could spam thousands — cap defensively.
+_RUN_LOG_LIMIT = 200
+
+
+def _maybe_evict_active_runs() -> None:
+    """Best-effort FIFO eviction of finished entries in _active_runs.
+
+    Must be called with _active_lock held. Idempotent — no-op when
+    the dict is under the threshold.
+    """
+    if len(_active_runs) <= _ACTIVE_RUNS_LIMIT:
+        return
+    # Oldest first. Use the started_at ISO string as the sort key.
+    finished_ordered = sorted(
+        (
+            (rid, info)
+            for rid, info in _active_runs.items()
+            if info.get("status") in ("done", "error")
+        ),
+        key=lambda kv: kv[1].get("started_at", ""),
+    )
+    to_remove = max(0, len(_active_runs) - _ACTIVE_RUNS_TARGET)
+    for rid, _ in finished_ordered[:to_remove]:
+        _active_runs.pop(rid, None)
+
+
+def _maybe_evict_turn_into_jobs() -> None:
+    """Best-effort FIFO eviction of finished Turn-Into jobs. Must hold
+    _active_lock."""
+    if len(_turn_into_jobs) <= _TURN_INTO_LIMIT:
+        return
+    finished = [
+        jid for jid, info in _turn_into_jobs.items()
+        if info.get("status") in ("done", "error")
+    ]
+    to_remove = max(0, len(_turn_into_jobs) - _TURN_INTO_TARGET)
+    for jid in finished[:to_remove]:
+        _turn_into_jobs.pop(jid, None)
 
 
 def _db():
@@ -1231,6 +1288,8 @@ def _start_run(file_bytes: bytes, file_name: str,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "file_name": file_name,
         }
+        # Evict completed older runs to keep the dict bounded.
+        _maybe_evict_active_runs()
     conn = _db()
     conn.execute(
         """INSERT INTO runs (id, created_at, status, file_name, profile_id)
@@ -1247,6 +1306,18 @@ def _start_run(file_bytes: bytes, file_name: str,
 
         def cb(msg: str):
             with _active_lock:
+                log_list = _active_runs[run_id]["log"]
+                log_list.append(msg)
+                # Cap each run's progress log so a buggy progress
+                # callback can't grow the in-memory list to thousands
+                # of entries × hundreds of bytes.
+                if len(log_list) > _RUN_LOG_LIMIT:
+                    # Keep the first 5 (queue/start markers — useful
+                    # for diagnosis) and the most recent N-5.
+                    keep_tail = _RUN_LOG_LIMIT - 5
+                    _active_runs[run_id]["log"] = (
+                        log_list[:5] + log_list[-keep_tail:]
+                    )
                 entry = _active_runs.get(run_id)
                 if entry is None:
                     return
@@ -2697,6 +2768,7 @@ def create_app() -> Flask:
         "settings_page",
         "healthz",
         "healthz_deps",
+        "healthz_memory",
         # /health is the deep dep-checking probe; it must also be
         # reachable without an active org (and outside the API prefix
         # allowlist below — it returns HTML/JSON, not JSON-only).
@@ -5977,6 +6049,40 @@ Relay team broke club record"></textarea>
                    "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         return jsonify(payload)
+
+    @app.route("/healthz/memory")
+    def healthz_memory():
+        """Report process memory usage + in-memory state size.
+
+        Added Phase 1.5 as a diagnostic for the "gunicorn restarts
+        every 6 minutes" pattern. If `rss_mb` climbs steadily across
+        repeated polls, the process is leaking and Render's 512 MB
+        ceiling will OOM-kill it. If `rss_mb` is stable and restarts
+        still happen, the cause is somewhere else (auto-redeploy,
+        platform action, etc.) and the user can stop blaming the app.
+        """
+        import resource
+        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # On Linux ru_maxrss is in KB; on macOS it's bytes. Render
+        # is always Linux so KB is correct.
+        rss_mb = rss_kb / 1024.0
+        with _active_lock:
+            active_n = len(_active_runs)
+            active_running = sum(
+                1 for v in _active_runs.values() if v.get("status") == "running"
+            )
+            ti_n = len(_turn_into_jobs)
+        return jsonify({
+            "ok": True,
+            "rss_mb": round(rss_mb, 1),
+            "rss_pct_of_512": round((rss_mb / 512.0) * 100.0, 1),
+            "active_runs": active_n,
+            "active_runs_running": active_running,
+            "active_runs_limit": _ACTIVE_RUNS_LIMIT,
+            "turn_into_jobs": ti_n,
+            "turn_into_jobs_limit": _TURN_INTO_LIMIT,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
 
     @app.route("/healthz/deps")
     def healthz_deps():
@@ -9806,6 +9912,11 @@ function copyWhyCard(btn, taId) {{
 
         import uuid as _uuid
         job_id = _uuid.uuid4().hex
+
+        # Evict any old finished jobs before inserting a new one so the
+        # dict can't grow unbounded over a long-running deploy.
+        with _active_lock:
+            _maybe_evict_turn_into_jobs()
 
         if async_mode:
             # Async: kick off background thread, return job_id immediately
