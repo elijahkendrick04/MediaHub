@@ -3605,6 +3605,13 @@ def create_app() -> Flask:
         "organisation_page",
         "organisation_setup",
         "organisation_setup_capture",
+        # Setup-page side-routes — the user is still pre-ready when
+        # they click "re-read" or "delete logo" or view a logo
+        # thumbnail, so these must bypass the gate just like the
+        # capture POST does.
+        "organisation_setup_reread",
+        "organisation_setup_logo_serve",
+        "organisation_setup_logo_delete",
         "organisation_set_active",
         # Phase 1.5 — the profile-picker page must be reachable without
         # an active org (it's how the user PICKS one). Same for the POST
@@ -11011,6 +11018,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '</div>'
             )
 
+        # M2 — "Where can AI read you" defaults to OPEN so a first-run
+        # user sees the inputs (they're entirely optional but easy to
+        # miss if collapsed). Once submitted with at least one link
+        # the section stays open so the user can re-edit; if submitted
+        # empty, leave it open too so re-entry is one click away.
+        _has_links = bool(website_url) or any(social.values())
+        _links_section_open = "open"  # always default-open per UX brief
+        _links_toggle_verb = "collapse" if _links_section_open else "expand"
+
         # Existing guidelines status (when the user has already uploaded once)
         _gl_status_html = ""
         if prof and prof.brand_guidelines_filename:
@@ -11067,17 +11083,76 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '</div>'
             )
 
+        # Per-link status chips (M5): map each captured status to a
+        # chip styled by severity. The mapping is kept here next to the
+        # social_inputs renderer so a missing status falls through to
+        # "Idle" without exception.
+        _STATUS_CHIP = {
+            "real_content":     ("Learned",      "rgba(94,227,154,0.12)",  "rgba(94,227,154,0.45)",  "var(--good, #5EE39A)"),
+            "soft_blocked_spa": ("Blocked (JS)", "rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
+            "hard_blocked":     ("Blocked",      "rgba(255,107,107,0.10)", "rgba(255,107,107,0.45)", "var(--bad, #FF6B6B)"),
+            "auth_walled":      ("Auth required","rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
+            "rate_limited":     ("Rate limited", "rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
+            "not_found":        ("Not found",    "rgba(255,107,107,0.10)", "rgba(255,107,107,0.45)", "var(--bad, #FF6B6B)"),
+            "unknown":          ("Unknown",      "rgba(245,242,232,0.04)", "rgba(245,242,232,0.14)", "var(--ink-dim, #B6B2A6)"),
+        }
+
+        def _chip_html_for(platform_key: str, current_url: str) -> str:
+            state = (link_state.get(platform_key) or {}) if current_url else {}
+            status = (state.get("status") or "").strip()
+            label, bg, border, ink = _STATUS_CHIP.get(
+                status, ("Idle", "rgba(245,242,232,0.04)", "rgba(245,242,232,0.14)", "var(--ink-dim, #B6B2A6)"),
+            )
+            # When a link is populated, allow a per-link "re-read now"
+            # button so the user can force a fresh capture without
+            # resubmitting the whole form.
+            reread = ""
+            if current_url:
+                try:
+                    reread_url = url_for("organisation_setup_reread", platform=platform_key)
+                    reread = (
+                        f'<form method="POST" action="{_h(reread_url)}" '
+                        'style="display:inline" data-no-loader="1">'
+                        '<button type="submit" '
+                        'style="font-size:10.5px;padding:3px 8px;background:transparent;'
+                        'border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));'
+                        'color:var(--ink-dim,#B6B2A6);border-radius:3px;cursor:pointer;'
+                        'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                        'letter-spacing:0.10em" title="Force the AI to re-read this link now">'
+                        'Re-read</button></form>'
+                    )
+                except Exception:
+                    reread = ""
+            return (
+                '<span style="display:inline-flex;align-items:center;gap:8px;'
+                'margin-left:8px;vertical-align:middle">'
+                f'<span style="display:inline-block;padding:2px 8px;border-radius:3px;'
+                f'font-size:10.5px;font-family:var(--font-mono,monospace);'
+                f'text-transform:uppercase;letter-spacing:0.10em;'
+                f'background:{bg};border:1px solid {border};color:{ink}">{_h(label)}</span>'
+                + reread +
+                '</span>'
+            )
+
         social_inputs = ""
         for key, label, placeholder in _PLATFORMS:
             val = social.get(key, "") or ""
+            chip = _chip_html_for(key, val)
             social_inputs += (
                 f'<div style="margin-bottom:10px">'
-                f'<label style="display:block;font-size:13px;color:var(--ink-dim);'
-                f'margin-bottom:4px">{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></label>'
+                f'<label style="display:flex;align-items:center;flex-wrap:wrap;'
+                f'font-size:13px;color:var(--ink-dim);margin-bottom:4px">'
+                f'<span>{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></span>'
+                f'{chip}'
+                f'</label>'
                 f'<input type="url" name="social_{key}" value="{_h(val)}" '
                 f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
                 f'</div>'
             )
+
+        # Website status chip — same logic, separate label so it can
+        # render above the website input.
+        _website_chip = _chip_html_for("website", website_url)
 
         _ORG_TYPES = [
             ("other", "Other / general"),
@@ -11153,17 +11228,34 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </div>
 </div>
 
-<div class="card" style="margin-bottom:20px">
-  <h2 style="margin-top:0;font-size:18px">Where can the AI read you?</h2>
-  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
-    All optional, but paste at least one. The AI reads each link, picks
-    up your palette, tone of voice, characteristic phrases and the
-    things you actually talk about, and uses that on every caption it
-    writes &mdash; so you never have to explain "this is how we sound".
+<details class="card mh-optional-section" style="margin-bottom:20px" {_links_section_open}>
+  <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;
+                   justify-content:space-between;gap:14px;flex-wrap:wrap;margin:-4px 0">
+    <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:18px;font-weight:700;color:var(--ink)">Where can the AI read you?</span>
+      <span style="display:inline-block;padding:2px 8px;border-radius:3px;
+                   font-size:10.5px;font-family:var(--font-mono,monospace);
+                   text-transform:uppercase;letter-spacing:0.10em;
+                   background:rgba(245,242,232,0.04);
+                   border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
+                   color:var(--ink-dim,#B6B2A6)">Optional</span>
+    </span>
+    <span class="muted mh-optional-toggle" style="font-size:12px">
+      Click to {_links_toggle_verb}
+    </span>
+  </summary>
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:14px 0 14px 0">
+    Skip this section entirely if you want &mdash; the AI works fine
+    without it. If you DO paste a link, the AI reads it, picks up your
+    palette, tone of voice, characteristic phrases and the things you
+    actually talk about, and uses that on every caption it writes &mdash;
+    so you never have to explain "this is how we sound".
   </p>
   <div style="margin-bottom:14px">
-    <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
-      Club website
+    <label style="display:flex;align-items:center;flex-wrap:wrap;
+                  font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+      <span>Club website <span class="muted" style="font-size:11px">(optional)</span></span>
+      {_website_chip}
     </label>
     <input type="url" name="website_url" value="{_h(website_url)}"
            placeholder="https://your-club.example"
@@ -11172,7 +11264,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">
     {social_inputs}
   </div>
-</div>
+</details>
 
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0;font-size:18px">
@@ -11199,21 +11291,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </h2>
   <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
     Drop in every logo variant your club has &mdash; full-colour, mono,
-    wordmark, icon. PNG, JPG, SVG, WEBP, PDF, EPS, AI all accepted.
-    The AI describes each one so motion graphics, story cards, and
-    sponsor posts pick the right variant automatically (e.g. white
-    mono on dark backgrounds, the icon when the layout is square).
+    wordmark, icon, print versions. PNG, JPG, SVG, WEBP, GIF, BMP,
+    TIFF, HEIC, AVIF, ICO, PDF, EPS, AI, PSD, INDD, Sketch, Figma, XD,
+    Affinity files all accepted &mdash; if it's a logo format, we'll
+    take it. The AI describes each one so motion graphics, story
+    cards, and sponsor posts pick the right variant automatically
+    (e.g. white mono on dark backgrounds, the icon when the layout is
+    square).
   </p>
   <label for="logos-input" id="logos-drop-zone" class="mh-drop-zone">
     <div class="mh-drop-zone-inner">
       <strong>Click to choose</strong> or drag files here
       <div class="muted" style="font-size:11px;margin-top:4px">
-        Up to {_LOGO_LIMIT} files &middot; 20 MB each
+        As many as you have &middot; up to 50 MB each &middot; any logo format
       </div>
     </div>
   </label>
   <input id="logos-input" type="file" name="brand_logos" multiple
-         accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/tiff,application/pdf,application/postscript,.png,.jpg,.jpeg,.webp,.svg,.gif,.tiff,.tif,.pdf,.eps,.ai"
+         accept="image/*,application/pdf,application/postscript,application/illustrator,application/x-photoshop,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.tif,.heic,.heif,.avif,.ico,.jxl,.jp2,.svg,.eps,.ai,.cdr,.wmf,.emf,.pdf,.psd,.indd,.sketch,.fig,.xd,.afdesign,.afphoto,.exr,.tga,.dng"
          style="display:none"/>
   <div id="logos-pending" class="muted" style="font-size:11px;margin-top:8px"></div>
   {_logos_grid_html}
@@ -11299,6 +11394,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   transform: translateY(-1px);
   border-color: var(--lane, var(--accent, #D4FF3A));
 }}
+
+/* M2 — collapsible "Where can AI read you" section. The default
+   <details> marker is hidden; we surface our own toggle hint on the
+   right side of the summary instead. */
+.mh-optional-section > summary::-webkit-details-marker {{ display: none; }}
+.mh-optional-section > summary {{ list-style: none; }}
+.mh-optional-section[open] .mh-optional-toggle::before {{ content: "▾ "; }}
+.mh-optional-section:not([open]) .mh-optional-toggle::before {{ content: "▸ "; }}
+.mh-optional-section[open] .mh-optional-toggle::after {{ content: ""; }}
+.mh-optional-section:not([open]) .mh-optional-toggle::after {{ content: ""; }}
 </style>
 <script>
 (function() {{
@@ -11699,6 +11804,47 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # send_from_directory is the safe primitive — it refuses path
         # traversal automatically.
         return send_from_directory(path.parent, path.name)
+
+    @app.route("/organisation/setup/reread/<platform>", methods=["POST"])
+    def organisation_setup_reread(platform):
+        """M5 — Force the AI to re-read one link without resubmitting
+        the whole form. Looks up the URL the user previously saved for
+        ``platform``, runs the matching handler with playbook drift
+        detection forced (force=True bypasses the social_dna cache),
+        merges the resulting per-link state back onto the profile, and
+        redirects back to the setup page so the new status chip is
+        visible.
+        """
+        prof = _active_profile()
+        if not prof:
+            return redirect(url_for("organisation_setup"))
+        platform = (platform or "").lower().strip()
+        # Resolve the URL the user previously saved
+        if platform == "website":
+            url = (prof.brand_source_url or "").strip()
+        else:
+            url = (prof.social_links.get(platform) or "").strip()
+        if not url:
+            return redirect(url_for("organisation_setup"))
+        # Run just this one platform through the handler pipeline.
+        try:
+            from mediahub.brand import link_handlers as _lh
+            handler = _lh.get_handler(platform)
+            if handler is not None:
+                entry = handler.process(url)
+                state = dict(prof.link_capture_state or {})
+                state[platform] = {
+                    "url": entry.get("url", url),
+                    "status": entry.get("status", "unknown"),
+                    "playbook_age": entry.get("playbook_age", -1),
+                    "regenerated": entry.get("regenerated", False),
+                    "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+                }
+                prof.link_capture_state = state
+                save_profile(prof)
+        except Exception as e:
+            log.info("re-read for %s failed: %s", platform, e)
+        return redirect(url_for("organisation_setup"))
 
     @app.route("/organisation/setup/logo/<logo_id>/delete", methods=["POST"])
     def organisation_setup_logo_delete(logo_id):
