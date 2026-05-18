@@ -151,7 +151,160 @@ uptime number derived from heartbeat density. Each `/healthz` and
 `/health` hit logs one row; the page is honest when there's no data
 yet (shows em-dashes, not a fake 100%).
 
-**Phase 1 is complete.** All 5 work-streams shipped.
+**Phase 1.1 – 1.5 are complete.** A sixth work-stream (1.6 Adaptive
+Theming Engine) was opened in May 2026 as a parity-polish lever
+that re-skins the entire product to a club's brand colours when
+they accept the brand-DNA capture — see below.
+
+### 1.6 Adaptive Theming Engine · 🔵 **NEW — IN FLIGHT**
+
+**The user-facing promise.** When a club's owner clicks
+*"Looks right — start creating"* at the end of organisation setup
+(`web.py:11014`), the entire website re-skins to their brand
+colours in one smooth, animated cascade — backgrounds, panels,
+buttons, focus rings, ink, borders, hover states, status
+colours — and stays that way for every subsequent login.
+
+**The engineering promise (the hard part).** This works for
+*any* hex the club provides. Fluorescent yellow, muddy dark
+green, near-white cream, pure black, two-tone red-on-red: the
+generated theme remains professional, accessible (APCA Lc ≥ 75
+for body text), colour-blind-safe (Machado-simulated ΔE2000 ≥ 10
+between brand and status colours), and visually harmonic — with
+**no hand-tuned per-seed overrides anywhere in the codebase.**
+The intelligence is in the algorithm, not in a giant lookup
+table.
+
+**Why this is Phase 1 polish, not Phase 2 distinction.** Without
+this, MediaHub's brand-DNA capture (1.1) and brand-kit upload
+flow promise more than they deliver: the user sees their colours
+on cards but the *chrome* still looks like our chrome.
+Single-org-per-deployment means every operator is hosting "their
+own MediaHub" — the product should feel like it from the first
+page render, not just inside generated graphics. Polish, not
+distinction.
+
+**Academic foundations.** Seventeen parallel research agents
+audited the relevant literature in May 2026. The architecture
+below draws directly on:
+- Björn Ottosson, *"A perceptual color space for image
+  processing"* (2020) — [OKLab / OKLCH](https://bottosson.github.io/posts/oklab/)
+- Sharma, Wu & Dalal (2005), *"The CIEDE2000 Color-Difference
+  Formula"* — [perceptual distance metric](https://www2.ece.rochester.edu/~gsharma/ciede2000/)
+- Andrew Somers, *SAPC-APCA* — [perceptual contrast that
+  replaces WCAG 2.x's broken luminance ratio](https://github.com/Myndex/SAPC-APCA)
+- Google Material Foundation, *Material 3 Dynamic Color* — the
+  [HCT colour space + 5-palette × 13-tone role-token system](https://m3.material.io/styles/color/dynamic/overview)
+  (`material-color-utilities`, Apache-2.0, Python port on PyPI)
+- Cohen-Or et al. (SIGGRAPH 2006), *"Color Harmonization"* —
+  [Matsuda harmonic templates](https://igl.ethz.ch/projects/color-harmonization/)
+  as a palette-validation oracle
+- O'Donovan, Agarwala & Hertzmann (SIGGRAPH 2011), *"Color
+  Compatibility from Large Datasets"* — [pretrained aesthetic
+  scorer](https://www.dgp.toronto.edu/~donovan/color/) usable as
+  a post-hoc gate
+- Machado, Oliveira & Fernandes (2009), *"A Physiologically-
+  based Model for Simulation of Color Vision Deficiency"* —
+  [the CVD matrices Chrome and Firefox use natively](https://www.inf.ufrgs.br/~oliveira/pubs_files/CVD_Simulation/CVD_Simulation.html)
+- Lalitha A R (arXiv 2512.05067, 2025), *"Perceptually-Minimal
+  Color Optimization for Web Accessibility"* — constrained
+  non-linear optimisation in OKLCH with hue frozen by default
+- W3C CSS Color Module Level 4 §14 gamut mapping, Level 5
+  `color-mix()` and relative-colour syntax, CSS Properties &
+  Values API `@property`, View Transitions API
+- Aslam (2006), Elliot & Maier (2007), Palmer & Schloss (2010),
+  W3C WCAG 1.4.1 — cross-cultural status-colour semantics
+  (status roles stay locked; only brand role flows from the seed)
+
+Provenance for every claim above is preserved in the research
+trail and cited inline in `docs/THEMING.md` (to be authored in
+Stage J).
+
+**Architecture in one paragraph.** A single brand-seed hex →
+HCT colour space → 5 tonal palettes (primary, secondary,
+tertiary, neutral, neutral-variant) × 13 tones each → ~25
+Material-3-style semantic role tokens for both light and dark
+schemes → CSS custom properties registered via `@property
+syntax: "<color>"` so they interpolate during a View
+Transitions API-driven cascade → cached on `ClubProfile.
+brand_kit.derived_palette` as a DTCG-format JSON file consumed
+by the Flask templates, Remotion compositions, the newsletter
+renderer, and the static graphic renderer. **Python only ships
+the seed and the 5 palette anchors; every derived shade, hover
+state, border, and focus ring is computed at runtime in CSS via
+`color-mix(in oklch, …)` and `oklch(from var(--mh-brand-seed) …)`.**
+QA gates (APCA contrast, CIEDE2000 ∆E, Machado CVD simulation,
+Cohen-Or harmonic template fit) run server-side at save-time
+and emit a quality report into the run audit trail.
+
+**Work breakdown.** Ten stages, deliberately additive — the
+existing `BrandKit` dataclass and `brand/` package are extended,
+never replaced. Each stage is its own PR and is independently
+testable.
+
+| Stage | Sub-item | Status | Notes |
+|---|---|---|---|
+| **A — Token foundation** | A1 Audit every hardcoded colour in `web.py` (~1,400 lines of inline CSS) and migrate to CSS variables | ❌ | Mechanical. No behaviour change. Output: one inventory of every literal `#…` or rgba() in templates |
+| | A2 Adopt 3-tier token system (primitive → semantic role → component) per [W3C Design Tokens DTCG spec](https://www.designtokens.org/TR/drafts/format/); ~25 MD3-style role tokens (`--mh-surface`, `--mh-on-surface`, `--mh-primary`, `--mh-on-primary`, `--mh-primary-container`, `--mh-on-primary-container`, `--mh-secondary`, `--mh-tertiary`, `--mh-outline`, `--mh-outline-variant`, `--mh-error`, `--mh-success`, `--mh-warning`, `--mh-focus`, `--mh-elevation-{1,2,3}`) | ❌ | Single source of truth. Tier 3 (component tokens) deferred per Curtis's "promote on 3+ component reuse" rule |
+| | A3 Register every animatable variable via `@property { syntax: "<color>"; inherits: true; }` so they interpolate smoothly through theme switches | ❌ | Without `@property`, CSS custom properties are untyped strings and `transition` silently snaps |
+| **B — Colour science library** | B1 Add `materialyoucolor` + `coloraide` to `requirements.txt` (both pure-Python, Apache-2.0, no JS runtime); avoid `colorthief` (already replaced by Pillow extractor in Phase 1.5) | ❌ | One known transitive dep (numpy) already present |
+| | B2 New `src/mediahub/theming/` package: `seed_extract.py` (SVG fast-path → rasterise → QuantizerCelebi → Score), `palette.py` (HCT seed → 5×13 tonal palettes), `roles.py` (palettes → MD3 role-token map for light + dark schemes), `contrast.py` (APCA `Lc` + ink-on-surface), `cvd.py` (Machado 2009 matrices for deutan/protan/tritan), `quality.py` (all QA gates → `PaletteQualityReport`), `repair.py` (constraint-satisfaction loop: clamp chroma → sweep L → relax H ±8° → curated-neighbour fallback) | ❌ | ~6 small modules, each independently unit-testable. Ports the relevant `material-color-utilities` paths via the maintained Python package |
+| | B3 Persist resolved palette on `ClubProfile.brand_kit.derived_palette` — compute once on save, never per-request | ❌ | Matches existing `brand/derived.py` operating-profile cache pattern |
+| **C — CSS architecture** | C1 Extract inline CSS from `web.py` (the ~1,400-line `<style>` block starting at `web.py:1363`) into `src/mediahub/web/static/theme-base.css`; content-hashed asset URL for cache-bust | ❌ | Big mechanical change; gated behind a feature flag during cutover |
+| | C2 Build the derivation graph in pure CSS via `color-mix(in oklch, …)` and relative-colour syntax (`oklch(from var(--mh-brand-seed) calc(l ± n) calc(c * f) h)`) — Python ships ~6 anchor values, CSS derives the remaining ~55 shades | ❌ | Drastically reduces the "hardcode surface area" the user mandated. CSS engine is the single source of truth for the cascade |
+| | C3 Add `light-dark()` for surface/ink pairs; honour `prefers-color-scheme: dark/light` so the same seed produces correct light + dark variants without a duplicate stylesheet | ❌ | Spec status: Baseline 2024 |
+| | C4 Add Python-precomputed fallback ramp inside `@supports not (color: oklch(from red l c h))` for Safari ≤ 16.3 (relative-colour syntax landed Mar 2023; the gate catches the remaining ~10% long-tail) | ❌ | No JS polyfill; pure-CSS feature query |
+| **D — Theme delivery (Flask)** | D1 `before_request` middleware loads the active `ClubProfile`'s `derived_palette` into `flask.g.theme` (already partially in place via the org-gate; extend it) | ❌ | Single-org-per-deploy today; one-line extension to subdomain-based multi-tenant lookup for Phase 3 |
+| | D2 Jinja base template emits one inline `<style id="mh-theme-seed">:root { --mh-brand-seed: {{ g.theme.seed }}; --mh-scheme-polarity: {{ g.theme.polarity }}; … }</style>` in `<head>` *before* any external stylesheet — zero FOUC | ❌ | Tiny payload (~250 bytes) vs the cacheable static `theme-base.css` |
+| | D3 Re-render cached pages (sponsor-variant page, sponsor-branded layouts) so they consume the new variables instead of hardcoded hexes | ❌ | Audit pass after C1 |
+| **E — "Looks right" cascade** | E1 Wire the existing button at `web.py:11014` so its click handler: (i) saves the brand kit, (ii) calls `theming.derive_from_seed(seed)` and persists `derived_palette`, (iii) wraps navigation to `/add-input` in `document.startViewTransition(() => location.assign(…))` | ❌ | The user-visible "wow" moment — fires on the exact button the user named |
+| | E2 Add `@view-transition { navigation: auto; }` to `theme-base.css` so cross-document navigation between pages crossfades atomically (Chrome 126+ / Safari 18.2+, Firefox in progress) | ❌ | Pure CSS; degrades to instant nav on older browsers |
+| | E3 Add `:root { transition: --mh-brand-seed 600ms cubic-bezier(.2,.7,.2,1); }` so the colour ripples through the page even when View Transitions isn't available — because every derived var is `color-mix(in oklch, var(--mh-brand-seed) …)`, the entire palette interpolates in lockstep for free | ❌ | One line per animatable token |
+| | E4 Gate animation with `@media (prefers-reduced-motion: reduce)` — instant swap for users who request it | ❌ | WCAG 2.3.3 |
+| **F — Logo intelligence** | F1 Default to a neutral chip behind every uploaded logo (auto-pick white/near-white rounded chip with 12px padding, sized to logo bounding box) — never recolour unknown SVG marks | ❌ | Matches Adobe Spectrum, IBM Carbon, BBC brand-book defaults |
+| | F2 "Safe to drop chip" auto-detection: compute the logo's dominant non-neutral colour vs the active surface in OKLCH; if ΔE2000 ≥ N AND APCA Lc ≥ 45 in both polarities, render bare; otherwise chip | ❌ | Honest about when it's safe to skip the chip |
+| | F3 Author MediaHub's own SVG marks with `fill="currentColor"` so the product chrome auto-adapts to ink colour without recolouring; **never** auto-inject this on uploaded logos | ❌ | Per W3C SVG2 spec; the Material You "ship a monochrome layer if you want it tintable" lesson |
+| **G — Single source of truth for motion + email** | G1 Convert `derived_palette` to DTCG-format JSON at `DATA_DIR/themes/<profile_id>.json` | ❌ | Aligns with the W3C Design Tokens spec; future-proofs against Style Dictionary integration |
+| | G2 `visual/motion.py` reads the JSON and passes it as `inputProps` to `render.js`; Remotion compositions consume the same tokens as the web UI | ❌ | Single source of truth across MP4 + browser |
+| | G3 `brand/newsletter_renderer.py` reads the JSON and Premailer-inlines the resolved hex values into outgoing HTML emails (email clients don't reliably support CSS custom properties) | ❌ | Same JSON, different rendering target |
+| | G4 `graphic_renderer/render.py` reads the same JSON, replacing today's `BrandKit.primary_colour` lookups | ❌ | Closes the loop: web, motion, email, static graphic all share one palette |
+| **H — Explainability + QA** | H1 Every palette derivation logs a `PaletteQualityReport` to the run audit trail: APCA `Lc` scores for every role pair, CIEDE2000 matrix for brand × {neutral-500, success, warning, danger}, Machado-CVD ∆E2000 for the same pairs under deutan/protan/tritan, Cohen-Or harmonic-template fit energy, and a decision trace ("clamped chroma 0.30 → 0.21 to fit sRGB; shifted hue +6° to keep success-green distinct under deuteranopia") | ❌ | Matches MediaHub's standing rule: "every step should be explainable and auditable" |
+| | H2 Add a "Why does my theme look like this?" expandable panel to `/organisation/setup` — committee members see the decisions and contrast scores, can override an individual role colour if they really must, and the override gets logged with a cultural-clash warning if it lowers a status colour's ΔE | ❌ | Trust signal; mirrors the brand-DNA "What MediaHub learned" panel |
+| | H3 Non-blocking warning surface if the hostile-seed repair loop fired: *"Your brand yellow (#DFFF00) was very close to our success-green (#1F9D55); we adjusted the success colour by +8° to keep them distinct for colour-blind viewers."* | ❌ | Never silently rewrite the brand colour; only adjust the *status* colour and tell the user why |
+| **I — Test coverage** | I1 New `tests/theming/` directory: `test_seed_extract.py`, `test_palette.py` (golden-master snapshots for ~30 representative seeds including fluorescent yellow `#DFFF00`, muddy dark green `#2A3A1A`, near-white `#FAFAF7`, near-black `#0C0C0C`, brand red `#A30D2D`, brand navy `#0E2A47`, plus 10 real club colours), `test_contrast.py` (APCA Lc gates), `test_cvd.py` (Machado simulator parity vs known fixtures), `test_quality.py`, `test_repair.py` | ❌ | Snapshots make regressions obvious in PR review |
+| | I2 Playwright/browser-use end-to-end test: upload a logo → land on `/add-input` → assert `getComputedStyle(document.documentElement).getPropertyValue('--mh-surface')` matches the expected derived value | ❌ | Gated on `MEDIAHUB_RUN_BROWSER_TESTS=1` like the existing motion tests |
+| **J — Cutover + polish** | J1 Replace the existing hardcoded palette in `web.py:1363-1462` by reading from `theming/`; gate behind a feature flag (`MEDIAHUB_ADAPTIVE_THEME`) during the rollout window | ❌ | Cutover is reversible while the new pipeline is observed in production |
+| | J2 Run the generic-default `BrandKit` (`#0E2A47` navy / `#C9A227` gold) through the new pipeline so the unconfigured first-run experience also gets the upgrade | ❌ | No regression for fresh deployments before brand DNA is captured |
+| | J3 Author `docs/THEMING.md` documenting the architecture, the role-token table, the CSS variables operators may safely override in a custom `theme-override.css`, and the academic references inline | ❌ | Single canonical doc for future contributors |
+
+**Acceptance criteria (the "definition of done" for 1.6):**
+
+1. A test suite that takes 30 representative seed hexes
+   (including deliberately hostile cases — neon, muddy, near-
+   greyscale, pure primaries) and asserts: APCA `Lc` ≥ 75 for
+   every text-on-surface role pair; CIEDE2000 ≥ 5 between
+   adjacent tonal stops; CIEDE2000 ≥ 15 between brand and each
+   of success/warning/danger; Machado-deuteranopia-simulated
+   ∆E2000 ≥ 10 for the same triples; Cohen-Or template fit
+   energy below threshold.
+2. Live cascade animation works in Chrome, Edge, Safari, and
+   Firefox; degrades gracefully on Firefox ≤ 143 (instant nav,
+   no jank). Reduced-motion users see an instant swap.
+3. No hardcoded brand colour anywhere in the codebase outside
+   `theming/repair.py`'s curated-neighbour fallback table (which
+   only fires in genuinely hostile-seed cases AND emits a user-
+   visible explanation).
+4. Web, motion (Remotion), email (newsletter renderer), and
+   static graphic outputs all consume the same DTCG-format
+   palette JSON — zero drift across media.
+5. Test suite green: the existing 678 passing tests still pass,
+   plus ~80 new theming tests, with zero new structural skips.
+
+**Effort estimate:** 3–4 engineering weeks of focused work,
+front-loaded on Stages A–C (the token plumbing and the colour-
+science package). Stages D–J each fit in 2–3 days once the
+foundation is in place. Independently testable per stage so
+the work can be parallelised across two engineers if needed.
 
 ---
 
@@ -298,21 +451,34 @@ work-stream.
 
 ## Immediate next moves
 
-**Phase 1 status:** 1.1, 1.2, 1.3, 1.4, 1.5 all SHIPPED. **Phase 1
-is complete.**
+**Phase 1 status:** 1.1, 1.2, 1.3, 1.4, 1.5 SHIPPED. **1.6 Adaptive
+Theming Engine** opened May 2026 and is the immediate priority — it
+makes the brand-DNA work (1.1) and the brand-kit upload flow actually
+*feel* like the user's product the moment they accept the captured
+brand. Until this lands, "single-org-per-deployment" is a promise
+the chrome doesn't keep.
 
-1. **Pilot deployment.** Stand up one production Render instance,
+1. **Adaptive Theming Engine (1.6).** Ship Stages A–C (token
+   foundation + colour-science package + CSS architecture)
+   first; they're the foundation that unlocks everything else.
+   Then E (the cascade animation on "Looks right – start
+   creating"), which is the user-visible moment. Stages F–J
+   follow naturally. Branch: `claude/club-color-scheme-switcher`.
+
+2. **Pilot deployment.** Stand up one production Render instance,
    set the env vars, invite one real club to use it for a month.
    This is the first real-world load test of the operator-managed
    model and will surface every UX hole the audits couldn't find.
    Operator runbook in [`docs/PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md).
+   *Best run after 1.6 lands, so the pilot club's first impression
+   is the themed product.*
 
-2. **Sport expansion (2.2 athletics).** Unlocks the next tranche
+3. **Sport expansion (2.2 athletics).** Unlocks the next tranche
    of buyers (track-and-field clubs). One quarter of work:
    canonical event taxonomy + result-file parser + PB/record/
    qualifier logic + copy templates.
 
-3. **Athlete-facing surfaces (2.5).** Per-athlete personal share
+4. **Athlete-facing surfaces (2.5).** Per-athlete personal share
    link (`/athlete/<slug>`) showing their season's cards +
    story-ready downloads. Long-tail distribution moat.
 
@@ -382,6 +548,27 @@ contracts shipped between V8 and the current state.
   (Pillow was already a hard dep). Operator pilot playbook in
   `docs/PILOT_PLAYBOOK.md`. **678 tests passing, zero failed,
   zero known-issue carve-outs.**
+
+### V9.6 (in flight)
+
+- 🔵 **Phase 1.6 Adaptive Theming Engine** opened. Seventeen
+  parallel research agents audited the academic and industry
+  literature (Ottosson OKLab 2020, Sharma CIEDE2000 2005, Somers
+  APCA, Material 3 Dynamic Color, Cohen-Or harmonic templates
+  2006, O'Donovan colour-compatibility 2011, Machado CVD
+  simulation 2009, Lalitha A R constrained-OKLCH 2025, plus
+  W3C CSS Color 4/5 + Properties & Values API + View
+  Transitions). Architecture: single-seed HCT → 5 tonal palettes
+  × 13 tones → ~25 MD3 role tokens → CSS custom properties
+  registered via `@property` + relative-colour syntax + `color-
+  mix(in oklch)` so Python ships only the seed and the 5 palette
+  anchors and the browser derives the remaining ~55 shades at
+  runtime. QA gates: APCA Lc, CIEDE2000 ΔE adjacency + brand-vs-
+  status, Machado-CVD simulation, Cohen-Or harmonic fit. Smooth
+  cascade animation via View Transitions API + `@property`
+  interpolation. Single DTCG-format JSON consumed by web,
+  Remotion motion, newsletter HTML, and the static graphic
+  renderer. Branch: `claude/club-color-scheme-switcher`.
 
 ### Future (V10+ vision, retained from previous roadmap)
 
