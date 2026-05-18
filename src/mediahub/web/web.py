@@ -1140,7 +1140,7 @@ def _schedule_modal_js() -> str:
         return;
       }
       if (o.status >= 400) {
-        chWrap.innerHTML = '<p style="color:#ff8a99;margin:0">' +
+        chWrap.innerHTML = '<p style="color:var(--bad);margin:0">' +
           ((o.body && o.body.message) || ('Buffer error ' + o.status)) + '</p>';
         modal.style.display = 'flex';
         return;
@@ -1172,7 +1172,7 @@ def _schedule_modal_js() -> str:
       }
       modal.style.display = 'flex';
     }).catch(function(e){
-      chWrap.innerHTML = '<p style="color:#ff8a99;margin:0">Network error: ' + (e && e.message || e) + '</p>';
+      chWrap.innerHTML = '<p style="color:var(--bad);margin:0">Network error: ' + (e && e.message || e) + '</p>';
       modal.style.display = 'flex';
     });
   };
@@ -1354,10 +1354,9 @@ BASE_CSS = """
    - Hanken Grotesk: humanist body / UI (not Inter, not Roboto)
    - JetBrains Mono: scoreboard data, mono labels, slashed-zero
 */
-@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,500;1,9..144,700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700;800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Font @imports moved to _layout's <head> as a single preconnect + non-
+   blocking <link> pair. CSS @import is fully render-blocking and was
+   costing ~500-700ms of FCP per the round-6 performance audit. */
 
 :root {
   /* Surfaces — pit-wall black to deep ink. Near-monochrome, no purple. */
@@ -1370,11 +1369,14 @@ BASE_CSS = """
   --rule:      rgba(245,242,232,0.10);  /* 1px section rules */
   --chrome:    rgba(245,242,232,0.14);  /* form borders, button outlines */
 
-  /* Ink — paper-cream on dark for editorial warmth (not white-on-blue) */
+  /* Ink — paper-cream on dark for editorial warmth (not white-on-blue).
+     --ink-muted raised from #7A7869 (4.41:1) to #9A988A (5.69:1 on bg)
+     to clear WCAG AA for normal body text. The smallest text in the app
+     (10.5px mono labels) lives at this token and was just below spec. */
   --ink:       #F5F2E8;     /* primary text, paper-cream */
-  --ink-dim:   #B6B2A6;
-  --ink-muted: #7A7869;
-  --ink-faint: #4A4940;
+  --ink-dim:   #B6B2A6;     /* 9.27:1 — safe on every surface */
+  --ink-muted: #9A988A;     /* 5.69:1 — passes AA */
+  --ink-faint: #62604F;     /* 3.14:1 — large/decorative only; raised from #4A4940 */
 
   /* SIGNATURE ACCENT — lane-marker yellow.
      The single chrome colour. Every CTA, focus ring, link, live state.
@@ -1726,6 +1728,8 @@ p:last-child { margin-bottom: 0; }
    tell of MediaHub: [ MEET / SAT 14 SEP / LANE 4 ] */
 .strap {
   display: inline-flex; align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 500;
@@ -1735,6 +1739,7 @@ p:last-child { margin-bottom: 0; }
   gap: 8px;
   padding: 4px 0;
 }
+.strap > * { word-break: break-word; overflow-wrap: anywhere; }
 .strap::before, .strap::after { content: '['; color: var(--lane); opacity: 0.7; }
 .strap::after { content: ']'; }
 .strap .sep { color: var(--ink-faint); font-weight: 400; }
@@ -1845,11 +1850,6 @@ p:last-child { margin-bottom: 0; }
 .btn.medal { background: var(--medal); color: var(--medal-ink); }
 .btn.medal:hover { background: var(--medal-h); box-shadow: var(--shadow-medal); }
 .btn.large { padding: 14px 28px; font-size: 14px; }
-.btn.xl {
-  padding: 18px 32px; font-size: 14px;
-  font-family: var(--font-mono); letter-spacing: 0.14em;
-  text-transform: uppercase; font-weight: 600;
-}
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
   font-family: var(--font-mono);
@@ -2055,9 +2055,10 @@ pre code { background: none; padding: 0; color: inherit; }
 @keyframes mh-spin { to { transform: rotate(360deg); } }
 @keyframes mh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes mh-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes mh-shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
 @keyframes mh-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes mh-aurora { 0% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(-30px,40px) rotate(180deg); } 100% { transform: translate(0,0) rotate(360deg); } }
+/* mh-shimmer + mh-aurora keyframes deleted in round-6 cleanup — the
+   `.skeleton` class and the old body::before aurora that consumed them
+   were already gone. */
 
 /* Page entry */
 main.wrap { animation: mh-fade-in 0.35s ease-out; position: relative; z-index: 1; }
@@ -2176,14 +2177,6 @@ a.card:hover, .card[data-interactive]:hover {
   width: 14px; height: 14px; margin-top: -7px;
   border: 2px solid currentColor; border-right-color: transparent;
   border-radius: 50%; animation: mh-spin 0.6s linear infinite;
-}
-
-/* Skeleton */
-.skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 100%);
-  background-size: 1000px 100%;
-  animation: mh-shimmer 1.6s linear infinite;
-  border-radius: 8px;
 }
 
 /* Content card (AI-generated content output) — published-article aesthetic */
@@ -2347,28 +2340,35 @@ a.card:hover, .card[data-interactive]:hover {
   100% { transform: translateX(440%); }
 }
 
-/* === Mobile responsive &mdash; nav + spacing === */
-@media (max-width: 720px) {
-  main.wrap { padding: 24px 16px 80px; }
-  h1 { font-size: 22px; }
-  h2 { font-size: 15px; }
-  header.topnav { padding: 0 12px; height: auto; flex-wrap: wrap; gap: 6px; }
-  header.topnav .brand { margin-right: 10px; }
+/* === Responsive: nav scrollable, hide backend pill on narrow widths ===
+   Audit found the topnav overflowed on every viewport between 721 and
+   ~1100 px because the 9 signed-in items + brand + pill = ~1100 px wide.
+   The scrollable-nav treatment now kicks in at 1100 px so iPads and
+   small laptops stop showing the right-edge bleed. */
+@media (max-width: 1100px) {
+  header.topnav { padding: 0 16px; height: auto; flex-wrap: wrap; gap: 6px; }
+  header.topnav .brand { margin-right: 14px; font-size: 18px; }
+  header.topnav .brand::after { display: none; }
   header.topnav nav {
     width: 100%; gap: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding-bottom: 6px;
+    padding-bottom: 4px;
   }
   header.topnav nav::-webkit-scrollbar { display: none; }
   header.topnav nav a {
-    padding: 5px 10px; font-size: 13px;
+    padding: 8px 12px; font-size: 11px;
     flex-shrink: 0;
   }
-  #backend-pill { margin-left: auto; flex-shrink: 0; }
+  /* Hide the backend pill on narrow widths — it's available on /status */
+  #backend-pill { display: none; }
+}
+/* Wider 720px treatment: smaller spacing, table tweaks, stat squeeze */
+@media (max-width: 720px) {
+  main.wrap { padding: 24px 16px 80px; }
   .card { padding: 18px 16px; }
-  .stat .v { font-size: 26px; }
+  .stat .v { font-size: 28px; }
   table { font-size: 12.5px; }
   table th, table td { padding: 8px 10px; }
   .kv { grid-template-columns: 1fr; gap: 2px 8px; }
@@ -2376,6 +2376,20 @@ a.card:hover, .card[data-interactive]:hover {
   .mh-card-confidence { position: static !important; display: block; margin-bottom: 8px; }
   .mh-toast { min-width: 0; }
   #mh-toast-container { left: 12px; right: 12px; max-width: none; top: 60px; }
+  /* Strap wraps onto new lines + breaks long filenames so user-supplied
+     content can't blow the layout (was the cause of /review overflow). */
+  .strap { flex-wrap: wrap; min-width: 0; }
+  .strap > * { word-break: break-word; overflow-wrap: anywhere; min-width: 0; }
+  /* Tables wrap a horizontal-scroll container automatically when wider
+     than the viewport (caller wraps the table in .table-scroll). */
+  .card > table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 480px) {
+  .row { gap: 12px; }
+  .grid-2, .grid-3 { gap: 12px; }
+  .stat-block { gap: 8px; }
+  .stat { padding: 10px 12px; min-width: 0; flex: 1; }
+  .mh-hero h1 { font-size: clamp(40px, 11vw, 64px); }
 }
 @media (max-width: 480px) {
   .row { gap: 12px; }
@@ -2978,11 +2992,66 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 }
 .mh-provider-badge.warn .mh-provider-dot { background: var(--warn); box-shadow: 0 0 6px rgba(255,180,84,0.6); }
 
-/* Reduced motion */
+/* Skip-to-content link — visible only when focused */
+.mh-skip-link {
+  position: absolute;
+  left: var(--sp-4);
+  top: -200px;
+  z-index: 200;
+  padding: 10px 14px;
+  background: var(--lane);
+  color: var(--lane-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: top var(--transition);
+}
+.mh-skip-link:focus,
+.mh-skip-link:focus-visible {
+  top: var(--sp-3);
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Stronger universal focus indicator — used to be a faint 18% glow that
+   barely registered on dark surfaces. WCAG 2.4.11 requires >= 3:1 against
+   adjacent colour with >= 2 CSS px thickness. */
+:focus-visible {
+  outline: 2px solid var(--lane);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+input[type=text]:focus-visible,
+input[type=email]:focus-visible,
+input[type=password]:focus-visible,
+input[type=url]:focus-visible,
+input[type=number]:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: 1px;
+}
+
+/* Reduced motion — kill all keyframe animation, freeze pulse dots,
+   stop the spinner. Round-1 audit had only zero'd duration; this also
+   forces iteration count to 1 and explicitly disables looping pulses. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .mh-spinner,
+  .mh-spinner::after,
+  .mh-hero-eyebrow::after,
+  .tag.live::before,
+  header.topnav nav a.live::before,
+  .mh-stage[data-state="active"]::after {
+    animation: none !important;
   }
 }
 """
@@ -3087,6 +3156,12 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{{ title }} &mdash; MediaHub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,500;1,9..144,700&amp;family=Hanken+Grotesk:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap"
+      media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&amp;family=Hanken+Grotesk:wght@400;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" /></noscript>
 <style>{{ css | safe }}</style>
 <script>
   // Detect deployed prefix (e.g. "/port/5000") so XHRs from inline JS use the right base.
@@ -3098,6 +3173,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </script>
 </head>
 <body>
+<a class="mh-skip-link" href="#mh-main">Skip to content</a>
 <div id="mh-loader" aria-live="polite" aria-busy="true">
   <div class="mh-loader-inner">
     <div class="mh-spinner"></div>
@@ -3141,7 +3217,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     </a>
   </nav>
 </header>
-<main class="wrap">
+<main class="wrap" id="mh-main">
 {{ body | safe }}
 </main>
 <footer class="mh-footer">
@@ -3352,25 +3428,43 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       if (!panel) return;
       var caption = (o.body && o.body.caption) || '';
       if (o.body && o.body.error === 'no_key') {
-        panel.innerHTML = '<strong style="color:#f59e0b">AI is in heuristic mode.</strong> '
+        panel.innerHTML = '<strong style="color:var(--warn)">AI is in heuristic mode.</strong> '
           + '<span>Contact your administrator to enable AI.</span>';
         return;
       }
       if (caption) {
-        panel.innerHTML = '<div style="font-weight:600;color:var(--lane);font-size:11px;'
-          + 'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
-          + 'Caption with reasoning woven in</div>'
-          + '<div style="margin-bottom:8px">' + caption.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
-          + '<button class="btn secondary" type="button" style="font-size:11px;padding:4px 10px" '
-          + 'onclick="navigator.clipboard.writeText(this.parentElement.querySelector(\'div:nth-child(2)\').textContent);'
-          + 'this.textContent=\'Copied\\u2009\\u2713\'">Copy</button>';
+        // Build the copy button via DOM API rather than serialising another
+        // string of inline onclick="..." attributes — the embedded escaping
+        // (Python f-string -> render_template_string -> JS string -> HTML
+        // attribute -> JS click handler) produced a "Unexpected identifier"
+        // syntax error on every page load. DOM API avoids the layered
+        // escaping entirely.
+        panel.innerHTML = '';
+        var hdr = document.createElement('div');
+        hdr.style.cssText = 'font-weight:600;color:var(--lane);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px';
+        hdr.textContent = 'Caption with reasoning woven in';
+        panel.appendChild(hdr);
+        var capDiv = document.createElement('div');
+        capDiv.style.marginBottom = '8px';
+        capDiv.textContent = caption;
+        panel.appendChild(capDiv);
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'btn secondary';
+        copyBtn.style.cssText = 'font-size:11px;padding:4px 10px';
+        copyBtn.textContent = 'Copy';
+        copyBtn.addEventListener('click', function(){
+          try { navigator.clipboard.writeText(capDiv.textContent); copyBtn.textContent = 'Copied \\u2009\\u2713'; }
+          catch(e) { copyBtn.textContent = 'Copy failed'; }
+        });
+        panel.appendChild(copyBtn);
       } else {
-        panel.innerHTML = '<strong style="color:#ff8a99">Generation failed.</strong> '
+        panel.innerHTML = '<strong style="color:var(--bad)">Generation failed.</strong> '
           + ((o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status));
       }
     }).catch(function(e){
       btn.disabled = false; btn.textContent = origLabel;
-      if (panel) panel.innerHTML = '<strong style="color:#ff8a99">Network error.</strong> '
+      if (panel) panel.innerHTML = '<strong style="color:var(--bad)">Network error.</strong> '
         + (e && e.message || e);
     });
   };
@@ -3402,18 +3496,32 @@ def _recovery_page(
     primary_cta: tuple[str, str] | None = None,
     secondary_cta: tuple[str, str] | None = None,
     code: int = 404,
+    eyebrow: str | None = None,
+    lane: str | None = None,
 ) -> tuple[str, int]:
-    """Render a friendly 404-style page with an H1 and at least one CTA.
+    """Render a friendly recovery page with an H1 and at least one CTA.
 
     The interaction audit found that every 404 / dead-end in MediaHub was
     a blank-feeling text line with no escape hatch. This helper builds the
     standard recovery page so users can always see what happened and where
     to go next without using the browser back button.
+
+    ``eyebrow`` lets each call site supply context-appropriate copy
+    ("Card", "Chat", "Service status") instead of every recovery page
+    wearing the same "Not found" eyebrow regardless of context.
     """
     pcta = primary_cta or ("Back to home", url_for("home"))
+    if eyebrow is None:
+        # Default eyebrow follows the HTTP code class — error pages
+        # used to leak "404 / page not found" into the masthead chrome,
+        # which is the only place in the UI that surfaces raw status
+        # codes. Now eyebrows read as editorial labels.
+        eyebrow = "Not found" if 400 <= code < 500 else "Something went wrong"
+    if lane is None:
+        lane = str(code)
     sects: list[str] = []
-    sects.append('<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">')
-    sects.append('<span class="mh-hero-eyebrow">Not found</span>')
+    sects.append(f'<section class="mh-hero" data-lane="{_h(lane)}" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">')
+    sects.append(f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>')
     sects.append(f'<h1>{_h(headline)}</h1>')
     sects.append(f'<p class="lede">{_h(detail)}</p>')
     sects.append('<div class="mh-hero-actions">')
@@ -4102,10 +4210,10 @@ def create_app() -> Flask:
                 )
             else:
                 prof_logo_html = (
-                    '<p class="dim" style="margin:6px 0 0;font-size:12px;color:#F59E0B">'
+                    '<p class="dim" style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
                     'No logo on your organisation profile. '
                     f'<a href="{url_for("organisation_page")}" '
-                    'style="color:#F59E0B;text-decoration:underline">Add one</a> '
+                    'style="color:var(--warn);text-decoration:underline">Add one</a> '
                     'so it flows through to every graphic.</p>'
                 )
 
@@ -4153,12 +4261,24 @@ def create_app() -> Flask:
     def upload_configure():
         run_id = request.values.get("run_id", "").strip()
         if not run_id:
-            return _layout("Configure", '<div class="card"><p class="tag bad">Missing run_id.</p></div>', active="add_input")
+            return _recovery_page(
+                "Configure step opened without a run",
+                "The configure step is the second half of the upload flow — you reach it by uploading a file first. Open the upload page and pick a meet results file to start.",
+                eyebrow="Upload",
+                primary_cta=("Start an upload", url_for("upload")),
+                secondary_cta=("All input types", url_for("add_input_page")),
+            )
         tmp_dir = RUNS_DIR / run_id
         meta_path = tmp_dir / "upload_meta.json"
         input_path = tmp_dir / "input.bin"
         if not (meta_path.exists() and input_path.exists()):
-            return _layout("Configure", '<div class="card"><p class="tag bad">Upload session not found or expired.</p></div>', active="add_input")
+            return _recovery_page(
+                "Upload session expired",
+                "The staged upload only lives for a few minutes before it's swept. Start a new upload — the file picker is one click away.",
+                eyebrow="Upload",
+                primary_cta=("Start a new upload", url_for("upload")),
+                secondary_cta=("Recent runs", url_for("activity_page")),
+            )
         try:
             meta = json.loads(meta_path.read_text())
         except Exception:
@@ -4371,12 +4491,21 @@ def create_app() -> Flask:
                     '</div>'
                 )
                 return _layout("Run failed", _err_body, active="add_input")
+            # Round-6 fix: when neither the in-memory cache nor the DB has
+            # the run id, we used to fall through to the "Processing run"
+            # hero with an indefinite poller — users bookmarking a stale
+            # URL would stare at an infinite spinner. Now we send them to
+            # the recovery page instead.
+            if _row_status is None:
+                return _recovery_page(
+                    "Run not found",
+                    "This run isn't on disk or in memory. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                    eyebrow="Run status",
+                    primary_cta=("Open activity", url_for("activity_page")),
+                    secondary_cta=("Upload a new file", url_for("upload")),
+                )
         except Exception:
             pass
-        # Five named stages, mapped from log message substrings.
-        # Each stage shows "queued" by default, becomes "active" when its
-        # keyword first appears in the log, "done" when the next stage's
-        # keyword appears (or the run finishes successfully).
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
@@ -4772,7 +4901,7 @@ def create_app() -> Flask:
                     )
                 _needs_verif_html = (
                     f'<div class="divider"></div>'
-                    f'<div><strong style="color:#F59E0B">&#x26A0; {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
+                    f'<div><strong style="color:var(--warn)">&#x26A0; {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
                     f'{rows}</div>'
                 )
 
@@ -4783,10 +4912,10 @@ def create_app() -> Flask:
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{_n_swimmers}</div></div>
     <div class="stat live"><div class="l">Verified</div><div class="v">{_n_verified}</div></div>
-    <div class="stat"><div class="l" style="color:#F59E0B">Needs verification</div><div class="v" style="color:#F59E0B">{_n_needs}</div></div>
+    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{_n_needs}</div></div>
     <div class="stat"><div class="l">Fetch failed</div><div class="v">{_n_fetch_fail}</div></div>
     <div class="stat"><div class="l">PB decisions</div><div class="v">{_n_decisions}</div></div>
-    <div class="stat"><div class="l" style="color:#4ADE80">Confirmed PBs</div><div class="v" style="color:#4ADE80">{_n_confirmed}</div></div>
+    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{_n_confirmed}</div></div>
     <div class="stat live" title="Time + date match SR all-time PB &mdash; strongest possible confirmation"><div class="l">Official PBs</div><div class="v">{_n_official}</div></div>
     <div class="stat"><div class="l">Likely PBs</div><div class="v">{_n_likely}</div></div>
     <div class="stat"><div class="l">Not PB</div><div class="v">{_n_not_pb}</div></div>
@@ -5702,7 +5831,7 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
     .then(function(res) {{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {{
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Error: ' + (res.body.error || 'render failed') + '</div>';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'render failed') + '</div>';
         return;
       }}
       _visualCache[cacheKey] = res.body;
@@ -5710,7 +5839,7 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
     }})
     .catch(function(err) {{
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     }});
 }}
 
@@ -5786,7 +5915,7 @@ function generateMotion(btn, motionUrl, cardId) {{
         // known infra failures into actionable copy; falls back to detail
         // for anything unexpected.
         var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">' + msg + '</div>';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
         return;
       }}
       var url = URL.createObjectURL(res.blob);
@@ -5807,7 +5936,7 @@ function generateMotion(btn, motionUrl, cardId) {{
     }})
     .catch(function(err) {{
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     }});
 }}
 
@@ -5833,7 +5962,7 @@ function generateReel(btn, reelUrl) {{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {{
         var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
         return;
       }}
       var url = URL.createObjectURL(res.blob);
@@ -5853,7 +5982,7 @@ function generateReel(btn, reelUrl) {{
     }})
     .catch(function(err) {{
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     }});
 }}
 
@@ -5875,14 +6004,14 @@ function regenerateGraphic(btn, createUrl, cardId) {{
     .then(function(res){{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {{
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Error: ' + (res.body.error || 'variants failed') + '</div>';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'variants failed') + '</div>';
         return;
       }}
       _renderVariantPicker(panel, res.body.variants || [], cardId, createUrl);
     }})
     .catch(function(err){{
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     }});
 }}
 
@@ -5895,7 +6024,7 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {{
   var tilesHtml = variants.map(function(vt) {{
     var v = vt.visual;
     if (!v) {{
-      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:#F87171;font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
     }}
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
@@ -6562,9 +6691,9 @@ function addGraphicToPack(btn, visualId) {{
                         f'<div class="card"><h2>Ground Truth Results</h2>'
                         f'<div class="stat-block">'
                         f'<div class="stat"><div class="l">Total entries</div><div class="v">{report.total_entries}</div></div>'
-                        f'<div class="stat"><div class="l" style="color:#4ADE80">True positives</div><div class="v" style="color:#4ADE80">{report.true_positives}</div></div>'
-                        f'<div class="stat"><div class="l" style="color:#F87171">False positives</div><div class="v" style="color:#F87171">{report.false_positives}</div></div>'
-                        f'<div class="stat"><div class="l" style="color:#FBBF24">False negatives</div><div class="v" style="color:#FBBF24">{report.false_negatives}</div></div>'
+                        f'<div class="stat good"><div class="l">True positives</div><div class="v">{report.true_positives}</div></div>'
+                        f'<div class="stat bad"><div class="l">False positives</div><div class="v">{report.false_positives}</div></div>'
+                        f'<div class="stat warn"><div class="l">False negatives</div><div class="v">{report.false_negatives}</div></div>'
                         f'<div class="stat"><div class="l">Precision</div><div class="v">{report.precision or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">Recall</div><div class="v">{report.recall or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">F1</div><div class="v">{report.f1 or "&mdash;"}</div></div>'
@@ -7140,9 +7269,11 @@ Relay team broke club record"></textarea>
         version_label = APP_VERSION
 
         body = (
-            '<h1 style="margin-bottom:6px">Status</h1>'
-            '<p class="dim" style="margin-bottom:24px">Live operational health '
-            'of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">System status</span>'
+            '<h1>Live <em class="editorial">health</em>.</h1>'
+            '<p class="lede">Operational health of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
+            '</section>'
 
             '<div class="card" style="display:flex;align-items:center;gap:14px;'
             'padding:18px 22px;margin-bottom:20px">'
@@ -8144,7 +8275,7 @@ Relay team broke club record"></textarea>
             ) or "").strip()
         except ProviderNotConfigured as e:
             err_html = (
-                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI features unavailable</h2>'
                 f'<p>Spotlight posts require AI. {_h(str(e))}</p>'
                 '<p class="muted">Contact your administrator to enable AI on '
@@ -8154,7 +8285,7 @@ Relay team broke club record"></textarea>
             return _layout("Build spotlight post", err_html, active="create"), 503
         except ProviderError as e:
             err_html = (
-                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI provider error</h2>'
                 f'<p>The AI provider couldn\'t finish the spotlight draft: '
                 f'<code>{_h(str(e))}</code>.</p>'
@@ -8165,7 +8296,7 @@ Relay team broke club record"></textarea>
             return _layout("Build spotlight post", err_html, active="create"), 502
         if not composed_caption:
             err_html = (
-                '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
+                '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI returned no caption</h2>'
                 '<p>The provider responded but produced an empty caption. '
                 'Try regenerating.</p>'
@@ -8295,7 +8426,13 @@ Relay team broke club record"></textarea>
 
         pack = build_spotlight_pack(run_data, swimmer_key)
         if not pack:
-            return _layout("No data", f'<div class="empty">No achievements found for swimmer key "{_h(swimmer_key)}" in this run.</div>'), 404
+            return _recovery_page(
+                "Swimmer not found",
+                f"No achievements were recorded for \"{swimmer_key}\" in this meet. Pick another swimmer, or open the meet review to see who's in the recognition report.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Choose another swimmer", url_for("spotlight_landing") + f"?run_id={run_id}"),
+                secondary_cta=("Open review", url_for("review", run_id=run_id)),
+            )
 
         _back_url = url_for("spotlight_landing") + f"?run_id={run_id}"
         _review_url = url_for("review", run_id=run_id)
@@ -8375,7 +8512,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <div class="stat-block">
-    <div class="stat"><div class="l" style="color:#F59E0B">Elite</div><div class="v" style="color:#F59E0B">{pack["n_elite"]}</div></div>
+    <div class="stat medal"><div class="l">Elite</div><div class="v">{pack["n_elite"]}</div></div>
     <div class="stat live"><div class="l">Strong</div><div class="v">{pack["n_strong"]}</div></div>
     <div class="stat"><div class="l" style="color:var(--lane)">Story</div><div class="v" style="color:var(--lane)">{pack["n_story"]}</div></div>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
@@ -9898,14 +10035,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if is_current:
                 pill_html = (
                     '<span class="pill" style="background:rgba(34,197,94,0.10);'
-                    'border-color:rgba(34,197,94,0.30);color:#22C55E">Active</span>'
+                    'border-color:rgba(34,197,94,0.30);color:var(--good)">Active</span>'
                 )
             if ready:
                 pill_html += '<span class="pill">Brand ready</span>'
             elif captured:
                 pill_html += (
                     '<span class="pill" style="background:rgba(245,158,11,0.10);'
-                    'border-color:rgba(245,158,11,0.30);color:#F59E0B">'
+                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
                     'Partial</span>'
                 )
             else:
@@ -9932,7 +10069,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'onsubmit="return confirm(\'Delete the &quot;{_h(p.display_name)}&quot; profile? '
                 f'Its runs stay on disk but it disappears from this picker. This cannot be undone.\')">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
-                f'<button type="submit" class="btn-delete" title="Delete profile">&times;</button>'
+                f'<button type="submit" class="btn-delete" aria-label="Delete profile" title="Delete profile">&times;</button>'
                 '</form>'
                 '</div>'
                 '</div>'
@@ -9965,13 +10102,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
 
         body = (
-            '<h1>Pick an organisation</h1>'
-            f'{err_html}'
-            '<p class="lede" style="margin-bottom:var(--sp-7)">'
-            f'{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Sign in</span>'
+            '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
+            f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             'Picking one loads its brand voice, palette, logo, and history. '
-            'Switch any time from the home page.'
-            '</p>'
+            'Switch any time from the home page.</p>'
+            '</section>'
+            f'{err_html}'
             f'<div class="mh-profile-grid">{cards_html}</div>'
         )
         return _layout("Sign in", body, active="signin")
@@ -10142,7 +10280,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">First-run setup · Step 1 of 1</span>
+  <span class="mh-hero-eyebrow">First-run setup</span>
   <h1>Tell us about<br><em class="editorial">your club.</em></h1>
   <p class="lede">
   The engine learns who you are from your existing online
@@ -10965,7 +11103,7 @@ function copyWhyCard(btn, taId) {{
         pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
         if pack is None:
             return _layout("Not found",
-                           '<div class="empty">Turn-Into pack not found.</div>'), 404
+                           '<div class="empty">Repurpose pack not found.</div>'), 404
 
         _review_url = url_for("review", run_id=run_id)
         _api_url = url_for("api_turn_into", run_id=run_id)
@@ -11130,7 +11268,7 @@ function copyWhyCard(btn, taId) {{
 
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Turn-Into pack</span>
+  <span class="mh-hero-eyebrow">Repurpose pack</span>
   <h1>{meet_name}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
@@ -11554,7 +11692,7 @@ function generateReelGrouped(btn, reelUrl) {{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {{
         var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Reel render error: ' + msg + '</div>';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
         return;
       }}
       var url = URL.createObjectURL(res.blob);
@@ -11571,7 +11709,7 @@ function generateReelGrouped(btn, reelUrl) {{
     }})
     .catch(function(err) {{
       btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Network error: ' + err + '</div>';
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     }});
 }}
 
@@ -12647,7 +12785,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "not_found", "path": request.path}), 404
         body = (
             '<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
-            '<span class="mh-hero-eyebrow">404 / page not found</span>'
+            '<span class="mh-hero-eyebrow">Page not found</span>'
             '<h1>Off the lane.</h1>'
             f'<p class="lede">The page <code>{_h(request.path)}</code> doesn\'t exist on this deployment. '
             'It may have been moved, renamed, or never minted.</p>'
@@ -12670,7 +12808,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "internal_error"}), 500
         body = (
             '<section class="mh-hero" data-lane="500" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
-            '<span class="mh-hero-eyebrow">500 / unhandled exception</span>'
+            '<span class="mh-hero-eyebrow">Server error</span>'
             '<h1>The engine stalled.</h1>'
             '<p class="lede">'
             'Something failed on the server. Nothing you uploaded was lost — '
