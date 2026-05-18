@@ -538,25 +538,12 @@ def _render_why_this_card(
             '</div>'
         )
 
-    # AI-unavailable callout. When the explanation couldn't be generated
-    # (no provider configured, rate-limit on every provider, etc.) the
-    # explainer attaches an `ai_error`. We render an honest red callout
-    # pointing the user at the administrator (AI keys are env-var
-    # configured at deploy time) instead of inventing a fake explanation.
-    ai_error = (exp.get("ai_error") or "").strip()
+    # AI-unavailable callout — round-3 cleanup. When the LLM provider is
+    # globally unavailable, every single card emits the same alert (177×
+    # on a typical meet review page). Suppress the per-card block here;
+    # the review/pack page now renders a single global notice at the top
+    # so the noise doesn't drown out the actual reasoning where it exists.
     ai_error_block = ""
-    if ai_error:
-        ai_error_block = (
-            '<div style="margin:8px 0 10px 0;padding:10px 12px;'
-            'background:rgba(244,63,94,0.06);border-left:2px solid #f43f5e;'
-            'border-radius:4px">'
-            '<div style="font-size:10px;text-transform:uppercase;color:#f43f5e;'
-            'letter-spacing:0.5px;margin-bottom:2px">AI unavailable</div>'
-            f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(ai_error)}</div>'
-            f'<div style="margin-top:6px;font-size:12px">'
-            '<span style="color:var(--ink-dim)">AI features are configured by your administrator.</span>'
-            '</div></div>'
-        )
 
     # Phase 1.4 — "Use in next caption" button. Only rendered when
     # the caller passed run_id (so legacy callers without a run
@@ -3794,12 +3781,19 @@ def create_app() -> Flask:
 
         if not rows:
             empty_body = (
-                f'<h1 style="margin-bottom:6px">Activity</h1>'
-                f'<p class="dim" style="margin-bottom:24px">Runs for '
-                f'<b>{_h(prof.display_name)}</b>.</p>'
-                '<div class="card empty">No runs yet for this organisation. '
-                f'<a href="{url_for("add_input_page")}">Create your first piece of content &rarr;</a>'
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Activity</span>'
+                f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">'
+                'No runs yet for this organisation. Upload a results file, paste '
+                'a sponsor brief, or describe a moment in your own words &mdash; '
+                'every run lands here with the meet name, status, queue, and a '
+                'one-click link back into the review.'
+                '</p>'
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("add_input_page")}">Create your first piece &rarr;</a>'
                 '</div>'
+                '</section>'
             )
             return _layout("Activity", empty_body, active="activity")
 
@@ -3918,9 +3912,14 @@ def create_app() -> Flask:
             )
 
         body = (
-            f'<h1 style="margin-bottom:6px">Activity</h1>'
-            f'<p class="dim" style="margin-bottom:24px">Recent runs for '
-            f'<b>{_h(prof.display_name)}</b>.</p>'
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Activity</span>'
+            '<h1>Recent runs</h1>'
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
+            f'<span>{len(rows):02d} {"run" if len(rows) == 1 else "runs"}</span>'
+            '</div>'
+            '</section>'
             f'{failure_callout}'
             '<div class="card"><table>'
             '<thead><tr><th>Input</th><th>Status</th>'
@@ -5170,6 +5169,27 @@ function turnMeetIntoPack() {{
             else:
                 ach_rows_html_wf = '<div class="empty">No achievements detected.</div>'
 
+        # Single global AI-availability banner — replaces the 177 per-card
+        # "AI UNAVAILABLE" alerts the previous implementation emitted.
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available
+            _ai_banner_html = "" if _llm_available() else (
+                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
+                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
+                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
+                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                '<span style="color:var(--ink-dim)">'
+                'Cards show ranker reasoning and grounded source lines only. '
+                'Captions, &ldquo;why this card&rdquo; explanations and performance '
+                'context need a Gemini or Anthropic key set by the deployment operator.'
+                '</span>'
+                '</div>'
+            )
+        except Exception:
+            _ai_banner_html = ""
+
         body = f"""
 <style>
 .ach-row {{ transition: background 100ms; }}
@@ -5179,6 +5199,8 @@ function turnMeetIntoPack() {{
 .ach-row.hidden {{ display:none; }}
 @keyframes spin {{ from {{ transform:rotate(0deg) }} to {{ transform:rotate(360deg) }} }}
 </style>
+
+{_ai_banner_html}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Review queue</span>
@@ -6632,9 +6654,11 @@ function addGraphicToPack(btn, visualId) {{
 """
 
         body = f"""
-<h1>Ground-truth check</h1>
-<p class="dim">Paste 5&ndash;15 expected highlights from this meet. We score how well MediaHub
-surfaces them as content cards. One per line.</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Ground-truth check</span>
+  <h1>How <em class="editorial">well</em> did we recall?</h1>
+  <p class="lede">Paste 5&ndash;15 expected highlights from this meet. We score how many MediaHub surfaced as content cards. One per line.</p>
+</section>
 
 <div class="card">
   <form method="post">
@@ -6642,7 +6666,7 @@ surfaces them as content cards. One per line.</p>
     <textarea name="moments" placeholder="Eva Davies 100m butterfly PB
 Mathew Bradley 200m IM gold
 Relay team broke club record"></textarea>
-    <div style="margin-top:14px"><button class="btn" type="submit">Score</button></div>
+    <div style="margin-top:var(--sp-4)"><button class="btn" type="submit">Score</button></div>
   </form>
 </div>
 {rep_html}
@@ -6676,7 +6700,14 @@ Relay team broke club record"></textarea>
 <p class="muted">Each new adapter must implement <code>can_parse()</code> and return the
    canonical Meet schema. No detector / caption code changes are needed.</p>
 """
-        body = f'<h1>Research roadmap</h1><div class="card">{html}</div>'
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Roadmap</span>'
+            '<h1>Adapter <em class="editorial">research</em></h1>'
+            '<p class="lede">What MediaHub can read today and what\'s coming next. Every new format becomes a single adapter — no detector or caption-engine rewrite.</p>'
+            '</section>'
+            f'<div class="card">{html}</div>'
+        )
         return _layout("Research", body, active="research")
 
     # ---- PRIVACY -------------------------------------------------------
@@ -6694,8 +6725,11 @@ Relay team broke club record"></textarea>
             + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
         )
         body = f"""
-<h1>Privacy & data</h1>
-<p class="dim">What this system stores, where, and how to delete it.</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>What we <em class="editorial">keep.</em></h1>
+  <p class="lede">Everything MediaHub stores on this deployment, and exactly how to delete it. No data leaves the box except to fetch public PB-lookup pages from the configured source.</p>
+</section>
 
 <div class="card">
   <h2>Inventory</h2>
@@ -8556,20 +8590,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         new_url = url_for("free_text_chat_new")
         body = f"""
-<h1>Free text — chat</h1>
-<p class="dim" style="max-width:680px">
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Free text — chat</span>
+  <h1>Describe the moment.<br><em class="editorial">We brief it.</em></h1>
+  <p class="lede">
   Talk to Claude. Describe what you want to post, answer the assistant's
   questions, and approve the brief when it's right. The assistant
-  researches the web on its own — names, venues, PBs, sponsor info — so
+  researches the web on its own &mdash; names, venues, PBs, sponsor info &mdash; so
   the brief is grounded in evidence, not invented.
-</p>
+  </p>
+  <div class="mh-hero-actions">
+    <form method="post" action="{new_url}" style="display:inline">
+      <button type="submit" class="mh-cta-primary" style="border:0">Start a new chat &rarr;</button>
+    </form>
+  </div>
+</section>
 
-<form method="post" action="{new_url}" style="margin-top:14px">
-  <button type="submit" class="btn">Start a new chat →</button>
-</form>
-
-<div class="card" style="margin-top:24px">
-  <h2 style="margin-top:0">Past chats</h2>
+<div class="card">
+  <h2>Past chats</h2>
   {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
     '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
    if rows_html else '<p class="muted">No chats yet.</p>'}
@@ -8784,16 +8822,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.club_platform.stub_pack_store import list_packs
         items = list_packs(limit=100)
         if not items:
-            body = f"""
-<h1>Saved drafts</h1>
-<p class="dim">Content packs you generate from Free Text, Event Preview, Sponsor Post and Session Update are saved here.</p>
-<div class="card" style="text-align:center;padding:48px 28px">
-  <div style="font-size:42px;margin-bottom:12px">&#x1F4DD;</div>
-  <h2 style="margin-bottom:6px">No drafts yet</h2>
-  <p class="dim" style="margin-bottom:18px">Generate your first content cards from the Add Input page.</p>
-  <a class="btn" href="{url_for('add_input_page')}">Add input &rarr;</a>
-</div>
-"""
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Saved drafts</span>'
+                '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
+                '<p class="lede">'
+                'Content packs you generate from Free Text, Event Preview, '
+                'Sponsor Post and Session Update are kept here so you can '
+                'come back, edit, and approve later.'
+                '</p>'
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("add_input_page")}">Add an input &rarr;</a>'
+                '</div>'
+                '</section>'
+            )
             return _layout("Saved drafts", body, active="add_input")
 
         rows_html = ""
@@ -8814,15 +8856,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
 
         body = f"""
-<h1>Saved drafts</h1>
-<p class="dim">{len(items)} pack{'s' if len(items)!=1 else ''} saved.</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Saved drafts</span>
+  <h1>Drafts</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{len(items):02d} pack{'s' if len(items) != 1 else ''} saved</span>
+  </div>
+</section>
 <div class="card">
   <table>
     <thead><tr><th>Title</th><th>Type</th><th>Cards</th><th>Created</th><th></th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>
-<p style="margin-top:14px"><a class="btn secondary" href="{url_for('add_input_page')}">+ New draft</a></p>
+<p style="margin-top:var(--sp-4)"><a class="btn secondary" href="{url_for('add_input_page')}">+ New draft</a></p>
 """
         return _layout("Saved drafts", body, active="add_input")
 
@@ -10339,11 +10386,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
 
         if not approved:
-            body = f"""
-<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
-<h1>Content Pack &mdash; {meet_name}</h1>
-<div class="card empty">No approved cards yet. Go to <a href="{_review_url}">the review page</a> and approve some cards first.</div>
-"""
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
+                '<span class="mh-hero-eyebrow">Content pack</span>'
+                f'<h1>Nothing <em class="editorial">approved</em> yet.</h1>'
+                '<p class="lede">'
+                f'Cards waiting on you in <strong>{meet_name}</strong>. Approve them in the review queue, '
+                'and they show up here as a ready-to-post pack with copy buttons, schedule, and export.'
+                '</p>'
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{_review_url}">Open review queue &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All runs</a>'
+                '</div>'
+                '</section>'
+            )
             return _layout("Content Pack", body, active="home")
 
         cards_html = ""
@@ -10476,14 +10532,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   .card {{ border: 1px solid #ccc; box-shadow: none; }}
 }}
 </style>
-<div class="no-print">
-  <p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
-</div>
+<section class="mh-hero no-print" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Content pack — approved</span>
+  <h1>{meet_name}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{len(approved):02d} approved {"card" if len(approved) == 1 else "cards"}</span><span class="sep">·</span>
+    <span>Ready to post</span><span class="sep">/</span>
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
+  </div>
+</section>
 
-<h1>Content Pack &mdash; {meet_name}</h1>
-<p class="dim">{len(approved)} approved card{"s" if len(approved) != 1 else ""} &middot; ready to post</p>
-
-<div class="no-print" style="margin-bottom:20px;display:flex;gap:10px">
+<div class="no-print" style="margin-bottom:var(--sp-6);display:flex;gap:var(--sp-3);flex-wrap:wrap">
   <form method="post" action="{_mark_all_url}" onsubmit="return confirm('Mark all approved cards as posted?')">
     <button class="btn secondary" type="submit">Mark all posted</button>
   </form>
@@ -10996,11 +11055,17 @@ function copyWhyCard(btn, taId) {{
             cards_html = '<div class="empty">No artefacts generated.</div>'
 
         body = f"""
-<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
-<h1>Turn-Into pack &mdash; {meet_name}</h1>
-<p class="dim">{len(artefacts)} artefacts &middot; generated {gen_at}</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Turn-Into pack</span>
+  <h1>{meet_name}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{len(artefacts):02d} {"artefact" if len(artefacts) == 1 else "artefacts"}</span><span class="sep">·</span>
+    <span>generated {gen_at}</span><span class="sep">/</span>
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
+  </div>
+</section>
 
-<div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+<div style="margin-bottom:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
   <button class="btn secondary" onclick="tiRegenerate()">&#x21BA; Regenerate pack</button>
 </div>
 
@@ -11310,9 +11375,37 @@ function tiRegenerate() {{
         except Exception:
             visuals_strip = ""
 
+        # Single global AI-availability banner (same pattern as /review).
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available
+            _ai_banner_html = "" if _llm_available() else (
+                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
+                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
+                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
+                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                '<span style="color:var(--ink-dim)">'
+                'Cards show ranker reasoning and grounded source lines only. '
+                'Captions, &ldquo;why this card&rdquo; explanations and performance '
+                'context need a Gemini or Anthropic key set by the deployment operator.'
+                '</span>'
+                '</div>'
+            )
+        except Exception:
+            _ai_banner_html = ""
+
         body = f"""
-<p class="dim"><a href="{_review_url}">&larr; Back to review</a> &nbsp;|&nbsp; <a href="{_pack_url}">Classic pack view</a></p>
-<h1>Content Pack (grouped) &mdash; {meet_name}</h1>
+{_ai_banner_html}
+
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Content pack — grouped</span>
+  <h1>{meet_name}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
+    <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Classic pack view</a>
+  </div>
+</section>
 
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -11504,17 +11597,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if not _profs:
                 _org_url = url_for('organisation_page')
                 _add_input_url = url_for('add_input_page')
-                empty_body = f"""
-<h1>Media library</h1>
-<p class="dim">Store reusable photos for your organisation so they can be pulled into branded content cards.</p>
-<div class="card" style="text-align:center;padding:48px 32px">
-  <div style="font-size:48px;margin-bottom:16px">&#128247;</div>
-  <h2 style="margin-bottom:8px">No organisation set up yet</h2>
-  <p class="dim" style="margin-bottom:24px">The media library is scoped per organisation. Set up your organisation first, or add an input to auto-create one.</p>
-  <a class="btn" href="{_org_url}">Set up organisation &rarr;</a>
-  <a class="btn secondary" href="{_add_input_url}" style="margin-left:8px">Or add an input &rarr;</a>
-</div>
-"""
+                empty_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+                    '<span class="mh-hero-eyebrow">Media library</span>'
+                    '<h1>No organisation,<br><em class="editorial">no library.</em></h1>'
+                    '<p class="lede">'
+                    'The media library is scoped per organisation. Set up your '
+                    'organisation first &mdash; or just add an input and one '
+                    'gets created automatically.'
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{_org_url}">Set up organisation &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{_add_input_url}">Or add an input</a>'
+                    '</div>'
+                    '</section>'
+                )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
         store = _v8_get_media_store()
@@ -11534,29 +11631,42 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td><code>{ad.get('id','')[:12]}</code></td>
 </tr>"""
         body = f"""
-<div class=\"card\">
-  <h2>Media library &mdash; {profile_id}</h2>
-  <p>Upload reusable photos. Each gets parsed for athlete/venue/event metadata.</p>
-  <form method=\"POST\" action=\"{url_for('api_media_library_upload')}\" enctype=\"multipart/form-data\">
-    <p><input type=\"file\" name=\"file\" accept=\"image/*\" required></p>
-    <p>Description: <input type=\"text\" name=\"description\" placeholder=\"e.g. Eira Hughes at Welsh National Open\" style=\"width:60%\"></p>
-    <p>Type: <select name=\"asset_type\">
-      <option value=\"athlete_photo\">athlete_photo</option>
-      <option value=\"venue\">venue</option>
-      <option value=\"team\">team</option>
-      <option value=\"action\">action</option>
-      <option value=\"podium\">podium</option>
-      <option value=\"logo\">logo</option>
-    </select></p>
-    <input type=\"hidden\" name=\"profile_id\" value=\"{profile_id}\">
-    <button type=\"submit\" class=\"btn\">Upload photo</button>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Media library</span>
+  <h1>Library</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(profile_id)}</span><span class="sep">·</span>
+    <span>{len(assets):03d} {"asset" if len(assets) == 1 else "assets"}</span>
+  </div>
+</section>
+
+<div class="card">
+  <h2>Upload a photo</h2>
+  <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
+  <form method="POST" action="{url_for('api_media_library_upload')}" enctype="multipart/form-data">
+    <label>File</label>
+    <input type="file" name="file" accept="image/*" required>
+    <label>Description</label>
+    <input type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
+    <label>Type</label>
+    <select name="asset_type">
+      <option value="athlete_photo">Athlete photo</option>
+      <option value="venue">Venue</option>
+      <option value="team">Team</option>
+      <option value="action">Action</option>
+      <option value="podium">Podium</option>
+      <option value="logo">Logo</option>
+    </select>
+    <input type="hidden" name="profile_id" value="{profile_id}">
+    <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo</button></div>
   </form>
 </div>
-<div class=\"card\">
-  <h3>{len(assets)} assets</h3>
-  <table style=\"width:100%\">
-    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue/Event</th><th>Permission</th><th>ID</th></tr></thead>
-    <tbody>{rows_html}</tbody>
+
+<div class="card">
+  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
+  <table style="width:100%">
+    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th></tr></thead>
+    <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'}</tbody>
   </table>
 </div>
 """
@@ -11788,17 +11898,19 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """Server-rendered sponsor variant page for one card."""
         run_data, target = _load_run_for_card(run_id, card_id)
         if run_data is None:
-            return _layout(
-                "Not found",
-                '<div class="empty">Run not found.</div>',
-                active="home",
-            ), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
         if target is None:
-            return _layout(
-                "Not found",
-                '<div class="empty">Card not found in this run.</div>',
-                active="home",
-            ), 404
+            return _recovery_page(
+                "Card not found",
+                "That card isn't part of this run any more. The pack may have been regenerated since the link was shared, or the card was deleted from the review queue.",
+                primary_cta=("Open the content pack", url_for("content_pack_grouped", run_id=run_id)),
+                secondary_cta=("Back to the review queue", url_for("review", run_id=run_id)),
+            )
 
         # Profile resolution: run's profile_id → session-pinned active.
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or ""
