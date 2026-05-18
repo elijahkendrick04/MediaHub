@@ -39,12 +39,22 @@ ai = [
   "replicate>=0.25",
 ]
 render = [
-  "playwright>=1.40",
+  # Playwright pin: the bundled Chromium revision must match what the
+  # Dockerfile downloads at build time. Phase 1.5 audit pinned this to
+  # 1.56 because the local dev environment had chromium-1194 (a revision
+  # only available in playwright 1.56.x). Production Dockerfile installs
+  # the matching chromium when it installs this version, so the runtime
+  # discovery succeeds (PLAYWRIGHT_BROWSERS_PATH=/ms-playwright pinned
+  # in the Dockerfile keeps the path stable).
+  "playwright>=1.56,<1.58",
   "weasyprint>=60",
 ]
 dev = [
   "pytest>=7.4",
   "pytest-xdist>=3.5",
+  # reportlab is used by test_interpreter_corpus to synthesise PDF
+  # fixtures so the corpus tests can run without external sample files.
+  "reportlab>=4.0",
 ]
 
 [project.scripts]

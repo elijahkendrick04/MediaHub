@@ -16,15 +16,18 @@ from mediahub.interpreter.hytek_parser import detect_hy3, parse_hy3
 from mediahub.interpreter.sdif_parser import detect_sdif, parse_sdif
 
 
-CORPUS = pathlib.Path(__file__).resolve().parents[1] / "samples" / "learning_corpus" / "level2"
-
-SAMPLES = [
-    "2025_01_westhill_january/results.zip",
-    "2025_02_elgin_spring_meet/results.zip",
-    "2025_03_garioch_pre_snags/results.zip",
-    "2025_03_dyce_mini_meet/results.zip",
-    "2025_02_silver_city_blues_masters/results.zip",
-]
+# Corpus root for parser-against-real-data tests. We originally tried to
+# parametrize over five level2 meet ZIPs (Westhill January, Elgin Spring,
+# Garioch, Dyce Mini, Silver City Blues) but those samples never landed
+# in the repo and the tests skipped every run. May 2026 cleanup: point at
+# the level1 North District Open Championships sample, which IS shipped
+# (samples/learning_corpus/level1/.../results_hy3.zip) so the parser is
+# exercised against real Hy-Tek / SDIF data on every test run.
+CORPUS_ZIP = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "samples" / "learning_corpus" / "level1"
+    / "2025_11_nd_open_championships" / "results_hy3.zip"
+)
 
 
 def _read_member(zip_path: pathlib.Path, suffix: str) -> bytes | None:
@@ -35,30 +38,31 @@ def _read_member(zip_path: pathlib.Path, suffix: str) -> bytes | None:
     return None
 
 
-@pytest.mark.parametrize("rel_path", SAMPLES)
-def test_hy3_parser_against_corpus(rel_path: str) -> None:
-    zip_path = CORPUS / rel_path
-    if not zip_path.exists():
-        pytest.skip(f"corpus sample missing: {zip_path}")
-    data = _read_member(zip_path, ".hy3")
-    if data is None:
-        pytest.skip(f".hy3 not present in {rel_path}")
+def test_hy3_parser_against_corpus() -> None:
+    """Parse the real .hy3 file from the shipped corpus.
+
+    The thresholds (≥10 events, ≥50 swims, ≥0.7 confidence) match
+    what we'd expect from any properly-formed competitive meet.
+    """
+    assert CORPUS_ZIP.exists(), f"corpus sample missing: {CORPUS_ZIP}"
+    data = _read_member(CORPUS_ZIP, ".hy3")
+    assert data is not None, f".hy3 not present in {CORPUS_ZIP.name}"
 
     assert detect_hy3(data), "detect_hy3 should be true for .hy3"
     meet = parse_hy3(data)
 
-    assert meet.meet_name, f"{rel_path}: meet name missing"
-    assert len(meet.events) >= 10, f"{rel_path}: only {len(meet.events)} events"
+    assert meet.meet_name, "meet name missing"
+    assert len(meet.events) >= 10, f"only {len(meet.events)} events"
     total_swims = sum(len(e.swims) for e in meet.events)
-    assert total_swims >= 50, f"{rel_path}: only {total_swims} swims"
+    assert total_swims >= 50, f"only {total_swims} swims"
     assert meet.overall_confidence >= 0.7, (
-        f"{rel_path}: overall confidence {meet.overall_confidence}"
+        f"overall confidence {meet.overall_confidence}"
     )
 
     # Spot-check that the first event has named swimmers + a club
     first = meet.events[0]
-    assert first.distance_m, f"{rel_path}: first event distance missing"
-    assert first.stroke, f"{rel_path}: first event stroke missing"
+    assert first.distance_m, "first event distance missing"
+    assert first.stroke, "first event stroke missing"
     sample_swim = first.swims[0]
     assert sample_swim.swimmer_name and sample_swim.swimmer_name != "Unknown"
     assert sample_swim.club, "club should be populated for the first swim"
@@ -68,47 +72,41 @@ def test_hy3_parser_against_corpus(rel_path: str) -> None:
             assert "02Meet Results" not in (s.swimmer_name or "")
 
 
-@pytest.mark.parametrize("rel_path", SAMPLES)
-def test_sdif_parser_against_corpus(rel_path: str) -> None:
-    zip_path = CORPUS / rel_path
-    if not zip_path.exists():
-        pytest.skip(f"corpus sample missing: {zip_path}")
-    data = _read_member(zip_path, ".cl2")
-    if data is None:
-        pytest.skip(f".cl2 not present in {rel_path}")
+def test_sdif_parser_against_corpus() -> None:
+    """Parse the real .cl2 file from the shipped corpus."""
+    assert CORPUS_ZIP.exists(), f"corpus sample missing: {CORPUS_ZIP}"
+    data = _read_member(CORPUS_ZIP, ".cl2")
+    assert data is not None, f".cl2 not present in {CORPUS_ZIP.name}"
 
     assert detect_sdif(data), "detect_sdif should be true for .cl2"
     meet = parse_sdif(data)
 
-    assert meet.meet_name, f"{rel_path}: meet name missing"
-    assert len(meet.events) >= 10, f"{rel_path}: only {len(meet.events)} events"
+    assert meet.meet_name, "meet name missing"
+    assert len(meet.events) >= 10, f"only {len(meet.events)} events"
     total_swims = sum(len(e.swims) for e in meet.events)
-    assert total_swims >= 50, f"{rel_path}: only {total_swims} swims"
+    assert total_swims >= 50, f"only {total_swims} swims"
     assert meet.overall_confidence >= 0.7, (
-        f"{rel_path}: overall confidence {meet.overall_confidence}"
+        f"overall confidence {meet.overall_confidence}"
     )
 
     first = meet.events[0]
-    assert first.distance_m, f"{rel_path}: first event distance missing"
-    assert first.stroke, f"{rel_path}: first event stroke missing"
+    assert first.distance_m, "first event distance missing"
+    assert first.stroke, "first event stroke missing"
     sample_swim = first.swims[0]
     assert sample_swim.swimmer_name and sample_swim.swimmer_name != "Unknown"
     assert sample_swim.club
 
 
-@pytest.mark.parametrize("rel_path", SAMPLES)
-def test_zip_routes_through_native_parsers(rel_path: str) -> None:
+def test_zip_routes_through_native_parsers() -> None:
     """End-to-end: interpret_document on the ZIP should use the native path."""
-    zip_path = CORPUS / rel_path
-    if not zip_path.exists():
-        pytest.skip(f"corpus sample missing: {zip_path}")
-    data = zip_path.read_bytes()
+    assert CORPUS_ZIP.exists(), f"corpus sample missing: {CORPUS_ZIP}"
+    data = CORPUS_ZIP.read_bytes()
     meet = interpret_document(data, hint="zip")
 
     # Source list includes hy3 or sdif (proves the native fast path fired)
     assert any("hy3" in s for s in meet.sources_used) or any(
         "sdif" in s for s in meet.sources_used
-    ), f"native parser was not invoked for {rel_path}: sources={meet.sources_used}"
+    ), f"native parser was not invoked: sources={meet.sources_used}"
 
     assert len(meet.events) >= 10
     total_swims = sum(len(e.swims) for e in meet.events)

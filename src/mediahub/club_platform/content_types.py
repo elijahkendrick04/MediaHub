@@ -166,6 +166,6 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         ),
         is_implemented=True,
         icon_svg=_PENCIL_SVG,
-        primary_route_endpoint="stub_free_text",
+        primary_route_endpoint="free_text_chat_page",
     ),
 }

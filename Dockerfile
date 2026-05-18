@@ -48,17 +48,19 @@ RUN python -c "from rembg import new_session; new_session('u2net')" \
  && test -f /root/.u2net/u2net.onnx
 
 # Install Playwright + Chromium for graphic_renderer's HTML→PNG step.
-# (Optional: comment out if you only need the WeasyPrint fallback.)
 #
-# PLAYWRIGHT_BROWSERS_PATH pins Chromium to a stable absolute path so
-# the runtime discovery works regardless of HOME. Without this,
-# Chromium installs under /root/.cache/ms-playwright at build time and
-# Playwright looks under $HOME/.cache/ms-playwright at runtime — when
-# Render's runtime HOME differs from /root, `p.chromium.executable_path`
-# points at a non-existent path and /healthz/deps reports chromium=false.
+# Two pins matter:
+#   1. PLAYWRIGHT_BROWSERS_PATH=/ms-playwright pins Chromium to a stable
+#      absolute path so the runtime discovery works regardless of HOME.
+#      Without this, Chromium installs under /root/.cache/ms-playwright
+#      at build time and Playwright looks under $HOME/.cache/ms-playwright
+#      at runtime — Render's runtime HOME may differ from /root.
+#   2. playwright version is pinned in requirements.txt so the Chromium
+#      revision Playwright expects matches what `playwright install`
+#      downloads. Drifting major versions broke runtime discovery in
+#      May 2026; the pin (>=1.56,<1.58) keeps build + runtime aligned.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN pip install playwright \
- && playwright install --with-deps chromium
+RUN playwright install --with-deps chromium
 
 # Copy app code.
 COPY src/ /app/src/

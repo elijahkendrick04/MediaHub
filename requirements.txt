@@ -7,8 +7,10 @@ pypdf>=4.0
 pdfminer.six>=20231228
 pdfplumber>=0.11
 
-# V8: media generation engine
-playwright>=1.40
+# V8: media generation engine. Playwright pinned to the version whose
+# bundled Chromium revision matches what's reliably installable on
+# Render at build time. See pyproject.toml comment for the full reason.
+playwright>=1.56,<1.58
 pillow>=10.0
 rembg>=2.0
 onnxruntime>=1.16

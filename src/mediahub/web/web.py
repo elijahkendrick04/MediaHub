@@ -25,6 +25,7 @@ State: SQLite at data.db (so publish_website snapshots it across deploys)
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -32,6 +33,8 @@ import sqlite3
 import threading
 import time
 import uuid
+
+log = logging.getLogger(__name__)
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2807,9 +2810,12 @@ def create_app() -> Flask:
                             clubs.append(c)
                 meta["clubs"] = sorted(clubs, key=str.lower)
                 meta["meet_name"] = interpreted.meet_name or ""
+                meta["n_events"] = len(interpreted.events)
+                meta["file_byte_size"] = len(data)
             except Exception as exc:
                 meta["clubs"] = []
                 meta["parse_error"] = str(exc)
+                meta["file_byte_size"] = len(data)
             (tmp_dir / "upload_meta.json").write_text(
                 json.dumps(meta, indent=2), encoding="utf-8"
             )
@@ -2839,20 +2845,56 @@ def create_app() -> Flask:
         parse_err = meta.get("parse_error") or ""
 
         # No clubs detected \u2192 render a polished error state, NOT a broken form.
+        # Differentiate three common causes so the user knows what to fix:
+        #   1. file is too small / unreadable (likely a broken download)
+        #   2. file parsed OK but contains no events (probably an entry
+        #      list or meet preview, not a results file)
+        #   3. file parsed and has events but no clubs (rare; format quirk)
         if not clubs:
             upload_url = url_for("upload")
+            byte_size = int(meta.get("file_byte_size") or 0)
+            n_events = int(meta.get("n_events") or 0)
+
+            if byte_size < 2048:
+                headline = "That file doesn't look like a meet results file"
+                explain = (
+                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
+                    f'is only {byte_size} bytes &mdash; far too small to be a real '
+                    'meet results file. The most common cause is a broken download '
+                    '(an HTML "404 Not Found" page saved as a PDF, or a partial save).</p>'
+                    '<p class="dim" style="font-size:13px;margin-top:8px">'
+                    'Try downloading the file again from the source and re-uploading. '
+                    'A real Hytek PDF or HY3 is usually 100 KB or larger.</p>'
+                )
+            elif n_events == 0:
+                headline = "That file looks like a meet preview, not results"
+                explain = (
+                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
+                    'parsed OK but doesn\'t contain any events with results.</p>'
+                    '<p class="dim" style="font-size:13px;margin-top:8px">'
+                    'This usually means you uploaded an entry list, a heat sheet, or '
+                    'meet conditions document. Wait until the meet finishes and the '
+                    'organisers publish the actual results file.</p>'
+                )
+            else:
+                headline = "We couldn't read clubs from that file"
+                explain = (
+                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
+                    f'has {n_events} events but no club information we can filter on. '
+                    'This is rare and usually means the file is from a meet management '
+                    'system MediaHub doesn\'t yet support.</p>'
+                )
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
-                f'Reason: <code>{_h(parse_err)}</code></p>'
+                f'Parser error: <code>{_h(parse_err)}</code></p>'
                 if parse_err else ""
             )
             body = f"""
-<h1>We couldn't read clubs from that file</h1>
+<h1>{_h(headline)}</h1>
 <div class="card">
-  <p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> didn't expose any clubs we can filter on.
-     This usually means the format isn't supported, the file is corrupted, or the meet had no club info.</p>
+  {explain}
   {err_explain}
-  <p class="dim" style="font-size:13px">Supported formats: Hytek Meet Manager <code>.hy3</code>, a <code>.zip</code> containing one, or a Sportsystems PDF results file.</p>
+  <p class="dim" style="font-size:13px;margin-top:14px">Supported formats: Hytek Meet Manager <code>.hy3</code>, a <code>.zip</code> containing one, or a Sportsystems PDF results file.</p>
   <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
     <a class="btn" href="{upload_url}">\u2190 Try another file</a>
     <a class="btn secondary" href="{url_for('add_input_page')}">Pick a different input type</a>
@@ -2947,7 +2989,16 @@ def create_app() -> Flask:
                 )
 
             data = input_path.read_bytes()
-            profile_id = meta.get("profile_id") or None
+            # Pin the run to the active organisation so it appears on
+            # /activity for the right tenant. Falls back to the upload
+            # meta only if it carries a profile_id (older flows); modern
+            # flows always come through the org-gated /add-input page,
+            # so the session pin is the authoritative source.
+            profile_id = (
+                meta.get("profile_id")
+                or _active_profile_id()
+                or None
+            )
             use_cache = bool(meta.get("use_cache", True))
             fetch_pbs = bool(meta.get("fetch_pbs", True))
             filename = meta.get("filename") or "upload.bin"
@@ -4438,8 +4489,12 @@ function generateMotion(btn, motionUrl, cardId) {{
     .then(function(res) {{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok) {{
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">Motion render error: ' + msg + '</div>';
+        // Prefer user_message (clean operator-written copy) over detail
+        // (raw stack trace). The backend Phase 1.5 mapping translates
+        // known infra failures into actionable copy; falls back to detail
+        // for anything unexpected.
+        var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:#F87171;font-size:13px">' + msg + '</div>';
         return;
       }}
       var url = URL.createObjectURL(res.blob);
@@ -6528,18 +6583,28 @@ Relay team broke club record"></textarea>
 
         tiles_html = ""
         for ct, meta in REGISTRY.items():
-            if meta.is_implemented:
-                badge = '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,0.15);color:#22C55E;border:1px solid rgba(34,197,94,0.3)">ready</span>'
+            # Defensive: a stale endpoint name in the content-type
+            # registry must NEVER 500 the whole /make page. If url_for
+            # raises BuildError (e.g. an endpoint was renamed and the
+            # registry not updated), degrade to a disabled tile instead.
+            try:
                 route_url = url_for(meta.primary_route_endpoint)
+                href_ok = True
+            except Exception:
+                log.warning(
+                    "make_page: content type %r references unknown endpoint %r — "
+                    "rendering as disabled tile",
+                    ct, meta.primary_route_endpoint,
+                )
+                route_url = "#"
+                href_ok = False
+            if meta.is_implemented and href_ok:
+                badge = '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,0.15);color:#22C55E;border:1px solid rgba(34,197,94,0.3)">ready</span>'
                 action = f'href="{route_url}"'
                 opacity = "1"
             else:
                 badge = '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:var(--ink-muted);border:1px solid var(--border)">coming soon</span>'
-                try:
-                    route_url = url_for(meta.primary_route_endpoint)
-                    action = f'href="{route_url}"'
-                except Exception:
-                    action = 'href="#" onclick="return false"'
+                action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
                 opacity = "0.7"
             tiles_html += f"""
 <a {action} class="make-tile" style="text-decoration:none;display:flex;flex-direction:column;gap:12px;padding:24px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms;opacity:{opacity}">
@@ -10474,6 +10539,57 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     # ------------------------------------------------------------------
     # Motion-graphic + short-form video output (Remotion)
     # ------------------------------------------------------------------
+    def _motion_error_payload(e: Exception) -> dict:
+        """Translate a raw motion render exception into a user-friendly JSON
+        payload. The frontend JS reads `user_message` for display and uses
+        `kind` to decide whether to surface a retry button.
+
+        Two known infra classes:
+          * ``infra_missing`` — Remotion / Node module isn't installed on
+            this deployment (Docker build skipped npm install, or running
+            in a dev env without the node_modules). The user can't fix
+            this themselves; the operator needs to redeploy.
+          * ``timeout`` — render took longer than the configured cap.
+            Usually transient; suggest a retry.
+        Anything else falls through to ``internal``.
+        """
+        detail = str(e)
+        low = detail.lower()
+        if ("cannot find module" in low or "remotion not installed" in low
+                or "module not found" in low or "modulenotfound" in low):
+            return {
+                "error": "render_failed",
+                "kind": "infra_missing",
+                "detail": detail,
+                "user_message": (
+                    "Motion video rendering isn't available on this "
+                    "deployment. The operator needs to rebuild the "
+                    "container so Remotion's Node modules are installed. "
+                    "Static graphics and downloads still work in the "
+                    "meantime."
+                ),
+            }
+        if "timed out" in low or "timeout" in low:
+            return {
+                "error": "render_failed",
+                "kind": "timeout",
+                "detail": detail,
+                "user_message": (
+                    "Motion video rendering took too long and was cancelled. "
+                    "Try again in a few seconds; cold renders sometimes "
+                    "take up to 90 seconds."
+                ),
+            }
+        return {
+            "error": "render_failed",
+            "kind": "internal",
+            "detail": detail,
+            "user_message": (
+                "Motion video rendering failed. Try again, or use "
+                "\"Create graphic\" to get a static visual instead."
+            ),
+        }
+
     @app.route("/api/runs/<run_id>/card/<card_id>/motion", methods=["POST", "GET"])
     def api_card_motion(run_id: str, card_id: str):
         """Render (or serve cached) MP4 story for a single card.
@@ -10554,12 +10670,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 variation_seed=variation_seed,
             )
         except RuntimeError as e:
-            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+            return jsonify(_motion_error_payload(e)), 500
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+            return jsonify(_motion_error_payload(e)), 500
 
         if not Path(mp4).exists():
-            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+            return jsonify({
+                "error": "render_failed",
+                "kind": "internal",
+                "detail": "mp4 missing after render",
+                "user_message": (
+                    "Motion video rendering didn't produce an output file. "
+                    "This is usually a transient issue — try again in a few seconds."
+                ),
+            }), 500
         return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
                          download_name=f"{card_id}.mp4")
 
@@ -10639,12 +10763,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 meet_name=meet_name,
             )
         except RuntimeError as e:
-            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+            return jsonify(_motion_error_payload(e)), 500
         except Exception as e:
-            return jsonify({"error": "render_failed", "detail": str(e)}), 500
+            return jsonify(_motion_error_payload(e)), 500
 
         if not Path(mp4).exists():
-            return jsonify({"error": "render_failed", "detail": "mp4 missing after render"}), 500
+            return jsonify({
+                "error": "render_failed",
+                "kind": "internal",
+                "detail": "mp4 missing after render",
+                "user_message": (
+                    "Reel rendering didn't produce an output file. "
+                    "This is usually a transient issue — try again."
+                ),
+            }), 500
         return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
                          download_name=f"meet_reel_{run_id}.mp4")
 
