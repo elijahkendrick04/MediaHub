@@ -1038,7 +1038,7 @@ def _schedule_modal_html() -> str:
       <button class="btn secondary" style="font-size:14px;padding:4px 10px"
               onclick="mhScheduleClose()" aria-label="Close">&times;</button>
     </div>
-    <div id="mh-sched-error" style="display:none;color:#ff8a99;margin-bottom:10px"></div>
+    <div id="mh-sched-error" style="display:none;color:var(--mh-prim-error-600);margin-bottom:10px"></div>
     <div id="mh-sched-channels-wrap" style="margin-bottom:12px">
       <div style="font-weight:600;margin-bottom:6px">Channels</div>
       <div id="mh-sched-channels" style="display:flex;flex-direction:column;gap:6px;
@@ -1481,71 +1481,79 @@ BASE_CSS = """
    costing ~500-700ms of FCP per the round-6 performance audit. */
 
 :root {
+  /* PHASE 1.6 STAGE A — every colour token below now resolves through the
+     three-tier vocabulary defined in src/mediahub/web/theme_tokens.py
+     (prepended ahead of BASE_CSS). Pixel-identical to the previous flat
+     palette; the indirection is what lets Stage E re-skin the whole site
+     from a single brand seed without touching component CSS. */
+
   /* Surfaces — pit-wall black to deep ink. Near-monochrome, no purple. */
-  --bg:        #0A0B11;     /* pit-wall black (never pure #000) */
-  --bg-deep:   #06070C;
-  --surface:   #14171F;     /* card / panel base */
-  --surface-2: #1A1E28;     /* raised */
-  --surface-3: #232838;     /* hover */
-  --hairline:  rgba(245,242,232,0.06);  /* 0.5px-style separators on dark */
-  --rule:      rgba(245,242,232,0.10);  /* 1px section rules */
-  --chrome:    rgba(245,242,232,0.14);  /* form borders, button outlines */
+  --bg:        var(--mh-surface);             /* #0A0B11 — pit-wall black */
+  --bg-deep:   var(--mh-surface-deep);        /* #06070C */
+  --surface:   var(--mh-surface-variant);     /* #14171F — card / panel base */
+  --surface-2: var(--mh-surface-container);   /* #1A1E28 — raised */
+  --surface-3: var(--mh-surface-container-high); /* #232838 — hover */
+  --hairline:  var(--mh-outline-variant);     /* rgba(245,242,232,0.06) */
+  --rule:      var(--mh-outline-rule);        /* rgba(245,242,232,0.10) */
+  --chrome:    var(--mh-outline);             /* rgba(245,242,232,0.14) */
 
   /* Ink — paper-cream on dark for editorial warmth (not white-on-blue).
      --ink-muted raised from #7A7869 (4.41:1) to #9A988A (5.69:1 on bg)
      to clear WCAG AA for normal body text. The smallest text in the app
      (10.5px mono labels) lives at this token and was just below spec. */
-  --ink:       #F5F2E8;     /* primary text, paper-cream */
-  --ink-dim:   #B6B2A6;     /* 9.27:1 — safe on every surface */
-  --ink-muted: #9A988A;     /* 5.69:1 — passes AA */
-  --ink-faint: #62604F;     /* 3.14:1 — large/decorative only; raised from #4A4940 */
+  --ink:       var(--mh-on-surface);          /* #F5F2E8 — primary text */
+  --ink-dim:   var(--mh-on-surface-variant);  /* #B6B2A6 — 9.27:1 safe */
+  --ink-muted: var(--mh-on-surface-muted);    /* #9A988A — 5.69:1 AA */
+  --ink-faint: var(--mh-on-surface-faint);    /* #62604F — large/decorative */
 
   /* SIGNATURE ACCENT — lane-marker yellow.
      The single chrome colour. Every CTA, focus ring, link, live state.
      No gradient, no fade — flat saturated hi-vis. */
-  --lane:      #D4FF3A;
-  --lane-h:    #E6FF6B;     /* hover lift */
-  --lane-deep: #A8CC2E;     /* pressed / underline */
-  --lane-ink:  #0A0B11;     /* text on lane bg = pit-wall black */
+  --lane:      var(--mh-primary);             /* #D4FF3A */
+  --lane-h:    var(--mh-primary-hover);       /* #E6FF6B — hover lift */
+  --lane-deep: var(--mh-primary-pressed);     /* #A8CC2E — pressed/underline */
+  --lane-ink:  var(--mh-on-primary);          /* #0A0B11 — text on lane bg */
   --lane-glow: rgba(212,255,58,0.35);
 
   /* SIGNATURE ACCENT 2 — medal gold.
      Reserved EXCLUSIVELY for athlete achievements (PB, medal, first-time,
      ranked, standout). NEVER chrome. NEVER UI. Earns its weight by scarcity. */
-  --medal:        #F4D58D;
-  --medal-h:      #FFE5A1;
-  --medal-deep:   #C9A04B;
-  --medal-ink:    #2B1F00;
+  --medal:        var(--mh-tertiary);                  /* #F4D58D */
+  --medal-h:      var(--mh-prim-tertiary-200);         /* #FFE5A1 */
+  --medal-deep:   var(--mh-prim-tertiary-600);         /* #C9A04B */
+  --medal-ink:    var(--mh-on-tertiary);               /* #2B1F00 */
   --medal-glow:   rgba(244,213,141,0.30);
-  --grad-medal:   linear-gradient(135deg, #FFE5A1 0%, #C9A04B 100%);
+  --grad-medal:   linear-gradient(135deg, var(--mh-prim-tertiary-200) 0%, var(--mh-prim-tertiary-600) 100%);
 
   /* Tertiary — timing-screen blue. Rare. Used for INFO / NEUTRAL state only. */
-  --info:      #4DA3FF;
+  --info:      var(--mh-info);                /* #4DA3FF */
   --info-bg:   rgba(77,163,255,0.10);
 
   /* Semantic — desaturated, readable, no neon */
-  --good:      #5EE39A;
+  --good:      var(--mh-success);             /* #5EE39A */
   --good-bg:   rgba(94,227,154,0.10);
-  --warn:      #FFB454;
+  --warn:      var(--mh-warning);             /* #FFB454 */
   --warn-bg:   rgba(255,180,84,0.10);
-  --bad:       #FF6B6B;
+  --bad:       var(--mh-error);               /* #FF6B6B */
   --bad-bg:    rgba(255,107,107,0.10);
 
   /* Legacy aliases so old class names keep working through the cascade.
-     The new code should reference --lane and --medal directly. */
-  --accent:    var(--lane);
-  --accent-h:  var(--lane-h);
-  --accent2:   var(--lane);
-  --accent2-h: var(--lane-h);
-  --accent3:   var(--medal);
-  --gold:      var(--medal);
-  --gold-h:    var(--medal-h);
-  --panel:     var(--surface);
-  --panel2:    var(--surface-2);
-  --panel-h:   var(--surface-3);
-  --border:    var(--hairline);
-  --border-h:  var(--chrome);
-  --bg-soft:   var(--surface);
+     The new code should reference --mh-* (tier-2) directly. The middle
+     layer (--lane, --medal, …) is preserved for backward compatibility
+     and re-resolves through the tier-2 tokens above. */
+  --accent:    var(--mh-primary);
+  --accent-h:  var(--mh-primary-hover);
+  --accent2:   var(--mh-primary);
+  --accent2-h: var(--mh-primary-hover);
+  --accent3:   var(--mh-tertiary);
+  --gold:      var(--mh-tertiary);
+  --gold-h:    var(--mh-prim-tertiary-200);
+  --panel:     var(--mh-surface-variant);
+  --panel2:    var(--mh-surface-container);
+  --panel-h:   var(--mh-surface-container-high);
+  --border:    var(--mh-outline-variant);
+  --border-h:  var(--mh-outline);
+  --bg-soft:   var(--mh-surface-variant);
 
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
@@ -1565,10 +1573,11 @@ BASE_CSS = """
   --radius-lg: 10px;
   --radius-pill: 999px;
 
-  /* Shadows — depth-by-elevation, not depth-by-decoration */
-  --shadow-1: 0 1px 0 rgba(245,242,232,0.04);
-  --shadow-2: 0 1px 0 rgba(245,242,232,0.04), 0 14px 32px rgba(0,0,0,0.45);
-  --shadow-3: 0 1px 0 rgba(245,242,232,0.06), 0 24px 60px rgba(0,0,0,0.55);
+  /* Shadows — depth-by-elevation, not depth-by-decoration. Re-pointed
+     at the tier-2 --mh-elevation-{1,2,3} tokens defined in theme_tokens. */
+  --shadow-1: var(--mh-elevation-1);
+  --shadow-2: var(--mh-elevation-2);
+  --shadow-3: var(--mh-elevation-3);
   --shadow-lane:  0 0 0 1px var(--lane-glow), 0 8px 26px var(--lane-glow);
   --shadow-medal: 0 0 0 1px var(--medal-glow), 0 8px 26px var(--medal-glow);
   /* legacy */
@@ -3212,13 +3221,23 @@ select:focus-visible {
 }
 """
 
-# Append the responsive guardrails layer. Imported here (after BASE_CSS is
-# fully defined) and concatenated so guardrails always sit last in the cascade,
-# never overriding existing MediaHub rules but providing safe fallbacks,
-# user-preference handling, and opt-in modern utilities.
-# See src/mediahub/web/responsive_guardrails.py for the full rationale.
+# Prepend the Adaptive Theming Engine's token foundation (Phase 1.6 Stage A)
+# so BASE_CSS's :root block can reference the tier-2 semantic role tokens.
+# See src/mediahub/web/theme_tokens.py for the three-tier vocabulary, the
+# @property registrations, and the academic citations.
+#
+# Append the responsive guardrails layer last so guardrails always sit
+# final in the cascade — never overriding existing MediaHub rules but
+# providing safe fallbacks, user-preference handling, and opt-in modern
+# utilities. See src/mediahub/web/responsive_guardrails.py for the full
+# rationale.
+#
+# Final cascade order:
+#   THEME_TOKENS_CSS  →  BASE_CSS (legacy aliases re-point at --mh-*)  →
+#   RESPONSIVE_GUARDRAILS_CSS
+from mediahub.web.theme_tokens import THEME_TOKENS_CSS as _MH_TT_CSS  # noqa: E402
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
-BASE_CSS = BASE_CSS + _MH_RG_CSS
+BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_RG_CSS
 
 
 def _render_markdown(text: str) -> str:
@@ -4131,10 +4150,10 @@ def create_app() -> Flask:
                 rows_html += (
                     '<tr class="run-error-row">'
                     '<td colspan="7" style="padding:6px 14px 14px 14px;'
-                    'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                    'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     '<details>'
                     '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
-                    'color:#ffbcc3">Why did this run fail?</summary>'
+                    'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
                     '<pre style="margin:8px 0 0;padding:10px 12px;'
                     'background:rgba(0,0,0,0.25);border-radius:6px;'
                     'font-size:12px;white-space:pre-wrap;word-break:break-word">'
@@ -4166,7 +4185,7 @@ def create_app() -> Flask:
                     f'<td style="font-size:12px">{_h(channel)}</td>'
                     f'<td>{badge_html}</td>'
                     f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:#ff8a99" title="{_h(err)}">{_h(err[:80])}</td>'
+                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
                     f'</tr>'
                 )
             posting_panel_html = (
@@ -4191,7 +4210,7 @@ def create_app() -> Flask:
             label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
-                'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                 f'<b>{_h(label)}</b> in the last 100 runs. '
                 'Expand <i>Why did this run fail?</i> on each row below to '
                 'see the pipeline error.</div>'
@@ -7626,7 +7645,7 @@ Relay team broke club record"></textarea>
         if last_err:
             err_html = (
                 '<div class="card" style="padding:16px 22px;margin-bottom:18px;'
-                'border-left:3px solid #ff5d6c">'
+                'border-left:3px solid var(--mh-prim-error-500)">'
                 f'<div style="font-weight:600;margin-bottom:4px">'
                 f'Last LLM error &mdash; {_h(last_err.get("provider", "unknown"))}</div>'
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
@@ -7913,10 +7932,10 @@ Relay team broke club record"></textarea>
                 rows_html += (
                     '<tr class="run-error-row">'
                     '<td colspan="7" style="padding:6px 14px 14px 14px;'
-                    'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                    'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     '<details>'
                     '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
-                    'color:#ffbcc3">Why did this run fail?</summary>'
+                    'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
                     '<pre style="margin:8px 0 0;padding:10px 12px;'
                     'background:rgba(0,0,0,0.25);border-radius:6px;'
                     'font-size:12px;white-space:pre-wrap;word-break:break-word">'
@@ -7930,7 +7949,7 @@ Relay team broke club record"></textarea>
             label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
-                'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                 f'<b>{_h(label)}</b> in the last 100 runs. '
                 'Expand <i>Why did this run fail?</i> on each row below to '
                 'see the pipeline error.</div>'
@@ -7956,7 +7975,7 @@ Relay team broke club record"></textarea>
                     f'<td style="font-size:12px">{_h(channel)}</td>'
                     f'<td>{badge_html}</td>'
                     f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
-                    f'<td style="font-size:12px;color:#ff8a99" title="{_h(err)}">{_h(err[:80])}</td>'
+                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
                     f'</tr>'
                 )
             posting_panel_html = (
@@ -8169,7 +8188,7 @@ Relay team broke club record"></textarea>
             'font-weight:600;border:1px solid rgba(44,201,127,0.30)">healthy</span>'
             if health_ok else
             '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
-            'background:rgba(255,93,108,0.12);color:#ff5d6c;font-size:12px;'
+            'background:rgba(255,93,108,0.12);color:var(--mh-prim-error-500);font-size:12px;'
             'font-weight:600;border:1px solid rgba(255,93,108,0.30)">degraded</span>'
         )
 
@@ -8194,7 +8213,7 @@ Relay team broke club record"></textarea>
                 check_rows += (
                     f'<tr><td><b>{_h(name)}</b></td>'
                     f'<td>{badge}</td>'
-                    f'<td style="font-size:12px;color:#ff8a99">{_h(err)}</td></tr>'
+                    f'<td style="font-size:12px;color:var(--mh-prim-error-600)">{_h(err)}</td></tr>'
                 )
 
         if not check_rows:
@@ -11186,7 +11205,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     preview = (
                         f'<img src="{_h(serve_url)}" alt="{_h(label)}" '
                         'style="display:block;max-width:100%;max-height:96px;'
-                        'object-fit:contain;background:#ffffff;border-radius:4px"/>'
+                        'object-fit:contain;background:var(--mh-prim-neutral-0);border-radius:4px"/>'
                     )
                 else:
                     preview = (
