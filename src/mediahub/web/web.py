@@ -54,6 +54,7 @@ from .club_profile import (
 )
 from .ground_truth import evaluate as gt_evaluate
 from .canonical import Meet
+from .bounded_cache import BoundedCache
 
 # V7 imports
 try:
@@ -108,7 +109,8 @@ except ImportError as _v73_err:
 
 # LLM-derived performance-context sentence, keyed by
 # (swimmer, event, time, meet level) so page re-renders are cheap.
-_perf_context_cache: dict[str, str] = {}
+# Bounded LRU so a busy day can't fill RAM with cache strings.
+_perf_context_cache: BoundedCache = BoundedCache(max_size=512)
 
 
 def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = None) -> str:
@@ -229,7 +231,9 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     return out
 
 
-_explanation_cache: dict[str, dict] = {}
+# "Why this card?" LLM cache, keyed by (swim_id, swimmer_name, event,
+# time, rank, meet_level). Bounded LRU — values are small dicts.
+_explanation_cache: BoundedCache = BoundedCache(max_size=512)
 
 
 def _llm_build_explanation(achievement: dict, factors: list,
@@ -694,6 +698,20 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 _active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
 _turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
 _active_lock = threading.Lock()
+# In-process registry of running pipeline uploads. Bounded LRU so a
+# leaking worker can't accumulate run dicts on Render's 512MB starter
+# plan. The /api/runs/<id>/status endpoint falls back to the SQLite row
+# when an entry has been evicted, so the user only loses in-memory
+# progress-log streaming, never run completion.
+_MAX_LOG_LINES = 200
+_active_runs: BoundedCache = BoundedCache(max_size=64)
+# Turn-Into job tracker. The "pack" payload is stripped at completion
+# time (the pack is already persisted to disk by save_pack), so each
+# entry stays small.
+_turn_into_jobs: BoundedCache = BoundedCache(max_size=32)
+# RLock so callers holding _active_lock can re-enter BoundedCache's
+# own lock without deadlock.
+_active_lock = threading.RLock()
 
 # When either dict exceeds the threshold, the oldest finished entries
 # are pruned to bring it back to the target. "Finished" = status in
@@ -903,8 +921,9 @@ def _run_state(run_id: str) -> str:
     if (RUNS_DIR / f"{run_id}.json").exists():
         return "done"
     # In-memory active dict &rarr; worker thread is alive in THIS process.
-    with _active_lock:
-        active = _active_runs.get(run_id)
+    # copy_value takes BoundedCache's own lock and returns a snapshot,
+    # so we don't hold a lock across the downstream status check.
+    active = _active_runs.copy_value(run_id)
     if active:
         status = (active.get("status") or "").lower()
         if status in ("queued", "running"):
@@ -1299,6 +1318,15 @@ def _start_run(file_bytes: bytes, file_name: str,
                     _active_runs[run_id]["log"] = (
                         log_list[:5] + log_list[-keep_tail:]
                     )
+                entry = _active_runs.get(run_id)
+                if entry is None:
+                    return
+                log_list = entry.setdefault("log", [])
+                log_list.append(msg)
+                if len(log_list) > _MAX_LOG_LINES:
+                    drop = len(log_list) - _MAX_LOG_LINES
+                    del log_list[:drop]
+                    log_list[0] = f"[truncated earlier {drop} log lines]"
 
         try:
             run = run_pipeline_v4(
@@ -3670,8 +3698,7 @@ def create_app() -> Flask:
 
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
-        with _active_lock:
-            active = _active_runs.get(run_id, {}).copy()
+        active = _active_runs.copy_value(run_id)
         if active:
             return jsonify(active)
         # Fallback to persisted status
@@ -9866,7 +9893,10 @@ function copyWhyCard(btn, taId) {{
                                         run_id=run_id, pack_id=pack["pack_id"])
                 _turn_into_jobs[job_id] = {
                     "status": "done",
-                    "pack": pack,
+                    # Pack is persisted to disk by save_pack() above; storing
+                    # it here too just bloats RAM. The response builders at
+                    # lines 9167 and 9182 already strip "pack", so dropping
+                    # it from the dict is a no-op for callers.
                     "pack_id": pack["pack_id"],
                     "n_artefacts": len(pack.get("artefacts", [])),
                     "skipped": [s.get("type") for s in pack.get("skipped", [])],
