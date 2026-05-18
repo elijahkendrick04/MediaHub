@@ -79,13 +79,19 @@ class TestMakePageEndpoints:
                 f"REGISTRY entries reference unknown endpoints: {missing}"
             )
 
-    def test_make_redirects_to_add_input_and_chooser_renders(self, gated_app):
-        """/make permanently redirects to the canonical /add-input chooser,
-        and /add-input itself must render 200 with the input-type tiles."""
+    def test_make_and_add_input_both_render(self, gated_app):
+        """Both /make and /add-input render the chooser tiles. The two
+        live as distinct entry points: /add-input is the input-picker
+        mental model; /make includes the REGISTRY-based content-type
+        tiles AND the same input cards as the lower section."""
         c, _ = gated_app
         resp = c.get("/make")
-        assert resp.status_code == 301
-        assert resp.headers.get("Location", "").endswith("/add-input")
+        assert resp.status_code == 200, (
+            f"/make crashed; body: {resp.get_data(as_text=True)[:300]}"
+        )
+        body = resp.get_data(as_text=True)
+        assert "Something went wrong" not in body
+        assert "create" in body.lower() or "make" in body.lower()
         resp = c.get("/add-input")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)

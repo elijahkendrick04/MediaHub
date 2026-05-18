@@ -1930,6 +1930,40 @@ label {
   text-transform: uppercase;
   letter-spacing: 0.18em;
 }
+/* `<label class="req">…</label>` adds a lane-yellow asterisk for required
+   fields so users see what they have to fill in before they hit submit. */
+label.req::after {
+  content: " *";
+  color: var(--lane);
+  font-weight: 700;
+  margin-left: 2px;
+}
+/* `<label class="mh-choice">` opts out of the global mono-uppercase rule
+   when the label wraps a radio / checkbox + text. Used by the organisation
+   form's tone / platform pickers. */
+label.mh-choice {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin: 0 var(--sp-4) var(--sp-2) 0;
+  cursor: pointer;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+label.mh-choice-block { display: flex; margin: 0 0 var(--sp-2); }
+label.mh-choice input { margin: 0; }
+/* Inline form-feedback slot under inputs */
+.mh-field-error {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--bad);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
 input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], input[type=number], textarea, select {
   background: rgba(245,242,232,0.025); color: var(--ink);
   border: 1px solid var(--chrome);
@@ -4102,9 +4136,9 @@ def create_app() -> Flask:
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 <div class="card">
-  <form method="post" enctype="multipart/form-data">
-    <label>Meet results file</label>
-    <input type="file" name="file" accept=".hy3,.zip,.pdf" required />
+  <form method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
+    <label class="req" for="upload-file">Meet results file</label>
+    <input id="upload-file" type="file" name="file" accept=".hy3,.zip,.pdf" required />
     <p class="dim" style="margin-top:var(--sp-2);font-size:12px">Accepted: Hytek Meet Manager .hy3 / .zip export, or a Sportsystems PDF results file.</p>
     <div style="margin-top:var(--sp-5)"><button class="btn" type="submit">Continue &rarr;</button></div>
   </form>
@@ -4242,9 +4276,9 @@ def create_app() -> Flask:
       {prof_logo_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
-        <div><label style="display:block">Primary</label><input type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
-        <div><label style="display:block">Secondary</label><input type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
-        <div><label style="display:block">Accent</label><input type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
+        <div><label>Primary</label><input type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
+        <div><label>Secondary</label><input type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
+        <div><label>Accent</label><input type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
     </fieldset>
 
@@ -5288,9 +5322,9 @@ function turnMeetIntoPack() {{
             <strong style="font-size:13px">Caption editor</strong>
             <span class="muted" style="font-size:11px;margin-left:6px">(warm-club tone &mdash; leave blank to use the default)</span>
             <div style="margin-top:10px">
-              <label style="font-size:11px;margin-bottom:4px;display:block">Headline</label>
+              <label>Headline</label>
               <textarea class="cap-edit" data-key="warm-club_headline" style="min-height:48px;font-size:12px" placeholder="Override the headline&hellip;"></textarea>
-              <label style="font-size:11px;margin-bottom:4px;display:block;margin-top:8px">Body</label>
+              <label style="margin-top:var(--sp-3)">Body</label>
               <textarea class="cap-edit" data-key="warm-club_body" style="min-height:64px;font-size:12px" placeholder="Override the body text&hellip;"></textarea>
             </div>
             <button class="btn" style="font-size:12px;padding:6px 14px;margin-top:10px"
@@ -5371,7 +5405,7 @@ function turnMeetIntoPack() {{
     <span>{_h(meet.get('start_date','?'))} – {_h(meet.get('end_date','?'))}</span><span class="sep">·</span>
     <span>{_h(meet.get('course','?'))}</span><span class="sep">·</span>
     <span>{_h(meet.get('venue') or 'venue unknown')}</span><span class="sep">·</span>
-    <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))} ({_h(dispatch_log.get('chosen_adapter','?'))})</span>
+    <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}</span>
   </div>
 </section>
 
@@ -6501,13 +6535,15 @@ function addGraphicToPack(btn, visualId) {{
         for sa in per_swimmer:
             identity = sa.get("identity") or {}
             method = identity.get("method", "")
-            method_cls = {
-                "asa_id_verified": "good",
-                "needs_verification": "warn",
-                "asa_id_unverified": "",
-                "no_id": "",
-                "manual_override": "info",
-            }.get(method, "")
+            # Map internal `method` enum to a human label + semantic tag class.
+            method_meta = {
+                "asa_id_verified":    ("Verified", "good"),
+                "needs_verification": ("Needs check", "warn"),
+                "asa_id_unverified":  ("Unverified", ""),
+                "no_id":              ("Not linked", ""),
+                "manual_override":    ("Override", "info"),
+            }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
+            method_label, method_cls = method_meta
             _sw_key = sa.get('asa_id') or f"name:{sa.get('hy3_name','')}"
             _verify_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=_sw_key)
             _ignore_url = url_for('pb_ignore', run_id=run_id, swimmer_key=_sw_key)
@@ -6518,7 +6554,7 @@ function addGraphicToPack(btn, visualId) {{
                 f'<td>{_h(sa.get("hy3_name",""))}</td>'
                 f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
                 f'<td>{_h(sa.get("sr_name") or "—")}</td>'
-                f'<td><span class="tag {method_cls}">{_h(method)}</span></td>'
+                f'<td><span class="tag {method_cls}">{_h(method_label)}</span></td>'
                 f'<td>{n_dec}</td>'
                 f'<td style="color:var(--good)">{n_conf}</td>'
                 f'<td>'
@@ -6632,20 +6668,26 @@ function addGraphicToPack(btn, visualId) {{
 </div>"""
 
         body = f"""
-<h1>Verify swimmer identity</h1>
-<p class="dim"><a href="{_audit_url}">&larr; Back to audit</a></p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Verify swimmer</span>
+  <h1>Confirm the <em class="editorial">identity</em>.</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_sw_key_h}</span><span class="sep">/</span>
+    <a href="{_audit_url}" style="color:var(--ink-muted);text-decoration:none">← Back to audit</a>
+  </div>
+</section>
 {context_html}
 <div class="card">
-  <h2 style="font-size:16px;margin-bottom:8px">Set the correct ASA member ID</h2>
-  <p class="dim" style="font-size:13px">This override applies to this meet only. It won't affect other runs.
+  <h2 style="font-size:16px;margin-bottom:var(--sp-2)">Set the correct ASA member ID</h2>
+  <p class="dim" style="font-size:13px;margin-bottom:var(--sp-4)">This override applies to this meet only. It won't affect other runs.
   If you save this, we'll re-fetch PBs for the corrected ID.</p>
-  <form method="post" action="{_action_url}">
-    <label>Correct ASA member ID</label>
-    <input type="text" name="new_asa_id" placeholder="e.g. 1382076" pattern="[0-9]+" required />
-    <label>Note (optional)</label>
-    <input type="text" name="note" placeholder="Why this override (e.g. wrong number entered in HY3)" />
-    <div style="margin-top:14px;display:flex;gap:10px">
-      <button class="btn" type="submit">Save correction</button>
+  <form method="post" action="{_action_url}" data-loader-text="Saving correction">
+    <label class="req" for="vf-asa">Correct ASA member ID</label>
+    <input id="vf-asa" type="text" name="new_asa_id" placeholder="e.g. 1382076" pattern="[0-9]+" required />
+    <label for="vf-note">Note (optional)</label>
+    <input id="vf-note" type="text" name="note" placeholder="Why this override (e.g. wrong number entered in HY3)" />
+    <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3)">
+      <button class="btn" type="submit">Save correction &rarr;</button>
       <a class="btn secondary" href="{_audit_url}">Cancel</a>
     </div>
   </form>
@@ -6828,12 +6870,12 @@ function addGraphicToPack(btn, visualId) {{
 </section>
 
 <div class="card">
-  <form method="post">
-    <label>Expected moments (one per line)</label>
-    <textarea name="moments" placeholder="Eva Davies 100m butterfly PB
+  <form method="post" data-loader-text="Scoring recall">
+    <label class="req" for="gt-moments">Expected moments (one per line)</label>
+    <textarea id="gt-moments" name="moments" required placeholder="Eva Davies 100m butterfly PB
 Mathew Bradley 200m IM gold
 Relay team broke club record"></textarea>
-    <div style="margin-top:var(--sp-4)"><button class="btn" type="submit">Score</button></div>
+    <div style="margin-top:var(--sp-4)"><button class="btn" type="submit">Score recall &rarr;</button></div>
   </form>
 </div>
 {rep_html}
@@ -8678,9 +8720,7 @@ Relay team broke club record"></textarea>
         tiles_html = ""
         for ct, meta in REGISTRY.items():
             # Defensive: a stale endpoint name in the content-type
-            # registry must NEVER 500 the whole /make page. If url_for
-            # raises BuildError (e.g. an endpoint was renamed and the
-            # registry not updated), degrade to a disabled tile instead.
+            # registry must NEVER 500 the whole /make page.
             try:
                 route_url = url_for(meta.primary_route_endpoint)
                 href_ok = True
@@ -8693,55 +8733,49 @@ Relay team broke club record"></textarea>
                 route_url = "#"
                 href_ok = False
             if meta.is_implemented and href_ok:
-                badge = '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,0.15);color:#22C55E;border:1px solid rgba(34,197,94,0.3)">ready</span>'
+                badge = '<span class="tag live">Ready</span>'
                 action = f'href="{route_url}"'
-                opacity = "1"
+                disabled_cls = ""
             else:
-                badge = '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:var(--ink-muted);border:1px solid var(--border)">coming soon</span>'
+                badge = '<span class="tag">Coming soon</span>'
                 action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
-                opacity = "0.7"
-            tiles_html += f"""
-<a {action} class="make-tile" style="text-decoration:none;display:flex;flex-direction:column;gap:12px;padding:24px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms;opacity:{opacity}">
-  <div style="color:var(--accent)">{meta.icon_svg}</div>
-  <div style="display:flex;align-items:center;gap:10px">
-    <div style="font-size:16px;font-weight:700;color:var(--ink)">{_h(meta.title)}</div>
-    {badge}
-  </div>
-  <div style="font-size:13px;color:var(--ink-dim);line-height:1.5">{_h(meta.description)}</div>
-  <div style="font-size:12px;color:var(--ink-muted);margin-top:auto">{_h(meta.input_contract[:120])}{"&hellip;" if len(meta.input_contract) > 120 else ""}</div>
-</a>"""
+                disabled_cls = " is-disabled"
+            tiles_html += (
+                f'<a {action} class="mh-template{disabled_cls}">'
+                f'<div class="mh-template-icon">{meta.icon_svg}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(meta.title)}</h3>'
+                f'{badge}'
+                '</div>'
+                f'<p>{_h(meta.description)}</p>'
+                '<span class="mh-template-cta">Open</span>'
+                '</a>'
+            )
 
         if registry_available and tiles_html:
-            content_types_section = f"""
-<h2 style="margin:0 0 10px;font-size:20px">Content types</h2>
-<p class="dim" style="margin-bottom:18px;font-size:13px">
-  Packaged content formats &mdash; pick a deliverable and the engine routes you to the right input.
-</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px;margin-bottom:36px">
-  {tiles_html}
-</div>
-"""
+            content_types_section = (
+                '<div class="mh-section-eyebrow" style="margin-top:0">Content types</div>'
+                '<h2 class="mh-section-title" style="text-align:left">Packaged <em class="editorial">deliverables</em></h2>'
+                '<p class="lede" style="margin-bottom:var(--sp-5)">Pick a deliverable and the engine routes you to the right input.</p>'
+                f'<div class="mh-template-grid">{tiles_html}</div>'
+                '<div style="height:var(--sp-7)"></div>'
+            )
         else:
             content_types_section = ""
 
         input_cards_html = _render_input_type_cards()
-        body = f"""
-<style>
-.make-tile:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
-.input-type-card:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
-</style>
-<h1>What do you want to create?</h1>
-<p class="dim" style="margin-bottom:28px">Choose a content type or an input to get started.</p>
-{content_types_section}
-<h2 style="margin:0 0 10px;font-size:20px">Inputs</h2>
-<p class="dim" style="margin-bottom:18px;font-size:13px">
-  The same inputs available on <a href="{url_for('add_input_page')}" style="text-decoration:underline">Add Input</a>
-  &mdash; included here so Create stays the single jumping-off point.
-</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
-  {input_cards_html}
-</div>
-"""
+        body = (
+            '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
+            '<span class="mh-hero-eyebrow">Create</span>'
+            '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
+            '<p class="lede">Pick a deliverable, or pick an input. Both lead to the same content pack — the difference is whether you start from a format or from raw material.</p>'
+            '</section>'
+            f'{content_types_section}'
+            '<div class="mh-section-eyebrow" style="margin-top:0">Inputs</div>'
+            '<h2 class="mh-section-title" style="text-align:left">Start from <em class="editorial">raw material</em></h2>'
+            f'<p class="lede" style="margin-bottom:var(--sp-5)">The same inputs on <a href="{url_for("add_input_page")}">/add-input</a> — included here so Create stays the single jumping-off point.</p>'
+            f'<div class="mh-template-grid">{input_cards_html}</div>'
+        )
         return _layout("Create", body, active="create")
 
     @app.route("/spotlight/<run_id>/<path:swimmer_key>/build", methods=["POST"])
@@ -9401,9 +9435,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def free_text_chat_new():
         """Create a fresh chat session and redirect into it.
 
-        Accepts GET in addition to POST so users who land on the URL via
-        browser back-button or shared link create a chat instead of 404'ing.
+        POST creates immediately. GET — used to also create-and-redirect,
+        but that polluted the chat list with "Untitled" drafts every time
+        a user followed a back-button or shared link. Now GET renders the
+        Free-text landing page (which has the prominent "Start a new chat"
+        POST form) so the DB row is only written after the user actually
+        means to create one.
         """
+        if request.method == "GET":
+            return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
         s = create_session()
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
@@ -9442,17 +9482,54 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="font-family:var(--font-body);font-size:14px;color:var(--ink);'
                 f'white-space:pre-wrap;line-height:1.5">{text}</div></div>'
             )
+        def _format_brief_html(brief: dict) -> str:
+            """Render a brief as a structured field list rather than a raw
+            JSON dump. Round-7 cleanup: the audit flagged the previous
+            `<pre>{json.dumps(brief)}</pre>` rendering as engineering
+            leak — users were staring at curly braces and indentation
+            instead of the actual content they were approving."""
+            if not isinstance(brief, dict):
+                return f'<p>{_h(str(brief))}</p>'
+            rows = []
+            # Field-name humanisation: snake_case -> Title Case sentence,
+            # so the LLM's structured output reads as English.
+            def _label(key: str) -> str:
+                return key.replace("_", " ").strip().capitalize()
+            for k, v in brief.items():
+                if k.startswith("_"):
+                    continue
+                label = _h(_label(k))
+                if isinstance(v, (list, tuple)):
+                    if not v:
+                        body = '<span class="muted">—</span>'
+                    else:
+                        items = "".join(f"<li>{_h(str(x))}</li>" for x in v)
+                        body = f'<ul style="margin:4px 0 0 var(--sp-5);padding:0">{items}</ul>'
+                elif isinstance(v, dict):
+                    sub_items = "".join(
+                        f"<li><strong>{_h(_label(sk))}:</strong> {_h(str(sv))}</li>"
+                        for sk, sv in v.items() if not sk.startswith("_")
+                    )
+                    body = f'<ul style="margin:4px 0 0 var(--sp-5);padding:0">{sub_items}</ul>'
+                elif v is None or v == "":
+                    body = '<span class="muted">—</span>'
+                else:
+                    body = _h(str(v))
+                rows.append(
+                    f'<div style="display:grid;grid-template-columns:140px 1fr;gap:var(--sp-3);padding:var(--sp-2) 0;border-bottom:1px solid var(--hairline)">'
+                    f'<div class="strap" style="color:var(--ink-muted);padding:0">{label}</div>'
+                    f'<div style="font-size:14px;color:var(--ink);line-height:1.5">{body}</div>'
+                    '</div>'
+                )
+            return "".join(rows) if rows else '<p class="muted">Empty brief.</p>'
+
         # Pending brief card (if any)
         brief_html = ""
         if s.pending_brief and not s.accepted_brief:
-            try:
-                pretty = json.dumps(s.pending_brief, indent=2, ensure_ascii=False)
-            except Exception:
-                pretty = str(s.pending_brief)
             brief_html = f"""
 <div id="pending-brief" class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--good);background:var(--good-bg)">
-  <div class="strap" style="color:var(--good);margin-bottom:var(--sp-2)">Proposed brief</div>
-  <pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(pretty)}</pre>
+  <div class="strap" style="color:var(--good);margin-bottom:var(--sp-3)">Proposed brief</div>
+  {_format_brief_html(s.pending_brief)}
   <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3)">
     <form method="post" action="{url_for('free_text_chat_accept', chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn">Accept &amp; generate</button>
@@ -9466,14 +9543,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         accepted_html = ""
         if s.accepted_brief:
             generate_url = url_for("free_text_chat_generate", chat_id=chat_id)
-            try:
-                pretty_a = json.dumps(s.accepted_brief, indent=2, ensure_ascii=False)
-            except Exception:
-                pretty_a = str(s.accepted_brief)
             accepted_html = f"""
 <div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:rgba(212,255,58,0.04)">
-  <div class="strap live" style="margin-bottom:var(--sp-2)">Accepted brief</div>
-  <pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(pretty_a)}</pre>
+  <div class="strap live" style="margin-bottom:var(--sp-3)">Accepted brief</div>
+  {_format_brief_html(s.accepted_brief)}
   <form method="post" action="{generate_url}" style="margin-top:var(--sp-3)">
     <button type="submit" class="btn">Generate content from this brief →</button>
   </form>
@@ -9499,12 +9572,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {brief_html}
 {accepted_html}
 
-<form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)">
-  <label>Your reply</label>
-  <textarea name="message" placeholder="Tell the assistant what you want to post about…"
+<form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)" data-loader-text="Thinking…">
+  <label class="req" for="chat-reply">Your reply</label>
+  <textarea id="chat-reply" name="message" placeholder="Tell the assistant what you want to post about…"
             style="min-height:110px" required></textarea>
   <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
-    <button type="submit" class="btn">Send</button>
+    <button type="submit" class="btn">Send reply &rarr;</button>
     <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
   </div>
 </form>
@@ -9859,52 +9932,51 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     ]
 
     def _render_input_type_cards() -> str:
-        """Render the input-type cards grid used on /add-input and /make."""
+        """Render the input-type cards grid used on /add-input and /make.
+
+        Round-7 bug fix: the previous version referenced `meta.primary_route_endpoint`
+        from a since-deleted REGISTRY-based render, leaving `href_attr` undefined on
+        the success path. Every tile was rendered with `href="#"` regardless of
+        whether the route existed. Now we read from card["endpoint"] directly and
+        set href_attr in both branches.
+        """
         cards_html = ""
         for card in _INPUT_TYPE_CATALOGUE:
-            is_live = card["status"] == "live"
+            is_live = card.get("status") == "live"
             if is_live:
-                badge = '<span class="tag good" style="font-size:11px">Live</span>'
-                btn_label = "Start &rarr;"
+                badge = '<span class="tag live">Live</span>'
             else:
-                badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
-                btn_label = "Preview &rarr;"
+                badge = '<span class="tag">Coming soon</span>'
             try:
-                href = url_for(meta.primary_route_endpoint)
-                disabled = False
+                href_attr = f'href="{url_for(card["endpoint"])}"'
+                disabled_cls = ""
             except Exception:
                 href_attr = 'href="#" onclick="return false"'
-            cards_html += f"""
-<a {href_attr} class="input-type-card" style="text-decoration:none;display:flex;flex-direction:column;
-   gap:14px;padding:24px;background:var(--panel);border:1px solid var(--border);
-   border-radius:var(--radius);transition:border-color 150ms,box-shadow 150ms">
-  <div style="color:var(--accent)">{card['icon']}</div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <div style="font-size:16px;font-weight:700;color:var(--ink)">{_h(card['title'])}</div>
-    {badge}
-  </div>
-  <div style="font-size:13px;color:var(--ink-dim);line-height:1.5">{_h(card['description'])}</div>
-  <div style="margin-top:auto">
-    <span class="btn" style="font-size:13px;padding:7px 14px">{btn_label}</span>
-  </div>
-</a>"""
+                disabled_cls = " is-disabled"
+            cards_html += (
+                f'<a {href_attr} class="mh-template{disabled_cls}">'
+                f'<div class="mh-template-icon">{card["icon"]}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(card["title"])}</h3>'
+                f'{badge}'
+                '</div>'
+                f'<p>{_h(card["description"])}</p>'
+                '<span class="mh-template-cta">Start</span>'
+                '</a>'
+            )
         return cards_html
 
     @app.route("/add-input")
     def add_input_page():
         cards_html = _render_input_type_cards()
-        body = f"""
-<style>
-.input-type-card:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
-</style>
-<h1>Add Input</h1>
-<p class="dim" style="margin-bottom:28px">
-  Choose the type of content you want to create. Each input type produces a different set of social-ready cards.
-</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
-  {cards_html}
-</div>
-"""
+        body = (
+            '<section class="mh-hero" data-lane="02" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
+            '<span class="mh-hero-eyebrow">Add input</span>'
+            '<h1>What are we <em class="editorial">making</em>?</h1>'
+            '<p class="lede">Each input type produces a different set of social-ready cards. Pick one to start.</p>'
+            '</section>'
+            f'<div class="mh-template-grid">{cards_html}</div>'
+        )
         return _layout("Add Input", body, active="add_input")
 
     # ---- /organisation &mdash; organisation DNA / club identity ---------------
@@ -10243,16 +10315,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         def _radio(name, val, label, checked):
             chk = " checked" if checked else ""
-            return (f'<label style="display:block;margin-bottom:8px;cursor:pointer">'
-                    f'<input type="radio" name="{_h(name)}" value="{_h(val)}"{chk} style="margin-right:6px">'
-                    f'{label}</label>')
+            return (f'<label class="mh-choice mh-choice-block">'
+                    f'<input type="radio" name="{_h(name)}" value="{_h(val)}"{chk}>'
+                    f'<span>{label}</span></label>')
 
         def _cb(name, val, label, checked):
             chk = " checked" if checked else ""
-            return (f'<label style="display:inline-flex;align-items:center;gap:6px;'
-                    f'margin-right:16px;margin-bottom:8px;cursor:pointer">'
+            return (f'<label class="mh-choice mh-choice-inline">'
                     f'<input type="checkbox" name="{_h(name)}" value="{_h(val)}"{chk}>'
-                    f'{_h(label)}</label>')
+                    f'<span>{_h(label)}</span></label>')
 
         org_type_opts = "".join(_opt(v, l, v == (profile.org_type or "other")) for v, l in _ORG_TYPES)
         tone_radios = "".join(_radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES)
@@ -10301,8 +10372,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<b>Analyse voice</b>.</p>'
             )
 
-        _input_style = "width:100%;max-width:480px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px"
-        _ta_style = "width:100%;max-width:600px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-family:inherit;font-size:14px"
+        # Empty constants — round-7 cleanup. The organisation form used to
+        # apply its own inline input styles that overrode the global
+        # `input[type=text]` rule, which is why /organisation looked
+        # different from every other form on the system. Now we let the
+        # globals do their job and just cap width via a style attribute on
+        # the rare wide-form input.
+        _input_style = "max-width:480px"
+        _ta_style = "max-width:600px"
 
         # ---- Brand DNA preview block (rendered when fields are populated) ----
         def _swatch(hexv: str) -> str:
@@ -10472,33 +10549,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
     <div style="margin-bottom:10px">
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Website</label>
+      <label>Website</label>
       <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
              placeholder="https://your-club.example" style="{_input_style};max-width:600px"/>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;max-width:780px">
       <div style="margin-bottom:10px">
-        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Instagram</label>
+        <label>Instagram</label>
         <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get('instagram',''))}"
                placeholder="https://instagram.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
-        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Facebook</label>
+        <label>Facebook</label>
         <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get('facebook',''))}"
                placeholder="https://facebook.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
-        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">Twitter / X</label>
+        <label>Twitter / X</label>
         <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get('twitter',''))}"
                placeholder="https://x.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
-        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">TikTok</label>
+        <label>TikTok</label>
         <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get('tiktok',''))}"
                placeholder="https://tiktok.com/@your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
-        <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">LinkedIn</label>
+        <label>LinkedIn</label>
         <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get('linkedin',''))}"
                placeholder="https://linkedin.com/company/your-club" style="{_input_style}"/>
       </div>
@@ -10515,14 +10592,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" style="margin-bottom:20px;border:1px solid rgba(167,139,250,0.4);background:rgba(167,139,250,0.04)">
   <h2 style="margin-top:0">Analyse voice from past posts</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">Paste 5&ndash;20 recent captions (one per line). MediaHub measures sentence length, emoji density, hashtag style, and extracts opening/closing phrase patterns so generated captions sound like you.</p>
-  <form method="POST">
+  <form method="POST" data-loader-text="Analysing voice">
     <input type="hidden" name="action" value="analyse_voice"/>
     <input type="hidden" name="profile_id" value="{_h(profile.profile_id)}"/>
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
-    <textarea name="voice_examples" rows="8"
+    <label for="org-voice-examples">Past captions (one per line)</label>
+    <textarea id="org-voice-examples" name="voice_examples" rows="8"
               placeholder="Paste one caption per line&#10;e.g.&#10;Huge PB for the squad this weekend &mdash; 200 free goes sub-2 for the first time &#127946;&#10;What a meet! Five PBs and a county standard from our junior group. #swimming #clublife"
-              style="{_ta_style};max-width:640px;display:block;margin-bottom:10px">{_h(voice_examples_text)}</textarea>
-    <button type="submit" class="btn">Analyse voice &rarr;</button>
+              style="max-width:640px">{_h(voice_examples_text)}</textarea>
+    <div style="margin-top:var(--sp-3)"><button type="submit" class="btn">Analyse voice &rarr;</button></div>
   </form>
 </div>
 
@@ -10537,42 +10615,42 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h2 style="margin-top:0">Identity</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;max-width:700px">
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Organisation name</label>
+      <label>Organisation name</label>
       <input type="text" name="display_name" value="{_h(profile.display_name)}" placeholder="e.g. City Aquatics Club"
              style="{_input_style}" required/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Short name</label>
+      <label>Short name</label>
       <input type="text" name="short_name" value="{_h(profile.short_name)}" placeholder="e.g. City AC"
              style="{_input_style}"/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Organisation type</label>
+      <label>Organisation type</label>
       <select name="org_type" style="{_input_style}">{org_type_opts}</select>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Governing body</label>
+      <label>Governing body</label>
       <input type="text" name="governing_body" value="{_h(profile.governing_body)}" placeholder="e.g. Swim England, UKA"
              style="{_input_style}"/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Country</label>
+      <label>Country</label>
       <input type="text" name="country" value="{_h(profile.country)}" placeholder="e.g. United Kingdom"
              style="{_input_style}"/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Result file codes</label>
+      <label>Result file codes</label>
       <input type="text" name="club_codes" value="{_h(', '.join(profile.club_codes or []))}"
              placeholder="e.g. CMA, COMA" style="{_input_style}"/>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Comma-separated codes that identify your members in results files.</p>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Primary colour</label>
+      <label>Primary colour</label>
       <input type="color" name="brand_primary" value="{_h(profile.brand_primary or '#0A2540')}"
              style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Secondary colour</label>
+      <label>Secondary colour</label>
       <input type="color" name="brand_secondary" value="{_h(profile.brand_secondary or '#000000')}"
              style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
     </div>
@@ -10582,20 +10660,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Voice &amp; Tone</h2>
   <div style="margin-bottom:16px">
-    <label style="display:block;font-weight:600;margin-bottom:8px;font-size:14px">Caption tone</label>
+    <label>Caption tone</label>
     {tone_radios}
   </div>
   <div style="margin-bottom:16px">
-    <label style="display:block;font-weight:600;margin-bottom:8px;font-size:14px">Active platforms</label>
+    <label>Active platforms</label>
     {platform_cbs}
   </div>
   <div style="margin-bottom:16px">
-    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Brand voice notes</label>
+    <label>Brand voice notes</label>
     <textarea name="tone_notes" rows="3" placeholder="Any guidelines, phrases you use, things to avoid..."
               style="{_ta_style}">{_h(profile.tone_notes or "")}</textarea>
   </div>
   <div>
-    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Example captions</label>
+    <label>Example captions</label>
     <textarea name="exemplar_captions" rows="6"
               placeholder="Paste up to 5 past captions that represent your voice.&#10;Separate each one with --- on its own line."
               style="{_ta_style}">{_h(exemplars_text)}</textarea>
@@ -10612,7 +10690,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     generating live AI captions. Names are stripped before storage.
   </p>
   <div>
-    <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Past captions (one per line)</label>
+    <label>Past captions (one per line)</label>
     <textarea name="voice_examples" rows="10"
               placeholder="Massive PB from [name] in the 200 free this morning&#10;Hard work pays off &mdash; proud of every swimmer in the pool tonight &#x1F3CA;&#10;..."
               style="{_ta_style}">{_h(voice_examples_text)}</textarea>
@@ -10632,12 +10710,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h2 style="margin-top:0">Sponsors</h2>
   <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Primary sponsor name</label>
+      <label>Primary sponsor name</label>
       <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or '')}"
              placeholder="e.g. Acme Sports" style="{_input_style}"/>
     </div>
     <div>
-      <label style="display:block;font-weight:600;margin-bottom:4px;font-size:14px">Sponsor guidelines</label>
+      <label>Sponsor guidelines</label>
       <textarea name="sponsor_guidelines" rows="3"
                 placeholder="Hashtags to include, mentions required, things to avoid..."
                 style="{_ta_style}">{_h(profile.sponsor_guidelines or "")}</textarea>
@@ -11061,8 +11139,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             val = social.get(key, "") or ""
             social_inputs += (
                 f'<div style="margin-bottom:10px">'
-                f'<label style="display:block;font-size:13px;color:var(--ink-dim);'
-                f'margin-bottom:4px">{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></label>'
+                f'<label>margin-bottom:4px">{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></label>'
                 f'<input type="url" name="social_{key}" value="{_h(val)}" '
                 f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
                 f'</div>'
@@ -11106,15 +11183,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h2 style="margin-top:0;font-size:18px">Identity</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
     <div>
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
-        Organisation name <span style="color:var(--accent)">*</span>
-      </label>
-      <input type="text" name="display_name" required value="{_h(display_name)}"
-             placeholder="e.g. City Aquatics Swimming Club"
-             style="{_input_style}"/>
+      <label class="req" for="os-display-name">Organisation name</label>
+      <input id="os-display-name" type="text" name="display_name" required value="{_h(display_name)}"
+             placeholder="e.g. City Aquatics Swimming Club"/>
     </div>
     <div>
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+      <label>
         Type
       </label>
       <select name="org_type" style="{_input_style}">{org_type_opts}</select>
@@ -11132,7 +11206,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <ul id="country-options" role="listbox" class="mh-combobox-options" hidden></ul>
     </div>
     <div>
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+      <label>
         Governing body <span class="muted" style="font-size:11px">(optional)</span>
       </label>
       <input type="text" name="governing_body" value="{_h(governing_body)}"
@@ -11151,7 +11225,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     writes &mdash; so you never have to explain "this is how we sound".
   </p>
   <div style="margin-bottom:14px">
-    <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+    <label>
       Club website
     </label>
     <input type="url" name="website_url" value="{_h(website_url)}"
@@ -11175,9 +11249,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     words, sponsor mention rules, and key messages so every piece of
     content the engine writes respects them. Up to 25 MB.
   </p>
-  <input type="file" name="brand_guidelines_file"
-         accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/html,application/zip"
-         style="font-size:13px"/>
+  <label for="os-brand-guidelines">Brand guidelines (optional)</label>
+  <input id="os-brand-guidelines" type="file" name="brand_guidelines_file"
+         accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm,.zip,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/html,application/zip"/>
   {_gl_status_html}
 </div>
 
@@ -12299,11 +12373,30 @@ function copyWhyCard(btn, taId) {{
                 '</div>'
             )
 
+        # Human-friendly labels for internal artefact-type slugs so the
+        # tag chips don't expose snake_case engineering enums.
+        _ARTEFACT_LABEL = {
+            "meet_recap":         "Meet recap",
+            "swimmer_spotlight":  "Swimmer spotlight",
+            "athlete_spotlight":  "Athlete spotlight",
+            "weekend_preview":    "Event preview",
+            "sponsor_post":       "Sponsor post",
+            "session_update":     "Session update",
+            "x_thread":           "X / Twitter thread",
+            "twitter_thread":     "Twitter thread",
+            "linkedin_post":      "LinkedIn post",
+            "free_text":          "Free text brief",
+            "parent_newsletter":  "Parent newsletter",
+            "coach_dm":           "Coach DM",
+            "dm_pack":            "DM pack",
+        }
+
         # --- Artefact cards
         cards_html = ""
         for art_idx, art in enumerate(artefacts):
             atype = art.get("type", "")
-            title = _h(art.get("title", atype))
+            atype_label = _ARTEFACT_LABEL.get(atype, atype.replace("_", " ").capitalize() or "Artefact")
+            title = _h(art.get("title", atype_label))
             captions = art.get("captions") or {}
             cards = art.get("cards") or []
             draft = art.get("draft_flag", "")
@@ -12418,7 +12511,7 @@ function copyWhyCard(btn, taId) {{
 <div class="card ti-artefact" data-type="{_h(atype)}" data-artefact-index="{art_idx}" style="margin-bottom:18px">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px">
     <h2 style="margin:0">{title}</h2>
-    <span class="tag info" style="font-size:11px">{_h(atype)}</span>
+    <span class="tag info">{_h(atype_label)}</span>
   </div>
   {draft_html}
   {sub_cards_html}
@@ -13024,13 +13117,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <div class="card">
   <h2>Upload a photo</h2>
   <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
-  <form method="POST" action="{url_for('api_media_library_upload')}" enctype="multipart/form-data">
-    <label>File</label>
-    <input type="file" name="file" accept="image/*" required>
-    <label>Description</label>
-    <input type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
-    <label>Type</label>
-    <select name="asset_type">
+  <form method="POST" action="{url_for('api_media_library_upload')}" enctype="multipart/form-data" data-loader-text="Uploading photo">
+    <label class="req" for="ml-file">File</label>
+    <input id="ml-file" type="file" name="file" accept="image/*" required>
+    <label for="ml-desc">Description</label>
+    <input id="ml-desc" type="text" name="description" placeholder="e.g. Eira Hughes at Welsh National Open">
+    <label for="ml-type">Type</label>
+    <select id="ml-type" name="asset_type">
       <option value="athlete_photo">Athlete photo</option>
       <option value="venue">Venue</option>
       <option value="team">Team</option>
@@ -13039,7 +13132,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
       <option value="logo">Logo</option>
     </select>
     <input type="hidden" name="profile_id" value="{profile_id}">
-    <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo</button></div>
+    <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
   </form>
 </div>
 
@@ -13555,17 +13648,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         detail = str(e)
         low = detail.lower()
         if ("cannot find module" in low or "remotion not installed" in low
-                or "module not found" in low or "modulenotfound" in low):
+                or "module not found" in low or "modulenotfound" in low
+                or "node is not installed" in low or "/usr/bin/env: node" in low
+                or "remotion render failed" in low or "exit code 3" in low
+                or "(exit 3)" in low or "node_modules" in low):
             return {
                 "error": "render_failed",
                 "kind": "infra_missing",
                 "detail": detail,
                 "user_message": (
                     "Motion video rendering isn't available on this "
-                    "deployment. The operator needs to rebuild the "
-                    "container so Remotion's Node modules are installed. "
-                    "Static graphics and downloads still work in the "
-                    "meantime."
+                    "deployment. The operator needs to install Node and "
+                    "run npm install inside src/mediahub/remotion/ for "
+                    "Remotion to work. Static graphics and downloads "
+                    "still work in the meantime."
                 ),
             }
         if "timed out" in low or "timeout" in low:
@@ -13669,9 +13765,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 variation_seed=variation_seed,
             )
         except RuntimeError as e:
-            return jsonify(_motion_error_payload(e)), 500
+            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
         except Exception as e:
-            return jsonify(_motion_error_payload(e)), 500
+            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
 
         if not Path(mp4).exists():
             return jsonify({
@@ -13762,9 +13858,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 meet_name=meet_name,
             )
         except RuntimeError as e:
-            return jsonify(_motion_error_payload(e)), 500
+            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
         except Exception as e:
-            return jsonify(_motion_error_payload(e)), 500
+            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
 
         if not Path(mp4).exists():
             return jsonify({
