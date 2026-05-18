@@ -1363,21 +1363,27 @@ def _start_run(file_bytes: bytes, file_name: str,
 BASE_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
   /* Surfaces — warmer, deeper, less corporate-blue */
-  --bg:       #08091A;
+  --bg:       #06071A;
   --bg-soft:  #0F1029;
   --panel:    #141532;
   --panel2:   #1B1D44;
   --panel-h:  #232556;
   --border:   rgba(255,255,255,0.07);
   --border-h: rgba(168,85,247,0.30);
+  --hairline: rgba(255,255,255,0.04);
+  --chrome:   rgba(255,255,255,0.10);
 
   /* Text */
   --ink:       #F2F4FD;
   --ink-dim:   #98A1C0;
   --ink-muted: #5F6790;
+  --ink-faint: #3F4669;
 
   /* Accent — bold cyan→violet gradient pair */
   --accent:    #22D3EE;
@@ -1385,9 +1391,13 @@ BASE_CSS = """
   --accent2:   #A855F7;
   --accent2-h: #C084FC;
   --accent3:   #F472B6;
+  /* Editorial gold — used sparingly for medal / podium / standout moments */
+  --gold:      #F4D58D;
+  --gold-h:    #FFE5A1;
   --grad-hot:  linear-gradient(135deg, #22D3EE 0%, #A855F7 55%, #F472B6 100%);
   --grad-cool: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
   --grad-warm: linear-gradient(135deg, #A855F7 0%, #F472B6 100%);
+  --grad-medal: linear-gradient(135deg, #F4D58D 0%, #C9A04B 100%);
 
   /* Semantic */
   --good: #22C55E;
@@ -1395,82 +1405,132 @@ BASE_CSS = """
   --bad:  #F43F5E;
   --info: #22D3EE;
 
+  /* Typography — sport-editorial pairing */
+  --font-display: 'Big Shoulders Display', 'Sora', 'Inter', sans-serif;
+  --font-serif:   'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Spacing scale (4px base) */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  32px;
+  --sp-8:  48px;
+  --sp-9:  64px;
+
   /* Misc */
   --radius:    18px;
   --radius-sm: 12px;
+  --radius-lg: 24px;
   --shadow:    0 1px 0 rgba(255,255,255,0.04), 0 12px 40px rgba(0,0,0,0.45);
   --shadow-h:  0 1px 0 rgba(255,255,255,0.06), 0 24px 60px rgba(168,85,247,0.18);
+  --shadow-medal: 0 1px 0 rgba(255,255,255,0.06), 0 18px 50px rgba(244,213,141,0.18);
   --transition: 180ms cubic-bezier(0.4,0,0.2,1);
+  --transition-slow: 360ms cubic-bezier(0.22,1,0.36,1);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-               Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
   background:
-    radial-gradient(1200px 600px at 12% -10%, rgba(168,85,247,0.18), transparent 60%),
-    radial-gradient(900px 500px at 90% -20%, rgba(34,211,238,0.14), transparent 65%),
-    radial-gradient(700px 700px at 50% 110%, rgba(244,114,182,0.08), transparent 65%),
+    /* Soft top-corner glows — atmosphere, not noise */
+    radial-gradient(1100px 500px at 8% -15%, rgba(34,211,238,0.10), transparent 65%),
+    radial-gradient(900px 420px at 95% -10%, rgba(168,85,247,0.12), transparent 65%),
+    /* Faint grid — stadium / screen feel, 32px lattice */
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px) 0 0 / 32px 32px,
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'ss01' 1, 'cv11' 1;
 }
 a { color: var(--accent); text-decoration: none; transition: color var(--transition); }
 a:hover { color: var(--accent-h); text-decoration: none; }
+::selection { background: rgba(34,211,238,0.30); color: var(--ink); }
 
-/* TOPNAV */
+/* TOPNAV — sport-editorial: condensed wordmark, mono nav, hairline rails */
 header.topnav {
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0 28px;
-  height: 56px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(11,18,32,0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 0 var(--sp-7);
+  height: 60px;
+  border-bottom: 1px solid var(--hairline);
+  background:
+    linear-gradient(180deg, rgba(6,7,26,0.94), rgba(6,7,26,0.86));
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
   position: sticky;
   top: 0;
   z-index: 100;
 }
+header.topnav::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.35) 50%, transparent 100%);
+  pointer-events: none;
+}
 header.topnav .brand {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ink);
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-right: 28px;
+  gap: 10px;
+  margin-right: var(--sp-7);
   text-decoration: none;
   flex-shrink: 0;
+  transition: color var(--transition);
 }
-header.topnav .brand svg { color: var(--accent); flex-shrink: 0; }
-header.topnav nav { display: flex; align-items: center; gap: 2px; flex: 1; }
+header.topnav .brand:hover { color: var(--accent-h); }
+header.topnav .brand svg { flex-shrink: 0; display: block; }
+header.topnav nav { display: flex; align-items: center; gap: 0; flex: 1; }
 header.topnav nav a {
+  position: relative;
+  font-family: var(--font-mono);
   color: var(--ink-dim);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
+  padding: 8px 13px;
+  font-size: 12px;
   font-weight: 500;
-  transition: background var(--transition), color var(--transition);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color var(--transition);
   white-space: nowrap;
+  border-radius: 0;
 }
 header.topnav nav a:hover {
-  background: rgba(255,255,255,0.05);
   color: var(--ink);
+  background: transparent;
   text-decoration: none;
 }
 header.topnav nav a.active {
-  color: var(--accent);
-  background: rgba(34,211,238,0.08);
-  border-bottom: 2px solid var(--accent);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  padding-bottom: 4px;
+  color: var(--ink);
+  background: transparent;
+  border-bottom: none;
+  border-radius: 0;
+  padding-bottom: 8px;
+}
+header.topnav nav a.active::after {
+  content: '';
+  position: absolute;
+  left: 13px; right: 13px;
+  bottom: -2px;
+  height: 2px;
+  background: var(--grad-cool);
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(34,211,238,0.5);
 }
 #backend-pill {
   margin-left: auto;
@@ -1499,10 +1559,104 @@ header.topnav nav a.active {
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 
-/* HEADINGS */
-h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; color: var(--ink); }
-h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 10px; color: var(--ink); }
-h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin: 20px 0 10px; }
+/* FOOTER — quiet hairline rail */
+.mh-footer {
+  border-top: 1px solid var(--hairline);
+  margin-top: 0;
+  background:
+    linear-gradient(180deg, transparent, rgba(34,211,238,0.025));
+  position: relative;
+}
+.mh-footer::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.20) 50%, transparent 100%);
+  pointer-events: none;
+}
+.mh-footer-inner {
+  max-width: 1200px; margin: 0 auto;
+  padding: var(--sp-7) var(--sp-7) var(--sp-8);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-7);
+  align-items: center;
+}
+.mh-footer-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.mh-footer-brand svg { color: var(--accent); }
+.mh-footer-tag {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+.mh-footer-meta {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-footer-meta a {
+  color: var(--ink-muted);
+  transition: color var(--transition);
+}
+.mh-footer-meta a:hover { color: var(--accent); }
+.mh-footer-sep { color: var(--ink-faint); }
+@media (max-width: 860px) {
+  .mh-footer-inner {
+    grid-template-columns: 1fr;
+    gap: var(--sp-4);
+    text-align: center;
+  }
+  .mh-footer-brand, .mh-footer-meta { justify-content: center; }
+}
+
+/* HEADINGS — sport-editorial hierarchy */
+h1 {
+  font-family: var(--font-display);
+  font-size: 36px; font-weight: 800;
+  letter-spacing: -0.005em; text-transform: uppercase;
+  margin: 0 0 var(--sp-2); color: var(--ink);
+  line-height: 1.02;
+}
+h2 {
+  font-family: var(--font-body);
+  font-size: 17px; font-weight: 700;
+  letter-spacing: -0.01em; margin: 0 0 var(--sp-3); color: var(--ink);
+}
+h3 {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-muted); margin: var(--sp-5) 0 var(--sp-3);
+}
+
+/* Editorial accent — italic serif for emphasis moments inside copy */
+.editorial, em.editorial {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--gold);
+  font-feature-settings: 'liga' 1, 'dlig' 1;
+}
+.display-num {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.9;
+}
 
 /* CARDS */
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); }
@@ -1510,25 +1664,33 @@ h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .card p { color: var(--ink-dim); margin: 0 0 12px; }
 .card p:last-child { margin-bottom: 0; }
 
-/* BUTTONS */
+/* BUTTONS — confident, sport-editorial */
 .btn {
   display: inline-flex; align-items: center; gap: 8px;
   background: var(--accent); color: #081820;
-  border: 0; padding: 9px 18px; font-size: 14px; font-weight: 600;
+  border: 0; padding: 10px 20px; font-size: 13px; font-weight: 600;
   border-radius: var(--radius-sm); cursor: pointer;
   transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
-  font-family: inherit; text-decoration: none; letter-spacing: -0.01em;
+  font-family: var(--font-body); text-decoration: none; letter-spacing: -0.005em;
+  position: relative;
+  isolation: isolate;
 }
 .btn:hover {
   background: var(--accent-h); color: #081820;
-  transform: translateY(-1px); box-shadow: 0 4px 16px rgba(34,211,238,0.2);
+  transform: translateY(-1px); box-shadow: 0 6px 22px rgba(34,211,238,0.28);
   text-decoration: none;
 }
 .btn:active { transform: translateY(0); }
-.btn.secondary { background: transparent; color: var(--ink-dim); border: 1px solid rgba(255,255,255,0.1); }
-.btn.secondary:hover { background: rgba(255,255,255,0.05); color: var(--ink); border-color: rgba(255,255,255,0.18); box-shadow: none; }
+.btn.secondary { background: transparent; color: var(--ink-dim); border: 1px solid var(--chrome); }
+.btn.secondary:hover { background: rgba(255,255,255,0.05); color: var(--ink); border-color: rgba(255,255,255,0.20); box-shadow: none; }
 .btn.danger { background: transparent; color: var(--bad); border: 1px solid rgba(244,63,94,0.3); }
 .btn.danger:hover { background: rgba(244,63,94,0.08); border-color: rgba(244,63,94,0.5); box-shadow: none; }
+.btn.large { padding: 13px 26px; font-size: 14px; }
+.btn.gradient {
+  background: var(--grad-cool);
+  color: #081820;
+}
+.btn.gradient:hover { box-shadow: 0 10px 28px rgba(34,211,238,0.32); }
 
 /* LAYOUT */
 .row { display: flex; gap: 18px; flex-wrap: wrap; }
@@ -1551,22 +1713,67 @@ table td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-
 table tbody tr:nth-child(odd) { background: rgba(255,255,255,0.015); }
 table tbody tr:hover { background: rgba(255,255,255,0.03); }
 
-/* TAGS */
-.tag { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; background: rgba(255,255,255,0.06); color: var(--ink-dim); border: 1px solid var(--border); }
-.tag.good { background: rgba(34,197,94,0.12); color: var(--good); border-color: rgba(34,197,94,0.25); }
-.tag.warn { background: rgba(245,158,11,0.12); color: var(--warn); border-color: rgba(245,158,11,0.25); }
-.tag.bad  { background: rgba(244,63,94,0.12);  color: var(--bad);  border-color: rgba(244,63,94,0.25); }
-.tag.info { background: rgba(34,211,238,0.10); color: var(--info); border-color: rgba(34,211,238,0.25); }
+/* TAGS — sharp, mono, scoreboard-y */
+.tag {
+  display: inline-flex; align-items: center;
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.05);
+  color: var(--ink-dim);
+  border: 1px solid var(--border);
+}
+.tag.good { background: rgba(34,197,94,0.10);  color: var(--good); border-color: rgba(34,197,94,0.30); }
+.tag.warn { background: rgba(245,158,11,0.10); color: var(--warn); border-color: rgba(245,158,11,0.30); }
+.tag.bad  { background: rgba(244,63,94,0.10);  color: var(--bad);  border-color: rgba(244,63,94,0.30); }
+.tag.info { background: rgba(34,211,238,0.10); color: var(--info); border-color: rgba(34,211,238,0.30); }
+.tag.gold { background: rgba(244,213,141,0.10); color: var(--gold); border-color: rgba(244,213,141,0.35); }
 
-/* FORMS */
-label { display: block; margin: 14px 0 5px; color: var(--ink-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
-input[type=text], input[type=file], textarea, select {
+/* FORMS — scoreboard labels, refined inputs */
+label {
+  display: block;
+  margin: var(--sp-4) 0 var(--sp-2);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], textarea, select {
   background: rgba(255,255,255,0.03); color: var(--ink);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  font-size: 14px; font-family: inherit; width: 100%;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-sm); padding: 11px 14px;
+  font-size: 14px; font-family: var(--font-body); width: 100%;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
   appearance: none;
+}
+/* Custom-styled file input — the native "Choose File" button is replaced */
+input[type=file] {
+  padding: 8px 10px;
+  cursor: pointer;
+}
+input[type=file]::file-selector-button {
+  background: rgba(34,211,238,0.10);
+  color: var(--accent);
+  border: 1px solid rgba(34,211,238,0.30);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  cursor: pointer;
+  margin-right: 14px;
+  transition: background var(--transition), border-color var(--transition);
+}
+input[type=file]::file-selector-button:hover {
+  background: rgba(34,211,238,0.18);
+  border-color: var(--accent);
 }
 input[type=text]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--accent);
@@ -1576,11 +1783,47 @@ input[type=checkbox] { width: auto; margin-right: 8px; accent-color: var(--accen
 textarea { min-height: 120px; resize: vertical; }
 select { cursor: pointer; }
 
-/* STATS */
-.stat-block { display: flex; gap: 12px; flex-wrap: wrap; }
-.stat { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; min-width: 110px; }
-.stat .l { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin-bottom: 4px; }
-.stat .v { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: var(--ink); line-height: 1; }
+/* STATS — sport-editorial scoreboard */
+.stat-block { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+.stat {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 70%),
+    rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-4) var(--sp-5);
+  min-width: 110px;
+  transition: border-color var(--transition), transform var(--transition);
+  overflow: hidden;
+}
+.stat::before {
+  content: '';
+  position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.5;
+  border-radius: 0 2px 2px 0;
+}
+.stat:hover { border-color: rgba(34,211,238,0.30); transform: translateY(-1px); }
+.stat .l {
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--ink-muted); margin-bottom: var(--sp-1);
+}
+.stat .v {
+  font-family: var(--font-display);
+  font-size: 40px; font-weight: 800;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink); line-height: 0.95;
+}
+.stat.elite::before { background: var(--gold); box-shadow: 0 0 12px rgba(244,213,141,0.4); }
+.stat.elite .v { background: var(--grad-medal); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stat.warn::before  { background: var(--warn); }
+.stat.good::before  { background: var(--good); }
+.stat.bad::before   { background: var(--bad);  }
 
 /* KV */
 .kv { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; font-size: 14px; }
@@ -1616,20 +1859,19 @@ main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
 main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
 main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
 
-/* Background accent &mdash; subtle aurora */
+/* Background accent &mdash; one slow drifting glow, not two competing auroras */
 body::before {
-  content: ''; position: fixed; top: -240px; right: -240px;
-  width: 640px; height: 640px;
-  background: radial-gradient(circle, rgba(34,211,238,0.06) 0%, transparent 70%);
-  pointer-events: none; z-index: 0;
-  animation: mh-aurora 28s ease-in-out infinite;
-}
-body::after {
-  content: ''; position: fixed; bottom: -320px; left: -240px;
+  content: ''; position: fixed; inset: -20% -20% auto auto;
   width: 720px; height: 720px;
-  background: radial-gradient(circle, rgba(124,58,237,0.05) 0%, transparent 70%);
+  background:
+    radial-gradient(closest-side, rgba(34,211,238,0.07), transparent 70%);
+  filter: blur(40px);
   pointer-events: none; z-index: 0;
-  animation: mh-aurora 36s ease-in-out infinite reverse;
+  animation: mh-drift 32s ease-in-out infinite;
+}
+@keyframes mh-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-40px, 30px) scale(1.08); }
 }
 
 /* Card hover */
@@ -1673,11 +1915,20 @@ a.card:hover, .card[data-interactive]:hover {
   animation: mh-pulse 1.4s ease-in-out infinite;
 }
 .mh-loader-text {
-  font-size: 15px; color: var(--ink); font-weight: 600;
-  letter-spacing: -0.01em; text-align: center;
+  font-family: var(--font-display);
+  font-size: 24px;
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-align: center;
 }
 .mh-loader-sub {
-  font-size: 13px; color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
   max-width: 360px; text-align: center;
   animation: mh-pulse 2.4s ease-in-out infinite;
 }
@@ -1961,110 +2212,176 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 
 /* Section heading */
 .mh-section-eyebrow {
-  display: block; text-align: center;
-  font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.12em;
+  display: flex; align-items: center; justify-content: center;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.24em;
   color: var(--accent);
-  margin: 36px 0 8px;
+  margin: var(--sp-8) 0 var(--sp-3);
+}
+.mh-section-eyebrow::before,
+.mh-section-eyebrow::after {
+  content: '';
+  height: 1px; width: 48px;
+  background: linear-gradient(90deg, transparent, rgba(34,211,238,0.5), transparent);
 }
 .mh-section-title {
-  font-size: clamp(22px, 3vw, 30px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4vw, 52px);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
   text-align: center;
-  margin: 0 0 32px;
-  max-width: 720px; margin-left: auto; margin-right: auto;
-  line-height: 1.2;
+  margin: 0 0 var(--sp-7);
+  max-width: 820px; margin-left: auto; margin-right: auto;
+  line-height: 1.0;
+  color: var(--ink);
+}
+.mh-section-title em.editorial {
+  font-size: 0.94em;
+  color: var(--gold);
+  padding: 0 0.04em;
 }
 
-/* === Numbered step cards (How it works) === */
+/* === Numbered step cards (How it works) — sport editorial === */
 .mh-steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
-  margin-bottom: 48px;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-8);
 }
 .mh-step {
-  background: var(--panel);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), transparent 60%),
+    var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px 22px;
+  padding: var(--sp-6) var(--sp-6) var(--sp-7);
   position: relative;
-  transition: border-color 0.25s ease, transform 0.25s ease;
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  overflow: hidden;
+}
+.mh-step::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--grad-cool);
+  opacity: 0; transform: scaleX(0.4);
+  transform-origin: left center;
+  transition: opacity var(--transition), transform var(--transition-slow);
 }
 .mh-step:hover {
   border-color: rgba(34,211,238,0.4);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
 }
+.mh-step:hover::before { opacity: 1; transform: scaleX(1); }
 .mh-step-num {
-  display: inline-flex;
-  align-items: center; justify-content: center;
-  width: 32px; height: 32px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(34,211,238,0.18), rgba(124,58,237,0.18));
-  border: 1px solid rgba(34,211,238,0.35);
-  color: var(--accent);
-  font-weight: 800; font-size: 14px;
-  margin-bottom: 14px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 56px;
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+  background: var(--grad-cool);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  display: block;
+  margin-bottom: var(--sp-3);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+.mh-step-num::after {
+  content: '';
+  display: block;
+  width: 28px; height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin-top: var(--sp-3);
+  opacity: 0.6;
 }
 .mh-step h3 {
-  font-size: 16px; font-weight: 700; color: var(--ink);
-  letter-spacing: -0.01em; margin: 0 0 8px;
+  font-family: var(--font-body);
+  font-size: 17px; font-weight: 700; color: var(--ink);
+  letter-spacing: -0.01em; margin: 0 0 var(--sp-2);
   text-transform: none;
 }
 .mh-step p {
-  font-size: 13.5px; color: var(--ink-dim);
+  font-size: 14px; color: var(--ink-dim);
   line-height: 1.55; margin: 0;
 }
 
-/* === Hero (rebuilt home page) === */
+/* === Hero (rebuilt home page) — sport-editorial cover === */
 .mh-hero {
   position: relative;
-  padding: 56px 32px 48px;
-  margin-bottom: 40px;
-  border-radius: 24px;
+  padding: 80px 44px 60px;
+  margin-bottom: var(--sp-8);
+  border-radius: var(--radius-lg);
   background:
-    radial-gradient(900px 320px at 18% 20%, rgba(168,85,247,0.18), transparent 60%),
-    radial-gradient(700px 280px at 88% 80%, rgba(34,211,238,0.20), transparent 65%),
-    linear-gradient(135deg, rgba(20,21,50,0.85), rgba(15,16,41,0.95));
+    radial-gradient(1100px 360px at 12% 15%, rgba(168,85,247,0.22), transparent 60%),
+    radial-gradient(800px 300px at 92% 85%, rgba(34,211,238,0.18), transparent 65%),
+    linear-gradient(180deg, rgba(15,16,41,0.55), rgba(8,9,28,0.75)),
+    var(--bg);
   border: 1px solid rgba(168,85,247,0.20);
   box-shadow: var(--shadow-h);
   overflow: hidden;
+  isolation: isolate;
 }
+/* Hairline rule grid inside hero — gives it a "stadium scoreboard" feel */
 .mh-hero::before {
   content: '';
-  position: absolute;
-  top: -1px; left: -1px; right: -1px; bottom: -1px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(34,211,238,0.45), rgba(168,85,247,0.30), rgba(244,114,182,0.30)) border-box;
-  -webkit-mask:
-    linear-gradient(#000 0 0) padding-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-  padding: 1px;
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 100% 56px,
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px) 0 0 / 56px 100%;
   pointer-events: none;
-  opacity: 0.6;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 35%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 35%, transparent 75%);
+  z-index: -1;
+}
+/* Gradient edge ring */
+.mh-hero::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: var(--radius-lg);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(34,211,238,0.55), rgba(168,85,247,0.35) 50%, rgba(244,114,182,0.35));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.65;
 }
 .mh-hero-eyebrow {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: 11px; font-weight: 700;
-  letter-spacing: 0.20em; text-transform: uppercase;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.24em; text-transform: uppercase;
   color: var(--accent);
-  display: inline-block;
-  padding: 5px 10px;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 14px 7px 12px;
   border: 1px solid rgba(34,211,238,0.30);
   border-radius: 999px;
-  margin-bottom: 18px;
+  margin-bottom: var(--sp-6);
   background: rgba(34,211,238,0.06);
+  position: relative;
+}
+.mh-hero-eyebrow::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: mh-pulse 1.6s ease-in-out infinite;
 }
 .mh-hero h1 {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: clamp(34px, 5.5vw, 60px);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.04;
-  margin: 0 0 18px;
-  max-width: 760px;
+  font-family: var(--font-display);
+  font-size: clamp(46px, 7vw, 96px);
+  font-weight: 900;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  line-height: 0.95;
+  margin: 0 0 var(--sp-5);
+  max-width: 920px;
+  color: var(--ink);
 }
 .mh-hero h1 .grad {
   background: var(--grad-hot);
@@ -2072,12 +2389,26 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   color: transparent;
   display: inline-block;
 }
+/* Editorial italic emphasis inside the hero — pairs with display caps */
+.mh-hero h1 .editorial,
+.mh-hero h1 em.editorial {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  color: var(--gold);
+  font-size: 0.94em;
+  padding: 0 0.04em;
+}
 .mh-hero p.lede {
-  font-size: 17px;
+  font-family: var(--font-body);
+  font-size: clamp(16px, 1.45vw, 19px);
   color: var(--ink-dim);
-  margin: 0 0 32px;
-  max-width: 620px;
-  line-height: 1.55;
+  margin: 0 0 var(--sp-7);
+  max-width: 640px;
+  line-height: 1.6;
+  font-weight: 400;
 }
 .mh-hero-actions {
   display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
@@ -2443,14 +2774,30 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </div>
 <div id="mh-toast-container"></div>
 <header class="topnav">
-  <div class="brand">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M2 12c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>
-      <path d="M2 17c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>
-      <path d="M2 7c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>
+  <a href="{{ url_for('home') }}" class="brand" aria-label="MediaHub — home">
+    <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="mhLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#22D3EE"/>
+          <stop offset="55%" stop-color="#A855F7"/>
+          <stop offset="100%" stop-color="#F472B6"/>
+        </linearGradient>
+        <linearGradient id="mhLogoEdge" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.45)"/>
+          <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+        </linearGradient>
+      </defs>
+      <!-- Rounded plate -->
+      <rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#0B0C24" stroke="url(#mhLogoEdge)" stroke-width="1"/>
+      <!-- Ascending podium bars (silver, gold, bronze tonality) -->
+      <rect x="6"  y="20" width="5" height="7"  rx="1.2" fill="url(#mhLogoGrad)" opacity="0.55"/>
+      <rect x="13.5" y="14" width="5" height="13" rx="1.2" fill="url(#mhLogoGrad)" opacity="0.80"/>
+      <rect x="21" y="8"  width="5" height="19" rx="1.2" fill="url(#mhLogoGrad)"/>
+      <!-- Hairline baseline -->
+      <line x1="5" y1="27.5" x2="27" y2="27.5" stroke="rgba(255,255,255,0.18)" stroke-width="0.75"/>
     </svg>
     MediaHub
-  </div>
+  </a>
   <nav>
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('add_input_page') }}" class="{{ 'active' if active=='add_input' else '' }}">Add Input</a>
@@ -2471,6 +2818,26 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <main class="wrap">
 {{ body | safe }}
 </main>
+<footer class="mh-footer">
+  <div class="mh-footer-inner">
+    <div class="mh-footer-brand">
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect x="6"  y="20" width="5" height="7"  rx="1.2" fill="currentColor" opacity="0.45"/>
+        <rect x="13.5" y="14" width="5" height="13" rx="1.2" fill="currentColor" opacity="0.70"/>
+        <rect x="21" y="8"  width="5" height="19" rx="1.2" fill="currentColor"/>
+      </svg>
+      <span>MediaHub</span>
+    </div>
+    <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
+    <div class="mh-footer-meta">
+      <a href="{{ url_for('status_page') }}">System status</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('privacy_page') }}">Data &amp; privacy</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('research_page') }}">Roadmap</a>
+    </div>
+  </div>
+</footer>
 <script>
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
@@ -2893,8 +3260,9 @@ def create_app() -> Flask:
             # Returning user with a pinned org. Lead with "continue" + give
             # secondary routes to sign-out / create another.
             hero_h1 = (
-                f'<span class="grad">{_h(prof.display_name)}</span><br>'
-                'is set up &mdash; let&rsquo;s make something.'
+                f'<span class="grad">{_h(prof.display_name)}</span> '
+                'is <em class="editorial">ready</em><br>'
+                'let&rsquo;s make something.'
             )
             hero_lede = (
                 'Your brand voice, palette, and logo are loaded. Captions, '
@@ -2914,8 +3282,8 @@ def create_app() -> Flask:
         else:
             # Fresh visit (or signed-out). Two equally-weighted CTAs.
             hero_h1 = (
-                'Turn results into <span class="grad">on-brand</span><br>'
-                'content in minutes.'
+                'Turn results into <em class="editorial">on-brand</em><br>'
+                '<span class="grad">content</span> in minutes.'
             )
             hero_lede = (
                 'MediaHub reads your club website, social profiles, and brand '
@@ -2969,15 +3337,15 @@ def create_app() -> Flask:
         # --- Four-step explainer (kept; still useful first-touch context) ---
         steps_html = (
             '<div class="mh-section-eyebrow">How it works</div>'
-            '<h2 class="mh-section-title">From results to ready-to-post content, end to end</h2>'
+            '<h2 class="mh-section-title">From results to <em class="editorial">ready-to-post</em> content</h2>'
             '<div class="mh-steps">'
-            '<div class="mh-step"><div class="mh-step-num">1</div><h3>Add an input</h3>'
+            '<div class="mh-step"><div class="mh-step-num">01</div><h3>Add an input</h3>'
             '<p>Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.</p></div>'
-            '<div class="mh-step"><div class="mh-step-num">2</div><h3>We detect the moments</h3>'
+            '<div class="mh-step"><div class="mh-step-num">02</div><h3>We detect the moments</h3>'
             '<p>The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.</p></div>'
-            '<div class="mh-step"><div class="mh-step-num">3</div><h3>On-brand drafts appear</h3>'
+            '<div class="mh-step"><div class="mh-step-num">03</div><h3>On-brand drafts appear</h3>'
             "<p>Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.</p></div>"
-            '<div class="mh-step"><div class="mh-step-num">4</div><h3>Approve and post</h3>'
+            '<div class="mh-step"><div class="mh-step-num">04</div><h3>Approve and post</h3>'
             '<p>You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.</p></div>'
             '</div>'
         )
