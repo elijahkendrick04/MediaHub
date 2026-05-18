@@ -6375,12 +6375,17 @@ function addGraphicToPack(btn, visualId) {{
                 n_variants = int(request.args.get("n_variants") or 1)
                 n_variants = max(1, min(n_variants, 4))
 
+                # V9: feed the AI the last few captions for this swim so
+                # it actively writes something different on each regenerate.
+                _recent_captions = _v9_load_caption_history(run_id, swim_id_dec)
+
                 def _gen_one():
                     try:
                         return _gen_tone(
                             ach_dict, club_brand, tone=tone,
                             voice_profile=_run_voice_profile,
                             club_profile=club_profile_obj,
+                            recent_captions=_recent_captions,
                         )
                     except _ClaudeUE:
                         # Terminal-shaped errors must propagate so the
@@ -6429,6 +6434,11 @@ function addGraphicToPack(btn, visualId) {{
                         ),
                         "explanation": explanation,
                     }), 200
+                # Persist the new caption(s) so the next regenerate can
+                # ask the AI to differ. We store ALL produced variants
+                # to widen the "avoid" window in one go.
+                for v in variants:
+                    _v9_save_caption_history(run_id, swim_id_dec, v)
                 return jsonify({
                     "caption": caption_text,
                     "variants": variants,
@@ -13368,6 +13378,98 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except Exception:
             return "", 404
 
+    # ------------------------------------------------------------------
+    # V9 variation history — small JSON sidecar per (run, card). Tracks
+    # the last ~12 variation signatures + hooks so each regenerate can
+    # actively pick something the user hasn't seen yet. Bounded so the
+    # file never grows unbounded.
+    # ------------------------------------------------------------------
+    def _v9_variation_history_path(run_id: str, card_id: str) -> "Path":
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", str(card_id))[:80]
+        return RUNS_DIR / run_id / "variations" / f"{safe}.json"
+
+    def _v9_load_variation_history(run_id: str, card_id: str) -> dict:
+        p = _v9_variation_history_path(run_id, card_id)
+        if not p.exists():
+            return {"signatures": [], "hooks": []}
+        try:
+            data = json.loads(p.read_text("utf-8"))
+            if not isinstance(data, dict):
+                return {"signatures": [], "hooks": []}
+            sigs = list(data.get("signatures") or [])
+            hooks = list(data.get("hooks") or [])
+            return {"signatures": sigs, "hooks": hooks}
+        except Exception:
+            return {"signatures": [], "hooks": []}
+
+    def _v9_save_variation_history(run_id: str, card_id: str,
+                                    signature: str, hook: str) -> None:
+        if not signature:
+            return
+        p = _v9_variation_history_path(run_id, card_id)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            data = _v9_load_variation_history(run_id, card_id)
+            sigs = data.get("signatures") or []
+            hooks = data.get("hooks") or []
+            sigs.append(signature)
+            if hook:
+                hooks.append(hook)
+            # Cap at 12 entries — the AI / picker only ever looks at the
+            # most recent 6 so this gives a comfortable buffer.
+            sigs = sigs[-12:]
+            hooks = hooks[-12:]
+            p.write_text(json.dumps({"signatures": sigs, "hooks": hooks}), encoding="utf-8")
+        except Exception:
+            # History is a nice-to-have, not a hard requirement — never
+            # surface persistence failures to the user.
+            pass
+
+    # ------------------------------------------------------------------
+    # V9 caption history — same idea as variation history but per swim.
+    # The caption route feeds the most recent ~5 captions back into the
+    # system prompt so the AI actively writes something different on
+    # each regenerate. Capped at 10 stored entries.
+    # ------------------------------------------------------------------
+    def _v9_caption_history_path(run_id: str, swim_id: str) -> "Path":
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", str(swim_id))[:80]
+        return RUNS_DIR / run_id / "caption_history" / f"{safe}.json"
+
+    def _v9_load_caption_history(run_id: str, swim_id: str) -> list[str]:
+        p = _v9_caption_history_path(run_id, swim_id)
+        if not p.exists():
+            return []
+        try:
+            data = json.loads(p.read_text("utf-8"))
+            if isinstance(data, dict):
+                items = data.get("captions") or []
+                return [c for c in items if isinstance(c, str) and c.strip()]
+            if isinstance(data, list):
+                return [c for c in data if isinstance(c, str) and c.strip()]
+        except Exception:
+            pass
+        return []
+
+    def _v9_save_caption_history(run_id: str, swim_id: str, caption: str) -> None:
+        if not caption or not caption.strip():
+            return
+        p = _v9_caption_history_path(run_id, swim_id)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            existing = _v9_load_caption_history(run_id, swim_id)
+            existing.append(caption.strip())
+            # Dedupe (preserve order) and cap at 10.
+            seen: set[str] = set()
+            unique: list[str] = []
+            for c in existing[-20:]:
+                if c not in seen:
+                    seen.add(c)
+                    unique.append(c)
+            unique = unique[-10:]
+            p.write_text(json.dumps({"captions": unique}), encoding="utf-8")
+        except Exception:
+            pass
+
     @app.route("/api/runs/<run_id>/cards/<card_id>/create-graphic", methods=["POST"])
     def api_create_graphic(run_id: str, card_id: str):
         """Render a visual for a single content item / recognition card."""
@@ -13445,15 +13547,33 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             req_fmt = _req.args.get("format")
         formats_kw = [req_fmt] if req_fmt else None
 
-        # Variation seed. Default behaviour now: pick a UNIQUE per-card seed
-        # so every card in a pack looks visibly different (different layout
-        # family, palette permutation, headline phrasing) while still using
-        # the club's own colours, logo, and photos.
-        # Caller can override with ?variation_seed=N (explicit int).
-        # Setting variation_seed=0 explicitly restores the legacy "identity"
-        # render (no variation), useful for debugging / regression tests.
+        # V9 variation overhaul: every regenerate produces a fresh random
+        # creative direction (different layout family + background style +
+        # accent decoration + typography pair + composition + headline
+        # hook). When an AI provider is configured we ask the AI to pick
+        # the direction; otherwise the random profile picker fills it.
+        # The route persists the last few signatures + hooks per card so
+        # the AI / picker actively avoids repeating itself.
+        #
+        # Stability mode for callers that need it (page reload, debug):
+        #   ?stable=true       → use the legacy deterministic seed
+        #   ?variation_seed=N  → force a specific integer seed
         seed_raw = _req.args.get("variation_seed")
-        if seed_raw is None or seed_raw == "":
+        stable_mode = (_req.args.get("stable") or "").lower() in ("1", "true", "yes")
+        variation_seed = 0
+        variation_profile = None
+        ai_directed = False
+
+        history = _v9_load_variation_history(run_id, card_id)
+        recent_sigs = history.get("signatures", [])[-6:]
+        recent_hooks = history.get("hooks", [])[-6:]
+
+        if seed_raw not in (None, ""):
+            try:
+                variation_seed = int(seed_raw)
+            except (TypeError, ValueError):
+                variation_seed = 0
+        elif stable_mode:
             try:
                 from mediahub.creative_brief.generator import auto_variation_seed_for
                 variation_seed = auto_variation_seed_for(
@@ -13462,10 +13582,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             except Exception:
                 variation_seed = 1
         else:
+            # Fresh random direction. The AI director runs inside
+            # generate() when a provider is configured; otherwise the
+            # random profile picker provides the variety.
             try:
-                variation_seed = int(seed_raw)
-            except (TypeError, ValueError):
-                variation_seed = 0
+                from mediahub.creative_brief.generator import random_variation_profile
+                variation_profile = random_variation_profile(
+                    angle=item.get("post_angle") or "",
+                    avoid_signatures=recent_sigs,
+                )
+            except Exception:
+                variation_profile = None
+            ai_directed = True   # generate() will try the AI director first
 
         try:
             res = _v8_create_visual_for_item(
@@ -13474,16 +13602,29 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 media_assets=media_assets,
                 formats=formats_kw,
                 variation_seed=variation_seed,
+                variation_profile=variation_profile,
+                use_ai_director=ai_directed,
+                recent_signatures=recent_sigs,
+                recent_hooks=recent_hooks,
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
         # V9: Attach the "Why this card?" explanation so JSON consumers can
         # render the same plain-English reasoning the UI shows.
         explanation = _build_card_explanation(target)
+        # Persist the new variation signature + hook so the next
+        # regenerate avoids it.
+        brief_d = res.get("brief") or {}
+        new_sig = brief_d.get("variation_signature") or ""
+        new_hook = brief_d.get("primary_hook") or ""
+        if new_sig:
+            _v9_save_variation_history(run_id, card_id, new_sig, new_hook)
         # Include the seed in the response so the UI / debugging can see it.
         return jsonify({
             "ok": True,
             "variation_seed": variation_seed,
+            "variation_signature": new_sig,
+            "ai_directed": bool(brief_d.get("ai_directed")),
             "explanation": explanation,
             **res,
         })
@@ -13762,31 +13903,50 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             pass
 
         from concurrent.futures import ThreadPoolExecutor
+        # V9: build three distinct random variation profiles so the
+        # variant picker actually shows three different visual directions
+        # (not the legacy palette-only seeds 1/2/3).
+        from mediahub.creative_brief.generator import random_variation_profile
 
-        def _one(seed: int) -> dict:
+        history = _v9_load_variation_history(run_id, card_id)
+        recent_sigs = history.get("signatures", [])[-6:]
+
+        profiles: list[Any] = []
+        sigs_so_far = list(recent_sigs)
+        for _ in range(3):
+            prof = random_variation_profile(
+                angle=item.get("post_angle") or "",
+                avoid_signatures=sigs_so_far,
+            )
+            profiles.append(prof)
+            sigs_so_far.append(prof.signature())
+
+        def _one(profile) -> dict:
             try:
                 res = _v8_create_visual_for_item(
                     item, brand_kit,
                     profile_id=profile_id, run_id=run_id,
                     media_assets=media_assets,
-                    variation_seed=seed,
+                    variation_profile=profile,
+                    use_ai_director=True,
+                    recent_signatures=sigs_so_far,
                 )
                 visuals = res.get("visuals") or []
                 # Pick the feed_portrait by default if present, else first.
                 primary = next((v for v in visuals if v.get("format_name") == "feed_portrait"), visuals[0] if visuals else None)
                 return {
-                    "seed": seed,
+                    "seed": 0,
+                    "variation_signature": (res.get("brief") or {}).get("variation_signature", ""),
                     "visual": primary,
                     "visuals": visuals,
                     "brief": res.get("brief"),
                     "errors": res.get("errors") or [],
                 }
             except Exception as e:
-                return {"seed": seed, "visual": None, "visuals": [], "brief": None, "errors": [str(e)]}
+                return {"seed": 0, "visual": None, "visuals": [], "brief": None, "errors": [str(e)]}
 
-        seeds = [1, 2, 3]
         with ThreadPoolExecutor(max_workers=3) as ex:
-            variants = list(ex.map(_one, seeds))
+            variants = list(ex.map(_one, profiles))
         return jsonify({"ok": True, "variants": variants})
 
     # ------------------------------------------------------------------

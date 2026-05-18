@@ -184,10 +184,16 @@ def generate_caption_for_tone(
     tone: str = "ai",
     voice_profile: Optional[dict] = None,
     club_profile=None,
+    recent_captions: Optional[list[str]] = None,
 ) -> str:
     """Generate one caption in plain English. Raises ClaudeUnavailableError
     if no provider can answer. NO heuristic fallback — that's intentional;
     a fake caption is worse than an honest error.
+
+    ``recent_captions`` is an optional list of the last few captions the
+    user has seen for this card; when provided the system prompt tells
+    the AI to write something distinct so clicking "regenerate" never
+    returns the same wording twice.
     """
     from mediahub.ai_core import narrate_achievement, narrate_brand
 
@@ -203,7 +209,26 @@ def generate_caption_for_tone(
         "Keep it specific, human, club-appropriate, ~280 characters max. "
         "Never invent facts. Output ONLY the caption text — no preamble, "
         "no quotes, no markdown.",
+        # Force genuine variety. The model has a strong attractor toward "
+        # the same opener / same closer wording on identical inputs;
+        # this instruction nudges it off the attractor.
+        "When you write, pick a fresh angle and structure: vary your "
+        "opener, the order in which facts appear, and the closing beat. "
+        "If you've been shown recent captions for this card, write "
+        "something noticeably different from each — different opener, "
+        "different rhythm, different lens (e.g. swimmer's effort vs. "
+        "the team's reaction vs. the numbers vs. the milestone).",
     ]
+    if recent_captions:
+        recent_block = "\n".join(
+            f"- {c.strip()}" for c in recent_captions[-5:] if c and c.strip()
+        )
+        if recent_block:
+            system_parts.append(
+                "Recent captions you wrote for this same card (DO NOT "
+                "repeat any of their openers, structure, or closers — "
+                "the user wants something different):\n" + recent_block
+            )
     brand_prose = narrate_brand(club_brand)
     if brand_prose:
         system_parts.append("Brand voice: " + brand_prose)

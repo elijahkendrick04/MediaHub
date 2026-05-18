@@ -210,6 +210,349 @@ def _noise_pattern_data_uri() -> str:
     return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
 
 
+# ---------------------------------------------------------------------------
+# Variation backgrounds — pick a pattern from the brief.background_style axis.
+# Each returns a CSS ``url("data:image/svg+xml;base64,...")`` value that the
+# templates plug into the ``--water-pattern`` CSS variable. The variable is
+# rebadged for backwards compat but every layout reads the same slot, so
+# every pattern works in every layout.
+# ---------------------------------------------------------------------------
+
+def _bg_halftone_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>
+  <g fill='white' fill-opacity='0.14'>
+    <circle cx='40' cy='40' r='6'/><circle cx='120' cy='40' r='5'/>
+    <circle cx='200' cy='40' r='4'/><circle cx='280' cy='40' r='3'/>
+    <circle cx='360' cy='40' r='2.5'/>
+    <circle cx='40' cy='120' r='6'/><circle cx='120' cy='120' r='5'/>
+    <circle cx='200' cy='120' r='4'/><circle cx='280' cy='120' r='3'/>
+    <circle cx='360' cy='120' r='2.5'/>
+    <circle cx='40' cy='200' r='5.5'/><circle cx='120' cy='200' r='4.5'/>
+    <circle cx='200' cy='200' r='3.5'/><circle cx='280' cy='200' r='2.5'/>
+    <circle cx='360' cy='200' r='2'/>
+    <circle cx='40' cy='280' r='5'/><circle cx='120' cy='280' r='4'/>
+    <circle cx='200' cy='280' r='3'/><circle cx='280' cy='280' r='2'/>
+    <circle cx='360' cy='280' r='1.5'/>
+    <circle cx='40' cy='360' r='4'/><circle cx='120' cy='360' r='3'/>
+    <circle cx='200' cy='360' r='2.5'/><circle cx='280' cy='360' r='2'/>
+    <circle cx='360' cy='360' r='1.5'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_diagonal_stripes_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'>
+  <g stroke='white' stroke-opacity='0.10' stroke-width='28'>
+    <line x1='-100' y1='100' x2='700' y2='-300'/>
+    <line x1='-100' y1='250' x2='700' y2='-150'/>
+    <line x1='-100' y1='400' x2='700' y2='0'/>
+    <line x1='-100' y1='550' x2='700' y2='150'/>
+    <line x1='-100' y1='700' x2='700' y2='300'/>
+    <line x1='-100' y1='850' x2='700' y2='450'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_radial_burst_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800'>
+  <defs>
+    <radialGradient id='r' cx='50%' cy='50%' r='60%'>
+      <stop offset='0%' stop-color='white' stop-opacity='0.30'/>
+      <stop offset='40%' stop-color='white' stop-opacity='0.10'/>
+      <stop offset='100%' stop-color='white' stop-opacity='0'/>
+    </radialGradient>
+    <radialGradient id='r2' cx='50%' cy='50%' r='60%'>
+      <stop offset='0%' stop-color='white' stop-opacity='0'/>
+      <stop offset='70%' stop-color='white' stop-opacity='0.06'/>
+      <stop offset='100%' stop-color='white' stop-opacity='0.18'/>
+    </radialGradient>
+  </defs>
+  <rect width='800' height='800' fill='url(#r2)'/>
+  <circle cx='400' cy='400' r='280' fill='url(#r)'/>
+  <g stroke='white' stroke-opacity='0.08' stroke-width='1.5' fill='none'>
+    <circle cx='400' cy='400' r='180'/>
+    <circle cx='400' cy='400' r='260'/>
+    <circle cx='400' cy='400' r='340'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_geometric_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>
+  <g fill='white' fill-opacity='0.06'>
+    <polygon points='0,0 200,0 100,200'/>
+    <polygon points='200,0 400,0 300,200'/>
+    <polygon points='0,400 200,400 100,200'/>
+    <polygon points='200,400 400,400 300,200'/>
+  </g>
+  <g stroke='white' stroke-opacity='0.10' stroke-width='1' fill='none'>
+    <polygon points='0,0 200,0 100,200'/>
+    <polygon points='200,0 400,0 300,200'/>
+    <polygon points='0,400 200,400 100,200'/>
+    <polygon points='200,400 400,400 300,200'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_clean_data_uri() -> str:
+    """No pattern, just an invisible 1x1 pixel — leaves the canvas clean
+    so the gradient + vignette do all the lifting."""
+    svg = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_vertical_stripes_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='200' height='400'>
+  <g fill='white' fill-opacity='0.07'>
+    <rect x='0'   y='0' width='40' height='400'/>
+    <rect x='80'  y='0' width='40' height='400'/>
+    <rect x='160' y='0' width='40' height='400'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_dots_data_uri() -> str:
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'>
+  <g fill='white' fill-opacity='0.18'>
+    <circle cx='20'  cy='20'  r='2.2'/>
+    <circle cx='80'  cy='20'  r='2.2'/>
+    <circle cx='140' cy='20'  r='2.2'/>
+    <circle cx='50'  cy='80'  r='2.2'/>
+    <circle cx='110' cy='80'  r='2.2'/>
+    <circle cx='170' cy='80'  r='2.2'/>
+    <circle cx='20'  cy='140' r='2.2'/>
+    <circle cx='80'  cy='140' r='2.2'/>
+    <circle cx='140' cy='140' r='2.2'/>
+  </g>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+def _bg_duotone_data_uri() -> str:
+    """Diagonal half-tone split — a flat triangle slice gives the
+    composition a strong, modern poster feel."""
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>
+  <polygon points='0,400 400,0 400,400' fill='white' fill-opacity='0.09'/>
+</svg>"""
+    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+
+
+# Lookup table: brief.background_style → CSS url() value
+def _background_pattern_for(style: str) -> str:
+    style = (style or "water").lower()
+    builders = {
+        "water":     _water_pattern_data_uri,
+        "halftone":  _bg_halftone_data_uri,
+        "diagonal":  _bg_diagonal_stripes_data_uri,
+        "radial":    _bg_radial_burst_data_uri,
+        "geometric": _bg_geometric_data_uri,
+        "clean":     _bg_clean_data_uri,
+        "stripes":   _bg_vertical_stripes_data_uri,
+        "dots":      _bg_dots_data_uri,
+        "duotone":   _bg_duotone_data_uri,
+        "grain":     _bg_clean_data_uri,  # rely on the noise overlay only
+    }
+    builder = builders.get(style, _water_pattern_data_uri)
+    return builder()
+
+
+# ---------------------------------------------------------------------------
+# Typography pairs. Each pair returns a small CSS override block that
+# rebinds the headline / numeral / body classes onto the chosen fonts.
+# All listed fonts are loaded by _shared.css / the @import URL so we can
+# reference them safely; an unknown pair falls back to the legacy default.
+# ---------------------------------------------------------------------------
+
+_TYPOGRAPHY_OVERRIDES: dict[str, str] = {
+    "anton-inter": "",  # legacy default — no override
+    "bebas-grotesk": (
+        ".surname-bg, .fg-firstname, .hero-numeral, .label-ribbon, "
+        ".headline-line { font-family: 'Bebas Neue','Anton',sans-serif !important; }\n"
+        ".result-chip .value, .fg-event, .meet-line, .club-line, "
+        ".sponsor-strip { font-family: 'Space Grotesk','Inter',sans-serif !important; }"
+    ),
+    "druk-inter": (
+        ".surname-bg, .fg-firstname, .hero-numeral, .label-ribbon, "
+        ".headline-line { font-family: 'Anton','Bowlby One','Bebas Neue',sans-serif !important; "
+        "letter-spacing: -0.05em !important; font-stretch: condensed !important; }\n"
+        ".result-chip .value, .fg-event, .meet-line, .club-line, "
+        ".sponsor-strip { font-family: 'Inter',sans-serif !important; }"
+    ),
+    "bowlby-inter": (
+        ".surname-bg, .fg-firstname, .hero-numeral, .label-ribbon, "
+        ".headline-line { font-family: 'Bowlby One','Anton',sans-serif !important; "
+        "letter-spacing: -0.01em !important; }\n"
+        ".result-chip .value, .fg-event, .meet-line, .club-line, "
+        ".sponsor-strip { font-family: 'Inter',sans-serif !important; }"
+    ),
+    "archivo-inter": (
+        ".surname-bg, .fg-firstname, .hero-numeral, .label-ribbon, "
+        ".headline-line { font-family: 'Anton','Bebas Neue',sans-serif !important; "
+        "letter-spacing: 0.01em !important; text-transform: uppercase; }\n"
+        ".result-chip .value, .fg-event, .meet-line, .club-line "
+        "{ font-family: 'Inter',sans-serif !important; font-weight: 700 !important; }"
+    ),
+    "oswald-inter": (
+        ".surname-bg, .fg-firstname, .hero-numeral, .label-ribbon, "
+        ".headline-line { font-family: 'Anton','Bebas Neue',sans-serif !important; "
+        "font-stretch: condensed !important; letter-spacing: 0.02em !important; }\n"
+        ".result-chip .value, .fg-event, .meet-line, .club-line "
+        "{ font-family: 'Inter',sans-serif !important; }"
+    ),
+}
+
+
+def _typography_overrides_css(pair: str) -> str:
+    return _TYPOGRAPHY_OVERRIDES.get((pair or "").lower(), "")
+
+
+# ---------------------------------------------------------------------------
+# Accent decorations — small extra HTML elements layered on top of the
+# canvas to give the brand accent a fresh visual signature without
+# touching the layout structure.
+# ---------------------------------------------------------------------------
+
+def _accent_decoration_html(style: str, accent: str, width: int, height: int,
+                             strength: float = 0.5) -> str:
+    style = (style or "brackets").lower()
+    s = max(0.0, min(1.0, float(strength)))
+    if s <= 0.05 or style == "minimal":
+        return ""
+    # Common helpers
+    weight = max(2, int(min(width, height) * 0.005 * (0.6 + s)))
+    long_side = int(min(width, height) * (0.10 + 0.10 * s))
+    color = accent or "#FFFFFF"
+    if style == "brackets":
+        offset = int(min(width, height) * 0.04)
+        return (
+            f'<div style="position:absolute;left:{offset}px;top:{offset}px;width:{long_side}px;'
+            f'height:{long_side}px;border-top:{weight}px solid {color};border-left:{weight}px solid {color};'
+            f'z-index:11;pointer-events:none;"></div>'
+            f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height*0.07)}px;'
+            f'width:{long_side}px;height:{long_side}px;border-bottom:{weight}px solid {color};'
+            f'border-right:{weight}px solid {color};z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "stripe":
+        band_h = max(6, int(height * 0.012 * (0.6 + s)))
+        top = int(height * 0.46)
+        return (
+            f'<div style="position:absolute;left:0;right:0;top:{top}px;height:{band_h}px;'
+            f'background:linear-gradient(90deg,transparent 0%,{color} 50%,transparent 100%);'
+            f'opacity:0.85;z-index:5;pointer-events:none;"></div>'
+        )
+    if style == "frame":
+        inset = int(min(width, height) * 0.035)
+        return (
+            f'<div style="position:absolute;left:{inset}px;right:{inset}px;top:{inset}px;'
+            f'bottom:{inset}px;border:{weight}px solid {color};opacity:0.55;'
+            f'z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "ribbon":
+        size = int(min(width, height) * 0.20 * (0.6 + s))
+        return (
+            f'<div style="position:absolute;left:-{size//2}px;top:{int(height*0.20)}px;'
+            f'width:{size*2}px;height:{max(20, int(size*0.18))}px;background:{color};'
+            f'transform:rotate(-32deg);transform-origin:left center;opacity:0.85;'
+            f'z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "arrow":
+        size = int(min(width, height) * 0.05 * (0.6 + s))
+        top = int(height * 0.52)
+        return (
+            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{top}px;'
+            f'width:0;height:0;border-left:{size}px solid {color};'
+            f'border-top:{size}px solid transparent;border-bottom:{size}px solid transparent;'
+            f'z-index:11;pointer-events:none;opacity:0.95;"></div>'
+        )
+    if style == "underline":
+        bar_h = max(4, int(height * 0.006 * (0.6 + s)))
+        return (
+            f'<div style="position:absolute;left:{int(width*0.06)}px;right:{int(width*0.40)}px;'
+            f'top:{int(height*0.20)}px;height:{bar_h}px;background:{color};'
+            f'z-index:11;pointer-events:none;"></div>'
+        )
+    if style == "badge":
+        size = int(min(width, height) * 0.085 * (0.6 + s))
+        return (
+            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{int(height*0.32)}px;'
+            f'width:{size}px;height:{size}px;border-radius:50%;background:{color};'
+            f'opacity:0.85;z-index:11;pointer-events:none;'
+            f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
+        )
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Composition override — flip the cutout to left / centre when the brief
+# requests it. The default templates pin .athlete-wrap to right:-40px so
+# all we need to do is inject a CSS override that retargets it.
+# ---------------------------------------------------------------------------
+
+def _composition_overrides_css(composition: str) -> str:
+    c = (composition or "right").lower()
+    if c == "left":
+        return (
+            ".athlete-wrap { left: -40px !important; right: auto !important; "
+            "transform: scaleX(-1); }\n"
+            ".surname-bg.has-photo { right: 0 !important; left: auto !important; "
+            "text-align: right !important; }\n"
+            ".fg-text { left: auto !important; right: 56px !important; "
+            "text-align: right !important; }"
+        )
+    if c == "center":
+        return (
+            ".athlete-wrap { left: 50% !important; right: auto !important; "
+            "transform: translateX(-50%); }\n"
+            ".surname-bg.has-photo { left: 0 !important; right: 0 !important; "
+            "text-align: center !important; }\n"
+            ".fg-text { left: 0 !important; right: 0 !important; "
+            "text-align: center !important; }"
+        )
+    if c == "off-center":
+        return (
+            ".athlete-wrap { right: 12% !important; }\n"
+            ".surname-bg.has-photo { left: -2% !important; }"
+        )
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Photo treatment — apply a CSS filter / wrapper effect to the athlete
+# cutout based on brief.photo_treatment. "no-photo" is handled upstream
+# by the brief generator (image_treatment phrase), but we still set the
+# CSS in case the cutout slipped through.
+# ---------------------------------------------------------------------------
+
+def _photo_treatment_css(treatment: str, palette: dict) -> str:
+    t = (treatment or "cutout").lower()
+    accent = palette.get("accent", "#FFFFFF")
+    if t == "vignette":
+        return (
+            ".athlete-cutout { filter: drop-shadow(0 0 36px rgba(0,0,0,0.55)) "
+            "drop-shadow(0 0 14px rgba(0,0,0,0.40)); }"
+        )
+    if t == "duotone":
+        return (
+            ".athlete-cutout { filter: grayscale(1) contrast(1.10) brightness(0.96) "
+            f"sepia(0.30); }}\n.athlete-cutout {{ mix-blend-mode: luminosity; opacity: 0.92; }}"
+        )
+    if t == "halftone":
+        return (
+            ".athlete-cutout { filter: grayscale(0.45) contrast(1.18) brightness(0.96); }"
+        )
+    if t == "frame":
+        return (
+            ".athlete-wrap { border-left: 4px solid " + accent + "; "
+            "padding-left: 6px; box-sizing: border-box; }"
+        )
+    return ""
+
+
 # ----- Athlete cutout pipeline ---------------------------------------------
 
 def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default") -> Path:
@@ -591,12 +934,48 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
     except Exception:
         ai_bg_uri = None
 
+    # ---- Variation axes (V9 overhaul) ----
+    # The brief now carries multi-axis variation: background_style picks the
+    # canvas pattern, typography_pair rebinds the headline/body fonts,
+    # composition flips the cutout L/R/C, accent_style draws decorations,
+    # and photo_treatment applies CSS filters to the cutout. The choices
+    # ride on top of base_css via a single override <style> block + a
+    # decoration overlay placeholder. Everything degrades to the legacy
+    # look when a brief comes in with the default values.
+    bg_style = getattr(brief, "background_style", None) or "water"
+    accent_style = getattr(brief, "accent_style", None) or "brackets"
+    type_pair = getattr(brief, "typography_pair", None) or "anton-inter"
+    composition = getattr(brief, "composition", None) or "right"
+    photo_treatment = getattr(brief, "photo_treatment", None) or "cutout"
+    decoration_strength = float(getattr(brief, "decoration_strength", 0.5) or 0.5)
+
+    variation_css_blocks: list[str] = []
+    type_css = _typography_overrides_css(type_pair)
+    if type_css:
+        variation_css_blocks.append(type_css)
+    comp_css = _composition_overrides_css(composition)
+    if comp_css:
+        variation_css_blocks.append(comp_css)
+    photo_css = _photo_treatment_css(photo_treatment, {"accent": accent})
+    if photo_css:
+        variation_css_blocks.append(photo_css)
+
+    # Inline the variation overrides at the end of the base CSS so they
+    # win the cascade (they all use !important too).
+    if variation_css_blocks:
+        base_css = base_css + "\n\n/* --- variation overrides --- */\n" + "\n".join(variation_css_blocks)
+
+    accent_overlay_html = _accent_decoration_html(
+        accent_style, accent, width, height, decoration_strength,
+    )
+
     return {
         "WIDTH": str(width), "HEIGHT": str(height),
         "PRIMARY": primary, "PRIMARY_DEEP": primary_deep,
         "SECONDARY": secondary, "ACCENT": accent,
         "BASE_CSS": base_css,
-        "WATER_PATTERN": _water_pattern_data_uri(),
+        "WATER_PATTERN": _background_pattern_for(bg_style),
+        "ACCENT_DECORATION": accent_overlay_html,
         "NOISE_PATTERN": _noise_pattern_data_uri(),
         "AI_BG_URI": ai_bg_uri or "",
         "ATHLETE_FULL_NAME": html_escape(full_name),
@@ -1253,6 +1632,43 @@ def render_brief(
     # Replace any unfilled placeholders to avoid raw {{X}} in output
     import re as _re
     html = _re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
+
+    # Inject the accent decoration overlay (V9 variation overhaul). It sits
+    # inside the .canvas so it inherits the same stacking context as the
+    # rest of the layout. We insert it before the closing </div> of the
+    # .canvas wrapper; if we can't find it cleanly we fall back to just
+    # before </body>.
+    accent_html = repl.get("ACCENT_DECORATION") or ""
+    if accent_html:
+        # Find the canvas's closing </div> using the same depth-walk the
+        # grain injector below uses.
+        canvas_marker = '<div class="canvas'
+        idx = html.find(canvas_marker)
+        if idx != -1:
+            search_from = html.find('>', idx) + 1
+            depth = 1
+            i = search_from
+            close_at = -1
+            while i < len(html) and depth > 0:
+                next_open = html.find('<div', i)
+                next_close = html.find('</div>', i)
+                if next_close == -1:
+                    break
+                if next_open != -1 and next_open < next_close:
+                    depth += 1
+                    i = html.find('>', next_open) + 1
+                else:
+                    depth -= 1
+                    if depth == 0:
+                        close_at = next_close
+                        break
+                    i = next_close + len('</div>')
+            if close_at != -1:
+                html = html[:close_at] + accent_html + html[close_at:]
+            else:
+                html = html.replace("</body>", accent_html + "</body>", 1)
+        else:
+            html = html.replace("</body>", accent_html + "</body>", 1)
 
     # Inject the grain SVG <filter> right after <body> so layouts that
     # opt in via class="texture-grain" get the filter resolved. Strip
