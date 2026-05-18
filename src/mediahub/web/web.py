@@ -42,7 +42,7 @@ from typing import Any, Dict, Optional
 
 from flask import (
     Flask, request, redirect, url_for, render_template_string,
-    jsonify, abort, send_file, Response, session, make_response,
+    jsonify, abort, send_file, send_from_directory, Response, session, make_response,
 )
 from markupsafe import escape as _h
 
@@ -10660,6 +10660,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         governing_body = (prof.governing_body if prof else "")
         website_url = (prof.brand_source_url if prof else "")
         social = dict(prof.social_links) if prof and prof.social_links else {}
+        brand_logos = list(prof.brand_logos) if prof and prof.brand_logos else []
+        mandatory_rules = list(prof.brand_guidelines_mandatory_rules) if prof and prof.brand_guidelines_mandatory_rules else []
+        link_state = dict(prof.link_capture_state) if prof and prof.link_capture_state else {}
+
+        from mediahub.web._countries import COUNTRIES
+        # JSON-safe array literal for inlining into the combobox JS.
+        # Each country is HTML-escaped because the same string is also
+        # rendered into list-item innerHTML below.
+        _countries_js_array = "[" + ",".join(
+            '"' + c.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for c in COUNTRIES
+        ) + "]"
 
         # --- Preview block (only when the AI has already run once) ---
         preview_html = ""
@@ -10711,6 +10723,71 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             ("tiktok",    "TikTok",     "https://tiktok.com/@your-club"),
             ("linkedin",  "LinkedIn",   "https://linkedin.com/company/your-club"),
         ]
+        # ---- Logo thumbnail grid (D1) — render existing logos with rename/delete
+        from mediahub.brand.logos import MAX_LOGOS_PER_PROFILE as _LOGO_LIMIT
+        _logos_grid_html = ""
+        if brand_logos:
+            cards = []
+            for logo in brand_logos:
+                lid = _h(logo.get("logo_id", ""))
+                label = logo.get("label") or logo.get("original_filename") or "logo"
+                desc = (logo.get("ai_description") or "").strip()
+                mime = logo.get("mime") or ""
+                # Server route exposes the actual file
+                serve_url = url_for("organisation_setup_logo_serve",
+                                    logo_id=logo.get("logo_id", ""))
+                delete_url = url_for("organisation_setup_logo_delete",
+                                     logo_id=logo.get("logo_id", ""))
+                preview = ""
+                if mime.startswith("image/"):
+                    preview = (
+                        f'<img src="{_h(serve_url)}" alt="{_h(label)}" '
+                        'style="display:block;max-width:100%;max-height:96px;'
+                        'object-fit:contain;background:#ffffff;border-radius:4px"/>'
+                    )
+                else:
+                    preview = (
+                        '<div style="display:flex;align-items:center;justify-content:center;'
+                        'height:96px;background:rgba(245,242,232,0.04);border-radius:4px;'
+                        'font-family:var(--font-mono,monospace);font-size:11px;'
+                        f'color:var(--ink-muted,#7A7869)">{_h(mime.split("/")[-1] or "FILE")}</div>'
+                    )
+                colours = logo.get("ai_dominant_colours") or []
+                colour_swatches = "".join(
+                    f'<span title="{_h(c)}" style="display:inline-block;'
+                    f'width:14px;height:14px;border-radius:2px;'
+                    f'background:{_h(c)};border:1px solid rgba(255,255,255,0.15);'
+                    f'vertical-align:middle;margin-right:3px"></span>'
+                    for c in colours[:4]
+                )
+                cards.append(
+                    '<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
+                    'border:1px solid var(--chrome,var(--border));border-radius:6px;'
+                    f'padding:10px;display:flex;flex-direction:column;gap:8px">'
+                    f'{preview}'
+                    f'<div style="font-size:12px;font-weight:600;color:var(--ink);'
+                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
+                    f'title="{_h(logo.get("original_filename", ""))}">{_h(label)}</div>'
+                    + (f'<div class="muted" style="font-size:11px;line-height:1.3" '
+                       f'title="{_h(desc)}">{_h(desc[:120])}</div>' if desc else "")
+                    + (f'<div>{colour_swatches}</div>' if colour_swatches else "")
+                    + '<form method="POST" action="' + _h(delete_url) + '" data-no-loader="1" '
+                      'onsubmit="return confirm(\'Delete this logo?\')">'
+                      '<button type="submit" style="font-size:11px;padding:5px 9px;'
+                      'background:transparent;border:1px solid rgba(255,107,107,0.3);'
+                      'color:#FF6B6B;border-radius:4px;cursor:pointer;'
+                      'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                      'letter-spacing:0.10em">Delete</button>'
+                      '</form>'
+                    '</div>'
+                )
+            _logos_grid_html = (
+                '<div style="margin-top:14px;display:grid;'
+                'grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">'
+                + "".join(cards) +
+                '</div>'
+            )
+
         # Existing guidelines status (when the user has already uploaded once)
         _gl_status_html = ""
         if prof and prof.brand_guidelines_filename:
@@ -10720,6 +10797,38 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             n_dos = len(g.get("tone_dos") or [])
             n_donts = len(g.get("tone_donts") or [])
             n_prohib = len(g.get("prohibited_words") or [])
+            # Surface mandatory rules — the user explicitly asked to see
+            # which "MUST follow" statements the AI extracted, so they
+            # can sanity-check the engine isn't silently dropping them.
+            rules = list(mandatory_rules)
+            rules_html = ""
+            if rules:
+                rule_chips = "".join(
+                    '<li style="padding:6px 10px;margin:4px 4px 0 0;'
+                    'display:inline-block;border-radius:4px;'
+                    'background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);'
+                    f'color:var(--ink);font-size:11.5px;line-height:1.35;max-width:100%">'
+                    f'<strong style="color:var(--lane,var(--accent))">MUST</strong> &middot; {_h(r[:240])}'
+                    '</li>'
+                    for r in rules[:12]
+                )
+                more = ""
+                if len(rules) > 12:
+                    more = f'<div class="muted" style="font-size:11px;margin-top:4px">…and {len(rules) - 12} more.</div>'
+                rules_html = (
+                    '<div style="margin-top:10px">'
+                    '<div style="font-size:11.5px;color:var(--ink);font-weight:600;'
+                    'letter-spacing:0.02em;margin-bottom:4px">'
+                    f'Non-negotiable rules the AI extracted ({len(rules)})'
+                    '</div>'
+                    f'<ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap">{rule_chips}</ul>'
+                    + more +
+                    '<div class="muted" style="font-size:11px;margin-top:6px">'
+                    'These are surfaced at the TOP of every system prompt with explicit '
+                    'override framing &mdash; they will be respected on every generated caption.'
+                    '</div>'
+                    '</div>'
+                )
             _gl_status_html = (
                 '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
                 'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
@@ -10730,6 +10839,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
                 f'{n_dos} do{"s" if n_dos != 1 else ""}, {n_donts} don\'t{"s" if n_donts != 1 else ""}, '
                 f'{n_prohib} prohibited word{"s" if n_prohib != 1 else ""}.</div>'
+                + rules_html +
                 '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
                 '</div>'
             )
@@ -10777,7 +10887,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 {preview_html}
 
-<form method="POST" action="{capture_url}" enctype="multipart/form-data">
+<form method="POST" action="{capture_url}" enctype="multipart/form-data"
+      data-loader-text="Teaching the AI about your organisation"
+      data-loader-sub="Reading links, learning scraping strategies, interpreting guidelines, describing logos. This takes 10&ndash;30 seconds.">
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0;font-size:18px">Identity</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
@@ -10795,13 +10907,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       </label>
       <select name="org_type" style="{_input_style}">{org_type_opts}</select>
     </div>
-    <div>
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+    <div class="mh-combobox" data-mh-combobox="country">
+      <label for="country-input" style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
         Country
       </label>
-      <input type="text" name="country" value="{_h(country)}"
-             placeholder="e.g. United Kingdom"
+      <input id="country-input" type="text" name="country" value="{_h(country)}"
+             placeholder="Start typing your country…"
+             autocomplete="off" spellcheck="false"
+             role="combobox" aria-autocomplete="list"
+             aria-controls="country-options" aria-expanded="false"
              style="{_input_style}"/>
+      <ul id="country-options" role="listbox" class="mh-combobox-options" hidden></ul>
     </div>
     <div>
       <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
@@ -10853,6 +10969,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_gl_status_html}
 </div>
 
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">
+    Logos
+    <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional, multiple)</span>
+  </h2>
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
+    Drop in every logo variant your club has &mdash; full-colour, mono,
+    wordmark, icon. PNG, JPG, SVG, WEBP, PDF, EPS, AI all accepted.
+    The AI describes each one so motion graphics, story cards, and
+    sponsor posts pick the right variant automatically (e.g. white
+    mono on dark backgrounds, the icon when the layout is square).
+  </p>
+  <label for="logos-input" id="logos-drop-zone" class="mh-drop-zone">
+    <div class="mh-drop-zone-inner">
+      <strong>Click to choose</strong> or drag files here
+      <div class="muted" style="font-size:11px;margin-top:4px">
+        Up to {_LOGO_LIMIT} files &middot; 20 MB each
+      </div>
+    </div>
+  </label>
+  <input id="logos-input" type="file" name="brand_logos" multiple
+         accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/tiff,application/pdf,application/postscript,.png,.jpg,.jpeg,.webp,.svg,.gif,.tiff,.tif,.pdf,.eps,.ai"
+         style="display:none"/>
+  <div id="logos-pending" class="muted" style="font-size:11px;margin-top:8px"></div>
+  {_logos_grid_html}
+</div>
+
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px">
   <button type="submit" class="btn">Build my brand &rarr;</button>
   <span class="muted" style="font-size:12px">
@@ -10861,6 +11004,244 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </div>
 </form>
 </div>
+
+<style>
+.mh-combobox {{ position: relative; }}
+.mh-combobox-options {{
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome, var(--border, rgba(245,242,232,0.14)));
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45);
+  z-index: 60;
+}}
+.mh-combobox-options li {{
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--ink, #F5F2E8);
+  cursor: pointer;
+  line-height: 1.3;
+}}
+.mh-combobox-options li:hover,
+.mh-combobox-options li.mh-combobox-active {{
+  background: rgba(212,255,58,0.10);
+  color: var(--lane, var(--accent, #D4FF3A));
+}}
+.mh-combobox-options li.mh-combobox-empty {{
+  color: var(--ink-muted, var(--ink-dim, #7A7869));
+  font-style: italic;
+  cursor: default;
+}}
+.mh-combobox-options li.mh-combobox-empty:hover {{
+  background: transparent;
+  color: var(--ink-muted, var(--ink-dim, #7A7869));
+}}
+
+.mh-drop-zone {{
+  display: block;
+  border: 1px dashed var(--chrome, var(--border, rgba(245,242,232,0.30)));
+  border-radius: 8px;
+  padding: 22px;
+  text-align: center;
+  cursor: pointer;
+  background:
+    repeating-linear-gradient(45deg, rgba(212,255,58,0.02) 0 10px,
+                              transparent 10px 20px),
+    var(--surface, var(--panel, #14171F));
+  color: var(--ink-dim, var(--ink-muted, #B6B2A6));
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}}
+.mh-drop-zone:hover {{
+  border-color: var(--lane, var(--accent, #D4FF3A));
+  color: var(--ink, #F5F2E8);
+}}
+.mh-drop-zone.is-dragover {{
+  border-color: var(--lane, var(--accent, #D4FF3A));
+  background: rgba(212,255,58,0.06);
+  color: var(--ink, #F5F2E8);
+}}
+.mh-drop-zone-inner strong {{ color: var(--ink, #F5F2E8); font-weight: 600; }}
+
+.mh-logo-card {{
+  transition: transform 150ms ease, border-color 150ms ease;
+}}
+.mh-logo-card:hover {{
+  transform: translateY(-1px);
+  border-color: var(--lane, var(--accent, #D4FF3A));
+}}
+</style>
+<script>
+(function() {{
+  var COUNTRIES = {_countries_js_array};
+  var MAX_RENDER = 250;
+
+  function escapeHTML(s) {{
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }}
+
+  document.querySelectorAll('[data-mh-combobox="country"]').forEach(function(box) {{
+    var input = box.querySelector('input[name="country"]');
+    var listEl = box.querySelector('.mh-combobox-options');
+    if (!input || !listEl) return;
+    var activeIdx = -1;
+
+    function render(filter) {{
+      var q = (filter || '').trim().toLowerCase();
+      var matches;
+      if (!q) {{
+        matches = COUNTRIES.slice();
+      }} else {{
+        matches = COUNTRIES.filter(function(c) {{
+          return c.toLowerCase().indexOf(q) !== -1;
+        }});
+        matches.sort(function(a, b) {{
+          var ap = a.toLowerCase().indexOf(q);
+          var bp = b.toLowerCase().indexOf(q);
+          if (ap !== bp) return ap - bp;
+          return a.localeCompare(b);
+        }});
+      }}
+      if (matches.length === 0) {{
+        listEl.innerHTML = '<li class="mh-combobox-empty" role="option" aria-disabled="true">No matches — type a different country.</li>';
+      }} else {{
+        listEl.innerHTML = matches.slice(0, MAX_RENDER).map(function(c) {{
+          var esc = escapeHTML(c);
+          return '<li role="option" data-value="' + esc + '" tabindex="-1">' + esc + '</li>';
+        }}).join('');
+      }}
+      listEl.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      activeIdx = -1;
+    }}
+
+    function close() {{
+      listEl.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      activeIdx = -1;
+    }}
+
+    function pick(value) {{
+      input.value = value;
+      close();
+      input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    }}
+
+    function updateActive() {{
+      var items = listEl.querySelectorAll('li[role="option"]:not([aria-disabled="true"])');
+      items.forEach(function(it, i) {{
+        if (i === activeIdx) {{
+          it.classList.add('mh-combobox-active');
+          it.scrollIntoView({{ block: 'nearest' }});
+        }} else {{
+          it.classList.remove('mh-combobox-active');
+        }}
+      }});
+    }}
+
+    input.addEventListener('input', function() {{ render(input.value); }});
+    input.addEventListener('focus', function() {{ render(input.value); }});
+    input.addEventListener('blur', function() {{
+      // small delay so a click on a <li> registers before we hide
+      setTimeout(close, 160);
+    }});
+
+    input.addEventListener('keydown', function(e) {{
+      var items = listEl.querySelectorAll('li[role="option"]:not([aria-disabled="true"])');
+      if (e.key === 'ArrowDown') {{
+        e.preventDefault();
+        if (listEl.hidden) {{ render(input.value); return; }}
+        if (items.length === 0) return;
+        activeIdx = (activeIdx + 1) % items.length;
+        updateActive();
+      }} else if (e.key === 'ArrowUp') {{
+        e.preventDefault();
+        if (listEl.hidden) {{ render(input.value); return; }}
+        if (items.length === 0) return;
+        activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
+        updateActive();
+      }} else if (e.key === 'Enter') {{
+        if (!listEl.hidden && activeIdx >= 0 && items[activeIdx]) {{
+          e.preventDefault();
+          pick(items[activeIdx].getAttribute('data-value'));
+        }}
+      }} else if (e.key === 'Escape') {{
+        if (!listEl.hidden) {{
+          e.preventDefault();
+          close();
+        }}
+      }} else if (e.key === 'Tab') {{
+        close();
+      }}
+    }});
+
+    listEl.addEventListener('mousedown', function(e) {{
+      var li = e.target.closest('li[role="option"]');
+      if (!li || li.getAttribute('aria-disabled') === 'true') return;
+      e.preventDefault(); // keep focus on the input
+      pick(li.getAttribute('data-value'));
+    }});
+  }});
+}})();
+
+(function () {{
+  // ---- Multi-logo drag-and-drop (D1) ----
+  var dropZone = document.getElementById('logos-drop-zone');
+  var fileInput = document.getElementById('logos-input');
+  var pending = document.getElementById('logos-pending');
+  if (!dropZone || !fileInput || !pending) return;
+
+  function showPending() {{
+    if (!fileInput.files || !fileInput.files.length) {{
+      pending.textContent = '';
+      return;
+    }}
+    var names = [];
+    for (var i = 0; i < fileInput.files.length; i++) {{
+      names.push(fileInput.files[i].name);
+    }}
+    pending.textContent = names.length + ' file' + (names.length === 1 ? '' : 's')
+                          + ' ready to upload: ' + names.join(', ');
+  }}
+
+  fileInput.addEventListener('change', showPending);
+
+  ['dragenter', 'dragover'].forEach(function (ev) {{
+    dropZone.addEventListener(ev, function (e) {{
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add('is-dragover');
+    }});
+  }});
+
+  ['dragleave', 'drop'].forEach(function (ev) {{
+    dropZone.addEventListener(ev, function (e) {{
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove('is-dragover');
+    }});
+  }});
+
+  dropZone.addEventListener('drop', function (e) {{
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    // Replace the input's file list with the dropped files.
+    var dt = new DataTransfer();
+    for (var i = 0; i < e.dataTransfer.files.length; i++) {{
+      dt.items.add(e.dataTransfer.files[i]);
+    }}
+    fileInput.files = dt.files;
+    showPending();
+  }});
+}})();
+</script>
 """
         return _layout("Set up your organisation", body, active="organisation")
 
@@ -10894,7 +11275,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         prof.display_name = display_name
         prof.org_type = (request.form.get("org_type") or "other").strip()
-        prof.country = (request.form.get("country") or "").strip()
+        raw_country = (request.form.get("country") or "").strip()
+        if raw_country:
+            from mediahub.web._countries import COUNTRIES
+            # Case-insensitive canonicalisation — if the user typed
+            # "united kingdom" the combobox will already have offered the
+            # canonical "United Kingdom", but defending in depth in case
+            # someone bypasses the dropdown (paste, autofill, JS off).
+            canon = next(
+                (c for c in COUNTRIES if c.casefold() == raw_country.casefold()),
+                None,
+            )
+            prof.country = canon or raw_country
+        else:
+            prof.country = ""
         prof.governing_body = (request.form.get("governing_body") or "").strip()
 
         website_url = (request.form.get("website_url") or "").strip()
@@ -10935,6 +11329,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 prof.brand_primary = pal["primary"]
             if pal.get("secondary") and prof.brand_secondary in ("", "#000000"):
                 prof.brand_secondary = pal["secondary"]
+            # Per-link audit state for the next-page transfer audits
+            # (E6-E8): the user wants to be able to see, for each link,
+            # what the AI extracted, which playbook served it, and
+            # whether drift detection regenerated the strategy.
+            lcs = result.get("link_capture_state") or {}
+            if isinstance(lcs, dict):
+                prof.link_capture_state = lcs
         elif status == "no_sources":
             # User submitted no links at all — keep the identity fields
             # and let them try again. The gate will keep them here until
@@ -11001,6 +11402,43 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 for k, v in g_payload.items():
                     setattr(prof, k, v)
 
+        # ---- Multi-logo upload (D1) -----------------------------------
+        # Accept any number of files under name="brand_logos". Each is
+        # persisted under data/club_logos/<profile_id>/ and a metadata
+        # dict appended to prof.brand_logos. AI vision (if available)
+        # produces a short description + dominant-colour swatches so
+        # downstream image/motion generators can pick the right variant.
+        logo_uploads = request.files.getlist("brand_logos")
+        if logo_uploads:
+            from mediahub.brand import logos as _logos_mod
+            current_logos = list(prof.brand_logos or [])
+            for upload in logo_uploads:
+                if not upload or not upload.filename:
+                    continue
+                try:
+                    raw = upload.read() or b""
+                except Exception:
+                    continue
+                if not raw:
+                    continue
+                try:
+                    meta = _logos_mod.store_logo(
+                        profile_id=prof.profile_id,
+                        filename=upload.filename,
+                        file_bytes=raw,
+                        existing_logos=current_logos,
+                    )
+                except ValueError as e:
+                    # Surface the problem on the next render without
+                    # blocking the rest of the save.
+                    log.info("logo rejected: %s", e)
+                    continue
+                except Exception as e:
+                    log.warning("logo store failed: %s", e)
+                    continue
+                current_logos.append(meta)
+            prof.brand_logos = current_logos
+
         # ---- AI-derive operating profile from the assembled context ----
         # One LLM call here means zero LLM calls per page render. The
         # derived dict carries the org-specific tone prose, ranking
@@ -11020,6 +11458,42 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         save_profile(prof)
         session["active_profile_id"] = prof.profile_id
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/organisation/setup/logo/<logo_id>", methods=["GET"])
+    def organisation_setup_logo_serve(logo_id):
+        """Serve a logo file. Logos are namespaced per profile to
+        prevent IDOR — a request only returns the file if it belongs
+        to the active session's profile.
+        """
+        prof = _active_profile()
+        if not prof:
+            return ("", 404)
+        from mediahub.brand.logos import resolve_logo_path
+        path = resolve_logo_path(prof.profile_id, logo_id)
+        if not path:
+            return ("", 404)
+        # send_from_directory is the safe primitive — it refuses path
+        # traversal automatically.
+        return send_from_directory(path.parent, path.name)
+
+    @app.route("/organisation/setup/logo/<logo_id>/delete", methods=["POST"])
+    def organisation_setup_logo_delete(logo_id):
+        """Remove a logo from the active profile's brand_logos list AND
+        delete the on-disk file. Same IDOR guard as the serve route."""
+        prof = _active_profile()
+        if not prof:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.brand.logos import delete_logo as _del
+        # Defensively match the entry by id before unlinking.
+        remaining = [
+            entry for entry in (prof.brand_logos or [])
+            if isinstance(entry, dict) and entry.get("logo_id") != logo_id
+        ]
+        if len(remaining) != len(prof.brand_logos or []):
+            _del(prof.profile_id, logo_id)
+            prof.brand_logos = remaining
+            save_profile(prof)
         return redirect(url_for("organisation_setup"))
 
     @app.route("/api/organisation/active", methods=["GET", "POST"])

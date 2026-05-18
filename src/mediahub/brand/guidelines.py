@@ -332,6 +332,148 @@ _LLM_SYSTEM = (
     "If a section is missing leave the corresponding key empty."
 )
 
+# Second LLM pass dedicated to surfacing non-negotiable rules verbatim.
+# Bug reported by the user: rules like "the strapline MUST always
+# appear in the caption" were being soft-interpreted by the primary pass
+# as a generic `tone_dos` item and then drowned out by website-derived
+# voice signals at generation time. This pass isolates anything that
+# reads as a hard constraint and stores it verbatim so brand.context can
+# surface it at the top of every system prompt with explicit override
+# framing.
+_MANDATORY_RULES_LLM_SYSTEM = (
+    "You read brand guideline documents and surface ONLY the "
+    "non-negotiable rules — the things the document literally states "
+    "must always happen or must never happen. You preserve the user's "
+    "wording. You do not interpret, soften, generalise, or expand. If a "
+    "sentence reads as a preference or a suggestion, ignore it. If it "
+    "reads as a hard rule (MUST, NEVER, ALWAYS, REQUIRED, SHALL, "
+    "MANDATORY, FORBIDDEN, do not, never, only) — preserve it."
+)
+
+
+def _build_mandatory_rules_prompt(text: str) -> str:
+    excerpt = text if len(text) <= 30_000 else text[:30_000] + "\n[... truncated ...]"
+    return (
+        "Here is the brand-guidelines document text:\n\n"
+        "===== BEGIN DOCUMENT =====\n"
+        f"{excerpt}\n"
+        "===== END DOCUMENT =====\n\n"
+        "Scan the document and extract every rule the organisation "
+        "literally states is non-negotiable. Look for words like MUST, "
+        "NEVER, ALWAYS, REQUIRED, SHALL, MANDATORY, FORBIDDEN, "
+        "PROHIBITED, \"do not\", \"never\", \"only\", and any rule "
+        "stated in equivalent force (e.g. \"the strapline appears on "
+        "every caption\" is mandatory even without MUST).\n\n"
+        "Return a SINGLE JSON object with EXACTLY one key:\n"
+        "  mandatory_rules: array of strings — each entry is one rule, "
+        "quoted as close to the document's own wording as possible "
+        "(rephrase only if the source sentence is impractically long; "
+        "preserve the imperative force). Up to 25 rules. If the "
+        "document contains no non-negotiable rules, return an empty "
+        "array.\n\n"
+        "Do NOT include preferences, suggestions, examples, or things "
+        "the document says are recommendations. Only hard rules."
+    )
+
+
+def _normalise_mandatory_rules(raw: object) -> list[str]:
+    """Coerce the LLM's response into a clean list[str]. Accept either
+    a list directly or a dict with `mandatory_rules`."""
+    if isinstance(raw, dict):
+        items = raw.get("mandatory_rules")
+    else:
+        items = raw
+    if not isinstance(items, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        s = item.strip()
+        if not s:
+            continue
+        # Strip surrounding quotes the LLM sometimes adds.
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            s = s[1:-1].strip()
+        if not s:
+            continue
+        s = s[:600]
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+        if len(out) >= 25:
+            break
+    return out
+
+
+_MANDATORY_REGEX_HINTS = (
+    r"\bMUST\b", r"\bNEVER\b", r"\bALWAYS\b", r"\bREQUIRED\b",
+    r"\bSHALL\b", r"\bMANDATORY\b", r"\bFORBIDDEN\b", r"\bPROHIBITED\b",
+    r"\bdo not\b", r"\bnever\b", r"\bonly\b",
+)
+
+
+def _heuristic_mandatory_rules(text: str) -> list[str]:
+    """Fallback when no LLM is available: pull every sentence containing
+    a mandatory-force keyword. Better than nothing — the user's literal
+    'MUST always include the hashtag #X' will still reach the system
+    prompt verbatim even on offline deployments.
+    """
+    if not text:
+        return []
+    pattern = re.compile("|".join(_MANDATORY_REGEX_HINTS), re.IGNORECASE)
+    # Split on sentence boundaries (rough — we want to keep the verbatim
+    # wording so heavy NLP would hurt fidelity).
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", text)
+    out: list[str] = []
+    seen: set[str] = set()
+    for s in sentences:
+        s = s.strip()
+        if not s or len(s) < 8 or len(s) > 600:
+            continue
+        if not pattern.search(s):
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+        if len(out) >= 25:
+            break
+    return out
+
+
+def extract_mandatory_rules(text: str) -> list[str]:
+    """Pull verbatim non-negotiable rules out of a brand-guidelines
+    text. LLM path preferred; falls back to a keyword-scanning
+    heuristic when no LLM is available. Never raises.
+    """
+    if not text or not text.strip():
+        return []
+    try:
+        from mediahub.media_ai.llm import generate_json, is_available
+    except Exception:
+        return _heuristic_mandatory_rules(text)
+    if not is_available():
+        return _heuristic_mandatory_rules(text)
+    prompt = _build_mandatory_rules_prompt(text)
+    try:
+        raw = generate_json(prompt, system=_MANDATORY_RULES_LLM_SYSTEM,
+                             max_tokens=1_800, fallback={})
+    except Exception as e:
+        log.debug("mandatory-rules LLM call failed: %s", e)
+        return _heuristic_mandatory_rules(text)
+    rules = _normalise_mandatory_rules(raw)
+    if not rules:
+        # Fall back so a quiet LLM doesn't silently drop the user's
+        # hard rules. The heuristic is conservative; if it also finds
+        # nothing the document genuinely had no hard rules.
+        return _heuristic_mandatory_rules(text)
+    return rules
+
 
 def _build_prompt(text: str) -> str:
     excerpt = text if len(text) <= 30_000 else text[:30_000] + "\n[... truncated ...]"
@@ -517,13 +659,14 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
 
     Returns:
         {
-          "brand_guidelines": dict,             # structured AI output
-          "brand_guidelines_raw_excerpt": str,  # first ~6 KB of text
+          "brand_guidelines": dict,                       # structured AI output
+          "brand_guidelines_raw_excerpt": str,            # first ~6 KB of text
           "brand_guidelines_filename": str,
-          "brand_guidelines_uploaded_at": str,  # ISO timestamp
-          "brand_guidelines_status": str,       # "ok"|"ok_heuristic"|"empty"|"too_large"|"unsupported"
+          "brand_guidelines_uploaded_at": str,            # ISO timestamp
+          "brand_guidelines_status": str,                 # "ok"|"ok_heuristic"|"empty"|"too_large"|"unsupported"
           "brand_guidelines_extractor": str,
           "brand_guidelines_byte_size": int,
+          "brand_guidelines_mandatory_rules": list[str],  # MUST/NEVER/ALWAYS rules, verbatim
         }
     Never raises.
     """
@@ -536,6 +679,7 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
         "brand_guidelines_status": ex["status"],
         "brand_guidelines_extractor": ex["extractor"],
         "brand_guidelines_byte_size": ex["byte_size"],
+        "brand_guidelines_mandatory_rules": [],
     }
     if ex["status"] != "ok":
         return payload
@@ -543,11 +687,15 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
     payload["brand_guidelines"] = interp
     payload["brand_guidelines_status"] = interp.get("status", "ok")
     payload["brand_guidelines_raw_excerpt"] = ex["text"][:_RAW_EXCERPT_CHARS]
+    # Second dedicated pass: surface non-negotiable rules verbatim so
+    # downstream content generators can put them above everything else.
+    payload["brand_guidelines_mandatory_rules"] = extract_mandatory_rules(ex["text"])
     return payload
 
 
 __all__ = [
     "extract_text",
     "interpret_guidelines",
+    "extract_mandatory_rules",
     "ingest_guidelines_file",
 ]

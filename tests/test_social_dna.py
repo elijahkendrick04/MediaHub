@@ -1,294 +1,242 @@
-"""tests/test_social_dna.py — first-run AI brand DNA capture from social links.
+"""tests/test_social_dna.py — capture_from_socials() public API.
 
-Covers the three concerns the user cares about:
-  1. The interpretation layer is LLM-driven — when an LLM is mocked, its
-     output is what shapes the returned brand profile (not regex
-     heuristics on the URL).
-  2. Graceful degradation — auth-walled / blocked / 4xx / network-failed
-     links are recorded in social_links_status but never blow up the
-     pipeline. When at least one source returns something readable, the
-     analyser still produces a profile.
-  3. The fetched payload (titles, descriptions, candidate captions,
-     hashtags) is what gets passed to the LLM — i.e. the AI engine
-     actually sees the content from the user's links, not just the URL.
+The internals of capture_from_socials() were rewritten to delegate to
+the AI-driven link_handlers / link_learners pipeline. This file now
+covers the mapping concern only:
+
+  - the returned dict has the legacy ClubProfile-friendly shape
+  - link_capture_state is surfaced for the next-page audits
+  - graceful no_sources / fetch_failed_all handling
+  - cache round-trip
+
+End-to-end orchestration (drift detection, learner dispatch, etc.) is
+covered in tests/test_link_handlers.py.
 """
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-from mediahub.brand import social_dna  # noqa: E402
+from mediahub.brand import social_dna, link_handlers  # noqa: E402
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def isolated_cache(tmp_path, monkeypatch):
-    """Redirect the social_dna cache dir under tmp_path so tests can't
-    pick up stale cache hits from another test run."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     yield tmp_path
 
 
-def _stub_fetch(responses: dict[str, tuple[str | None, int]]):
-    """Return a fake ``_fetch`` that serves canned HTML per-URL."""
-    def fake_fetch(url: str):
-        return responses.get(url, (None, 0))
-    return fake_fetch
+# ---------------------------------------------------------------------------
+# 1. No-sources case
+# ---------------------------------------------------------------------------
+
+def test_no_sources_returns_no_sources_status(isolated_cache):
+    out = social_dna.capture_from_socials(social_links={}, website_url="")
+    assert out["brand_capture_status"] == "no_sources"
+    assert out["brand_voice_summary"] == ""
+    assert out["brand_keywords"] == []
 
 
 # ---------------------------------------------------------------------------
-# 1. LLM-driven interpretation
+# 2. Successful capture maps merged_dna into ClubProfile fields
 # ---------------------------------------------------------------------------
 
-class TestLlmDrivenInterpretation:
-    """Whatever the LLM returns shapes the brand profile — there is no
-    fallback URL-pattern matching for voice."""
-
-    def test_llm_output_populates_voice_fields(self, isolated_cache, monkeypatch):
-        responses = {
-            "https://city-aquatics.example": (
-                "<html><head><title>City Aquatics</title>"
-                "<meta name='description' content='Inclusive community swimming for all ages'/>"
-                "<meta name='theme-color' content='#0066CC'/>"
-                "<style>.brand{color:#0066CC} .accent{background:#F2A900}</style>"
-                "</head><body><h1>City Aquatics</h1>"
-                "<p>Big PB for the squad this weekend. #ClubLife</p>"
-                "<p>What a meet — five PBs and a county standard. #Swimming</p>"
-                "</body></html>",
-                200,
-            ),
-            "https://instagram.com/city-aquatics": (
-                "<html><head><title>City Aquatics (@city.aquatics) · Instagram</title>"
-                "<meta property='og:description' content='Inclusive club. We celebrate every effort. #ClubLife'/>"
-                "</head><body><p>Massive shout out to the junior squad #PBseason</p></body></html>",
-                200,
-            ),
-        }
-        monkeypatch.setattr(social_dna, "_fetch", _stub_fetch(responses))
-
-        mock_llm_output = {
-            "voice_summary": "An inclusive community swimming club that celebrates every effort, with a warm and encouraging tone.",
-            "keywords": ["inclusive", "community", "swimming", "PBs", "junior squad"],
-            "phrases_to_use": ["Big PB for the squad", "What a meet"],
-            "phrases_to_avoid": ["elite athletes only", "champions only"],
-            "palette": {"primary": "#0066cc", "secondary": "#f2a900"},
+def test_capture_maps_handler_output_into_legacy_shape(isolated_cache, monkeypatch):
+    fake_handler_out = {
+        "any_real": True,
+        "state": {
+            "website": {
+                "url": "https://city-aquatics.example",
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "voice_digest": "Inclusive community swimming.",
+            },
+            "instagram": {
+                "url": "https://www.instagram.com/city.aquatics/",
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "voice_digest": "Celebrates every effort.",
+            },
+        },
+        "merged_dna": {
+            "voice_summary": "Inclusive community swimming club, warm and encouraging.",
+            "keywords": ["inclusive", "community", "swimming", "pb"],
+            "phrases_to_use": ["celebrate every effort", "shout out to the squad"],
+            "phrases_to_avoid": ["elite only"],
+            "palette_mentions": ["#0066cc", "#f2a900"],
             "typography_hint": "sans",
-            "voice_profile": {
-                "sentence_length_avg": 9,
-                "sentence_length_p90": 14,
-                "emoji_rate_per_caption": 0.0,
-                "hashtag_count_avg": 1.5,
-                "characteristic_openers": ["Big PB", "What a meet", "Massive shout out"],
-                "characteristic_closers": ["#ClubLife", "#PBseason"],
-                "preferred_swimmer_address": "first_name",
-                "common_hashtags": ["#ClubLife", "#PBseason", "#Swimming"],
-                "capitalisation_style": "sentence",
-            },
-        }
-        monkeypatch.setattr(social_dna, "_call_llm", lambda prompt: mock_llm_output)
+            "sponsor_mentions": [],
+            "hashtag_patterns": ["#ClubLife", "#PBseason"],
+        },
+    }
+    monkeypatch.setattr(link_handlers, "process_links",
+                         lambda **kw: fake_handler_out)
 
-        result = social_dna.capture_from_socials(
-            social_links={"instagram": "https://instagram.com/city-aquatics"},
-            website_url="https://city-aquatics.example",
-        )
+    out = social_dna.capture_from_socials(
+        social_links={"instagram": "https://instagram.com/city.aquatics"},
+        website_url="https://city-aquatics.example",
+    )
 
-        assert result["brand_capture_status"] == "ok"
-        assert "inclusive community swimming" in result["brand_voice_summary"].lower()
-        assert "inclusive" in result["brand_keywords"]
-        assert "Big PB for the squad" in result["brand_phrases_to_use"]
-        assert "elite athletes only" in result["brand_phrases_to_avoid"]
-        # Voice profile flows through to the saved structure
-        vp = result["voice_profile"]
-        assert vp["preferred_swimmer_address"] == "first_name"
-        assert "Big PB" in vp["characteristic_openers"]
-        assert vp["capitalisation_style"] == "sentence"
-
-    def test_llm_sees_actual_caption_text(self, isolated_cache, monkeypatch):
-        """The LLM prompt must include candidate captions extracted from
-        the fetched page — proving the AI is reading the user's links."""
-        responses = {
-            "https://example.example": (
-                "<html><head><title>Example Club</title></head><body>"
-                "<p>This is a very specific caption that should make it into the prompt.</p>"
-                "<p>Another caption here for good measure. #Hashtag</p>"
-                "</body></html>",
-                200,
-            ),
-        }
-        monkeypatch.setattr(social_dna, "_fetch", _stub_fetch(responses))
-
-        captured_prompt: dict = {"text": ""}
-
-        def fake_llm(prompt: str):
-            captured_prompt["text"] = prompt
-            return {"voice_summary": "x", "keywords": []}
-
-        monkeypatch.setattr(social_dna, "_call_llm", fake_llm)
-
-        social_dna.capture_from_socials(
-            social_links={}, website_url="https://example.example"
-        )
-
-        assert "specific caption that should make it" in captured_prompt["text"]
-        assert "#Hashtag" in captured_prompt["text"]
-
-    def test_no_llm_falls_back_gracefully(self, isolated_cache, monkeypatch):
-        """When no LLM is available the analyser still returns ok_heuristic
-        and a usable voice_summary built from fetched meta — never raises."""
-        responses = {
-            "https://example.example": (
-                "<html><head><title>Example Club</title>"
-                "<meta name='description' content='A friendly local club'/>"
-                "</head></html>",
-                200,
-            ),
-        }
-        monkeypatch.setattr(social_dna, "_fetch", _stub_fetch(responses))
-        monkeypatch.setattr(social_dna, "_call_llm", lambda prompt: None)
-
-        result = social_dna.capture_from_socials(
-            social_links={}, website_url="https://example.example"
-        )
-        assert result["brand_capture_status"] == "ok_heuristic"
-        assert "friendly local club" in result["brand_voice_summary"].lower()
+    assert out["brand_capture_status"] == "ok"
+    assert out["brand_voice_summary"].startswith("Inclusive community swimming")
+    assert "inclusive" in out["brand_keywords"]
+    assert "celebrate every effort" in out["brand_phrases_to_use"]
+    assert out["brand_typography_hint"] == "sans"
+    palette = out["brand_palette_extracted"]
+    assert palette.get("primary") == "#0066cc"
+    assert palette.get("secondary") == "#f2a900"
+    # social_links_status is populated for the next-page audit
+    assert out["social_links_status"]["website"] == "real_content"
+    assert out["social_links_status"]["instagram"] == "real_content"
+    # link_capture_state carries the full per-link record
+    state = out["link_capture_state"]
+    assert state["instagram"]["voice_digest"] == "Celebrates every effort."
+    assert state["website"]["regenerated"] is True
 
 
 # ---------------------------------------------------------------------------
-# 2. Graceful degradation
+# 3. Fetch failures bubble up as a status, not an exception
 # ---------------------------------------------------------------------------
 
-class TestGracefulDegradation:
-    def test_no_sources_returns_clean_error(self, isolated_cache):
-        result = social_dna.capture_from_socials(social_links={}, website_url="")
-        assert result["brand_capture_status"] == "no_sources"
-        # Never raises
-        assert result["brand_voice_summary"] == ""
+def test_all_links_blocked_returns_fetch_failed_all(isolated_cache, monkeypatch):
+    monkeypatch.setattr(link_handlers, "process_links", lambda **kw: {
+        "any_real": False,
+        "state": {
+            "instagram": {"url": "x", "status": "hard_blocked",
+                          "playbook_age": -1, "regenerated": True,
+                          "voice_digest": ""},
+        },
+        "merged_dna": {},
+    })
+    out = social_dna.capture_from_socials(
+        social_links={"instagram": "https://instagram.com/x"},
+        website_url="",
+    )
+    assert out["brand_capture_status"] == "fetch_failed_all"
+    assert out["social_links_status"]["instagram"] == "hard_blocked"
 
-    def test_auth_walled_link_recorded_but_does_not_fail(self, isolated_cache, monkeypatch):
-        """A 403 on Instagram should not poison the whole capture if at
-        least one other link is readable."""
-        responses = {
-            "https://instagram.com/blocked": (None, 403),
-            "https://city.example": (
-                "<html><head><title>City</title>"
-                "<meta name='description' content='A club'/></head></html>",
-                200,
-            ),
-        }
-        monkeypatch.setattr(social_dna, "_fetch", _stub_fetch(responses))
-        monkeypatch.setattr(social_dna, "_call_llm", lambda prompt: {"voice_summary": "A club"})
 
-        result = social_dna.capture_from_socials(
-            social_links={"instagram": "https://instagram.com/blocked"},
-            website_url="https://city.example",
-        )
-        assert result["brand_capture_status"] == "ok"
-        assert result["social_links_status"]["instagram"] == "auth_walled"
-        assert result["social_links_status"]["website"] == "ok"
-
-    def test_all_links_fail_returns_status(self, isolated_cache, monkeypatch):
-        responses = {
-            "https://instagram.com/x": (None, 0),
-            "https://facebook.com/x": (None, 500),
-        }
-        monkeypatch.setattr(social_dna, "_fetch", _stub_fetch(responses))
-
-        result = social_dna.capture_from_socials(
-            social_links={
-                "instagram": "https://instagram.com/x",
-                "facebook": "https://facebook.com/x",
-            },
-            website_url="",
-        )
-        assert result["brand_capture_status"] == "fetch_failed_all"
-        assert result["social_links_status"]["instagram"] == "fetch_failed"
-        # 500 is not in the special-cased buckets so it lands in http_500
-        assert result["social_links_status"]["facebook"] == "http_500"
-
-    def test_garbage_url_no_crash(self, isolated_cache, monkeypatch):
-        monkeypatch.setattr(social_dna, "_fetch", lambda u: (None, 0))
-        result = social_dna.capture_from_socials(
-            social_links={"instagram": "not-a-url"}, website_url="also-broken",
-        )
-        # Must not raise; status is fetch_failed_all
-        assert result["brand_capture_status"] == "fetch_failed_all"
+def test_handler_exception_returns_error_status(isolated_cache, monkeypatch):
+    def boom(**kw):
+        raise RuntimeError("internal blow-up")
+    monkeypatch.setattr(link_handlers, "process_links", boom)
+    out = social_dna.capture_from_socials(
+        social_links={"instagram": "https://instagram.com/x"},
+        website_url="",
+    )
+    assert out["brand_capture_status"].startswith("error: ")
 
 
 # ---------------------------------------------------------------------------
-# 3. Caching + URL normalisation
+# 4. Cache round-trip
 # ---------------------------------------------------------------------------
 
-class TestCaching:
-    def test_cache_hit_skips_fetch(self, isolated_cache, monkeypatch):
-        responses = {
-            "https://city.example": (
-                "<html><head><title>City</title></head></html>",
-                200,
-            ),
+def test_cache_hit_skips_pipeline(isolated_cache, monkeypatch):
+    call_count = {"n": 0}
+
+    def counting_handler(**kw):
+        call_count["n"] += 1
+        return {
+            "any_real": True,
+            "state": {"website": {"url": "https://x.example",
+                                    "status": "real_content",
+                                    "playbook_age": 0,
+                                    "regenerated": True,
+                                    "voice_digest": "Demo."}},
+            "merged_dna": {"voice_summary": "Demo voice.", "keywords": ["a"]},
         }
-        fetch_calls: list[str] = []
+    monkeypatch.setattr(link_handlers, "process_links", counting_handler)
 
-        def counting_fetch(url):
-            fetch_calls.append(url)
-            return responses.get(url, (None, 0))
+    social_dna.capture_from_socials(website_url="https://x.example")
+    social_dna.capture_from_socials(website_url="https://x.example")
+    # second call hits cache, not the handler
+    assert call_count["n"] == 1
 
-        monkeypatch.setattr(social_dna, "_fetch", counting_fetch)
-        monkeypatch.setattr(social_dna, "_call_llm", lambda p: {"voice_summary": "x"})
 
-        # First call populates cache
-        social_dna.capture_from_socials(social_links={}, website_url="https://city.example")
-        first_count = len(fetch_calls)
-        # Second call must serve from cache
-        social_dna.capture_from_socials(social_links={}, website_url="https://city.example")
-        assert len(fetch_calls) == first_count, "cache was not consulted"
+def test_force_bypasses_cache(isolated_cache, monkeypatch):
+    call_count = {"n": 0}
 
-    def test_force_bypasses_cache(self, isolated_cache, monkeypatch):
-        responses = {
-            "https://city.example": (
-                "<html><head><title>City</title></head></html>",
-                200,
-            ),
+    def counting_handler(**kw):
+        call_count["n"] += 1
+        return {
+            "any_real": True,
+            "state": {"website": {"url": "https://x.example",
+                                    "status": "real_content",
+                                    "playbook_age": 0,
+                                    "regenerated": True,
+                                    "voice_digest": "Demo."}},
+            "merged_dna": {"voice_summary": "Demo voice.", "keywords": ["a"]},
         }
-        fetch_calls: list[str] = []
+    monkeypatch.setattr(link_handlers, "process_links", counting_handler)
 
-        def counting_fetch(url):
-            fetch_calls.append(url)
-            return responses.get(url, (None, 0))
+    social_dna.capture_from_socials(website_url="https://x.example")
+    social_dna.capture_from_socials(website_url="https://x.example", force=True)
+    assert call_count["n"] == 2
 
-        monkeypatch.setattr(social_dna, "_fetch", counting_fetch)
-        monkeypatch.setattr(social_dna, "_call_llm", lambda p: {"voice_summary": "x"})
 
-        social_dna.capture_from_socials(social_links={}, website_url="https://city.example")
-        social_dna.capture_from_socials(
-            social_links={}, website_url="https://city.example", force=True,
-        )
-        # force=True re-fetches
-        assert len(fetch_calls) >= 2
+# ---------------------------------------------------------------------------
+# 5. The legacy contract: output keys downstream code depends on
+# ---------------------------------------------------------------------------
 
-    def test_missing_scheme_is_normalised(self, isolated_cache, monkeypatch):
-        seen: list[str] = []
+REQUIRED_KEYS = (
+    "brand_voice_summary",
+    "brand_keywords",
+    "brand_palette_extracted",
+    "brand_logo_url",
+    "brand_typography_hint",
+    "brand_phrases_to_avoid",
+    "brand_phrases_to_use",
+    "brand_source_url",
+    "brand_captured_at",
+    "brand_capture_status",
+    "voice_profile",
+    "social_links_status",
+    "captions_captured",
+    "link_capture_state",
+)
 
-        def fetch(url):
-            seen.append(url)
-            return ("<html><title>X</title></html>", 200)
 
-        monkeypatch.setattr(social_dna, "_fetch", fetch)
-        monkeypatch.setattr(social_dna, "_call_llm", lambda p: {"voice_summary": "x"})
+def test_output_always_contains_all_required_keys(isolated_cache):
+    out = social_dna.capture_from_socials(social_links={}, website_url="")
+    for k in REQUIRED_KEYS:
+        assert k in out, f"missing key {k!r} in capture output"
 
-        social_dna.capture_from_socials(
-            social_links={"instagram": "instagram.com/x"},
-            website_url="city.example",
-        )
-        # Both URLs must have been upgraded to https://
-        assert any(u.startswith("https://") for u in seen)
-        assert not any(u.startswith("http://") and not u.startswith("https://") for u in seen)
+
+# ---------------------------------------------------------------------------
+# 6. URL normalisation
+# ---------------------------------------------------------------------------
+
+def test_bare_host_gets_https_prefix(isolated_cache, monkeypatch):
+    seen = {}
+
+    def capture(**kw):
+        seen.update(kw)
+        return {"any_real": False, "state": {}, "merged_dna": {}}
+    monkeypatch.setattr(link_handlers, "process_links", capture)
+
+    social_dna.capture_from_socials(website_url="club.example")
+    assert seen["website_url"] == "https://club.example"
+
+
+def test_bare_handle_get_normalised_to_full_url(isolated_cache, monkeypatch):
+    seen = {}
+
+    def capture(**kw):
+        seen.update(kw)
+        return {"any_real": False, "state": {}, "merged_dna": {}}
+    monkeypatch.setattr(link_handlers, "process_links", capture)
+
+    social_dna.capture_from_socials(
+        social_links={"instagram": "city.aquatics"},
+    )
+    # social_dna prepends https:// — the handler then runs its own
+    # platform normalisation on top.
+    assert seen["social_links"]["instagram"] == "https://city.aquatics"
