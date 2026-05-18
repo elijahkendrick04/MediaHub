@@ -17,13 +17,18 @@ MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, expor
 git clone <this-repo>
 cd mediahub-export
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+make install           # python deps + editable install
+make media-deps        # Playwright Chromium + Remotion node_modules
 cp .env.example .env   # add your API keys (all optional)
 make run               # starts http://localhost:5000
 ```
 
 Open `http://localhost:5000`, click **Upload**, drop in a results PDF, and watch the pipeline run.
+
+> `make media-deps` downloads ~500 MB the first time (Chromium + Remotion).
+> Skip it only if you don't need rendered graphics or motion video — the
+> caption pipeline still works without them, and `/healthz/deps` will report
+> which renderers are missing.
 
 ## Quick start (Docker)
 

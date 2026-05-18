@@ -7,13 +7,17 @@ can run MediaHub.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+make install           # pip install -r requirements.txt && pip install -e .
+make media-deps        # Playwright Chromium + Remotion node_modules
 cp .env.example .env
 make run
 ```
 
 Default port is 5000. Browse to http://localhost:5000.
+
+`make media-deps` is required for the HTML→PNG (graphic_renderer) and
+MP4 (motion) pipelines. Skip it only if you're running the caption-only
+pipeline; `/healthz/deps` reports which renderers are available at runtime.
 
 ## Docker
 
@@ -77,11 +81,29 @@ fly volumes create mediahub_data --size 1
 
 ## VPS (bare metal / cloud Linux)
 
-1. Install Python 3.12, Poppler (`apt install poppler-utils`), and (optional)
-   Chromium dependencies for Playwright.
+1. Install Python 3.12, Node 20+, Poppler (`apt install poppler-utils`), and
+   the Chromium runtime libs that Playwright needs. On Debian/Ubuntu:
+
+   ```bash
+   sudo apt install -y poppler-utils libnss3 libxss1 libgbm1 libasound2 \
+       libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 libxcomposite1 \
+       libxdamage1 libxfixes3 libxrandr2 libxshmfence1 libxkbcommon0 \
+       libpango-1.0-0 libpangocairo-1.0-0 libcairo2 fonts-liberation
+   ```
+
 2. `git clone` the repo.
 3. `pip install -r requirements.txt && pip install -e . && pip install gunicorn`.
-4. Add a `systemd` unit:
+4. **Install browser + motion renderers**:
+
+   ```bash
+   python -m playwright install chromium     # graphic_renderer
+   (cd src/mediahub/remotion && npm install)  # motion/reel routes
+   ```
+
+   Without these two commands the app starts, but `/api/.../create-graphic`
+   and `/api/.../motion` return 500s. Verify with
+   `curl http://localhost:5000/healthz/deps`.
+5. Add a `systemd` unit:
 
    ```ini
    [Unit]
@@ -100,7 +122,7 @@ fly volumes create mediahub_data --size 1
    WantedBy=multi-user.target
    ```
 
-5. Front it with nginx for TLS termination.
+6. Front it with nginx for TLS termination.
 
 ## Vercel
 
