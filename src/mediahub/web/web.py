@@ -4348,9 +4348,29 @@ def create_app() -> Flask:
                     _row_error = _r["error"]
             if _row_status == "done":
                 return redirect(_review_url)
-            # Note: don't auto-redirect on error — the page surfaces the
-            # error inline (see JS poll handler below) which is more useful
-            # than dropping the user into /review with no context.
+            if _row_status == "error":
+                # Server-side render a real error page rather than waiting for
+                # the JS poller — gives the user immediate context, a clear
+                # path back to the upload step, and the raw error text.
+                _err_msg = (_row_error or "Pipeline failed without leaving an error message.")
+                _err_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
+                    '<span class="mh-hero-eyebrow">Pipeline failed</span>'
+                    '<h1>Run didn\'t finish.</h1>'
+                    '<p class="lede">'
+                    'The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn\'t parse &mdash; try a different format or check the file isn\'t corrupted.'
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All recent runs</a>'
+                    '</div>'
+                    '</section>'
+                    '<div class="card" style="border-left:2px solid var(--bad)">'
+                    '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
+                    f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
+                    '</div>'
+                )
+                return _layout("Run failed", _err_body, active="add_input")
         except Exception:
             pass
         # Five named stages, mapped from log message substrings.
@@ -5192,8 +5212,16 @@ function turnMeetIntoPack() {{
 
         body = f"""
 <style>
-.ach-row {{ transition: background 100ms; }}
-.ach-row:hover {{ background: rgba(255,255,255,0.015); }}
+.ach-row {{ transition: background 100ms; position: relative; padding-left: 12px; }}
+.ach-row:hover {{ background: rgba(245,242,232,0.018); }}
+.ach-row::before {{ content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; background: transparent; border-radius: 0; }}
+.ach-row[data-type="pb"]::before,
+.ach-row[data-type="personal_best"]::before {{ background: var(--lane); box-shadow: 0 0 8px var(--lane-glow); }}
+.ach-row[data-type="medal"]::before,
+.ach-row[data-type="gold_medal"]::before,
+.ach-row[data-type="podium"]::before {{ background: var(--medal); box-shadow: 0 0 8px var(--medal-glow); }}
+.ach-row[data-type="first_time"]::before,
+.ach-row[data-type="ft"]::before {{ background: var(--info); }}
 .filters-bar {{ display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);position:sticky;top:56px;z-index:50; }}
 .filters-bar select {{ width:auto;min-width:120px;font-size:13px;padding:6px 10px; }}
 .ach-row.hidden {{ display:none; }}
@@ -6359,7 +6387,7 @@ function addGraphicToPack(btn, visualId) {{
                 f'<td>{_h(sa.get("sr_name") or "—")}</td>'
                 f'<td><span class="tag {method_cls}">{_h(method)}</span></td>'
                 f'<td>{n_dec}</td>'
-                f'<td style="color:#4ADE80">{n_conf}</td>'
+                f'<td style="color:var(--good)">{n_conf}</td>'
                 f'<td>'
                 f'<a class="btn secondary" style="font-size:11px;padding:3px 8px" href="{_verify_url}">Verify</a>'
                 f' <form style="display:inline" method="post" action="{_ignore_url}">'
@@ -6369,14 +6397,20 @@ function addGraphicToPack(btn, visualId) {{
             )
 
         body = f"""
-<h1>PB Audit &mdash; {_h(pb_audit.get('run_id', run_id))}</h1>
-<p class="dim"><a href="{_review_url}">&larr; Back to review</a></p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">PB audit</span>
+  <h1>Personal-best reconciliation</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>run {_h(pb_audit.get('run_id', run_id)[:12])}</span><span class="sep">/</span>
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
+  </div>
+</section>
 <div class="card">
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get('swimmers_total',0)}</div></div>
     <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get('swimmers_matched_verified',0)}</div></div>
-    <div class="stat"><div class="l" style="color:#F59E0B">Needs verification</div><div class="v" style="color:#F59E0B">{pb_audit.get('swimmers_needs_verification',0)}</div></div>
-    <div class="stat"><div class="l">Confirmed PBs</div><div class="v" style="color:#4ADE80">{pb_audit.get('pb_confirmed_count',0)}</div></div>
+    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get('swimmers_needs_verification',0)}</div></div>
+    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get('pb_confirmed_count',0)}</div></div>
     <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get('pb_decisions_count',0)}</div></div>
     <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get('fetch_total_seconds',0):.1f}s</div></div>
   </div>
@@ -8432,22 +8466,54 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         "FreeTextStub":       "free_text",
     }
 
+    # Per-content-type hero copy. Centralised once so every stub form
+    # (and its returned cards page) shares the same masthead voice. Each
+    # entry is (eyebrow, italic-emphasised tail of the headline).
+    _STUB_HEROES = {
+        "Event Preview":  ("Event preview", "preview it",
+            "Tell us the event, athletes to watch, and angles. We draft preview captions for Instagram, Stories, and Twitter — ready to edit and post."),
+        "Sponsor Post":   ("Sponsor post", "activate it",
+            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption."),
+        "Session Update": ("Session update", "live from poolside",
+            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing."),
+        "Free Text (quick)": ("Free text — quick", "in your own words",
+            "Paste a description of any moment. We identify the strongest social angles and draft platform-ready cards."),
+    }
+
+    def _stub_hero(title: str) -> str:
+        meta = _STUB_HEROES.get(title)
+        if not meta:
+            return f'<h1>{_h(title)}</h1>'
+        eyebrow, italic_tail, lede = meta
+        return (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
+            f'<h1>Describe it.<br><em class="editorial">{_h(italic_tail)}.</em></h1>'
+            f'<p class="lede">{_h(lede)}</p>'
+            '</section>'
+        )
+
     def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
                      active_tab: str = "add_input"):
         """Shared handler for stub routes. GET renders form, POST renders cards."""
         try:
             from mediahub.club_platform import stubs as _stubs_mod
         except Exception as exc:
-            body = (
-                '<div class="card"><h2>Temporarily unavailable</h2>'
-                f'<p class="muted">Content engine failed to load: {_h(str(exc))}</p></div>'
+            return _recovery_page(
+                "Temporarily unavailable",
+                f"The content engine failed to load: {exc}. The stub content type can't render until the underlying module is back. Try refreshing in a moment.",
+                primary_cta=("Back to Add Input", url_for("add_input_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=503,
             )
-            return _layout(title, body, active=active_tab)
 
         StubCls = getattr(_stubs_mod, stub_cls_name, None)
         if StubCls is None:
-            body = '<div class="card"><p class="muted">This content type is not available.</p></div>'
-            return _layout(title, body, active=active_tab)
+            return _recovery_page(
+                "Content type unavailable",
+                f"The {title} stub class isn't registered on this deployment. The route still exists, but the generator wasn't loaded.",
+                primary_cta=("Back to Add Input", url_for("add_input_page")),
+            )
 
         stub = StubCls()
         if request.method == "POST":
@@ -8483,25 +8549,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     ProviderNotConfigured, ProviderError,
                 )
                 if isinstance(e, ProviderNotConfigured):
-                    err_html = (
-                        '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
-                        '<h2 style="margin-top:0">AI features unavailable</h2>'
-                        f'<p>{_h(str(e))}</p>'
-                        '<p class="muted">Contact your administrator to enable '
-                        'AI on this deployment.</p>'
-                        '</div>'
+                    return _recovery_page(
+                        "AI features unavailable",
+                        f"{e}. Contact your deployment operator to enable Gemini or Anthropic on this instance.",
+                        primary_cta=("Back to Add Input", url_for("add_input_page")),
+                        secondary_cta=("System status", url_for("status_page")),
+                        code=503,
                     )
-                    return _layout(title, err_html, active=active_tab)
                 if isinstance(e, ProviderError):
-                    err_html = (
-                        '<div class="card" style="border-color:rgba(244,63,94,0.4)">'
-                        '<h2 style="margin-top:0">AI provider error</h2>'
-                        f'<p>{_h(str(e))}</p>'
-                        '<p class="muted">Try again in a moment (rate limits '
-                        'typically clear within seconds).</p>'
-                        '</div>'
+                    return _recovery_page(
+                        "AI provider error",
+                        f"{e}. Rate limits usually clear within seconds — try the same form again, or fall back to a simpler input.",
+                        primary_cta=("Try again", url_for(route_endpoint)),
+                        secondary_cta=("Back to Add Input", url_for("add_input_page")),
+                        code=502,
                     )
-                    return _layout(title, err_html, active=active_tab)
             # Persist this pack so it survives refresh + is exportable.
             saved = None
             try:
@@ -8538,18 +8600,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     1,
                 )
             return _layout(title, body, active=active_tab)
-        # GET &mdash; render form
-        body = stub.render_stub_html()
+        # GET &mdash; render hero + form
+        body = _stub_hero(title) + stub.render_stub_html()
         try:
             _packs_url = url_for("stub_packs_list")
             body += (
-                f'<p style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">'
+                f'<p style="margin-top:var(--sp-5);display:flex;gap:var(--sp-4);flex-wrap:wrap">'
                 f'<a href="{_packs_url}">View your saved drafts &rarr;</a>'
-                f'<a href="{url_for("make_page")}">&larr; Back to Make</a>'
+                f'<a href="{url_for("add_input_page")}">&larr; All input types</a>'
                 f'</p>'
             )
         except Exception:
-            body += f'<p style="margin-top:16px"><a href="{url_for("make_page")}">&larr; Back to Make</a></p>'
+            body += f'<p style="margin-top:var(--sp-5)"><a href="{url_for("add_input_page")}">&larr; All input types</a></p>'
         return _layout(title, body, active=active_tab)
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
@@ -8642,23 +8704,27 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 secondary_cta=("Free-text home", url_for("free_text_chat_page")),
             )
         # Pre-render messages for the initial paint; JS keeps it live.
+        # User vs assistant bubbles are distinguished by a lane-yellow side
+        # rail (user) vs a paper-cream side rail (assistant) — same chrome
+        # discipline as everywhere else in the system.
         msgs_html = ""
         for m in s.messages:
             if m.get("role") == "system_note":
                 continue  # internal — not shown to user
             role = m.get("role", "")
             text = _h(m.get("content", "") or "")
-            who = "You" if role == "user" else "Assistant"
-            bg = ("rgba(212,255,58,0.06)" if role == "user"
-                  else "rgba(212,255,58,0.06)")
+            is_user = (role == "user")
+            who = "You" if is_user else "Assistant"
+            rail = "var(--lane)" if is_user else "var(--ink-faint)"
             msgs_html += (
                 f'<div class="chat-msg" data-role="{_h(role)}" '
-                f'style="margin-bottom:10px;padding:10px 12px;background:{bg};'
-                f'border-radius:8px;border:1px solid var(--border)">'
-                f'<div style="font-size:10px;text-transform:uppercase;'
-                f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:3px">{who}</div>'
-                f'<div style="font-size:13px;color:var(--ink);white-space:pre-wrap;'
-                f'line-height:1.45">{text}</div></div>'
+                f'style="margin-bottom:var(--sp-3);padding:var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);'
+                f'background:var(--surface);border:1px solid var(--hairline);'
+                f'border-left:2px solid {rail};border-radius:var(--radius)">'
+                f'<div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;'
+                f'color:{"var(--lane)" if is_user else "var(--ink-muted)"};letter-spacing:0.18em;margin-bottom:6px">{who}</div>'
+                f'<div style="font-family:var(--font-body);font-size:14px;color:var(--ink);'
+                f'white-space:pre-wrap;line-height:1.5">{text}</div></div>'
             )
         # Pending brief card (if any)
         brief_html = ""
@@ -8668,12 +8734,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             except Exception:
                 pretty = str(s.pending_brief)
             brief_html = f"""
-<div id="pending-brief" class="card" style="margin-top:14px;border-color:rgba(74,222,128,0.35);background:rgba(74,222,128,0.04)">
-  <div style="font-size:10px;text-transform:uppercase;color:#4ade80;letter-spacing:0.5px;margin-bottom:4px">Proposed brief</div>
-  <pre style="font-size:12px;white-space:pre-wrap;margin:0">{_h(pretty)}</pre>
-  <div style="margin-top:14px;display:flex;gap:10px">
+<div id="pending-brief" class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--good);background:var(--good-bg)">
+  <div class="strap" style="color:var(--good);margin-bottom:var(--sp-2)">Proposed brief</div>
+  <pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(pretty)}</pre>
+  <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3)">
     <form method="post" action="{url_for('free_text_chat_accept', chat_id=chat_id)}" style="display:inline">
-      <button type="submit" class="btn" style="background:#4ade80;color:#000;border:none">Accept &amp; generate</button>
+      <button type="submit" class="btn">Accept &amp; generate</button>
     </form>
     <form method="post" action="{url_for('free_text_chat_decline', chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn secondary">Decline — keep refining</button>
@@ -8689,33 +8755,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             except Exception:
                 pretty_a = str(s.accepted_brief)
             accepted_html = f"""
-<div class="card" style="margin-top:14px;border-color:rgba(212,255,58,0.35);background:rgba(212,255,58,0.04)">
-  <div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;margin-bottom:4px">Accepted brief</div>
-  <pre style="font-size:12px;white-space:pre-wrap;margin:0">{_h(pretty_a)}</pre>
-  <form method="post" action="{generate_url}" style="margin-top:12px">
+<div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:rgba(212,255,58,0.04)">
+  <div class="strap live" style="margin-bottom:var(--sp-2)">Accepted brief</div>
+  <pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(pretty_a)}</pre>
+  <form method="post" action="{generate_url}" style="margin-top:var(--sp-3)">
     <button type="submit" class="btn">Generate content from this brief →</button>
   </form>
 </div>
 """
         send_url = url_for("free_text_chat_send", chat_id=chat_id)
         title = _h(s.title or "New chat")
+        msg_count = sum(1 for m in s.messages if m.get("role") not in ("system_note",))
         body = f"""
-<h1>{title}</h1>
-<p class="dim"><a href="{url_for('free_text_chat_page')}">← All chats</a></p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Free text — chat</span>
+  <h1>{title}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{msg_count:02d} {"message" if msg_count == 1 else "messages"}</span><span class="sep">/</span>
+    <a href="{url_for('free_text_chat_page')}" style="color:var(--ink-muted);text-decoration:none">← All chats</a>
+  </div>
+</section>
 
-<div id="chat-log" style="margin-top:14px">
+<div id="chat-log">
   {msgs_html or '<p class="muted">Start by telling the assistant what you want to post. It will ask questions, research the web, and propose a brief.</p>'}
 </div>
 
 {brief_html}
 {accepted_html}
 
-<form id="chat-form" method="post" action="{send_url}" style="margin-top:14px">
+<form id="chat-form" method="post" action="{send_url}" style="margin-top:var(--sp-5)">
+  <label>Your reply</label>
   <textarea name="message" placeholder="Tell the assistant what you want to post about…"
-            style="width:100%;min-height:90px;padding:10px;font-size:13px" required></textarea>
-  <div style="margin-top:8px;display:flex;gap:10px;align-items:center">
+            style="min-height:110px" required></textarea>
+  <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap">
     <button type="submit" class="btn">Send</button>
-    <span class="muted" style="font-size:11px">The assistant uses Claude with web research tools.</span>
+    <span class="strap" style="color:var(--ink-muted)">Assistant uses Claude · web research</span>
   </div>
 </form>
 """
