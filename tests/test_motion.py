@@ -181,11 +181,6 @@ def test_render_story_card_returns_cached_file_when_present(tmp_path, monkeypatc
 # don't want to add 60s to the suite by default.
 # ---------------------------------------------------------------------------
 
-_RUN_INTEGRATION = (
-    os.environ.get("MEDIAHUB_RUN_MOTION_TESTS", "").lower() in ("1", "true", "yes")
-)
-
-
 def _node_present() -> bool:
     return shutil.which("node") is not None
 
@@ -194,12 +189,21 @@ def _remotion_installed() -> bool:
     return (motion.REMOTION_DIR / "node_modules" / "remotion").exists()
 
 
+# Integration test runs by default now (Phase 1.5 no-skips directive).
+# Override with MEDIAHUB_SKIP_MOTION_TESTS=1 if you need to run the suite
+# in a Node-less environment temporarily. The Dockerfile always installs
+# Remotion's node_modules so the production image satisfies this.
+_SKIP_INTEGRATION = (
+    os.environ.get("MEDIAHUB_SKIP_MOTION_TESTS", "").lower() in ("1", "true", "yes")
+)
+
+
+@pytest.mark.skipif(_SKIP_INTEGRATION, reason="MEDIAHUB_SKIP_MOTION_TESTS set")
 @pytest.mark.skipif(not _node_present(), reason="node not installed")
 @pytest.mark.skipif(
     not _remotion_installed(),
     reason="Remotion deps not installed (run `npm install` in src/mediahub/remotion)",
 )
-@pytest.mark.skipif(not _RUN_INTEGRATION, reason="set MEDIAHUB_RUN_MOTION_TESTS=1 to run")
 def test_render_story_card_produces_valid_mp4(tmp_path, monkeypatch):
     """End-to-end: 1-second render should produce a real, non-empty MP4."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
