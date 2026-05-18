@@ -8,8 +8,9 @@ Pins the new /sign-in page:
     doesn't crash.
   * The picker is reachable without an active org (it's how the user
     picks one in the first place).
-  * Returns a redirect to /organisation/setup when no profiles exist
-    (no point showing an empty picker).
+  * When no profiles exist the page renders an honest empty state with
+    a Create CTA — previously it 302'd to /organisation/setup, which
+    made the home page "Sign in" button look broken.
 """
 from __future__ import annotations
 
@@ -62,11 +63,23 @@ def app_two_profiles(app_no_profiles):
 
 
 class TestSignInPage:
-    def test_no_profiles_redirects_to_setup(self, app_no_profiles):
+    def test_no_profiles_renders_empty_state(self, app_no_profiles):
+        """When no organisation profiles exist, the sign-in page must
+        render an honest empty state — NOT a redirect to /organisation/
+        setup. The redirect-to-setup behaviour made the home page
+        "Sign in to my organisation profile" button look broken, since
+        clicking it landed the user on the same setup page as "Create
+        your first organisation"."""
         c, _, _ = app_no_profiles
         resp = c.get("/sign-in", follow_redirects=False)
-        assert resp.status_code == 302
-        assert "/organisation/setup" in resp.headers.get("Location", "")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        # The empty state announces "no profiles" and offers a clear
+        # path forward (create one) and a way back home.
+        assert "No organisation profiles" in body
+        assert "Create your first organisation" in body
+        # The sign-in page is in the topnav as active.
+        assert "Sign in" in body
 
     def test_renders_card_per_profile(self, app_two_profiles):
         c, _, _ = app_two_profiles
@@ -160,8 +173,14 @@ class TestHomeHeroSwitching:
         c, _, _ = app_no_profiles
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # No existing profiles → the primary CTA leads to setup.
+        # Primary CTA leads to setup ("Create your first organisation").
         assert "Create your first organisation" in body
+        # AND the secondary CTA offers the sign-in path — the user
+        # must see both options even on a fresh deployment so the
+        # "Sign in" button never looks broken.
+        assert "Sign in to my organisation profile" in body
+        assert 'class="mh-cta-primary"' in body
+        assert 'class="mh-cta-secondary"' in body
 
     def test_pinned_home_shows_continue_cta(self, app_two_profiles):
         c, _, _ = app_two_profiles

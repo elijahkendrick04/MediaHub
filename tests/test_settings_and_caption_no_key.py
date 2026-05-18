@@ -1,12 +1,18 @@
-"""Settings-page-removal + caption-no-key behaviour.
+"""Settings page + caption-no-key behaviour.
 
-The settings page is gone — operator credentials are now exclusively
-env-var configured at deploy time. This test file pins what's left:
+Operator credentials (AI keys, Buffer token) remain env-var only —
+they have NO user-facing configuration surface. /settings now renders
+a consolidated Operations page (Activity, Status, Privacy, Deployment
+status) but exposes zero credential editing.
 
-  • /settings 302-redirects to home so old bookmarks don't 404
+This test file pins what's left:
+
+  • /settings renders a real page (consolidated Operations)
   • /api/settings/llm-status remains a read-only status endpoint
   • The caption endpoint with no LLM key returns
     {live: false, error: "no_key", message: <admin-facing copy>}
+  • API error messages must NOT direct users to "configure in Settings"
+    (still true — the Settings page has no credential controls)
   • env-var key resolution still works for the LLM layer
 """
 from __future__ import annotations
@@ -45,16 +51,26 @@ def app(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# /settings now redirects to home
+# /settings renders the consolidated Operations page
 # ---------------------------------------------------------------------------
 
-def test_settings_redirects_to_home(app):
+def test_settings_renders_consolidated_operations_page(app):
+    """The Settings route used to 302-redirect to home (a relic of the
+    operator-config rewrite that stripped the settings UI). It now
+    renders a real consolidated Operations page — Activity, Status,
+    Privacy, and Deployment status sections all on one URL — which
+    is the topnav target."""
     c = app.test_client()
     r = c.get("/settings", follow_redirects=False)
-    assert r.status_code in (301, 302, 303, 307, 308)
-    # The redirect target must be home.
-    location = r.headers.get("Location", "")
-    assert location.endswith("/") or location == "" or location.endswith("/home")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # All four consolidated sections appear on the page.
+    assert "Activity" in body
+    assert "Status" in body
+    assert "Privacy" in body
+    assert "Deployment status" in body
+    # And it carries the Settings topnav active state.
+    assert "Operations" in body or "Settings" in body
 
 
 # ---------------------------------------------------------------------------
@@ -163,25 +179,32 @@ def test_no_env_no_provider(app):
 
 
 # ---------------------------------------------------------------------------
-# Rendered-page invariant — no clickable /settings link anywhere in the
-# inline JS shell. Pins the fix for the three stale "Open Settings" /
-# "Add an API key" / Buffer-redirect JS sites that used to surface a
-# dead /settings link in the no-key / no-buffer flows.
+# Rendered-page invariant — the Settings topnav link is the only
+# /settings reference allowed. The error-message paths that used to
+# surface a dead "Open Settings" / "Add an API key" / Buffer-redirect
+# anchor must still be gone — those flows steer users to their
+# administrator instead, because /settings has no credential surface.
 # ---------------------------------------------------------------------------
 
-def test_rendered_page_has_no_clickable_settings_link(app):
-    """After the settings-page rewrite, every JS message in the shell
-    must steer the user to their administrator. The page must NOT render
-    a clickable anchor or `window.location.href = '/settings'`-style
-    redirect to /settings."""
+def test_rendered_page_has_only_topnav_settings_link(app):
+    """The Settings topnav anchor exists (one link to the consolidated
+    Operations page). Beyond that, no JS error message or Buffer flow
+    is allowed to redirect to /settings — those paths still need to
+    steer the user to their administrator, since the Settings page
+    has no credential controls."""
     import re
     c = app.test_client()
     r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    # No <a href="/settings"> anchor (the dead "Open Settings" pattern).
-    assert not re.search(r"""<a[^>]+href\s*=\s*["']/settings["']""", html)
-    # No window.location redirect to /settings (the schedule-modal fallback).
+    # Exactly one Settings anchor — the topnav link.
+    settings_anchors = re.findall(
+        r"""<a[^>]+href\s*=\s*["']/settings["'][^>]*>""", html,
+    )
+    assert len(settings_anchors) == 1, (
+        f"expected one topnav /settings anchor, found {len(settings_anchors)}"
+    )
+    # No window.location redirect to /settings (the old schedule-modal fallback).
     assert not re.search(r"""window\.location\.href\s*=\s*['"]/settings['"]""", html)
     assert "API_BASE + '/settings'" not in html
     # No JSON-consumer fallback that hardcoded '/settings' as a link.

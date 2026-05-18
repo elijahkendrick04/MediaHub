@@ -204,15 +204,33 @@ class TestHomeIsStripped:
 
 
 # ---------------------------------------------------------------------------
-# 3. Top nav has the Activity link
+# 3. Top nav consolidates Activity under Settings
 # ---------------------------------------------------------------------------
 
-class TestActivityInNav:
-    def test_activity_link_in_top_nav(self, gated_client):
+class TestSettingsExposesActivityInNav:
+    def test_settings_link_in_top_nav(self, gated_client):
+        """The standalone Activity nav button was consolidated into the
+        Settings page (which carries Activity / Status / Privacy /
+        Deployment status sections). The topnav must surface Settings
+        as the single entrypoint; the /activity deep-link route still
+        exists for backwards compatibility, but is no longer a
+        first-class nav item."""
         c, _ = gated_client
         c.post("/api/organisation/active", data={"profile_id": "club-a"})
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # The link should be in the rendered <nav>
-        assert ">Activity<" in body
-        assert "/activity" in body
+        # Settings is the nav entrypoint.
+        assert ">Settings<" in body
+        assert "/settings" in body
+
+    def test_activity_route_still_resolves(self, gated_client):
+        """Backwards compatibility — the /activity URL still works
+        even though the nav no longer surfaces it directly. Internal
+        url_for('activity_page') calls and external bookmarks must
+        continue to render the activity page."""
+        c, _ = gated_client
+        c.post("/api/organisation/active", data={"profile_id": "club-a"})
+        resp = c.get("/activity")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Activity" in body

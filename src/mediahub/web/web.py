@@ -3137,11 +3137,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('add_input_page') }}" class="{{ 'active' if active=='add_input' else '' }}">Add Input</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    <a href="{{ url_for('activity_page') }}" class="{{ 'active' if active=='activity' else '' }}">Activity</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
-    <a href="{{ url_for('status_page') }}" class="{{ 'active' if active=='status' else '' }}">Status</a>
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     {% if signed_in %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
       <a href="{{ url_for('sign_out') }}">Sign out</a>
@@ -3681,11 +3679,16 @@ def create_app() -> Flask:
                     'Create new organisation</a>'
                 )
             else:
+                # Two-button hero even when no profiles exist yet — the
+                # sign-in route is now reachable from the empty state
+                # (it shows a friendly "no orgs yet" panel) so users can
+                # explore both paths without thinking the engine is
+                # half-broken.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
                     'Create your first organisation &rarr;</a>'
-                    f'<a class="mh-cta-secondary" href="{url_for("status_page")}">'
-                    'See deployment status</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                    'Sign in to my organisation profile</a>'
                 )
             eyebrow = 'Sport content automation'
             lane_no = '01'
@@ -7367,17 +7370,513 @@ Relay team broke club record"></textarea>
         )
         return _layout("Usage", body, active="usage")
     #
-    # The settings page used to collect operator credentials (AI API
-    # keys, Buffer access token, cutout provider, LLM preference). All
-    # of these are now exclusively env-var configured at deploy time —
-    # see `.env.example` for the full list. The user-visible product
-    # has zero configuration surface; the operator sets env vars on
-    # their host once and never again.
+    # Settings — consolidated operations surface.
     #
-    # Old bookmarks redirect to home so they don't 404.
+    # Brings together the four operator-facing surfaces that used to
+    # live as separate top-nav items:
+    #
+    #   * Activity   — recent runs scoped to the active organisation
+    #   * Status     — backend uptime and last-incident summary
+    #   * Privacy    — inventory and delete actions for stored data
+    #   * Deployment — version, dependency health, and links to deep
+    #                  operator dashboards (/healthz/usage etc.)
+    #
+    # Settings stays reachable without a pinned organisation (it's in
+    # `_SETUP_EXEMPT_ENDPOINTS`) so the user can audit deployment
+    # health and clear caches before completing first-run setup.
+    # Sections that need a profile (Activity) render an inline "sign
+    # in to see this" stub instead of crashing.
     @app.route("/settings")
     def settings_page():
-        return redirect(url_for("home"))
+        return _render_settings_page()
+
+    def _render_settings_page() -> str:
+        """Render the consolidated Settings page.
+
+        Each section renders independently so a failure inside one
+        (e.g. a missing observability table) doesn't break the rest.
+        """
+        prof = _active_profile()
+
+        # ---- TOC strap ------------------------------------------------
+        toc_html = (
+            '<div class="mh-section-eyebrow" style="margin-bottom:6px">Settings</div>'
+            '<h1 style="margin:0 0 12px;font-size:32px">Operations &amp; data</h1>'
+            '<p class="dim" style="margin-bottom:24px;max-width:680px">'
+            'Everything previously surfaced under <i>Activity</i>, <i>Status</i>, '
+            '<i>Privacy</i>, and <i>Deployment status</i> now lives here. '
+            'Jump to a section:</p>'
+            '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:32px">'
+            '<a class="btn secondary" href="#activity" style="font-size:12px;padding:6px 12px">Activity</a>'
+            '<a class="btn secondary" href="#status" style="font-size:12px;padding:6px 12px">Status</a>'
+            '<a class="btn secondary" href="#privacy" style="font-size:12px;padding:6px 12px">Privacy</a>'
+            '<a class="btn secondary" href="#deployment" style="font-size:12px;padding:6px 12px">Deployment status</a>'
+            '</div>'
+        )
+
+        activity_html = _render_settings_activity_section(prof)
+        status_html = _render_settings_status_section()
+        privacy_html = _render_settings_privacy_section()
+        deployment_html = _render_settings_deployment_section()
+
+        body = (
+            toc_html
+            + activity_html
+            + status_html
+            + privacy_html
+            + deployment_html
+        )
+        return _layout("Settings", body, active="settings")
+
+    def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
+        """Activity section — recent runs for the pinned org.
+
+        Mirrors the standalone /activity page but degrades gracefully
+        when no profile is pinned (Settings is reachable pre-org-setup).
+        """
+        section_header = (
+            '<h2 id="activity" style="margin:32px 0 6px;font-size:22px;'
+            'scroll-margin-top:80px">Activity</h2>'
+        )
+        if prof is None:
+            return (
+                f'{section_header}'
+                '<p class="dim" style="margin-bottom:14px">'
+                'Sign in to an organisation to see its recent runs here. '
+                'Activity is scoped per-organisation so the data never '
+                'leaks between profiles.</p>'
+                '<div class="card empty">No organisation pinned. '
+                f'<a href="{url_for("sign_in_page")}">Sign in &rarr;</a></div>'
+            )
+
+        try:
+            conn = _db()
+            rows = conn.execute(
+                "SELECT id, created_at, finished_at, status, profile_id, "
+                "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                "FROM runs WHERE profile_id = ? "
+                "ORDER BY created_at DESC LIMIT 100",
+                (prof.profile_id,),
+            ).fetchall()
+            conn.close()
+        except Exception:
+            rows = []
+
+        try:
+            from mediahub.publishing import posting_log as _plog
+            recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
+        except Exception:
+            recent_attempts = []
+
+        summaries: dict[str, dict] = {}
+        try:
+            ws = _get_wf_store()
+        except Exception:
+            ws = None
+        if ws is not None:
+            for r in rows:
+                run_id = r["id"]
+                summary = {"scheduled": 0, "published": 0, "failed": 0}
+                try:
+                    states = ws.load(run_id) or {}
+                    for cs in states.values():
+                        s = getattr(cs, "schedule_status", None)
+                        val = s.value if hasattr(s, "value") else (s or "queued")
+                        if val == "scheduled":
+                            summary["scheduled"] += 1
+                        elif val == "published":
+                            summary["published"] += 1
+                        elif val == "failed":
+                            summary["failed"] += 1
+                except Exception:
+                    pass
+                summaries[run_id] = summary
+
+        section_intro = (
+            f'<p class="dim" style="margin-bottom:14px">Recent runs for '
+            f'<b>{_h(prof.display_name)}</b>.</p>'
+        )
+
+        if not rows:
+            return (
+                f'{section_header}'
+                f'{section_intro}'
+                '<div class="card empty">No runs yet for this organisation. '
+                f'<a href="{url_for("add_input_page")}">Create your first piece of content &rarr;</a>'
+                '</div>'
+            )
+
+        def _schedule_summary_html(rid: str) -> str:
+            s = summaries.get(rid) or {}
+            if not (s.get("scheduled") or s.get("published") or s.get("failed")):
+                return '<span class="muted" style="font-size:11px">&mdash;</span>'
+            parts = []
+            if s.get("scheduled"):
+                parts.append(f'<span class="tag info" style="font-size:11px">'
+                             f'{s["scheduled"]} scheduled</span>')
+            if s.get("published"):
+                parts.append(f'<span class="tag good" style="font-size:11px">'
+                             f'{s["published"]} published</span>')
+            if s.get("failed"):
+                parts.append(f'<span class="tag bad" style="font-size:11px">'
+                             f'{s["failed"]} failed</span>')
+            return " ".join(parts)
+
+        rows_html = ""
+        n_errored = 0
+        for r in rows:
+            badge = {"done": "good", "running": "info", "queued": "info",
+                     "error": "bad"}.get(r["status"], "")
+            review_href = url_for('review', run_id=r['id'])
+            delete_href = url_for('privacy_delete_run', run_id=r['id'])
+            rows_html += (
+                f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
+                f'<td>{_h(r["our_swims"] or 0)}</td>'
+                f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td>{_schedule_summary_html(r["id"])}</td>'
+                f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
+                f'<td><form method="post" action="{delete_href}" '
+                f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                f'<button class="btn danger" type="submit" '
+                f'style="font-size:11px;padding:4px 10px">Delete</button>'
+                f'</form></td></tr>'
+            )
+            if r["status"] == "error" and r["error"]:
+                n_errored += 1
+                err_text = str(r["error"])
+                truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
+                rows_html += (
+                    '<tr class="run-error-row">'
+                    '<td colspan="7" style="padding:6px 14px 14px 14px;'
+                    'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                    '<details>'
+                    '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
+                    'color:#ffbcc3">Why did this run fail?</summary>'
+                    '<pre style="margin:8px 0 0;padding:10px 12px;'
+                    'background:rgba(0,0,0,0.25);border-radius:6px;'
+                    'font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f'{_h(truncated)}</pre>'
+                    '</details>'
+                    '</td></tr>'
+                )
+
+        failure_callout = ""
+        if n_errored:
+            label = "1 run failed" if n_errored == 1 else f"{n_errored} runs failed"
+            failure_callout = (
+                '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
+                'background:rgba(255,93,108,0.06);border-left:3px solid #ff5d6c">'
+                f'<b>{_h(label)}</b> in the last 100 runs. '
+                'Expand <i>Why did this run fail?</i> on each row below to '
+                'see the pipeline error.</div>'
+            )
+
+        posting_panel_html = ""
+        if recent_attempts:
+            attempts_rows = ""
+            for a in recent_attempts:
+                status = a.get("status") or ""
+                kind = a.get("error_kind") or ""
+                if status == "ok":
+                    badge_html = '<span class="tag good" style="font-size:11px">ok</span>'
+                else:
+                    label = kind or "failed"
+                    badge_html = f'<span class="tag bad" style="font-size:11px">{_h(label)}</span>'
+                excerpt = (a.get("caption_excerpt") or "")[:120]
+                when = (a.get("attempted_at") or "")[:19]
+                channel = a.get("channel_name") or a.get("channel_id") or "&mdash;"
+                err = a.get("error_message") or ""
+                attempts_rows += (
+                    f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
+                    f'<td style="font-size:12px">{_h(channel)}</td>'
+                    f'<td>{badge_html}</td>'
+                    f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
+                    f'<td style="font-size:12px;color:#ff8a99" title="{_h(err)}">{_h(err[:80])}</td>'
+                    f'</tr>'
+                )
+            posting_panel_html = (
+                '<h3 style="margin-top:24px;margin-bottom:6px;font-size:16px">'
+                'Recent posting activity</h3>'
+                '<p class="dim" style="margin-bottom:14px;font-size:13px">'
+                f'Last {len(recent_attempts)} Buffer attempts for this organisation.</p>'
+                '<div class="card"><table>'
+                '<thead><tr><th>When</th><th>Channel</th><th>Status</th>'
+                '<th>Caption excerpt</th><th>Error</th></tr></thead>'
+                f'<tbody>{attempts_rows}</tbody>'
+                '</table></div>'
+            )
+
+        return (
+            f'{section_header}'
+            f'{section_intro}'
+            f'{failure_callout}'
+            '<div class="card"><table>'
+            '<thead><tr><th>Input</th><th>Status</th>'
+            '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
+            '<th>Started</th><th></th></tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            '</table></div>'
+            f'{posting_panel_html}'
+        )
+
+    def _render_settings_status_section() -> str:
+        """Status section — uptime + last-incident, mirrors /status."""
+        section_header = (
+            '<h2 id="status" style="margin:40px 0 6px;font-size:22px;'
+            'scroll-margin-top:80px">Status</h2>'
+        )
+        try:
+            from mediahub.observability import uptime as _uptime
+            s24 = _uptime.uptime_stats(window_hours=24)
+            s7d = _uptime.uptime_stats(window_hours=24 * 7)
+            s30 = _uptime.uptime_stats(window_hours=24 * 30)
+            latest = _uptime.latest_heartbeat()
+            gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
+        except Exception:
+            return (
+                f'{section_header}'
+                '<div class="card empty">Status data not available.</div>'
+            )
+
+        pill_label = "no data yet"
+        pill_color = "#7a7a7a"
+        if latest is not None:
+            try:
+                ts_raw = latest["ts"]
+                if ts_raw.endswith("Z"):
+                    ts_raw = ts_raw[:-1] + "+00:00"
+                from datetime import datetime as _dt
+                last_ts = _dt.fromisoformat(ts_raw)
+                age_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
+            except (ValueError, TypeError):
+                age_s = 99999
+            if not latest.get("ok"):
+                pill_label = "degraded"
+                pill_color = "#ffaa3a"
+            elif age_s <= 300:
+                pill_label = "operational"
+                pill_color = "#2cc97f"
+            elif age_s <= 1800:
+                pill_label = "stale (no heartbeat in 5–30 min)"
+                pill_color = "#ffaa3a"
+            else:
+                pill_label = "unknown (last heartbeat > 30 min ago)"
+                pill_color = "#ff5d6c"
+
+        last_incident_html = (
+            '<p class="dim" style="margin:0">No incidents recorded in the last 30 days.</p>'
+        )
+        if gaps:
+            top = gaps[0]
+            duration = _humanize_duration(top["duration_seconds"])
+            when = _humanize_when(top["to_ts"])
+            last_incident_html = (
+                f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
+                f'(silent for {_h(duration)})</p>'
+                f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
+                f'Detected from a gap in heartbeats between '
+                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+            )
+
+        version_label = APP_VERSION
+        return (
+            f'{section_header}'
+            '<p class="dim" style="margin-bottom:14px">Live operational health '
+            'of this MediaHub deployment.</p>'
+
+            '<div class="card" style="display:flex;align-items:center;gap:14px;'
+            'padding:18px 22px;margin-bottom:14px">'
+            f'<span style="display:inline-block;width:14px;height:14px;'
+            f'border-radius:50%;background:{pill_color};flex:0 0 auto"></span>'
+            f'<div style="flex:1"><div style="font-size:18px;font-weight:600">'
+            f'Backend &mdash; {_h(pill_label)}</div>'
+            f'<div class="dim" style="font-size:13px;margin-top:2px">'
+            f'Version <code>{_h(version_label)}</code>'
+            + (f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
+               f'({_h((latest.get("source") or "").lower())})'
+               if latest else "")
+            + '</div></div></div>'
+
+            '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
+            '<table style="width:100%"><thead>'
+            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
+            '<th>Downtime</th></tr></thead><tbody>'
+            f'<tr><td><b>24 hours</b></td>'
+            f'<td>{_format_uptime_pct(s24)}</td>'
+            f'<td>{_h(s24.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
+            f'<tr><td><b>7 days</b></td>'
+            f'<td>{_format_uptime_pct(s7d)}</td>'
+            f'<td>{_h(s7d.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
+            f'<tr><td><b>30 days</b></td>'
+            f'<td>{_format_uptime_pct(s30)}</td>'
+            f'<td>{_h(s30.get("samples", 0))}</td>'
+            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
+            '</tbody></table></div>'
+
+            f'<div class="card" style="padding:14px 22px">'
+            f'{last_incident_html}</div>'
+        )
+
+    def _render_settings_privacy_section() -> str:
+        """Privacy section — inventory + cache-clear, mirrors /privacy."""
+        section_header = (
+            '<h2 id="privacy" style="margin:40px 0 6px;font-size:22px;'
+            'scroll-margin-top:80px">Privacy &amp; data</h2>'
+        )
+        try:
+            conn = _db()
+            n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            conn.close()
+        except Exception:
+            n_runs = 0
+        try:
+            n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
+        except Exception:
+            n_files = 0
+        try:
+            n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+        except Exception:
+            n_uploads = 0
+        cache_dir = DATA_DIR / ".cache" / "pb_lookup"
+        legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
+        try:
+            n_cache = (
+                (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
+                + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
+            )
+        except Exception:
+            n_cache = 0
+
+        return f"""
+{section_header}
+<p class="dim" style="margin-bottom:14px">What this system stores, where, and how to delete it.</p>
+
+<div class="card">
+  <h3 style="margin-top:0">Inventory</h3>
+  <div class="stat-block">
+    <div class="stat"><div class="l">Runs (DB)</div><div class="v">{n_runs}</div></div>
+    <div class="stat"><div class="l">Run JSON files</div><div class="v">{n_files}</div></div>
+    <div class="stat"><div class="l">Upload temp files</div><div class="v">{n_uploads}</div></div>
+    <div class="stat"><div class="l">PB cache entries</div><div class="v">{n_cache}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">What we store</h3>
+  <ul>
+    <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
+    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
+    <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
+    <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
+  </ul>
+  <p class="muted">No data is sent to third parties beyond fetching public PB-lookup pages from the configured PB source.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Actions</h3>
+  <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
+    <button class="btn secondary" type="submit">Clear PB cache</button>
+  </form>
+  <p class="muted" style="margin-top:8px">To delete an individual run, open it from the activity section above and use the Delete button on the row.</p>
+</div>
+"""
+
+    def _render_settings_deployment_section() -> str:
+        """Deployment status section — version + dep health summary."""
+        section_header = (
+            '<h2 id="deployment" style="margin:40px 0 6px;font-size:22px;'
+            'scroll-margin-top:80px">Deployment status</h2>'
+        )
+        version_label = APP_VERSION
+        try:
+            health = _health_payload()
+            health_ok = bool(health.get("ok"))
+            checks = health.get("checks") or {}
+        except Exception:
+            health_ok = False
+            checks = {}
+
+        ok_pill = (
+            '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
+            'background:rgba(44,201,127,0.12);color:#2cc97f;font-size:12px;'
+            'font-weight:600;border:1px solid rgba(44,201,127,0.30)">healthy</span>'
+            if health_ok else
+            '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
+            'background:rgba(255,93,108,0.12);color:#ff5d6c;font-size:12px;'
+            'font-weight:600;border:1px solid rgba(255,93,108,0.30)">degraded</span>'
+        )
+
+        check_rows = ""
+        for name in sorted(checks.keys()):
+            check = checks.get(name) or {}
+            if check.get("ok"):
+                badge = '<span class="tag good" style="font-size:11px">ok</span>'
+                detail = check.get("path") or check.get("version") or "&mdash;"
+                if isinstance(detail, list):
+                    detail = ", ".join(str(x) for x in detail[:5]) or "&mdash;"
+                if isinstance(detail, int):
+                    detail = str(detail)
+                check_rows += (
+                    f'<tr><td><b>{_h(name)}</b></td>'
+                    f'<td>{badge}</td>'
+                    f'<td class="muted" style="font-size:12px">{_h(str(detail))}</td></tr>'
+                )
+            else:
+                badge = '<span class="tag bad" style="font-size:11px">fail</span>'
+                err = str(check.get("error") or "")[:200]
+                check_rows += (
+                    f'<tr><td><b>{_h(name)}</b></td>'
+                    f'<td>{badge}</td>'
+                    f'<td style="font-size:12px;color:#ff8a99">{_h(err)}</td></tr>'
+                )
+
+        if not check_rows:
+            check_rows = (
+                '<tr><td colspan="3" class="muted">No health data available.</td></tr>'
+            )
+
+        return (
+            f'{section_header}'
+            '<p class="dim" style="margin-bottom:14px">Backend version, health checks, '
+            'and links to deeper operator dashboards.</p>'
+
+            '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
+            f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+            f'<div style="font-size:18px;font-weight:600">Version <code>{_h(version_label)}</code></div>'
+            f'{ok_pill}'
+            '</div>'
+            '<p class="dim" style="margin:8px 0 0;font-size:12px">'
+            'Auto-refresh disabled here. Open the live <a href="' + url_for('status_page')
+            + '">/status page</a> for the auto-refreshing version.</p>'
+            '</div>'
+
+            '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Health checks</h3>'
+            '<table style="width:100%">'
+            '<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>'
+            f'<tbody>{check_rows}</tbody></table></div>'
+
+            '<div class="card" style="padding:18px 22px">'
+            '<h3 style="margin-top:0;font-size:16px">Operator dashboards</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">'
+            'Deep operations data lives behind these URLs. They are safe to share '
+            'with deployment operators but not user-facing.</p>'
+            '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.8">'
+            f'<li><a href="{url_for("healthz_usage")}">LLM usage dashboard</a>'
+            ' &mdash; today\'s call counts, cost estimate, free-tier headroom.</li>'
+            f'<li><a href="{url_for("api_status_json")}">/api/status</a>'
+            ' &mdash; raw uptime JSON for external monitors.</li>'
+            f'<li><a href="{url_for("health")}">/health</a>'
+            ' &mdash; deep dependency probe (DB, dirs, profiles).</li>'
+            f'<li><a href="{url_for("healthz_deps")}">/healthz/deps</a>'
+            ' &mdash; Playwright / Node / Remotion availability.</li>'
+            f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
+            ' &mdash; process RSS and active-run counters.</li>'
+            '</ul></div>'
+        )
 
     # ---- /api/settings/llm-status ----
     #
@@ -7990,10 +8489,22 @@ Relay team broke club record"></textarea>
     # ---- /make &mdash; content-type chooser ----------------------------------
     @app.route("/make")
     def make_page():
+        # The Create page consolidates two card groups:
+        #   1. Content-type tiles (from REGISTRY) — packaged content
+        #      formats like meet recap, athlete spotlight pack, etc.
+        #   2. Input-type cards (shared with /add-input) — the starting
+        #      points: meet results upload, athlete spotlight, event
+        #      preview, sponsor post, session update, free text.
+        # Both surfaces lead to producing a content pack; grouping
+        # them here means "Create" is the single entry to actually
+        # start work, while "Add Input" stays focused on the input
+        # picker for users who prefer that mental model.
         try:
             from mediahub.club_platform.content_types import REGISTRY, ContentType
+            registry_available = True
         except ImportError:
-            return _layout("Create", '<div class="card"><p class="muted">club_platform package not available.</p></div>', active="create")
+            REGISTRY = {}
+            registry_available = False
 
         tiles_html = ""
         for ct, meta in REGISTRY.items():
@@ -8031,14 +8542,35 @@ Relay team broke club record"></textarea>
   <div style="font-size:12px;color:var(--ink-muted);margin-top:auto">{_h(meta.input_contract[:120])}{"&hellip;" if len(meta.input_contract) > 120 else ""}</div>
 </a>"""
 
+        if registry_available and tiles_html:
+            content_types_section = f"""
+<h2 style="margin:0 0 10px;font-size:20px">Content types</h2>
+<p class="dim" style="margin-bottom:18px;font-size:13px">
+  Packaged content formats &mdash; pick a deliverable and the engine routes you to the right input.
+</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px;margin-bottom:36px">
+  {tiles_html}
+</div>
+"""
+        else:
+            content_types_section = ""
+
+        input_cards_html = _render_input_type_cards()
         body = f"""
 <style>
 .make-tile:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
+.input-type-card:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
 </style>
 <h1>What do you want to create?</h1>
-<p class="dim" style="margin-bottom:28px">Choose a content type to get started.</p>
+<p class="dim" style="margin-bottom:28px">Choose a content type or an input to get started.</p>
+{content_types_section}
+<h2 style="margin:0 0 10px;font-size:20px">Inputs</h2>
+<p class="dim" style="margin-bottom:18px;font-size:13px">
+  The same inputs available on <a href="{url_for('add_input_page')}" style="text-decoration:underline">Add Input</a>
+  &mdash; included here so Create stays the single jumping-off point.
+</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">
-  {tiles_html}
+  {input_cards_html}
 </div>
 """
         return _layout("Create", body, active="create")
@@ -8998,98 +9530,102 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         })
 
     # ---- /add-input &mdash; multi-input landing page --------------------------
-    @app.route("/add-input")
-    def add_input_page():
-        _INPUT_TYPES = [
-            {
-                "title": "Meet Results",
-                "description": "Upload results from any sport meet, gala, or competition. Ranked content cards with confidence scores.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>'
-                    '<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>'
-                    '<path d="M4 22h16"/>'
-                    '<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>'
-                    '<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>'
-                    '<path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "upload",
-            },
-            {
-                "title": "Athlete Spotlight",
-                "description": "Pick a member from a processed meet and get a single-person achievement pack.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<circle cx="12" cy="8" r="4"/>'
-                    '<path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "spotlight_landing",
-            },
-            {
-                "title": "Event Preview",
-                "description": "Tease an upcoming event, fixture, or competition before it starts.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>'
-                    '<line x1="16" y1="2" x2="16" y2="6"/>'
-                    '<line x1="8" y1="2" x2="8" y2="6"/>'
-                    '<line x1="3" y1="10" x2="21" y2="10"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "stub_weekend_preview",
-            },
-            {
-                "title": "Sponsor Post",
-                "description": "Create brand-safe sponsor activation content with your partners.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "stub_sponsor_post",
-            },
-            {
-                "title": "Session Update",
-                "description": "Share live updates from training or events as they happen.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
-                    '<polyline points="14 2 14 8 20 8"/>'
-                    '<line x1="16" y1="13" x2="8" y2="13"/>'
-                    '<line x1="16" y1="17" x2="8" y2="17"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "stub_session_update",
-            },
-            {
-                "title": "Free Text",
-                "description": "Describe any moment in your own words and get content suggestions.",
-                "icon": (
-                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
-                    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
-                    '<path d="M12 20h9"/>'
-                    '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'
-                    '</svg>'
-                ),
-                "status": "live",
-                "endpoint": "free_text_chat_page",
-            },
-        ]
+    # The catalogue of input-type cards rendered on both /add-input and
+    # /make. Kept as module-scoped data inside create_app() so add_input_page
+    # and make_page share the exact same list — adding a new input type
+    # surfaces it in both places, no duplication.
+    _INPUT_TYPE_CATALOGUE = [
+        {
+            "title": "Meet Results",
+            "description": "Upload results from any sport meet, gala, or competition. Ranked content cards with confidence scores.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>'
+                '<path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>'
+                '<path d="M4 22h16"/>'
+                '<path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>'
+                '<path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>'
+                '<path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "upload",
+        },
+        {
+            "title": "Athlete Spotlight",
+            "description": "Pick a member from a processed meet and get a single-person achievement pack.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<circle cx="12" cy="8" r="4"/>'
+                '<path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "spotlight_landing",
+        },
+        {
+            "title": "Event Preview",
+            "description": "Tease an upcoming event, fixture, or competition before it starts.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>'
+                '<line x1="16" y1="2" x2="16" y2="6"/>'
+                '<line x1="8" y1="2" x2="8" y2="6"/>'
+                '<line x1="3" y1="10" x2="21" y2="10"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "stub_weekend_preview",
+        },
+        {
+            "title": "Sponsor Post",
+            "description": "Create brand-safe sponsor activation content with your partners.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "stub_sponsor_post",
+        },
+        {
+            "title": "Session Update",
+            "description": "Share live updates from training or events as they happen.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>'
+                '<polyline points="14 2 14 8 20 8"/>'
+                '<line x1="16" y1="13" x2="8" y2="13"/>'
+                '<line x1="16" y1="17" x2="8" y2="17"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "stub_session_update",
+        },
+        {
+            "title": "Free Text",
+            "description": "Describe any moment in your own words and get content suggestions.",
+            "icon": (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+                '<path d="M12 20h9"/>'
+                '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>'
+                '</svg>'
+            ),
+            "status": "live",
+            "endpoint": "free_text_chat_page",
+        },
+    ]
 
+    def _render_input_type_cards() -> str:
+        """Render the input-type cards grid used on /add-input and /make."""
         cards_html = ""
-        for card in _INPUT_TYPES:
+        for card in _INPUT_TYPE_CATALOGUE:
             is_live = card["status"] == "live"
             if is_live:
                 badge = '<span class="tag good" style="font-size:11px">Live</span>'
@@ -9116,7 +9652,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <span class="btn" style="font-size:13px;padding:7px 14px">{btn_label}</span>
   </div>
 </a>"""
+        return cards_html
 
+    @app.route("/add-input")
+    def add_input_page():
+        cards_html = _render_input_type_cards()
         body = f"""
 <style>
 .input-type-card:hover {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
@@ -9895,10 +10435,37 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         profiles = list_profiles()
         current_id = _active_profile_id() or ""
 
-        # Friendly fallback when no profiles exist yet — send the user
-        # straight to setup rather than render an empty picker.
+        # No profiles yet — render an honest empty state with a clear
+        # path forward. Previously this redirected straight to
+        # /organisation/setup, which made the home page "Sign in" button
+        # appear broken (it'd land you back on the setup screen with no
+        # explanation). Now the user sees what's going on and has both
+        # the "Create" CTA and a way back home.
         if not profiles:
-            return redirect(url_for("organisation_setup"))
+            new_org_url = url_for("organisation_setup")
+            home_url = url_for("home")
+            empty_body = (
+                '<h1>Sign in</h1>'
+                '<p class="lede" style="margin-bottom:var(--sp-6)">'
+                'No organisation profiles exist on this deployment yet. '
+                'Create one and it will appear here for sign-in next time.'
+                '</p>'
+                '<div class="card" style="padding:24px 28px;margin-bottom:18px">'
+                '<h2 style="margin-top:0;font-size:18px">Get started</h2>'
+                '<p class="dim" style="margin-bottom:18px;font-size:13px">'
+                'MediaHub needs to know who you are before it can produce '
+                'on-brand content. Create your first organisation profile '
+                '&mdash; it takes a minute &mdash; and the AI will read '
+                'your website and social profiles so every caption it '
+                'writes sounds like you.'
+                '</p>'
+                f'<a class="btn" href="{new_org_url}">'
+                'Create your first organisation &rarr;</a>'
+                f'<a class="btn secondary" href="{home_url}" '
+                'style="margin-left:10px">Back to home</a>'
+                '</div>'
+            )
+            return _layout("Sign in", empty_body, active="signin")
 
         def _initials(name: str) -> str:
             parts = [p for p in (name or "").strip().split() if p]

@@ -6,7 +6,8 @@ Asserts that:
      exists AND is "ready" (has a captured brand voice or pasted voice
      examples).
   2. JSON API routes return 409 with an explanatory body, not a redirect.
-  3. /, /organisation*, /settings, /healthz, /static remain reachable.
+  3. /, /organisation*, /settings (consolidated Operations page),
+     /healthz, /static remain reachable.
   4. After a successful capture the session is pinned and the gate lifts
      for the same browser session.
 """
@@ -109,13 +110,21 @@ class TestExemptRoutesReachable:
         resp = c.get("/organisation")
         assert resp.status_code == 200
 
-    def test_settings_redirects_to_home(self, gated_client):
-        """The settings page was removed in the operator-config rewrite.
-        Old bookmarks redirect to home — they don't 404, and the gate
-        doesn't intercept them (it lets the redirect through)."""
+    def test_settings_renders_without_org(self, gated_client):
+        """The Settings page consolidates Activity / Status / Privacy /
+        Deployment status into one Operations surface. It must render
+        even when no organisation is pinned — the user needs to be
+        able to audit deployment health and clear caches before
+        completing first-run setup. (The Activity section gracefully
+        renders an empty 'Sign in to see runs' panel when no org.)"""
         c, _ = gated_client
         resp = c.get("/settings", follow_redirects=False)
-        assert resp.status_code in (301, 302, 303, 307, 308)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Activity" in body
+        assert "Status" in body
+        assert "Privacy" in body
+        assert "Deployment status" in body
 
     def test_healthz_loads(self, gated_client):
         c, _ = gated_client
