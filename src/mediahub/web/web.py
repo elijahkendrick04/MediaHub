@@ -933,6 +933,49 @@ def _run_state(run_id: str) -> str:
     return "done"
 
 
+_WF_STATUS_LABEL = {
+    "queue":    "In queue",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "posted":   "Posted",
+    "edited":   "Edited",
+}
+
+
+def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
+    """Render the per-card Approve / Reject / Re-queue action strip.
+
+    Round-8: shared between /pack/<id>/grouped (where the audit found
+    no approval primitive at all) and any other page that wants the
+    same workflow control surface. The "Status" strap shows the
+    current state and is updated optimistically by the global
+    `[data-mh-wf]` click handler in _layout.
+    """
+    status_key = (wf_status or "queue").lower()
+    label = _WF_STATUS_LABEL.get(status_key, status_key.replace("_", " ").capitalize() or "In queue")
+    # Visually de-emphasise the action that matches the current state
+    # so the user sees "I'm already in this state".
+    def _disabled_attrs(target: str) -> str:
+        return ' aria-pressed="true" style="opacity:0.55;cursor:default"' if status_key == target else ''
+    return (
+        f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
+        f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
+        f'<span data-mh-wf-label>{_h(label)}</span></span>'
+        f'<button class="btn" type="button" style="font-size:12px;padding:4px 10px;background:var(--good);color:var(--lane-ink);border:0"'
+        f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
+        f'{_disabled_attrs("approved")}'
+        f' title="Mark this card approved — it lands in the approved set the content pack exports.">Approve</button>'
+        f'<button class="btn danger" type="button" style="font-size:12px;padding:4px 10px"'
+        f' data-mh-wf="rejected" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
+        f'{_disabled_attrs("rejected")}'
+        f' title="Reject this card so it\'s hidden from the approved content pack.">Reject</button>'
+        f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
+        f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
+        f'{_disabled_attrs("queue")}'
+        f' title="Send back to the queue — neither approved nor rejected.">Re-queue</button>'
+    )
+
+
 def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     """Return a friendly HTML page that auto-refreshes every 4 seconds."""
     try:
@@ -1181,6 +1224,85 @@ def _schedule_modal_js() -> str:
     var modal = document.getElementById('mh-sched-modal');
     if (modal) modal.style.display = 'none';
   };
+
+  // Global workflow-status helper used by per-card Approve / Reject /
+  // Re-queue buttons across /review AND /pack/<id>/grouped. Posts to the
+  // shared /api/workflow/<run>/<card> endpoint. Returns a Promise so the
+  // caller can chain UI updates; surfaces failures via MH.toast.
+  window.mhWorkflowSet = function(runId, cardId, status) {
+    if (!runId || !cardId || !status) return Promise.reject(new Error('mhWorkflowSet: missing arg'));
+    var url = (API_BASE || '') + '/api/workflow/' + encodeURIComponent(runId) +
+              '/' + encodeURIComponent(cardId);
+    return fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'set_status', status: status})
+    }).then(function(r){
+      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+    }).then(function(o){
+      if (!o.ok || !o.body || o.body.ok === false) {
+        var msg = (o.body && (o.body.error || o.body.message)) || ('HTTP ' + (o.ok ? 200 : 'err'));
+        if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + msg, 'error', 4000);
+        throw new Error(msg);
+      }
+      return o.body;
+    }).catch(function(e){
+      if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + (e && e.message || e), 'error', 4000);
+      throw e;
+    });
+  };
+
+  // Delegated click handler for any element marked with
+  // data-mh-wf="approved|rejected|queue|posted". Updates pill on the
+  // same card group (matching data-mh-wf-target="<cardId>") and
+  // optimistically swaps in the new state before the server confirms.
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-mh-wf]');
+    if (!btn) return;
+    var status = btn.getAttribute('data-mh-wf');
+    var runId  = btn.getAttribute('data-mh-run-id');
+    var cardId = btn.getAttribute('data-mh-card-id');
+    if (!runId || !cardId || !status) return;
+    e.preventDefault();
+    // Optimistic UI: tint matching pills on the same card AND swap the
+    // strap label so the user sees the new state immediately.
+    var labelMap = {
+      'queue':    'In queue',
+      'approved': 'Approved',
+      'rejected': 'Rejected',
+      'posted':   'Posted',
+      'edited':   'Edited'
+    };
+    var groupSel = '[data-mh-wf-target="' + (window.CSS && CSS.escape ? CSS.escape(cardId) : cardId) + '"]';
+    document.querySelectorAll(groupSel).forEach(function(el){
+      el.dataset.mhWfState = status;
+      var labelEl = el.querySelector('[data-mh-wf-label]');
+      if (labelEl) labelEl.textContent = labelMap[status] || status;
+    });
+    // De-emphasise the new "current" button across the card; restore the others.
+    var rowSel = '[data-mh-card-id="' + (window.CSS && CSS.escape ? CSS.escape(cardId) : cardId) + '"]';
+    document.querySelectorAll(rowSel + '[data-mh-wf]').forEach(function(b){
+      if (b.getAttribute('data-mh-wf') === status) {
+        b.setAttribute('aria-pressed', 'true');
+        b.style.opacity = '0.55';
+        b.style.cursor = 'default';
+      } else {
+        b.removeAttribute('aria-pressed');
+        b.style.opacity = '';
+        b.style.cursor = '';
+      }
+    });
+    var origLabel = btn.textContent;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    window.mhWorkflowSet(runId, cardId, status).then(function(){
+      btn.disabled = false; btn.style.opacity = '';
+      if (window.MH && MH.toast) MH.toast('Marked as ' + status, 'success', 1800);
+    }).catch(function(){
+      btn.disabled = false; btn.style.opacity = '';
+      btn.textContent = origLabel;
+    });
+  });
 
   window.mhScheduleSend = function() {
     var runId  = document.getElementById('mh-sched-run-id').value;
@@ -5287,8 +5409,20 @@ function turnMeetIntoPack() {{
             # V8: Create-graphic API URL (lazy visual generation)
             _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
             _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
+            # Round-8: per-card Schedule button parity with /pack/grouped.
+            # The schedule modal reads the active tone's caption text via
+            # `pickActiveCaption(cardEl)` (web.py mhScheduleOpen), so we
+            # point it at the tone-picker's wrapper id `wf-{card_uuid}`
+            # which contains the `.tone-panel.active .caption-text`.
+            _wf_card_el_id = f"wf-{card_uuid}"
+            schedule_btn_review = (
+                f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
+                f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
+                f'Schedule&hellip;</button>'
+            ) if card_id_raw else ""
+
             tone_tabs_html = (
-                f'<div class="tone-picker" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
+                f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
                 f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
                 f'<div style="margin-bottom:8px">{tabs_html}</div>'
                 f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
@@ -5297,6 +5431,7 @@ function turnMeetIntoPack() {{
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
                 f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
                 f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+                f'{schedule_btn_review}'
                 f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
                 f'</div>'
                 f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
@@ -12786,6 +12921,19 @@ function tiRegenerate() {{
         if not _v73_ok or _build_grouped_pack is None:
             return redirect(_pack_url)
 
+        # Round-8: load the per-card workflow sidecar so the new
+        # Approve / Reject / Re-queue strap below each card can stamp
+        # the current state (queue|approved|rejected|posted|edited).
+        # Falls back to an empty dict so the loop below stays
+        # crash-safe when the workflow store can't be reached.
+        _wf_states: dict = {}
+        try:
+            _ws = _get_wf_store()
+            if _ws is not None:
+                _wf_states = _ws.load(run_id) or {}
+        except Exception:
+            _wf_states = {}
+
         try:
             grouped = _build_grouped_pack(run_data, profile_id)
         except Exception as e:
@@ -12821,6 +12969,15 @@ function tiRegenerate() {{
                 band = _h(item.get("quality_band") or "")
                 prio = item.get("priority", 0)
                 n_ach = item.get("n_achievements", 0)
+                # Pull the per-card workflow status so the approve/reject row
+                # below can render the current state strap. Sidecar workflow
+                # state lives in _wf_states (loaded once at the top of the
+                # route), falling back to whatever the item itself carries.
+                _card_wf = _wf_states.get(card_id_raw) if isinstance(_wf_states, dict) else None
+                if _card_wf is not None and hasattr(_card_wf, "status"):
+                    wf_status = _card_wf.status.value
+                else:
+                    wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
                 # Schedule state pill (queued|scheduled|published|failed).
                 sched_state_raw = (item.get("schedule_status")
                                    or (item.get("workflow") or {}).get("schedule_status")
@@ -12907,7 +13064,9 @@ function tiRegenerate() {{
     </div>
   </div>
   {why_html}
-  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    {_render_wf_actions(run_id, str(card_id_raw), wf_status) if card_id_raw else ""}
+    <span style="flex:1"></span>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-1')">Copy caption</button>
     <textarea id="cap-{card_id}-1" style="display:none">{cap_only}</textarea>
     <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'cap-{card_id}-2')">Copy + hashtags</button>
