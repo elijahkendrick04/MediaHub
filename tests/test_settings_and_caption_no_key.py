@@ -235,16 +235,64 @@ def test_caption_endpoint_llm_unavailable_error_steers_to_administrator(app, mon
     assert r.status_code == 200
     j = r.get_json()
     assert j["tone"] == "ai"
-    assert j["live"] is False
-    assert j["error"] == "llm_unavailable"
     assert j["caption"] == ""
-    # The new copy steers the user to their administrator.
-    assert "administrator" in j["message"].lower()
-    # No reference to the deleted Settings page.
+    # Phase 1.5: ClaudeUnavailableError("upstream 503") is now classed
+    # as a transient failure (not "no key configured"), so the response
+    # tells the user to retry rather than contact their administrator.
+    # `live` stays True because the provider IS reachable in principle.
+    assert j["error"] == "transient"
+    assert j["live"] is True
+    # The retry copy.
+    assert ("retry" in j["message"].lower()
+            or "try again" in j["message"].lower()
+            or "few seconds" in j["message"].lower())
+    # No reference to the deleted Settings page either way.
     assert "Settings" not in j["message"]
     assert "in Settings" not in j["message"]
     assert "Gemini API key" not in j["message"]
     assert "Anthropic key" not in j["message"]
+
+
+def test_caption_endpoint_no_key_steers_to_administrator(app, monkeypatch):
+    """When the LLM provider raises with terminal wording ("not
+    configured" / "unavailable on this deployment"), the error class
+    is no_key and the user is steered to their administrator. This is
+    the complement to the transient test above."""
+    from mediahub.web import web as _web
+    from mediahub.web import ai_caption as _ai_caption
+
+    fake_run = {
+        "profile_display": "Test Club",
+        "meet": {"name": "Test Meet"},
+        "recognition_report": {
+            "ranked_achievements": [{
+                "achievement": {
+                    "swim_id": "abc123",
+                    "swimmer_name": "Jane Doe",
+                    "event": "100 Free",
+                    "time": "1:02.34",
+                    "pb": True, "place": 1, "type": "PB",
+                    "headline": "First place",
+                },
+            }],
+        },
+    }
+    monkeypatch.setattr(_web, "_load_run", lambda rid: fake_run)
+    from mediahub.media_ai import llm as _llm
+    monkeypatch.setattr(_llm, "is_available", lambda: True)
+    def _raise(*a, **kw):
+        raise _ai_caption.ClaudeUnavailableError(
+            "AI features are unavailable on this deployment. No provider configured."
+        )
+    monkeypatch.setattr(_ai_caption, "generate_caption_for_tone", _raise)
+
+    c = app.test_client()
+    r = c.post("/api/runs/test_run/swim/abc123/caption?tone=ai&n_variants=1")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j["error"] == "no_key"
+    assert j["live"] is False
+    assert "administrator" in j["message"].lower()
 
 
 def test_no_api_key_message_does_not_steer_to_settings_page(app, monkeypatch):

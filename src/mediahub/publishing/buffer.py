@@ -104,8 +104,8 @@ def list_channels(token: str) -> list[dict]:
         {
             "id":                  "<buffer profile id>",
             "service":             "instagram" | "twitter" | "facebook" | ...,
-            "service_username":    "@swansea_uni_swim",
-            "formatted_username":  "Swansea Uni Swim",
+            "service_username":    "@your_club_handle",
+            "formatted_username":  "Your Club Handle",
             "avatar":              "https://...png" | None,
             "default":             bool,
         }

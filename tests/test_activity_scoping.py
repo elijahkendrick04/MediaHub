@@ -175,24 +175,24 @@ class TestHomeIsStripped:
         c.post("/api/organisation/active", data={"profile_id": "club-a"})
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # Org banner (set-up state morphed to edit state)
-        assert "Edit organisation" in body
+        # Phase 1.5 redesigned home: pinned-state hero leads with the
+        # org name + "Create new content" CTA + "Edit profile" link.
         assert "Club A" in body
-        # How-it-works steps
+        assert "Create new content" in body
+        assert "Edit profile" in body
+        # How-it-works steps still present.
         assert "How it works" in body
         assert "Add an input" in body
 
     def test_home_banner_morphs_to_setup_when_no_org(self, gated_client):
         c, _ = gated_client
-        # No pin, no ready org → setup banner with the setup CTA.
+        # No pin → the rebuilt home shows either Sign in (if profiles
+        # exist) or Create first organisation (if none).
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # Both clubs exist but neither is pinned and neither is "active"
-        # for *this* fresh session. _active_profile_id falls back to
-        # most-recent-mtime, so we may land on one of the seeded clubs.
-        # The important assertion is: an org-related CTA exists in the
-        # banner.
-        assert ("Set up your organisation" in body or "Edit organisation" in body)
+        # Both seeded clubs exist, so the picker is the primary path.
+        assert ("Sign in" in body or "Create new organisation" in body
+                or "Create your first organisation" in body)
 
 
 # ---------------------------------------------------------------------------

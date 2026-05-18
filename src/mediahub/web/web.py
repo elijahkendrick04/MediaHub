@@ -1266,23 +1266,33 @@ def _start_run(file_bytes: bytes, file_name: str,
 # ---------------------------------------------------------------------
 
 BASE_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
 
 :root {
-  /* Surfaces */
-  --bg:       #0B1220;
-  --panel:    #111A2E;
-  --panel2:   #17233D;
-  --border:   rgba(255,255,255,0.06);
+  /* Surfaces — warmer, deeper, less corporate-blue */
+  --bg:       #08091A;
+  --bg-soft:  #0F1029;
+  --panel:    #141532;
+  --panel2:   #1B1D44;
+  --panel-h:  #232556;
+  --border:   rgba(255,255,255,0.07);
+  --border-h: rgba(168,85,247,0.30);
 
   /* Text */
-  --ink:       #E6ECF5;
-  --ink-dim:   #8A95A8;
-  --ink-muted: #5A6478;
+  --ink:       #F2F4FD;
+  --ink-dim:   #98A1C0;
+  --ink-muted: #5F6790;
 
-  /* Accent */
+  /* Accent — bold cyan→violet gradient pair */
   --accent:    #22D3EE;
-  --accent-h:  #06B6D4;
+  --accent-h:  #67E8F9;
+  --accent2:   #A855F7;
+  --accent2-h: #C084FC;
+  --accent3:   #F472B6;
+  --grad-hot:  linear-gradient(135deg, #22D3EE 0%, #A855F7 55%, #F472B6 100%);
+  --grad-cool: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
+  --grad-warm: linear-gradient(135deg, #A855F7 0%, #F472B6 100%);
 
   /* Semantic */
   --good: #22C55E;
@@ -1291,10 +1301,11 @@ BASE_CSS = """
   --info: #22D3EE;
 
   /* Misc */
-  --radius:    16px;
-  --radius-sm: 10px;
-  --shadow:    0 1px 0 rgba(255,255,255,0.03), 0 4px 24px rgba(0,0,0,0.4);
-  --transition: 150ms cubic-bezier(0.4,0,0.2,1);
+  --radius:    18px;
+  --radius-sm: 12px;
+  --shadow:    0 1px 0 rgba(255,255,255,0.04), 0 12px 40px rgba(0,0,0,0.45);
+  --shadow-h:  0 1px 0 rgba(255,255,255,0.06), 0 24px 60px rgba(168,85,247,0.18);
+  --transition: 180ms cubic-bezier(0.4,0,0.2,1);
 }
 
 * { box-sizing: border-box; }
@@ -1302,7 +1313,12 @@ html, body { margin: 0; padding: 0; }
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
                Roboto, Helvetica, Arial, sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(1200px 600px at 12% -10%, rgba(168,85,247,0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% -20%, rgba(34,211,238,0.14), transparent 65%),
+    radial-gradient(700px 700px at 50% 110%, rgba(244,114,182,0.08), transparent 65%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--ink);
   font-size: 15px;
   line-height: 1.6;
@@ -1906,6 +1922,237 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   line-height: 1.55; margin: 0;
 }
 
+/* === Hero (rebuilt home page) === */
+.mh-hero {
+  position: relative;
+  padding: 56px 32px 48px;
+  margin-bottom: 40px;
+  border-radius: 24px;
+  background:
+    radial-gradient(900px 320px at 18% 20%, rgba(168,85,247,0.18), transparent 60%),
+    radial-gradient(700px 280px at 88% 80%, rgba(34,211,238,0.20), transparent 65%),
+    linear-gradient(135deg, rgba(20,21,50,0.85), rgba(15,16,41,0.95));
+  border: 1px solid rgba(168,85,247,0.20);
+  box-shadow: var(--shadow-h);
+  overflow: hidden;
+}
+.mh-hero::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: -1px; right: -1px; bottom: -1px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(34,211,238,0.45), rgba(168,85,247,0.30), rgba(244,114,182,0.30)) border-box;
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  padding: 1px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.mh-hero-eyebrow {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.20em; text-transform: uppercase;
+  color: var(--accent);
+  display: inline-block;
+  padding: 5px 10px;
+  border: 1px solid rgba(34,211,238,0.30);
+  border-radius: 999px;
+  margin-bottom: 18px;
+  background: rgba(34,211,238,0.06);
+}
+.mh-hero h1 {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: clamp(34px, 5.5vw, 60px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.04;
+  margin: 0 0 18px;
+  max-width: 760px;
+}
+.mh-hero h1 .grad {
+  background: var(--grad-hot);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  display: inline-block;
+}
+.mh-hero p.lede {
+  font-size: 17px;
+  color: var(--ink-dim);
+  margin: 0 0 32px;
+  max-width: 620px;
+  line-height: 1.55;
+}
+.mh-hero-actions {
+  display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+}
+.mh-cta-primary,
+.mh-cta-secondary {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 22px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+  cursor: pointer;
+}
+.mh-cta-primary {
+  background: var(--grad-hot);
+  color: #08091A;
+  box-shadow: 0 8px 28px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.mh-cta-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(168,85,247,0.50), inset 0 1px 0 rgba(255,255,255,0.3);
+  color: #08091A;
+}
+.mh-cta-secondary {
+  background: rgba(255,255,255,0.04);
+  color: var(--ink);
+  border-color: rgba(255,255,255,0.10);
+}
+.mh-cta-secondary:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: var(--accent);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+.mh-hero-meta {
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  display: flex; gap: 14px; flex-wrap: wrap;
+}
+.mh-hero-meta .dot { color: var(--ink-muted); }
+.mh-hero-meta b { color: var(--ink-dim); font-weight: 600; }
+
+/* === Sign-in profile cards === */
+.mh-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.mh-profile-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 60%),
+    var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition);
+  text-decoration: none;
+  color: inherit;
+  min-height: 180px;
+}
+.mh-profile-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-h);
+  box-shadow: var(--shadow-h);
+}
+.mh-profile-card .logo {
+  width: 56px; height: 56px;
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+  font-family: 'Sora', sans-serif;
+  font-weight: 800; font-size: 22px;
+  color: #fff;
+  background: var(--grad-hot);
+  overflow: hidden;
+}
+.mh-profile-card .logo img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+.mh-profile-card .display-name {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.mh-profile-card .meta-line {
+  font-size: 12px;
+  color: var(--ink-muted);
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.mh-profile-card .meta-line .pill {
+  padding: 2px 8px;
+  background: rgba(34,211,238,0.10);
+  border: 1px solid rgba(34,211,238,0.20);
+  border-radius: 999px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.mh-profile-card .actions {
+  margin-top: auto;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.mh-profile-card .actions .btn-sign-in {
+  flex: 1;
+  text-align: center;
+  padding: 8px 12px;
+  background: var(--grad-cool);
+  color: #08091A;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.mh-profile-card .actions .btn-delete {
+  padding: 8px 12px;
+  background: rgba(244,63,94,0.08);
+  border: 1px solid rgba(244,63,94,0.20);
+  color: #FCA5A5;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mh-profile-card .actions .btn-delete:hover {
+  background: rgba(244,63,94,0.18);
+  border-color: rgba(244,63,94,0.40);
+}
+
+/* === New org "+" tile === */
+.mh-new-profile {
+  display: flex;
+  align-items: center; justify-content: center;
+  min-height: 180px;
+  background:
+    repeating-linear-gradient(45deg, rgba(168,85,247,0.04) 0 12px, transparent 12px 24px),
+    var(--panel);
+  border: 1.5px dashed rgba(168,85,247,0.40);
+  border-radius: var(--radius);
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-weight: 600;
+  text-align: center;
+  transition: var(--transition);
+}
+.mh-new-profile:hover {
+  background:
+    repeating-linear-gradient(45deg, rgba(168,85,247,0.08) 0 12px, transparent 12px 24px),
+    var(--panel-h);
+  border-color: var(--accent2);
+  color: var(--ink);
+}
+.mh-new-profile .plus {
+  font-size: 28px;
+  margin-bottom: 6px;
+  color: var(--accent2);
+  font-weight: 800;
+}
+
 /* === Template gallery cards === */
 .mh-template-grid {
   display: grid;
@@ -2118,6 +2365,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
     <a href="{{ url_for('status_page') }}" class="{{ 'active' if active=='status' else '' }}">Status</a>
+    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -2412,6 +2660,12 @@ def create_app() -> Flask:
         "organisation_setup",
         "organisation_setup_capture",
         "organisation_set_active",
+        # Phase 1.5 — the profile-picker page must be reachable without
+        # an active org (it's how the user PICKS one). Same for the POST
+        # endpoints that switch / delete.
+        "sign_in_page",
+        "sign_in_post",
+        "sign_in_delete",
         # /settings now redirects to / so doesn't actually need exempting,
         # but we keep the endpoint name in the allow-list so a directly-
         # hit /settings URL doesn't get caught by the gate before reaching
@@ -2516,44 +2770,107 @@ def create_app() -> Flask:
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
     def home():
-        # The front page intentionally shows only two things:
-        #   1. The organisation banner (morphs between "set up" and
-        #      "edit" depending on whether a ready profile is pinned).
-        #   2. The "how it works" explainer.
-        # Everything else (Create, Add Input, Activity, etc.) lives
-        # in the top nav.
+        """Rebuilt home page (Phase 1.5 polish).
+
+        Two-button hero — "Create organisation" + "Sign in to existing" —
+        plus the established four-step explainer. When an org is already
+        pinned, the hero swaps in a "Continue as <name>" CTA pointing at
+        Add Input, with the sign-in / create paths still accessible below
+        so the user can switch tenants without rummaging through nav.
+        """
         prof = _active_profile()
-        is_setup = bool(prof and prof.is_ready())
-        org_name = (prof.display_name if prof else "")
+        existing = list_profiles()
+        n_orgs = len(existing)
 
-        if is_setup:
-            banner_html = (
-                '<div class="card" style="border-color:rgba(44,201,127,0.35);'
-                'margin-bottom:28px;display:flex;align-items:center;gap:20px;'
-                'flex-wrap:wrap;background:rgba(44,201,127,0.04)">'
-                '<div style="flex:1;min-width:240px">'
-                f'<h2 style="margin-top:0;margin-bottom:6px">{_h(org_name)}</h2>'
-                '<p style="margin:0">MediaHub is set up to write in your voice. '
-                'Use <b>Create</b> in the top bar to start a new piece of content '
-                'or <b>Activity</b> to revisit recent runs.</p>'
-                '</div>'
-                f'<a class="btn secondary" href="{url_for("organisation_page")}">Edit organisation &rarr;</a>'
-                '</div>'
+        # Compute a small run-count for the hero meta line so the page
+        # doesn't feel hollow once the user has activity.
+        n_runs = 0
+        try:
+            conn = _db()
+            n_runs = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+            conn.close()
+        except Exception:
+            pass
+
+        # --- Hero ----------------------------------------------------------
+        if prof and prof.is_ready():
+            # Returning user with a pinned org. Lead with "continue" + give
+            # secondary routes to sign-out / create another.
+            hero_h1 = (
+                f'<span class="grad">{_h(prof.display_name)}</span><br>'
+                'is set up &mdash; let&rsquo;s make something.'
             )
+            hero_lede = (
+                'Your brand voice, palette, and logo are loaded. Captions, '
+                'graphics, and motion videos will arrive on-brand. Anything '
+                'you generate goes through your approval before it leaves '
+                'this deployment.'
+            )
+            hero_actions = (
+                f'<a class="mh-cta-primary" href="{url_for("add_input_page")}">'
+                'Create new content &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
+                'Switch organisation</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
+                'Edit profile</a>'
+            )
+            eyebrow = 'Pinned organisation'
         else:
-            banner_html = (
-                '<div class="card" style="border-color:rgba(34,211,238,0.35);'
-                'margin-bottom:28px;display:flex;align-items:center;gap:20px;'
-                'flex-wrap:wrap;background:rgba(34,211,238,0.04)">'
-                '<div style="flex:1;min-width:240px">'
-                '<h2 style="margin-top:0;margin-bottom:6px">Set up your organisation first</h2>'
-                '<p style="margin:0">MediaHub needs to know who you are before it can write in your voice. '
-                'Paste your website or social links &mdash; MediaHub reads each one and learns your brand voice.</p>'
-                '</div>'
-                f'<a class="btn" href="{url_for("organisation_setup")}">Set up organisation &rarr;</a>'
-                '</div>'
+            # Fresh visit (or signed-out). Two equally-weighted CTAs.
+            hero_h1 = (
+                'Turn results into <span class="grad">on-brand</span><br>'
+                'content in minutes.'
             )
+            hero_lede = (
+                'MediaHub reads your club website, social profiles, and brand '
+                'guidelines, then writes captions, builds graphics, and renders '
+                'motion videos in your voice. Set up once. Reuse forever. '
+                'Nothing posts without you.'
+            )
+            if n_orgs > 0:
+                hero_actions = (
+                    f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
+                    f'Sign in &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
+                    'Create new organisation</a>'
+                )
+            else:
+                hero_actions = (
+                    f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
+                    'Create your first organisation &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("status_page")}">'
+                    'See deployment status</a>'
+                )
+            eyebrow = 'Sport content automation'
 
+        # Meta line under the CTAs — honest counts, no fake numbers.
+        meta_parts = []
+        if n_orgs:
+            meta_parts.append(
+                f'<span><b>{n_orgs}</b> {"organisation" if n_orgs == 1 else "organisations"}</span>'
+            )
+        if n_runs:
+            meta_parts.append(
+                f'<span><b>{n_runs}</b> total {"run" if n_runs == 1 else "runs"}</span>'
+            )
+        if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
+            meta_parts.append('<span>Brand voice <b>captured</b></span>')
+        meta_html = ""
+        if meta_parts:
+            sep = '<span class="dot">&middot;</span>'
+            meta_html = '<div class="mh-hero-meta">' + sep.join(meta_parts) + '</div>'
+
+        hero_html = (
+            '<section class="mh-hero">'
+            f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
+            f'<h1>{hero_h1}</h1>'
+            f'<p class="lede">{_h(hero_lede)}</p>'
+            f'<div class="mh-hero-actions">{hero_actions}</div>'
+            f'{meta_html}'
+            '</section>'
+        )
+
+        # --- Four-step explainer (kept; still useful first-touch context) ---
         steps_html = (
             '<div class="mh-section-eyebrow">How it works</div>'
             '<h2 class="mh-section-title">From results to ready-to-post content, end to end</h2>'
@@ -2569,7 +2886,7 @@ def create_app() -> Flask:
             '</div>'
         )
 
-        return _layout("Home", banner_html + steps_html, active="home")
+        return _layout("Home", hero_html + steps_html, active="home")
 
     # ---- ACTIVITY &mdash; recent runs scoped to the active organisation ----
     @app.route("/activity")
@@ -2911,6 +3228,41 @@ def create_app() -> Flask:
         err_html = (
             f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>' if error else ""
         )
+
+        # Pre-fill the brand fields from the active organisation so the
+        # user never re-enters logo / colours they already gave us at
+        # /organisation/setup. Phase 1.5 consolidation: logos live on the
+        # profile, not on individual runs. Colour pickers stay because
+        # they're cheap per-run overrides for the rare case someone wants
+        # a different palette for a sponsor-themed post.
+        active_prof = _active_profile()
+        prof_primary = "#0A2540"
+        prof_secondary = "#101820"
+        prof_accent = "#FFD86E"
+        prof_logo_html = ""
+        if active_prof is not None:
+            prof_primary = (getattr(active_prof, "brand_primary", "") or prof_primary).strip()
+            prof_secondary = (getattr(active_prof, "brand_secondary", "") or prof_secondary).strip()
+            extracted = getattr(active_prof, "brand_palette_extracted", {}) or {}
+            if isinstance(extracted, dict) and extracted.get("accent"):
+                prof_accent = extracted["accent"]
+            logo_url = (getattr(active_prof, "brand_logo_url", "") or "").strip()
+            if logo_url:
+                _logo_disp = logo_url[:80] + ("\u2026" if len(logo_url) > 80 else "")
+                prof_logo_html = (
+                    f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
+                    f'Logo: <code style="font-size:11px">'
+                    f'{_h(_logo_disp)}</code></p>'
+                )
+            else:
+                prof_logo_html = (
+                    '<p class="dim" style="margin:6px 0 0;font-size:12px;color:#F59E0B">'
+                    'No logo on your organisation profile. '
+                    f'<a href="{url_for("organisation_page")}" '
+                    'style="color:#F59E0B;text-decoration:underline">Add one</a> '
+                    'so it flows through to every graphic.</p>'
+                )
+
         body = f"""
 <h1>Configure this run</h1>
 <div class="card">
@@ -2924,17 +3276,18 @@ def create_app() -> Flask:
     <p class="dim" style="margin-top:4px;font-size:12px">Only clubs that actually appear in this meet are listed.</p>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
-      <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Branding (required)</legend>
-      <p class="dim" style="margin:0 0 10px;font-size:12px">Upload a logo, or pick brand colours \u2014 at least one is required.</p>
-      <label>Club logo (PNG / JPG / SVG)</label>
-      <input type="file" name="club_logo" accept="image/png,image/jpeg,image/svg+xml" />
+      <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Brand &mdash; loaded from your organisation</legend>
+      <p class="dim" style="margin:0 0 10px;font-size:12px">
+        These come from your <a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a>.
+        Change colours below for a one-off override, or update them once on your profile to apply everywhere.
+      </p>
+      {prof_logo_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
-        <div><label style="display:block">Primary</label><input type="color" name="primary_colour" value="#0A2540" /></div>
-        <div><label style="display:block">Secondary</label><input type="color" name="secondary_colour" value="#101820" /></div>
-        <div><label style="display:block">Accent</label><input type="color" name="accent_colour" value="#FFD86E" /></div>
+        <div><label style="display:block">Primary</label><input type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
+        <div><label style="display:block">Secondary</label><input type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
+        <div><label style="display:block">Accent</label><input type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
-      <label style="margin-top:10px;display:block"><input type="checkbox" name="use_logo_colours" value="1" /> Use logo colours as club colours (auto-extract)</label>
     </fieldset>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
@@ -2970,23 +3323,24 @@ def create_app() -> Flask:
             if not club_filter:
                 return _layout("Configure", '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>', active="add_input")
 
-            # V8.2 issue 5: branding is now required. Either a logo or
-            # the colour pickers must be filled in.
-            logo_file = request.files.get("club_logo")
-            logo_bytes = logo_file.read() if (logo_file and logo_file.filename) else None
-            logo_filename = logo_file.filename if (logo_file and logo_file.filename) else None
+            # Phase 1.5 logo consolidation: logos now live on the active
+            # organisation profile, not on individual runs. The configure
+            # form no longer accepts a club_logo file; the per-run brand
+            # kit pulls the logo from the active ClubProfile's
+            # brand_logo_url and the colour pickers default to the
+            # profile's saved colours (still per-run-overridable).
+            active_prof_for_run = _active_profile()
+            logo_bytes = None
+            logo_filename = None
             primary_form = (request.form.get("primary_colour") or "").strip() or None
             secondary_form = (request.form.get("secondary_colour") or "").strip() or None
             accent_form = (request.form.get("accent_colour") or "").strip() or None
-            use_logo_colours = request.form.get("use_logo_colours") in ("1", "on", "true", "True")
+            use_logo_colours = False
             display_name_form = (request.form.get("display_name") or club_filter or "").strip()
-            has_branding = bool(logo_bytes or primary_form or secondary_form or accent_form)
-            if not has_branding:
-                return _render_configure(
-                    run_id, meta,
-                    error="Please upload a logo or pick at least one brand colour before running.",
-                    selected_club=club_filter,
-                )
+            # We always have branding now (the profile guarantees it), so
+            # the old "branding required" gate is removed. If somehow
+            # neither the profile nor the form supplies colours, the
+            # downstream renderer falls back to deterministic defaults.
 
             data = input_path.read_bytes()
             # Pin the run to the active organisation so it appears on
@@ -3009,17 +3363,44 @@ def create_app() -> Flask:
                 club_filter=club_filter,
             )
 
-            # Persist the brand kit (logo + colours) for the new run id.
+            # Persist the brand kit (colours) for the new run id. The
+            # logo is no longer per-run — it comes from the active
+            # profile's brand_logo_url at render time (see
+            # content_pack_visual/integration.py fallback). If the
+            # profile has a logo, we fetch it once and seed the run's
+            # brand kit with it so downstream layout code that expects
+            # a local path doesn't trip.
             try:
                 from .brand_kit_upload import process_upload as _bk_process
+                profile_logo_bytes = None
+                profile_logo_name = None
+                if active_prof_for_run is not None:
+                    url = (getattr(active_prof_for_run, "brand_logo_url", "") or "").strip()
+                    if url and (url.startswith("http://") or url.startswith("https://")):
+                        try:
+                            import requests as _rq
+                            r = _rq.get(url, timeout=10)
+                            if r.ok and len(r.content) < 5_000_000:
+                                profile_logo_bytes = r.content
+                                # Derive a sensible filename from the URL
+                                # path so the on-disk save uses the right
+                                # extension. Default to .png if unknown.
+                                from urllib.parse import urlparse
+                                path = urlparse(url).path or ""
+                                tail = path.rsplit("/", 1)[-1] or "logo.png"
+                                if "." not in tail:
+                                    tail += ".png"
+                                profile_logo_name = tail
+                        except Exception:
+                            profile_logo_bytes = None
                 _bk_process(
                     new_run_id,
-                    logo_bytes=logo_bytes,
-                    logo_filename=logo_filename,
+                    logo_bytes=profile_logo_bytes,
+                    logo_filename=profile_logo_name,
                     primary_form=primary_form,
                     secondary_form=secondary_form,
                     accent_form=accent_form,
-                    use_logo_colours=use_logo_colours,
+                    use_logo_colours=False,
                     display_name=display_name_form,
                 )
             except Exception:
@@ -4216,8 +4597,13 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       var text = j.caption || '';
       var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
       var fallbackNote = '';
-      // No-key or LLM unavailable state &mdash; AI features disabled by the operator.
-      if (j.live === false) {{
+      // Distinguish transient (rate-limit / network blip) from terminal
+      // (no key configured). Transient errors must NOT flip the dot red
+      // permanently — the AI itself is still set up correctly, the
+      // request just needs a retry.
+      var isTransient = (j.error === 'transient' || (j.live === true && !text));
+      var isTerminal = (j.live === false && j.error !== 'transient');
+      if (isTerminal) {{
         if (captionDiv) {{
           captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
             + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions are unavailable</div>'
@@ -4225,6 +4611,16 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
             + '</div>';
         }}
         document.querySelectorAll('.ai-status-dot').forEach(function(d){{ d.style.background='#ff5d6c'; }});
+        return;
+      }}
+      if (isTransient) {{
+        if (captionDiv) {{
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(34,211,238,0.20);border-radius:6px;background:rgba(34,211,238,0.04)">'
+            + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
+            + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
+            + '</div>';
+        }}
+        // Keep the dot green — provider is reachable, just throttled.
         return;
       }}
       if (j.fallback && j.fallback_voice) {{
@@ -4647,28 +5043,34 @@ function addGraphicToPack(btn, visualId) {{
   setTimeout(function() {{ btn.textContent = '+ Add to pack'; btn.disabled = false; }}, 2000);
 }}
 
-// Poll LLM status once on page load and colour every AI status dot
-// (green = any provider live, red = heuristic fallback only).
+// Poll LLM status on page load and every 30s afterwards. Self-healing:
+// if a previous transient 429 painted the dot red, the next poll
+// re-greens it once the rate-limit window has elapsed. Without this
+// the user had to reload the page to recover from any blip.
 (function pollLlmStatus(){{
-  try {{
-    var url = (window._API_BASE || '') + '/api/settings/llm-status';
-    fetch(url, {{cache:'no-store'}})
-      .then(function(r){{ return r.json(); }})
-      .then(function(j){{
-        var dots = document.querySelectorAll('.ai-status-dot');
-        var color = j.live ? '#2cc97f' : '#ff5d6c';
-        var providerLabel = j.provider_label || 'Anthropic key';
-        var title = j.live
-          ? ('Live AI enabled &mdash; provider: ' + providerLabel)
-          : 'Live AI DISABLED &mdash; contact your administrator to enable AI captions.';
-        dots.forEach(function(d){{
-          d.style.background = color;
-          var btn = d.closest('button');
-          if (btn) btn.title = title;
-        }});
-      }})
-      .catch(function(){{}});
-  }} catch(e){{}}
+  function _tick() {{
+    try {{
+      var url = (window._API_BASE || '') + '/api/settings/llm-status';
+      fetch(url, {{cache:'no-store'}})
+        .then(function(r){{ return r.json(); }})
+        .then(function(j){{
+          var dots = document.querySelectorAll('.ai-status-dot');
+          var color = j.live ? '#2cc97f' : '#ff5d6c';
+          var providerLabel = j.provider_label || 'AI key';
+          var title = j.live
+            ? ('Live AI enabled &mdash; provider: ' + providerLabel)
+            : 'Live AI DISABLED &mdash; contact your administrator to enable AI captions.';
+          dots.forEach(function(d){{
+            d.style.background = color;
+            var btn = d.closest('button');
+            if (btn) btn.title = title;
+          }});
+        }})
+        .catch(function(){{}});
+    }} catch(e){{}}
+  }}
+  _tick();
+  setInterval(_tick, 30000);
 }})();
 </script>
 """
@@ -4878,22 +5280,45 @@ function addGraphicToPack(btn, visualId) {{
                 # (Holo/Blaze pattern). The first is returned as `caption`
                 # for backwards-compat with existing consumers; the full list
                 # lives in `variants`.
+                #
+                # Phase 1.5 rate-limit fix: default n_variants dropped
+                # from 3 → 1. Three parallel Gemini calls per click
+                # blew through the free-tier 15 RPM after just a few
+                # regenerates, and pool.map propagated the FIRST 429 as
+                # a request-level failure even if 2 of 3 succeeded —
+                # the user saw "AI captions are unavailable" after one
+                # click. Each variant is now generated sequentially
+                # with individual error capture so one failure doesn't
+                # poison the others.
                 from concurrent.futures import ThreadPoolExecutor
-                n_variants = int(request.args.get("n_variants") or 3)
+                n_variants = int(request.args.get("n_variants") or 1)
                 n_variants = max(1, min(n_variants, 4))
 
                 def _gen_one():
-                    return _gen_tone(
-                        ach_dict, club_brand, tone=tone,
-                        voice_profile=_run_voice_profile,
-                        club_profile=club_profile_obj,
-                    )
+                    try:
+                        return _gen_tone(
+                            ach_dict, club_brand, tone=tone,
+                            voice_profile=_run_voice_profile,
+                            club_profile=club_profile_obj,
+                        )
+                    except _ClaudeUE:
+                        # Terminal-shaped errors must propagate so the
+                        # outer except can distinguish "no key" from
+                        # "transient" and steer the user appropriately.
+                        raise
+                    except Exception:
+                        # Per-variant failures (network blips, parse
+                        # errors mid-stream) must NOT poison sibling
+                        # variants — return None and filter.
+                        return None
 
                 if n_variants == 1:
                     variants = [_gen_one()]
                 else:
                     with ThreadPoolExecutor(max_workers=n_variants) as pool:
                         variants = list(pool.map(lambda _: _gen_one(), range(n_variants)))
+                # Drop None placeholders from failed variants.
+                variants = [v for v in variants if v]
                 # Deduplicate identical outputs (Gemini occasionally returns the
                 # same caption twice on short prompts) while preserving order.
                 seen = set()
@@ -4905,6 +5330,24 @@ function addGraphicToPack(btn, visualId) {{
                 variants = unique or variants
 
                 caption_text = variants[0] if variants else ""
+                # If every variant failed (e.g. provider rate-limited),
+                # distinguish that from "no key configured". The former
+                # is transient — the user should be told to retry, not
+                # told the deployment doesn't have AI.
+                if not caption_text:
+                    return jsonify({
+                        "caption": "",
+                        "tone": tone,
+                        "live": True,
+                        "generated_at": now_iso,
+                        "error": "transient",
+                        "message": (
+                            "The AI is briefly busy or rate-limited. "
+                            "Wait a few seconds and click regenerate "
+                            "again — your key is fine."
+                        ),
+                        "explanation": explanation,
+                    }), 200
                 return jsonify({
                     "caption": caption_text,
                     "variants": variants,
@@ -4917,15 +5360,40 @@ function addGraphicToPack(btn, visualId) {{
                     "explanation": explanation,
                 })
             except _ClaudeUE as e:
+                # Distinguish "no key" from "transient error". The
+                # ClaudeUnavailableError message is checked for hints:
+                # provider configuration issues say "unavailable on this
+                # deployment"; transient errors carry rate-limit / HTTP
+                # status info. Default conservatively to transient so
+                # the user doesn't lose hope after a single 429.
+                msg = str(e).lower()
+                terminal = (
+                    "not configured" in msg
+                    or "unavailable on this deployment" in msg
+                    or "no provider" in msg
+                )
+                if terminal:
+                    return jsonify({
+                        "caption": "",
+                        "tone": tone,
+                        "live": False,
+                        "generated_at": now_iso,
+                        "error": "no_key",
+                        "message": (
+                            "AI captions are unavailable on this deployment. "
+                            "Contact your administrator to enable them."
+                        ),
+                        "explanation": explanation,
+                    }), 200
                 return jsonify({
                     "caption": "",
                     "tone": tone,
-                    "live": False,
+                    "live": True,
                     "generated_at": now_iso,
-                    "error": "llm_unavailable",
+                    "error": "transient",
                     "message": (
-                        "AI captions are unavailable on this deployment. "
-                        "Contact your administrator to enable them."
+                        "The AI provider returned a transient error. "
+                        "Wait a few seconds and try again."
                     ),
                     "explanation": explanation,
                 }), 200
@@ -8449,6 +8917,142 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # page: identity (name/type/country), sources (website + 5 social
     # links), and AI build (one click that hands everything to the LLM
     # and shows the result for confirmation). On save the org is pinned
+    # ---- /sign-in -----------------------------------------------------
+    #
+    # Profile picker. No username, no password — we don't have a real
+    # auth model and the deployment is operator-managed single-instance.
+    # The page just lists every saved ClubProfile and lets the user
+    # pick one to pin into their session, OR delete a profile they no
+    # longer want, OR jump to /organisation/setup to create a fresh one.
+    #
+    # This is the *only* path to switch tenants once a profile is set
+    # up; the home page links here, and the hero "Switch organisation"
+    # button on the pinned-state hero links here too.
+    @app.route("/sign-in", methods=["GET"])
+    def sign_in_page():
+        profiles = list_profiles()
+        current_id = _active_profile_id() or ""
+
+        # Friendly fallback when no profiles exist yet — send the user
+        # straight to setup rather than render an empty picker.
+        if not profiles:
+            return redirect(url_for("organisation_setup"))
+
+        def _initials(name: str) -> str:
+            parts = [p for p in (name or "").strip().split() if p]
+            if not parts:
+                return "?"
+            if len(parts) == 1:
+                return parts[0][:2].upper()
+            return (parts[0][0] + parts[-1][0]).upper()
+
+        cards_html = ""
+        for p in profiles:
+            is_current = (p.profile_id == current_id)
+            logo_html = ""
+            logo_url = (getattr(p, "brand_logo_url", "") or "").strip()
+            if logo_url and (logo_url.startswith("http://") or logo_url.startswith("https://")):
+                logo_html = f'<img src="{_h(logo_url)}" alt="" />'
+            else:
+                logo_html = _h(_initials(p.display_name))
+
+            ready = p.is_ready()
+            captured = p.brand_capture_status in ("ok", "ok_heuristic")
+            pill_html = ""
+            if is_current:
+                pill_html = (
+                    '<span class="pill" style="background:rgba(34,197,94,0.10);'
+                    'border-color:rgba(34,197,94,0.30);color:#22C55E">Active</span>'
+                )
+            if ready:
+                pill_html += '<span class="pill">Brand ready</span>'
+            elif captured:
+                pill_html += (
+                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
+                    'border-color:rgba(245,158,11,0.30);color:#F59E0B">'
+                    'Partial</span>'
+                )
+            else:
+                pill_html += (
+                    '<span class="pill" style="background:rgba(255,255,255,0.06);'
+                    'border-color:rgba(255,255,255,0.10);color:var(--ink-muted)">'
+                    'Incomplete</span>'
+                )
+
+            sign_in_url = url_for("sign_in_post")
+            delete_url = url_for("sign_in_delete")
+            cards_html += (
+                '<div class="mh-profile-card">'
+                f'<div class="logo">{logo_html}</div>'
+                f'<div class="display-name">{_h(p.display_name)}</div>'
+                f'<div class="meta-line">{pill_html}</div>'
+                '<div class="actions">'
+                f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
+                f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
+                f'<button type="submit" class="btn-sign-in">'
+                f'{"Continue" if is_current else "Sign in"} &rarr;</button>'
+                '</form>'
+                f'<form method="post" action="{delete_url}" data-no-loader="1" '
+                f'onsubmit="return confirm(\'Delete the &quot;{_h(p.display_name)}&quot; profile? '
+                f'Its runs stay on disk but it disappears from this picker. This cannot be undone.\')">'
+                f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
+                f'<button type="submit" class="btn-delete" title="Delete profile">&times;</button>'
+                '</form>'
+                '</div>'
+                '</div>'
+            )
+
+        new_org_url = url_for("organisation_setup")
+        cards_html += (
+            f'<a class="mh-new-profile" href="{new_org_url}">'
+            '<div><div class="plus">+</div>'
+            'Create new organisation</div></a>'
+        )
+
+        body = (
+            '<h1 style="margin-top:8px;font-family:Sora,Inter,sans-serif;'
+            'font-size:32px;letter-spacing:-0.02em">Pick an organisation</h1>'
+            '<p class="dim" style="margin-bottom:24px;font-size:14px">'
+            f'{len(profiles)} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
+            'Picking one loads its brand voice, palette, logo, and history. '
+            'Switch any time from the home page.'
+            '</p>'
+            f'<div class="mh-profile-grid">{cards_html}</div>'
+        )
+        return _layout("Sign in", body, active="signin")
+
+    @app.route("/sign-in", methods=["POST"])
+    def sign_in_post():
+        """Pin the chosen profile into the session and redirect home."""
+        pid = (request.form.get("profile_id") or "").strip()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        prof = load_profile(pid)
+        if prof is None:
+            return redirect(url_for("sign_in_page"))
+        session["active_profile_id"] = prof.profile_id
+        return redirect(url_for("home"))
+
+    @app.route("/sign-in/delete", methods=["POST"])
+    def sign_in_delete():
+        """Delete the profile JSON from disk and clear the session pin
+        if it was the active one. Runs (under DATA_DIR/runs_v4) are NOT
+        removed — they're orphaned but recoverable.
+        """
+        pid = (request.form.get("profile_id") or "").strip()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from .club_profile import _profiles_dir
+        p = _profiles_dir() / f"{pid}.json"
+        try:
+            if p.exists():
+                p.unlink()
+        except OSError:
+            pass
+        if _active_profile_id() == pid:
+            session.pop("active_profile_id", None)
+        return redirect(url_for("sign_in_page"))
+
     # into session so the user never sees this page again unless they
     # ask to re-run it.
     @app.route("/organisation/setup", methods=["GET"])
@@ -8754,7 +9358,38 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         upload = request.files.get("brand_guidelines_file")
         if upload and upload.filename:
             file_bytes = upload.read() or b""
-            if file_bytes:
+            # Phase 1.5 — reject obvious binary uploads (PNG/JPG
+            # screenshots, MP4, etc.) at the boundary so the binary
+            # bytes never reach _heuristic_interpret. The downstream
+            # guideline parser already has a magic-byte check but
+            # surfacing it as a clean user-visible status here is
+            # honest: we tell them "that file type isn't supported"
+            # rather than silently store a garbage summary that
+            # poisons every later caption.
+            BINARY_MAGIC = (
+                b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff",
+                b"GIF87a", b"GIF89a", b"BM",
+                b"\x00\x00\x01\x00", b"II*\x00", b"MM\x00*",
+                b"\x7fELF", b"MZ",
+            )
+            ext = (upload.filename.rsplit(".", 1)[-1] or "").lower() if "." in upload.filename else ""
+            IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "tiff",
+                          "tif", "bmp", "ico", "heic", "heif", "avif"}
+            looks_binary = (
+                ext in IMAGE_EXTS
+                or any(file_bytes.startswith(sig) for sig in BINARY_MAGIC)
+            )
+            if looks_binary:
+                # Friendly status — don't pollute prof.brand_guidelines.
+                prof.brand_guidelines_status = (
+                    f"unsupported_binary: {upload.filename!r} looks like an "
+                    "image / binary file. Brand guidelines must be a text "
+                    "document (PDF, DOCX, TXT, RTF, MD)."
+                )
+                prof.brand_guidelines_filename = upload.filename
+                prof.brand_guidelines_byte_size = len(file_bytes)
+                # Clear any prior good guidelines? No — preserve them.
+            elif file_bytes:
                 try:
                     from mediahub.brand.guidelines import ingest_guidelines_file
                     g_payload = ingest_guidelines_file(upload.filename, file_bytes)

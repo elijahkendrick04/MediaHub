@@ -135,13 +135,26 @@ def test_upload_form_has_no_club_or_brand_fields(app):
     assert 'name="primary_colour"' not in body
 
 
-def test_configure_requires_branding(app, monkeypatch):
-    """V8.2 issue 5: must upload logo or pick a colour before submit."""
+def test_configure_no_longer_requires_per_run_branding(app, monkeypatch):
+    """Phase 1.5 consolidation: branding (logo + colours) lives on the
+    organisation profile and flows into every run automatically. The
+    per-run configure form no longer gates submission on a logo upload
+    or colour pick — those default to the active profile's saved values
+    (or to deterministic renderer defaults if the profile has none).
+
+    A user who submits configure with no colours filled in must now see
+    a pipeline launch (302 redirect to /runs/<id>), NOT the old
+    "upload a logo or pick at least one brand colour" gate.
+    """
     if not _SAMPLE_PDF.exists():
         pytest.skip("sample PDF missing")
     import mediahub.web.web as web_module
 
-    monkeypatch.setattr(web_module, "_start_run", lambda *a, **kw: "shouldnotrun")
+    captured = {}
+    def _fake_start_run(*a, **kw):
+        captured["called"] = True
+        return "fake-run-id"
+    monkeypatch.setattr(web_module, "_start_run", _fake_start_run)
 
     c = app.test_client()
     rv = c.post("/upload", data={
@@ -155,11 +168,15 @@ def test_configure_requires_branding(app, monkeypatch):
     rv2 = c.post("/upload/configure", data={
         "run_id": run_id,
         "club_filter": pick,
-        # No logo, no colours
+        # No colours filled — should still launch the run.
         "primary_colour": "",
         "secondary_colour": "",
         "accent_colour": "",
     }, content_type="multipart/form-data", follow_redirects=False)
-    # Should NOT redirect; it should re-render the configure form with an error.
-    assert rv2.status_code == 200
-    assert b"upload a logo or pick at least one brand colour" in rv2.data
+    # Pipeline must have been kicked off — 302 to the new run page,
+    # NOT a 200 with the old branding-required gate copy.
+    assert rv2.status_code == 302
+    assert "/runs/" in rv2.headers.get("Location", "")
+    assert captured.get("called") is True
+    # The deleted gate copy must NOT appear anywhere.
+    assert b"upload a logo or pick at least one brand colour" not in rv2.data

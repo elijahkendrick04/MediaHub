@@ -222,13 +222,51 @@ def _dispatch_extract(ext: str, data: bytes) -> str:
         return _extract_zip(data)
     if ext in ("txt", "md", "markdown", "rst", "csv", "tsv", "json", "yaml", "yml"):
         return _extract_plain(data)
-    # Unknown extension: try plaintext decode as a last resort. If the
-    # file is binary the result will be garbage and the LLM step will
-    # report "no readable content".
+
+    # Known-binary extensions that must NEVER be plaintext-decoded —
+    # decoded garbage from a screenshot upload was leaking into the
+    # profile's brand_voice_summary and then into every caption prompt
+    # (Phase 1.5 bug: user reported "AI captions return uploaded
+    # screenshots"). The right response for these is "unsupported",
+    # not a best-effort UTF-8 decode of the binary bytes.
+    _BINARY_EXTS = {
+        "png", "jpg", "jpeg", "gif", "webp", "tiff", "tif", "bmp",
+        "ico", "svg",  # SVG technically XML but treated as image by
+                       # the brand-DNA pipeline upstream
+        "heic", "heif", "avif",
+        "mp4", "mov", "avi", "mkv", "webm", "m4v",
+        "mp3", "wav", "ogg", "flac", "m4a",
+        "exe", "dll", "so", "dylib",
+        "psd", "ai", "indd",
+    }
+    if ext in _BINARY_EXTS:
+        return ""
+
+    # Magic-byte check: even if the extension is unknown, refuse to
+    # decode files that start with common binary signatures.
+    _BINARY_MAGIC = (
+        b"\x89PNG\r\n\x1a\n",   # PNG
+        b"\xff\xd8\xff",        # JPEG
+        b"GIF87a", b"GIF89a",   # GIF
+        b"RIFF",                # WebP / WAV (with WEBP/WAVE at byte 8)
+        b"BM",                  # BMP
+        b"\x00\x00\x01\x00",    # ICO
+        b"II*\x00", b"MM\x00*", # TIFF
+        b"\x1f\x8b",            # gzip
+        b"PK\x03\x04",          # zip (already handled above)
+        b"%PDF",                # PDF (already handled above)
+        b"\x7fELF",             # Linux executable
+        b"MZ",                  # Windows executable
+    )
+    if data and any(data.startswith(sig) for sig in _BINARY_MAGIC):
+        return ""
+
+    # Unknown extension AND no binary magic-bytes: try plaintext decode
+    # as a last resort. Tightened to 1% replacement-char threshold (was
+    # 5%) because real text documents have well under that even with
+    # unusual encodings.
     decoded = _extract_plain(data)
-    # Heuristic: if more than 5% of chars are non-printable replacement
-    # chars, treat as unsupported binary.
-    if decoded and decoded.count("�") < max(20, int(len(decoded) * 0.05)):
+    if decoded and decoded.count("�") < max(5, int(len(decoded) * 0.01)):
         return decoded
     return ""
 
