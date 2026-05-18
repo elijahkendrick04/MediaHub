@@ -41,21 +41,35 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Accepted file extensions. The UI accept= attribute also lists MIME
-# types — the server still validates the extension because some
-# browsers (notably Safari) send empty MIME for SVG/PDF/EPS uploads.
+# Accepted file extensions. The user asked for "whatever format the
+# club likes" so this list is intentionally broad — every common
+# raster, vector, design-tool, and print format. The server validates
+# by extension because some browsers (Safari especially) send empty
+# MIME types for SVG / PDF / EPS / design-tool uploads.
 ALLOWED_EXTENSIONS: frozenset[str] = frozenset({
-    "png", "jpg", "jpeg", "webp", "svg", "pdf", "eps", "ai", "tiff", "tif", "gif",
+    # Raster
+    "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "tif",
+    "heic", "heif", "avif", "ico", "jxl", "jp2", "ppm",
+    # Vector
+    "svg", "eps", "ai", "cdr", "wmf", "emf",
+    # Document / multi-page
+    "pdf",
+    # Native design-tool files
+    "psd", "indd", "sketch", "fig", "xd", "afdesign", "afphoto",
+    # High-end / specialist
+    "exr", "tga", "dng",
 })
 
 # Per-file size cap. Logos are typically small; cap stops zip-bomb /
-# disk-fill attacks while leaving headroom for high-res print files.
-MAX_LOGO_BYTES = 20 * 1024 * 1024  # 20 MB
+# disk-fill attacks while leaving headroom for high-res print files
+# and native design-tool documents which can run 20-50 MB.
+MAX_LOGO_BYTES = 50 * 1024 * 1024  # 50 MB
 
-# Reasonable cap on how many logos a single org keeps on file. The
-# user said "as many logos as they like" — but every logo costs disk
-# and renders. 25 is plenty for a single club with multiple variants.
-MAX_LOGOS_PER_PROFILE = 25
+# The user explicitly asked "as many logos as the club likes". The
+# cap here exists only to stop pathological abuse (e.g. an automated
+# loop). 500 logos at 50 MB each is 25 GB per org which is well above
+# any realistic operator concern.
+MAX_LOGOS_PER_PROFILE = 500
 
 
 def _data_dir() -> Path:
