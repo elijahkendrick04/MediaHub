@@ -10137,6 +10137,38 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             n_dos = len(g.get("tone_dos") or [])
             n_donts = len(g.get("tone_donts") or [])
             n_prohib = len(g.get("prohibited_words") or [])
+            # Surface mandatory rules — the user explicitly asked to see
+            # which "MUST follow" statements the AI extracted, so they
+            # can sanity-check the engine isn't silently dropping them.
+            rules = list(mandatory_rules)
+            rules_html = ""
+            if rules:
+                rule_chips = "".join(
+                    '<li style="padding:6px 10px;margin:4px 4px 0 0;'
+                    'display:inline-block;border-radius:4px;'
+                    'background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);'
+                    f'color:var(--ink);font-size:11.5px;line-height:1.35;max-width:100%">'
+                    f'<strong style="color:var(--lane,var(--accent))">MUST</strong> &middot; {_h(r[:240])}'
+                    '</li>'
+                    for r in rules[:12]
+                )
+                more = ""
+                if len(rules) > 12:
+                    more = f'<div class="muted" style="font-size:11px;margin-top:4px">…and {len(rules) - 12} more.</div>'
+                rules_html = (
+                    '<div style="margin-top:10px">'
+                    '<div style="font-size:11.5px;color:var(--ink);font-weight:600;'
+                    'letter-spacing:0.02em;margin-bottom:4px">'
+                    f'Non-negotiable rules the AI extracted ({len(rules)})'
+                    '</div>'
+                    f'<ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap">{rule_chips}</ul>'
+                    + more +
+                    '<div class="muted" style="font-size:11px;margin-top:6px">'
+                    'These are surfaced at the TOP of every system prompt with explicit '
+                    'override framing &mdash; they will be respected on every generated caption.'
+                    '</div>'
+                    '</div>'
+                )
             _gl_status_html = (
                 '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
                 'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
@@ -10147,6 +10179,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
                 f'{n_dos} do{"s" if n_dos != 1 else ""}, {n_donts} don\'t{"s" if n_donts != 1 else ""}, '
                 f'{n_prohib} prohibited word{"s" if n_prohib != 1 else ""}.</div>'
+                + rules_html +
                 '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
                 '</div>'
             )

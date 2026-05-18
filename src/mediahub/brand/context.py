@@ -136,6 +136,51 @@ def _voice_profile_prose(profile) -> str:
     return " ".join(bits) if len(bits) > 1 else ""
 
 
+def _mandatory_rules_prose(profile) -> str:
+    """Render the user's verbatim MUST / NEVER / ALWAYS rules at the
+    TOP of every system prompt with explicit override framing.
+
+    Previously these were soft-interpreted into tone_dos and got drowned
+    out by website-derived voice signals when the LLM weighed competing
+    instructions. By stating them first, numbering them, and explicitly
+    telling Claude they override anything else in the prompt, we make
+    them the highest-priority constraint the model sees.
+    """
+    rules = list(_get(profile, "brand_guidelines_mandatory_rules") or [])
+    rules = [str(r).strip() for r in rules if isinstance(r, str) and str(r).strip()]
+    if not rules:
+        return ""
+    numbered = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(rules[:25]))
+    return (
+        "=== NON-NEGOTIABLE RULES (from the organisation's uploaded "
+        "brand guidelines) ===\n"
+        "These rules are MANDATORY. They override every other "
+        "instruction in this system prompt, including voice cues "
+        "derived from the organisation's website or socials. Follow "
+        "them literally. If two instructions conflict, these rules "
+        "win:\n"
+        f"{numbered}\n"
+        "=== END NON-NEGOTIABLE RULES ==="
+    )
+
+
+def _compliance_recheck_prose(profile) -> str:
+    """A short reminder at the very END of the system prompt to verify
+    compliance before returning. Cheap belt-and-braces against the LLM
+    forgetting the top of the prompt after a long block of voice prose.
+    Only emitted when there ARE mandatory rules to recheck.
+    """
+    rules = list(_get(profile, "brand_guidelines_mandatory_rules") or [])
+    if not rules:
+        return ""
+    return (
+        "Before returning your final answer, re-read the NON-NEGOTIABLE "
+        "RULES block at the top of this prompt and confirm your output "
+        "complies with every one of them. If your draft violates any "
+        "rule, revise it before answering."
+    )
+
+
 def _guidelines_prose(profile) -> str:
     g = _get(profile, "brand_guidelines") or {}
     if not isinstance(g, dict) or not g:
@@ -178,6 +223,38 @@ def _guidelines_prose(profile) -> str:
     return " ".join(bits)
 
 
+def _logos_prose(profile) -> str:
+    """Surface uploaded logo variants so downstream image/motion
+    generators (and any LLM-driven asset-picker) know what's available."""
+    logos = list(_get(profile, "brand_logos") or [])
+    if not logos:
+        return ""
+    pieces: list[str] = []
+    for logo in logos[:8]:
+        if not isinstance(logo, dict):
+            continue
+        label = (logo.get("label") or logo.get("original_filename") or "logo").strip()
+        desc = (logo.get("ai_description") or "").strip()
+        mime = (logo.get("mime") or "").strip()
+        fmt = mime.split("/")[-1] if "/" in mime else (logo.get("original_filename", "").rsplit(".", 1)[-1] if "." in logo.get("original_filename", "") else "")
+        bits = [label]
+        if fmt:
+            bits.append(f"format: {fmt}")
+        if desc:
+            bits.append(desc)
+        pieces.append(" — ".join(bits))
+    if not pieces:
+        return ""
+    intro = (
+        f"The organisation has {len(pieces)} logo variant"
+        f"{'s' if len(pieces) != 1 else ''} on file. When suggesting "
+        "imagery or motion compositions, pick the variant whose "
+        "description best matches the context (e.g. dark backgrounds → "
+        "the white/mono variant, square crops → the icon variant):"
+    )
+    return intro + "\n" + "\n".join(f"  · {p}" for p in pieces)
+
+
 def brand_context_for_llm(profile) -> str:
     """Return a single coherent system-prompt block describing the
     organisation's brand identity, voice, captured DNA, and uploaded
@@ -189,14 +266,33 @@ def brand_context_for_llm(profile) -> str:
 
     The returned text is plain prose — safe to drop into any LLM
     system message without further escaping.
+
+    Section order:
+      1. Non-negotiable mandatory rules from the uploaded guidelines
+         (top of prompt, explicit override framing).
+      2. Identity (who you're writing for).
+      3. Brand guidelines (summary, voice attrs, do/don'ts, prohibited
+         words, terminology, hashtag/sponsor rules, key messages).
+      4. Captured DNA from website + socials.
+      5. Voice profile learned from past captions.
+      6. Logo inventory.
+      7. Compliance recheck reminder at the very end.
+
+    Guidelines deliberately precede website/social DNA so that the
+    uploaded document — the explicit declaration of how the
+    organisation wants to be represented — outranks signals scraped
+    from the open web when the LLM weighs conflicting cues.
     """
     if profile is None:
         return ""
     sections = [
+        _mandatory_rules_prose(profile),
         _identity_prose(profile),
+        _guidelines_prose(profile),
         _dna_prose(profile),
         _voice_profile_prose(profile),
-        _guidelines_prose(profile),
+        _logos_prose(profile),
+        _compliance_recheck_prose(profile),
     ]
     sections = [s for s in sections if s]
     if not sections:
