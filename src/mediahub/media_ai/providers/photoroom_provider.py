@@ -79,7 +79,11 @@ class PhotoroomBgRemover(BackgroundRemover):
             "Accept": "image/png, application/json",
         }
         files = {"image_file": ("input.png", image_bytes, "application/octet-stream")}
-        data = {"format": "png", "bg_color": "transparent"}
+        # `crop=false` preserves the original image dimensions; without
+        # it Photoroom auto-crops to the subject's bounding box and the
+        # athlete then sizes/positions wrong in layouts that assume the
+        # input dimensions are preserved.
+        data = {"format": "png", "bg_color": "transparent", "crop": "false"}
         r = requests.post(
             self.endpoint, headers=headers, files=files, data=data, timeout=60,
         )

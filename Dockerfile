@@ -38,8 +38,25 @@ RUN pip install --upgrade pip \
  && pip install -r /app/requirements.txt \
  && pip install gunicorn
 
+# Preload rembg's u2net ONNX model (~170 MB) into the image so the
+# first cutout request doesn't hang on a GitHub download — Render's
+# outbound is slow on cold start and a missed download falls through
+# to a silent passthrough (the user gets the original photo back as
+# if it were a cutout). Failing the build here is the right loud
+# signal; quiet runtime failures are not.
+RUN python -c "from rembg import new_session; new_session('u2net')" \
+ && test -f /root/.u2net/u2net.onnx
+
 # Install Playwright + Chromium for graphic_renderer's HTML→PNG step.
 # (Optional: comment out if you only need the WeasyPrint fallback.)
+#
+# PLAYWRIGHT_BROWSERS_PATH pins Chromium to a stable absolute path so
+# the runtime discovery works regardless of HOME. Without this,
+# Chromium installs under /root/.cache/ms-playwright at build time and
+# Playwright looks under $HOME/.cache/ms-playwright at runtime — when
+# Render's runtime HOME differs from /root, `p.chromium.executable_path`
+# points at a non-existent path and /healthz/deps reports chromium=false.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN pip install playwright \
  && playwright install --with-deps chromium
 

@@ -73,9 +73,10 @@ def _log_call(*, provider: str, ok: bool, model: Optional[str] = None,
 
 
 # Anthropic models — kept as module-level constants so other code that
-# imports them (e.g. test fixtures) keeps working.
-DEFAULT_MODEL = os.environ.get("MEDIAHUB_LLM_MODEL", "claude-sonnet-4-5-20250929")
-ALT_MODEL = "claude-3-5-sonnet-20241022"
+# imports them (e.g. test fixtures) keeps working. Updated May 2026:
+# Claude 4.x family is current; Claude 3.x is retired (404s).
+DEFAULT_MODEL = os.environ.get("MEDIAHUB_LLM_MODEL", "claude-sonnet-4-6")
+ALT_MODEL = "claude-haiku-4-5"
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +232,10 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
 # Gemini (free default)
 # ---------------------------------------------------------------------------
 
-_GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.0-flash")
+# Gemini default updated May 2026: gemini-2.0-flash was deprecated and
+# returns 410 Gone. gemini-2.5-flash is the current GA model with the
+# same free-tier (1,500 req/day) and similar quality.
+_GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 _GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
 
 

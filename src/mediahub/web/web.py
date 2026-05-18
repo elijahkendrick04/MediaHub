@@ -659,9 +659,9 @@ UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
 DB_PATH    = DATA_DIR / "data.db"               # MUST be data.db for publish snapshot
 RESEARCH_DIR = DATA_DIR / "research"
 
-RUNS_DIR.mkdir(exist_ok=True)
-UPLOADS_DIR.mkdir(exist_ok=True)
-RESEARCH_DIR.mkdir(exist_ok=True)
+RUNS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
 
 # V7: workflow store (sidecar JSON per run)
 _wf_store = None  # initialised after imports complete
@@ -6313,10 +6313,20 @@ Relay team broke club record"></textarea>
         profile_id_for_log = (
             run_data.get("profile_id")
             or (_active_profile_id() or "")
+            # Sentinel so a scheduled-but-orphaned post still leaves an
+            # audit trail in the posting log. Without this fallback, a
+            # run with no profile_id silently no-ops the log row because
+            # record_attempt rejects empty profile_id.
+            or "_orphaned"
         )
         scheduled_at_iso_for_log = (
             scheduled_at_dt.isoformat() if scheduled_at_dt else None
         )
+
+        # Pre-filter empty channel ids so they don't reach _buf_schedule
+        # and produce a per-channel "channel id is required" failure.
+        # Cast every value to str up front for a consistent shape.
+        channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
 
         for cid in channel_ids:
             try:

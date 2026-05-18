@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import math
 import os
 import uuid
@@ -34,6 +35,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 # Optional: PIL only if needed for size sanity / fallbacks.
 try:
@@ -212,8 +215,12 @@ def _noise_pattern_data_uri() -> str:
 def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default") -> Path:
     """Run the configured background remover on the athlete photo if needed.
 
-    Caches results in ``uploads_v4/media_library/<profile_id>/cutouts/`` so we
-    don't re-run rembg on the same photo every render.
+    Caches results in ``<UPLOADS_DIR>/media_library/<profile_id>/cutouts/``
+    so we don't re-run rembg on the same photo every render. The cache
+    dir is DATA_DIR-derived so cutouts survive Render redeploys (the
+    persistent disk holds them); a previous version of this used a
+    relative path that mapped to /app/uploads_v4 and was wiped on every
+    container restart.
     """
     src = Path(src_path)
     if not src.exists():
@@ -223,7 +230,9 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
     if "cutout" in src.stem.lower() or src.parent.name == "cutouts":
         return src
 
-    cache_dir = Path("uploads_v4/media_library") / profile_id / "cutouts"
+    uploads_root = os.environ.get("UPLOADS_DIR") \
+        or str(Path(os.environ.get("DATA_DIR", "data")) / "uploads_v4")
+    cache_dir = Path(uploads_root) / "media_library" / profile_id / "cutouts"
     cache_dir.mkdir(parents=True, exist_ok=True)
     out_path = cache_dir / f"{src.stem}__cutout.png"
     if out_path.exists() and out_path.stat().st_size > 1000:
@@ -233,12 +242,16 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
         from mediahub.media_ai.providers import get_bg_remover  # type: ignore
         remover = get_bg_remover()
         if remover is None:
+            log.warning("cutout: no bg remover provider available for %s", src.name)
             return src
         ok = remover.remove(src, out_path)
         if ok and out_path.exists():
             return out_path
-    except Exception:
-        pass
+        log.warning("cutout: provider returned ok=%s for %s (out=%s)",
+                    ok, src.name, out_path)
+    except Exception as exc:
+        log.warning("cutout: provider raised for %s: %s",
+                    src.name, exc)
     return src
 
 

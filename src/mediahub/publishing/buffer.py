@@ -257,7 +257,12 @@ def schedule_post(
     except ValueError as exc:
         raise BufferAPIError("Buffer returned an unreadable response.") from exc
 
-    if not isinstance(data, dict) or not data.get("success", True) is True:
+    # Buffer's v1 success flag is *usually* boolean True but the API has
+    # been observed to return truthy non-bool values (1, "true") for some
+    # update kinds. Use a permissive truthy check so legitimate posts
+    # aren't falsely flagged as failures. Missing key defaults to True
+    # (the response shape is success-implied).
+    if not isinstance(data, dict) or not bool(data.get("success", True)):
         raise BufferAPIError(_summarise_error_dict(data if isinstance(data, dict) else {}))
 
     update_id = ""
