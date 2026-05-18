@@ -213,7 +213,11 @@ def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
 # Gemini (Google) — text + native tool-use; free-tier default
 # ---------------------------------------------------------------------------
 def _gemini_model() -> str:
-    return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.0-flash")
+    # May 2026: gemini-2.0-flash was deprecated by Google and now
+    # returns HTTP 404 "model is no longer available to new users".
+    # gemini-2.5-flash is the current GA model with the same free-tier
+    # quotas (1,500 req/day) and equivalent capability.
+    return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 
 
 def _ask_gemini(system: str, user: str, max_tokens: int) -> str:

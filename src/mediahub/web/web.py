@@ -5948,7 +5948,7 @@ Relay team broke club record"></textarea>
             '<p class="dim" style="margin-top:30px;font-size:12px">'
             'Estimated cost is derived from published list pricing for each '
             'provider and is not a substitute for a real billing source. '
-            'Gemini free tier (1,500 req/day on gemini-2.0-flash) is treated '
+            'Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated '
             'as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>'
         )
         return _layout("Usage", body, active="usage")

@@ -242,7 +242,7 @@ _GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
 def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
     """Call Google Gemini generateContent. Returns text or None.
 
-    Free-tier limits (gemini-2.0-flash): 15 RPM, 1,500 RPD. Plenty for
+    Free-tier limits (gemini-2.5-flash): 15 RPM, 1,500 RPD. Plenty for
     a small-club deployment; the dissertation's cost model assumes
     free tier handles the entire small-club tier.
     """
