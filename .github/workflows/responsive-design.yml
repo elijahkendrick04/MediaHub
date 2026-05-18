@@ -1,0 +1,136 @@
+# Responsive Design Guardrails — CI workflow
+#
+# Runs on every PR + push to the main branches. Fails the build if a change
+# regresses the responsive baseline (viewport meta, modern CSS features,
+# brand tokens, accessibility primitives).
+#
+# Three jobs:
+#   1. responsive-tests      — pytest contract suite (always runs, ~3 seconds)
+#   2. css-lint              — stylelint on the standalone .css files in
+#                              src/mediahub/graphic_renderer/layouts/
+#                              (skipped automatically if Node is missing)
+#   3. responsive-summary    — collates a one-line PASS/FAIL summary into the
+#                              PR check summary, so reviewers can see the
+#                              guardrail status at a glance.
+#
+# This workflow is deliberately self-contained: no third-party actions beyond
+# the official actions/checkout, actions/setup-python, actions/setup-node so
+# it keeps working even if upstream actions change their APIs.
+
+name: Responsive Design Guardrails
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: responsive-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  responsive-tests:
+    name: Responsive contract (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install MediaHub (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run responsive guardrails tests
+        run: |
+          python -m pytest \
+            tests/test_responsive_guardrails.py \
+            tests/test_responsive_meta.py \
+            -v --tb=short
+
+      - name: Verify viewport meta on every public HTML route
+        run: |
+          # Belt-and-braces sanity check independent of the pytest suite:
+          # the rendered HTML must include the viewport meta and the
+          # guardrails marker so the cascade always carries them.
+          python - <<'PY'
+          import os, tempfile
+          os.environ.setdefault("DATA_DIR", tempfile.mkdtemp())
+          from mediahub.web.web import create_app
+          app = create_app()
+          app.config["TESTING"] = True
+          fails = []
+          with app.test_client() as c:
+              for route in ("/status", "/healthz/usage"):
+                  body = c.get(route).get_data(as_text=True)
+                  for needle in (
+                      '<meta name="viewport"',
+                      'viewport-fit=cover',
+                      'RESPONSIVE GUARDRAILS',
+                      '100dvh',
+                      'safe-area-inset',
+                  ):
+                      if needle not in body:
+                          fails.append(f"{route}: missing {needle!r}")
+          if fails:
+              raise SystemExit("Responsive guardrails missing:\n  " + "\n  ".join(fails))
+          print("OK — viewport + guardrails delivered on all probed routes")
+          PY
+
+  css-lint:
+    name: Stylelint standalone CSS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true  # opt-in lint; never blocks a PR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install stylelint
+        run: |
+          npm install --no-save --no-audit --no-fund \
+            stylelint@16 \
+            stylelint-config-standard@36
+
+      - name: Lint standalone CSS files
+        run: |
+          npx stylelint \
+            "src/mediahub/graphic_renderer/layouts/*.css" \
+            --formatter compact \
+            --allow-empty-input
+
+  responsive-summary:
+    name: Responsive design summary
+    runs-on: ubuntu-latest
+    needs: [responsive-tests]
+    if: always()
+    steps:
+      - name: Write summary
+        run: |
+          {
+            echo "## Responsive Design Guardrails"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Pytest contract suite | ${{ needs.responsive-tests.result }} |"
+            echo
+            echo "See [docs/responsive-design.md](../blob/${{ github.sha }}/docs/responsive-design.md) for what these guardrails cover and how to extend them."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/stylelintrc",
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "comment-empty-line-before": null,
+    "selector-class-pattern": null,
+    "custom-property-pattern": null,
+    "value-keyword-case": null,
+    "declaration-block-no-redundant-longhand-properties": null,
+    "no-descending-specificity": null,
+    "media-feature-range-notation": "prefix",
+    "alpha-value-notation": "number",
+    "color-function-notation": "modern",
+    "color-hex-length": null,
+    "shorthand-property-no-redundant-values": null,
+    "declaration-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "comment-whitespace-inside": null,
+    "block-no-empty": true,
+    "color-no-invalid-hex": true,
+    "function-calc-no-unspaced-operator": true,
+    "function-no-unknown": [
+      true,
+      {
+        "ignoreFunctions": ["env", "container", "color-mix", "oklch", "lab", "lch", "hwb"]
+      }
+    ],
+    "media-query-no-invalid": true,
+    "no-invalid-position-at-import-rule": null,
+    "at-rule-no-unknown": [
+      true,
+      {
+        "ignoreAtRules": ["container", "layer", "scope", "supports", "starting-style"]
+      }
+    ]
+  },
+  "ignoreFiles": [
+    "node_modules/**",
+    "data/**",
+    "dist/**",
+    "legacy/**",
+    "**/*.min.css"
+  ]
+}

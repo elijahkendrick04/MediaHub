@@ -2987,6 +2987,14 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 }
 """
 
+# Append the responsive guardrails layer. Imported here (after BASE_CSS is
+# fully defined) and concatenated so guardrails always sit last in the cascade,
+# never overriding existing MediaHub rules but providing safe fallbacks,
+# user-preference handling, and opt-in modern utilities.
+# See src/mediahub/web/responsive_guardrails.py for the full rationale.
+from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
+BASE_CSS = BASE_CSS + _MH_RG_CSS
+
 
 def _render_markdown(text: str) -> str:
     """Tiny, dependency-free markdown subset for the research page."""
@@ -3085,7 +3093,10 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#0A0B11" />
+<meta name="format-detection" content="telephone=no" />
 <title>{{ title }} &mdash; MediaHub</title>
 <style>{{ css | safe }}</style>
 <script>
