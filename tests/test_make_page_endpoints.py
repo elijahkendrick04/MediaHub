@@ -1,17 +1,20 @@
-"""tests/test_make_page_endpoints.py — Phase 1.5 stability regression.
+"""tests/test_make_page_endpoints.py — Phase 1.5 stability regression
++ Round-3 redirect-and-degrade contract.
 
-The /make page reads ContentTypeMeta entries from
-``mediahub.club_platform.content_types`` and calls ``url_for()`` on each
-`primary_route_endpoint`. A renamed-but-not-updated endpoint name used
-to crash the whole page with a 500 Werkzeug BuildError.
+The /add-input page (was /make pre-Round-3) reads ContentTypeMeta entries
+from ``mediahub.club_platform.content_types`` and calls ``url_for()`` on
+each `primary_route_endpoint`. A renamed-but-not-updated endpoint name
+used to crash the whole page with a 500 Werkzeug BuildError.
 
-These tests pin two contracts:
+These tests pin three contracts:
 
   1. Every ``primary_route_endpoint`` in the REGISTRY resolves to a
      registered Flask route. (Catches future drift at suite time, not
      in production.)
-  2. Even if a single entry's endpoint is missing, /make still renders
-     200 — the offender degrades to a disabled tile.
+  2. /make permanently redirects to /add-input (Round-3 merged the two
+     duplicate chooser pages into a single canonical /add-input).
+  3. Even if a single entry's endpoint is missing, /add-input still
+     renders 200 — the offender degrades to a disabled tile.
 """
 from __future__ import annotations
 
@@ -76,21 +79,25 @@ class TestMakePageEndpoints:
                 f"REGISTRY entries reference unknown endpoints: {missing}"
             )
 
-    def test_make_page_renders_200_with_active_org(self, gated_app):
-        """/make must not 500 just because the active org is set."""
+    def test_make_redirects_to_add_input_and_chooser_renders(self, gated_app):
+        """/make permanently redirects to the canonical /add-input chooser,
+        and /add-input itself must render 200 with the input-type tiles."""
         c, _ = gated_app
         resp = c.get("/make")
+        assert resp.status_code == 301
+        assert resp.headers.get("Location", "").endswith("/add-input")
+        resp = c.get("/add-input")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Something went wrong" not in body
-        assert "Create" in body or "make" in body.lower()
+        assert "Add input" in body or "add input" in body.lower()
 
-    def test_make_page_survives_a_broken_endpoint_via_guard(self, gated_app, monkeypatch):
+    def test_add_input_survives_a_broken_endpoint_via_guard(self, gated_app, monkeypatch):
         """Defensive: if a future commit reintroduces a stale endpoint
-        name, /make must degrade to a disabled tile instead of 500ing.
+        name, the chooser must degrade to a disabled tile instead of 500ing.
 
         Monkeypatch one entry in REGISTRY to a known-bad endpoint and
-        confirm /make still returns 200.
+        confirm /add-input still returns 200.
         """
         c, app = gated_app
         from mediahub.club_platform import content_types as ct_mod
@@ -99,9 +106,9 @@ class TestMakePageEndpoints:
         original = ct_mod.REGISTRY[first_key].primary_route_endpoint
         try:
             ct_mod.REGISTRY[first_key].primary_route_endpoint = "_definitely_not_a_real_endpoint"
-            resp = c.get("/make")
+            resp = c.get("/add-input")
             assert resp.status_code == 200, (
-                f"/make crashed instead of degrading; body: "
+                f"/add-input crashed instead of degrading; body: "
                 f"{resp.get_data(as_text=True)[:300]}"
             )
         finally:
