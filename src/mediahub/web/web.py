@@ -1361,114 +1361,156 @@ def _start_run(file_bytes: bytes, file_name: str,
 # ---------------------------------------------------------------------
 
 BASE_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
+/* PODIUM AFTER DARK
+   - Big Shoulders Display: condensed sport display headlines
+   - Fraunces (opsz): editorial serif for emphasis, drop-caps, italic accents
+   - Hanken Grotesk: humanist body / UI (not Inter, not Roboto)
+   - JetBrains Mono: scoreboard data, mono labels, slashed-zero
+*/
 @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,500;1,9..144,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  /* Surfaces — warmer, deeper, less corporate-blue */
-  --bg:       #06071A;
-  --bg-soft:  #0F1029;
-  --panel:    #141532;
-  --panel2:   #1B1D44;
-  --panel-h:  #232556;
-  --border:   rgba(255,255,255,0.07);
-  --border-h: rgba(168,85,247,0.30);
-  --hairline: rgba(255,255,255,0.04);
-  --chrome:   rgba(255,255,255,0.10);
+  /* Surfaces — pit-wall black to deep ink. Near-monochrome, no purple. */
+  --bg:        #0A0B11;     /* pit-wall black (never pure #000) */
+  --bg-deep:   #06070C;
+  --surface:   #14171F;     /* card / panel base */
+  --surface-2: #1A1E28;     /* raised */
+  --surface-3: #232838;     /* hover */
+  --hairline:  rgba(245,242,232,0.06);  /* 0.5px-style separators on dark */
+  --rule:      rgba(245,242,232,0.10);  /* 1px section rules */
+  --chrome:    rgba(245,242,232,0.14);  /* form borders, button outlines */
 
-  /* Text */
-  --ink:       #F2F4FD;
-  --ink-dim:   #98A1C0;
-  --ink-muted: #5F6790;
-  --ink-faint: #3F4669;
+  /* Ink — paper-cream on dark for editorial warmth (not white-on-blue) */
+  --ink:       #F5F2E8;     /* primary text, paper-cream */
+  --ink-dim:   #B6B2A6;
+  --ink-muted: #7A7869;
+  --ink-faint: #4A4940;
 
-  /* Accent — bold cyan→violet gradient pair */
-  --accent:    #22D3EE;
-  --accent-h:  #67E8F9;
-  --accent2:   #A855F7;
-  --accent2-h: #C084FC;
-  --accent3:   #F472B6;
-  /* Editorial gold — used sparingly for medal / podium / standout moments */
-  --gold:      #F4D58D;
-  --gold-h:    #FFE5A1;
-  --grad-hot:  linear-gradient(135deg, #22D3EE 0%, #A855F7 55%, #F472B6 100%);
-  --grad-cool: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
-  --grad-warm: linear-gradient(135deg, #A855F7 0%, #F472B6 100%);
-  --grad-medal: linear-gradient(135deg, #F4D58D 0%, #C9A04B 100%);
+  /* SIGNATURE ACCENT — lane-marker yellow.
+     The single chrome colour. Every CTA, focus ring, link, live state.
+     No gradient, no fade — flat saturated hi-vis. */
+  --lane:      #D4FF3A;
+  --lane-h:    #E6FF6B;     /* hover lift */
+  --lane-deep: #A8CC2E;     /* pressed / underline */
+  --lane-ink:  #0A0B11;     /* text on lane bg = pit-wall black */
+  --lane-glow: rgba(212,255,58,0.35);
 
-  /* Semantic */
-  --good: #22C55E;
-  --warn: #F59E0B;
-  --bad:  #F43F5E;
-  --info: #22D3EE;
+  /* SIGNATURE ACCENT 2 — medal gold.
+     Reserved EXCLUSIVELY for athlete achievements (PB, medal, first-time,
+     ranked, standout). NEVER chrome. NEVER UI. Earns its weight by scarcity. */
+  --medal:        #F4D58D;
+  --medal-h:      #FFE5A1;
+  --medal-deep:   #C9A04B;
+  --medal-ink:    #2B1F00;
+  --medal-glow:   rgba(244,213,141,0.30);
+  --grad-medal:   linear-gradient(135deg, #FFE5A1 0%, #C9A04B 100%);
 
-  /* Typography — sport-editorial pairing */
-  --font-display: 'Big Shoulders Display', 'Sora', 'Inter', sans-serif;
-  --font-serif:   'Instrument Serif', Georgia, 'Times New Roman', serif;
-  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Tertiary — timing-screen blue. Rare. Used for INFO / NEUTRAL state only. */
+  --info:      #4DA3FF;
+  --info-bg:   rgba(77,163,255,0.10);
+
+  /* Semantic — desaturated, readable, no neon */
+  --good:      #5EE39A;
+  --good-bg:   rgba(94,227,154,0.10);
+  --warn:      #FFB454;
+  --warn-bg:   rgba(255,180,84,0.10);
+  --bad:       #FF6B6B;
+  --bad-bg:    rgba(255,107,107,0.10);
+
+  /* Legacy aliases so old class names keep working through the cascade.
+     The new code should reference --lane and --medal directly. */
+  --accent:    var(--lane);
+  --accent-h:  var(--lane-h);
+  --accent2:   var(--lane);
+  --accent2-h: var(--lane-h);
+  --accent3:   var(--medal);
+  --gold:      var(--medal);
+  --gold-h:    var(--medal-h);
+  --panel:     var(--surface);
+  --panel2:    var(--surface-2);
+  --panel-h:   var(--surface-3);
+  --border:    var(--hairline);
+  --border-h:  var(--chrome);
+  --bg-soft:   var(--surface);
+
+  /* Typography stacks — every face here is intentional */
+  --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
+  --font-serif:   'Fraunces', 'Source Serif Pro', Georgia, serif;
+  --font-body:    'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Spacing scale (4px base) */
-  --sp-1:  4px;
-  --sp-2:  8px;
-  --sp-3:  12px;
-  --sp-4:  16px;
-  --sp-5:  20px;
-  --sp-6:  24px;
-  --sp-7:  32px;
-  --sp-8:  48px;
-  --sp-9:  64px;
+  --sp-1:  4px;   --sp-2:  8px;   --sp-3:  12px;  --sp-4:  16px;
+  --sp-5:  20px;  --sp-6:  24px;  --sp-7:  32px;  --sp-8:  48px;
+  --sp-9:  64px;  --sp-10: 96px;
 
-  /* Misc */
-  --radius:    18px;
-  --radius-sm: 12px;
-  --radius-lg: 24px;
-  --shadow:    0 1px 0 rgba(255,255,255,0.04), 0 12px 40px rgba(0,0,0,0.45);
-  --shadow-h:  0 1px 0 rgba(255,255,255,0.06), 0 24px 60px rgba(168,85,247,0.18);
-  --shadow-medal: 0 1px 0 rgba(255,255,255,0.06), 0 18px 50px rgba(244,213,141,0.18);
-  --transition: 180ms cubic-bezier(0.4,0,0.2,1);
-  --transition-slow: 360ms cubic-bezier(0.22,1,0.36,1);
+  /* Radii — sharp by default. Soft only where ergonomically required. */
+  --radius:    4px;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Shadows — depth-by-elevation, not depth-by-decoration */
+  --shadow-1: 0 1px 0 rgba(245,242,232,0.04);
+  --shadow-2: 0 1px 0 rgba(245,242,232,0.04), 0 14px 32px rgba(0,0,0,0.45);
+  --shadow-3: 0 1px 0 rgba(245,242,232,0.06), 0 24px 60px rgba(0,0,0,0.55);
+  --shadow-lane:  0 0 0 1px var(--lane-glow), 0 8px 26px var(--lane-glow);
+  --shadow-medal: 0 0 0 1px var(--medal-glow), 0 8px 26px var(--medal-glow);
+  /* legacy */
+  --shadow:    var(--shadow-2);
+  --shadow-h:  var(--shadow-3);
+
+  --transition:      150ms cubic-bezier(0.4,0,0.2,1);
+  --transition-slow: 320ms cubic-bezier(0.85,0,0.15,1);
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+html { background: var(--bg-deep); }
 body {
   font-family: var(--font-body);
   background:
-    /* Soft top-corner glows — atmosphere, not noise */
-    radial-gradient(1100px 500px at 8% -15%, rgba(34,211,238,0.10), transparent 65%),
-    radial-gradient(900px 420px at 95% -10%, rgba(168,85,247,0.12), transparent 65%),
-    /* Faint grid — stadium / screen feel, 32px lattice */
-    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px) 0 0 / 32px 32px,
+    /* One subtle radial lift at top centre — stadium-light fall-off */
+    radial-gradient(1400px 600px at 50% -10%, rgba(245,242,232,0.04), transparent 70%),
+    /* Faint 40px grid lattice — pit-wall / scoreboard substrate */
+    linear-gradient(rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'ss01' 1, 'cv11' 1;
+  /* Slashed-zero + tabular figures + ligatures everywhere by default */
+  font-feature-settings: 'ss01' 1, 'tnum' 0, 'liga' 1, 'calt' 1;
+  font-variant-numeric: oldstyle-nums;
 }
-a { color: var(--accent); text-decoration: none; transition: color var(--transition); }
-a:hover { color: var(--accent-h); text-decoration: none; }
-::selection { background: rgba(34,211,238,0.30); color: var(--ink); }
+a {
+  color: var(--lane);
+  text-decoration: none;
+  transition: color var(--transition);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+a:hover { color: var(--lane-h); text-decoration: underline; text-decoration-color: var(--lane); }
+::selection { background: var(--lane); color: var(--lane-ink); }
 
-/* TOPNAV — sport-editorial: condensed wordmark, mono nav, hairline rails */
+/* TOPNAV — pit-wall masthead: condensed wordmark + mono control panel */
 header.topnav {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0;
   padding: 0 var(--sp-7);
-  height: 60px;
+  height: 64px;
   border-bottom: 1px solid var(--hairline);
-  background:
-    linear-gradient(180deg, rgba(6,7,26,0.94), rgba(6,7,26,0.86));
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: rgba(10,11,17,0.92);
+  /* No blur — glass is banned by every audit. Solid pit-wall instead. */
   position: sticky;
   top: 0;
   z-index: 100;
@@ -1476,35 +1518,48 @@ header.topnav {
 header.topnav::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.35) 50%, transparent 100%);
+  background: var(--lane);
+  opacity: 0.40;
   pointer-events: none;
 }
 header.topnav .brand {
   font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 20px;
-  letter-spacing: 0.04em;
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--ink);
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-right: var(--sp-7);
+  gap: 12px;
+  margin-right: var(--sp-8);
   text-decoration: none;
   flex-shrink: 0;
   transition: color var(--transition);
+  position: relative;
 }
-header.topnav .brand:hover { color: var(--accent-h); }
+header.topnav .brand:hover { color: var(--lane); }
 header.topnav .brand svg { flex-shrink: 0; display: block; }
-header.topnav nav { display: flex; align-items: center; gap: 0; flex: 1; }
+/* Vertical hairline separator after wordmark — broadsheet detail */
+header.topnav .brand::after {
+  content: '';
+  position: absolute; right: calc(var(--sp-8) * -0.5);
+  top: 18px; bottom: 18px;
+  width: 1px; background: var(--hairline);
+}
+header.topnav nav {
+  display: flex; align-items: stretch; gap: 0; flex: 1;
+  padding-left: var(--sp-2);
+}
 header.topnav nav a {
   position: relative;
+  display: inline-flex; align-items: center;
   font-family: var(--font-mono);
-  color: var(--ink-dim);
-  padding: 8px 13px;
-  font-size: 12px;
+  color: var(--ink-muted);
+  padding: 0 var(--sp-4);
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   transition: color var(--transition);
   white-space: nowrap;
@@ -1516,62 +1571,66 @@ header.topnav nav a:hover {
   text-decoration: none;
 }
 header.topnav nav a.active {
-  color: var(--ink);
+  color: var(--lane);
   background: transparent;
-  border-bottom: none;
-  border-radius: 0;
-  padding-bottom: 8px;
 }
 header.topnav nav a.active::after {
   content: '';
   position: absolute;
-  left: 13px; right: 13px;
-  bottom: -2px;
+  left: var(--sp-4); right: var(--sp-4);
+  bottom: 0;
   height: 2px;
-  background: var(--grad-cool);
-  border-radius: 2px;
-  box-shadow: 0 0 12px rgba(34,211,238,0.5);
+  background: var(--lane);
+  border-radius: 0;
+  box-shadow: 0 0 16px var(--lane-glow);
+}
+/* Tiny inline "live dot" for nav items that should pulse a status (use class) */
+header.topnav nav a.live::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--lane);
+  box-shadow: 0 0 10px var(--lane-glow);
+  margin-right: 8px;
+  animation: mh-pulse 1.6s ease-in-out infinite;
 }
 #backend-pill {
   margin-left: auto;
+  align-self: center;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
+  gap: 8px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--chrome);
   color: var(--ink-muted);
   text-decoration: none;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), color var(--transition);
   flex-shrink: 0;
 }
-#backend-pill:hover { border-color: rgba(255,255,255,0.12); text-decoration: none; }
+#backend-pill:hover { border-color: var(--lane); color: var(--ink); text-decoration: none; }
 #backend-pill-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--ink-muted);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
   flex-shrink: 0;
-  transition: background 0.3s;
+  transition: background 0.3s, box-shadow 0.3s;
 }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 
-/* FOOTER — quiet hairline rail */
+/* FOOTER — masthead rail */
 .mh-footer {
-  border-top: 1px solid var(--hairline);
-  margin-top: 0;
-  background:
-    linear-gradient(180deg, transparent, rgba(34,211,238,0.025));
+  border-top: 1px solid var(--lane);
+  margin-top: var(--sp-9);
+  background: var(--bg-deep);
   position: relative;
-}
-.mh-footer::before {
-  content: ''; position: absolute; left: 0; right: 0; top: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,0.20) 50%, transparent 100%);
-  pointer-events: none;
 }
 .mh-footer-inner {
   max-width: 1200px; margin: 0 auto;
@@ -1584,25 +1643,26 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
 .mh-footer-brand {
   display: inline-flex; align-items: center; gap: 10px;
   font-family: var(--font-display);
-  font-weight: 800;
+  font-weight: 900;
   font-size: 15px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-dim);
+  color: var(--ink);
 }
-.mh-footer-brand svg { color: var(--accent); }
+.mh-footer-brand svg { color: var(--lane); }
 .mh-footer-tag {
   font-family: var(--font-serif);
   font-style: italic;
-  font-size: 14px;
-  color: var(--ink-muted);
+  font-variation-settings: 'opsz' 72;
+  font-size: 15px;
+  color: var(--ink-dim);
   text-align: center;
 }
 .mh-footer-meta {
-  display: inline-flex; align-items: center; gap: 12px;
+  display: inline-flex; align-items: center; gap: var(--sp-3);
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.10em;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-muted);
 }
@@ -1610,7 +1670,7 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   color: var(--ink-muted);
   transition: color var(--transition);
 }
-.mh-footer-meta a:hover { color: var(--accent); }
+.mh-footer-meta a:hover { color: var(--lane); text-decoration: none; }
 .mh-footer-sep { color: var(--ink-faint); }
 @media (max-width: 860px) {
   .mh-footer-inner {
@@ -1621,76 +1681,198 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   .mh-footer-brand, .mh-footer-meta { justify-content: center; }
 }
 
-/* HEADINGS — sport-editorial hierarchy */
+/* HEADINGS — clear hierarchy, no ambiguity between h1 and section title */
 h1 {
   font-family: var(--font-display);
-  font-size: 36px; font-weight: 800;
-  letter-spacing: -0.005em; text-transform: uppercase;
-  margin: 0 0 var(--sp-2); color: var(--ink);
-  line-height: 1.02;
+  font-size: clamp(40px, 5.2vw, 64px);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  margin: 0 0 var(--sp-3);
+  color: var(--ink);
+  line-height: 0.95;
 }
 h2 {
-  font-family: var(--font-body);
-  font-size: 17px; font-weight: 700;
-  letter-spacing: -0.01em; margin: 0 0 var(--sp-3); color: var(--ink);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  margin: 0 0 var(--sp-3);
+  color: var(--ink);
+  line-height: 1.05;
 }
 h3 {
   font-family: var(--font-mono);
-  font-size: 11px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.14em;
-  color: var(--ink-muted); margin: var(--sp-5) 0 var(--sp-3);
+  font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.18em;
+  color: var(--ink-muted);
+  margin: var(--sp-6) 0 var(--sp-3);
 }
+p { margin: 0 0 var(--sp-3); }
+p:last-child { margin-bottom: 0; }
 
-/* Editorial accent — italic serif for emphasis moments inside copy */
-.editorial, em.editorial {
+/* Editorial italic — serif emphasis inside copy. Reserved + earned. */
+.editorial, em.editorial, .ed-italic {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
-  letter-spacing: 0;
-  color: var(--gold);
-  font-feature-settings: 'liga' 1, 'dlig' 1;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  font-feature-settings: 'liga' 1, 'dlig' 1, 'ss01' 1;
+  text-transform: none;
 }
+/* Lede — pulled-together body copy under hero / section openings */
+.lede {
+  font-family: var(--font-serif);
+  font-style: normal;
+  font-variation-settings: 'opsz' 72;
+  font-size: clamp(17px, 1.6vw, 21px);
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  color: var(--ink-dim);
+  max-width: 56ch;
+}
+/* Strap — bracketed mono metadata above a section. The defining typographic
+   tell of MediaHub: [ MEET / SAT 14 SEP / LANE 4 ] */
+.strap {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  gap: 8px;
+  padding: 4px 0;
+}
+.strap::before, .strap::after { content: '['; color: var(--lane); opacity: 0.7; }
+.strap::after { content: ']'; }
+.strap .sep { color: var(--ink-faint); font-weight: 400; }
+.strap.live { color: var(--lane); }
+.strap.live::before, .strap.live::after { opacity: 1; }
+
+/* Display numeral — for hero stats / step numbers / lane numbers */
 .display-num {
   font-family: var(--font-display);
-  font-weight: 800;
-  letter-spacing: -0.005em;
-  font-variant-numeric: tabular-nums;
-  line-height: 0.9;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'ss01' 1, 'tnum' 1, 'lnum' 1;
+  line-height: 0.85;
+  color: var(--ink);
 }
+.display-num.lane { color: var(--lane); }
+.display-num.medal { color: var(--medal); }
 
-/* CARDS */
-.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); }
-.card h2 { margin: 0 0 10px; }
-.card p { color: var(--ink-dim); margin: 0 0 12px; }
+/* Result row — N..............T.TT (broadsheet leader-dots) */
+.result-row {
+  display: flex; align-items: baseline;
+  font-family: var(--font-body);
+  font-size: 15px;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--hairline);
+}
+.result-row .nm { color: var(--ink); font-weight: 500; }
+.result-row .dots {
+  flex: 1; overflow: hidden; color: var(--ink-faint);
+  letter-spacing: 3px; min-width: 24px;
+  white-space: nowrap;
+  user-select: none;
+}
+.result-row .dots::before {
+  content: '. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .';
+}
+.result-row .tm {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'ss01' 1;
+  color: var(--ink); font-weight: 600;
+}
+.result-row .tag { margin-left: 8px; }
+
+/* CARDS — sharp, paper-on-pit-wall */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--sp-6);
+  margin-bottom: var(--sp-5);
+  box-shadow: var(--shadow-1);
+  position: relative;
+}
+.card h2 { margin: 0 0 var(--sp-3); }
+.card p { color: var(--ink-dim); margin: 0 0 var(--sp-3); }
 .card p:last-child { margin-bottom: 0; }
 
-/* BUTTONS — confident, sport-editorial */
+/* Cornered card — L-bracket corners in lane yellow. For highlights / featured */
+.card.cornered { padding: var(--sp-7); border-color: var(--rule); }
+.card.cornered::before, .card.cornered::after {
+  content: ''; position: absolute; width: 12px; height: 12px;
+  border-color: var(--lane); border-style: solid;
+}
+.card.cornered::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+.card.cornered::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+.card.cornered.medal::before, .card.cornered.medal::after { border-color: var(--medal); }
+
+/* BUTTONS — flat lane-yellow, broadcast-control aesthetic */
 .btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: var(--accent); color: #081820;
-  border: 0; padding: 10px 20px; font-size: 13px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--lane); color: var(--lane-ink);
+  border: 0; padding: 11px 22px;
+  font-family: var(--font-body);
+  font-size: 13px; font-weight: 700;
   border-radius: var(--radius-sm); cursor: pointer;
   transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
-  font-family: var(--font-body); text-decoration: none; letter-spacing: -0.005em;
+  text-decoration: none;
+  letter-spacing: 0.01em;
   position: relative;
   isolation: isolate;
+  white-space: nowrap;
 }
 .btn:hover {
-  background: var(--accent-h); color: #081820;
-  transform: translateY(-1px); box-shadow: 0 6px 22px rgba(34,211,238,0.28);
+  background: var(--lane-h); color: var(--lane-ink);
+  transform: translateY(-1px); box-shadow: var(--shadow-lane);
   text-decoration: none;
 }
-.btn:active { transform: translateY(0); }
-.btn.secondary { background: transparent; color: var(--ink-dim); border: 1px solid var(--chrome); }
-.btn.secondary:hover { background: rgba(255,255,255,0.05); color: var(--ink); border-color: rgba(255,255,255,0.20); box-shadow: none; }
-.btn.danger { background: transparent; color: var(--bad); border: 1px solid rgba(244,63,94,0.3); }
-.btn.danger:hover { background: rgba(244,63,94,0.08); border-color: rgba(244,63,94,0.5); box-shadow: none; }
-.btn.large { padding: 13px 26px; font-size: 14px; }
-.btn.gradient {
-  background: var(--grad-cool);
-  color: #081820;
+.btn:active { transform: translateY(0); background: var(--lane-deep); }
+.btn:focus-visible {
+  outline: 2px solid var(--lane);
+  outline-offset: 3px;
 }
-.btn.gradient:hover { box-shadow: 0 10px 28px rgba(34,211,238,0.32); }
+.btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
+.btn.secondary:hover {
+  background: rgba(245,242,232,0.04);
+  color: var(--ink);
+  border-color: var(--lane);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+.btn.ghost { background: transparent; color: var(--ink-dim); padding: 8px 12px; }
+.btn.ghost:hover { color: var(--lane); background: transparent; transform: none; box-shadow: none; }
+.btn.danger { background: transparent; color: var(--bad); border: 1px solid rgba(255,107,107,0.30); }
+.btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); box-shadow: none; }
+.btn.medal { background: var(--medal); color: var(--medal-ink); }
+.btn.medal:hover { background: var(--medal-h); box-shadow: var(--shadow-medal); }
+.btn.large { padding: 14px 28px; font-size: 14px; }
+.btn.xl {
+  padding: 18px 32px; font-size: 14px;
+  font-family: var(--font-mono); letter-spacing: 0.14em;
+  text-transform: uppercase; font-weight: 600;
+}
+/* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
+.btn.mono {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 12px 20px;
+}
+/* No more .btn.gradient — lane yellow does the heavy lift */
 
 /* LAYOUT */
 .row { display: flex; gap: 18px; flex-wrap: wrap; }
@@ -1713,26 +1895,44 @@ table td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-
 table tbody tr:nth-child(odd) { background: rgba(255,255,255,0.015); }
 table tbody tr:hover { background: rgba(255,255,255,0.03); }
 
-/* TAGS — sharp, mono, scoreboard-y */
+/* TAGS — broadcast lower-third chips */
 .tag {
-  display: inline-flex; align-items: center;
-  padding: 3px 9px;
-  border-radius: 4px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px 3px 8px;
+  border-radius: 2px;
   font-family: var(--font-mono);
-  font-size: 10.5px; font-weight: 500;
-  letter-spacing: 0.10em;
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: rgba(255,255,255,0.05);
+  background: rgba(245,242,232,0.04);
   color: var(--ink-dim);
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+  line-height: 1.4;
 }
-.tag.good { background: rgba(34,197,94,0.10);  color: var(--good); border-color: rgba(34,197,94,0.30); }
-.tag.warn { background: rgba(245,158,11,0.10); color: var(--warn); border-color: rgba(245,158,11,0.30); }
-.tag.bad  { background: rgba(244,63,94,0.10);  color: var(--bad);  border-color: rgba(244,63,94,0.30); }
-.tag.info { background: rgba(34,211,238,0.10); color: var(--info); border-color: rgba(34,211,238,0.30); }
-.tag.gold { background: rgba(244,213,141,0.10); color: var(--gold); border-color: rgba(244,213,141,0.35); }
+.tag.lane  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.40); }
+.tag.live  { background: rgba(212,255,58,0.10); color: var(--lane);  border-color: rgba(212,255,58,0.50); }
+.tag.live::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--lane);
+  box-shadow: 0 0 8px var(--lane);
+  animation: mh-pulse 1.4s ease-in-out infinite;
+}
+.tag.good  { background: var(--good-bg);  color: var(--good); border-color: rgba(94,227,154,0.30); }
+.tag.warn  { background: var(--warn-bg);  color: var(--warn); border-color: rgba(255,180,84,0.30); }
+.tag.bad   { background: var(--bad-bg);   color: var(--bad);  border-color: rgba(255,107,107,0.30); }
+.tag.info  { background: var(--info-bg);  color: var(--info); border-color: rgba(77,163,255,0.30); }
+.tag.medal { background: rgba(244,213,141,0.10); color: var(--medal); border-color: rgba(244,213,141,0.40); }
+.tag.medal::before {
+  content: '★'; color: var(--medal); font-family: var(--font-body);
+  font-size: 9px; letter-spacing: 0;
+}
+/* legacy alias */
+.tag.gold { background: rgba(244,213,141,0.10); color: var(--medal); border-color: rgba(244,213,141,0.40); }
 
-/* FORMS — scoreboard labels, refined inputs */
+/* FORMS — mono scoreboard labels, lane-yellow focus */
 label {
   display: block;
   margin: var(--sp-4) 0 var(--sp-2);
@@ -1741,89 +1941,111 @@ label {
   font-size: 10.5px;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
 }
-input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], textarea, select {
-  background: rgba(255,255,255,0.03); color: var(--ink);
+input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], input[type=number], textarea, select {
+  background: rgba(245,242,232,0.025); color: var(--ink);
   border: 1px solid var(--chrome);
   border-radius: var(--radius-sm); padding: 11px 14px;
   font-size: 14px; font-family: var(--font-body); width: 100%;
   transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
   appearance: none;
 }
-/* Custom-styled file input — the native "Choose File" button is replaced */
-input[type=file] {
-  padding: 8px 10px;
-  cursor: pointer;
+input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
+  border-color: var(--rule);
 }
-input[type=file]::file-selector-button {
-  background: rgba(34,211,238,0.10);
-  color: var(--accent);
-  border: 1px solid rgba(34,211,238,0.30);
-  border-radius: 8px;
-  padding: 6px 14px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.10em;
-  cursor: pointer;
-  margin-right: 14px;
-  transition: background var(--transition), border-color var(--transition);
+input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
+  outline: none; border-color: var(--lane);
+  box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
+  background: rgba(245,242,232,0.04);
 }
-input[type=file]::file-selector-button:hover {
-  background: rgba(34,211,238,0.18);
-  border-color: var(--accent);
+input[type=checkbox], input[type=radio] {
+  width: auto; margin-right: 8px; accent-color: var(--lane);
 }
-input[type=text]:focus, textarea:focus, select:focus {
-  outline: none; border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(34,211,238,0.18);
-}
-input[type=checkbox] { width: auto; margin-right: 8px; accent-color: var(--accent); }
-textarea { min-height: 120px; resize: vertical; }
+textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
 select { cursor: pointer; }
 
-/* STATS — sport-editorial scoreboard */
+/* Custom-styled file input — replaces ugly native OS button */
+input[type=file] { padding: 7px 10px; cursor: pointer; }
+input[type=file]::file-selector-button {
+  background: var(--lane);
+  color: var(--lane-ink);
+  border: 0;
+  border-radius: 2px;
+  padding: 7px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  margin-right: 14px;
+  transition: background var(--transition);
+}
+input[type=file]::file-selector-button:hover {
+  background: var(--lane-h);
+}
+input[type=color] {
+  height: 36px; padding: 2px; cursor: pointer;
+  background: rgba(245,242,232,0.04); border-color: var(--chrome);
+}
+
+/* STATS — pit-wall scoreboard. Display-font numerals, mono labels, side-rail accent */
 .stat-block { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
 .stat {
   position: relative;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 70%),
-    rgba(255,255,255,0.025);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--sp-4) var(--sp-5) var(--sp-4) var(--sp-6);
   min-width: 110px;
   transition: border-color var(--transition), transform var(--transition);
   overflow: hidden;
 }
 .stat::before {
   content: '';
-  position: absolute; left: 0; top: 14px; bottom: 14px;
-  width: 2px;
-  background: var(--accent);
-  opacity: 0.5;
-  border-radius: 0 2px 2px 0;
+  position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 3px;
+  background: var(--ink-faint);
+  border-radius: 0;
 }
-.stat:hover { border-color: rgba(34,211,238,0.30); transform: translateY(-1px); }
+.stat:hover { border-color: var(--rule); transform: translateY(-1px); }
+.stat:hover::before { background: var(--lane); }
 .stat .l {
+  display: block;
   font-family: var(--font-mono);
-  font-size: 10.5px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.16em;
-  color: var(--ink-muted); margin-bottom: var(--sp-1);
+  font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.20em;
+  color: var(--ink-muted); margin-bottom: var(--sp-2);
 }
 .stat .v {
+  display: block;
   font-family: var(--font-display);
-  font-size: 40px; font-weight: 800;
-  letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink); line-height: 0.95;
+  font-size: 44px; font-weight: 900;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1, 'ss01' 1;
+  color: var(--ink); line-height: 0.9;
 }
-.stat.elite::before { background: var(--gold); box-shadow: 0 0 12px rgba(244,213,141,0.4); }
-.stat.elite .v { background: var(--grad-medal); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stat .delta {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  vertical-align: super;
+  color: var(--ink-muted);
+}
+/* Semantic stat variants */
+.stat.live::before  { background: var(--lane); box-shadow: 0 0 12px var(--lane-glow); }
+.stat.live .v       { color: var(--lane); }
+.stat.medal::before { background: var(--medal); box-shadow: 0 0 12px var(--medal-glow); }
+.stat.medal .v      { color: var(--medal); }
 .stat.warn::before  { background: var(--warn); }
 .stat.good::before  { background: var(--good); }
 .stat.bad::before   { background: var(--bad);  }
+/* Old "elite" → medal alias */
+.stat.elite::before { background: var(--medal); box-shadow: 0 0 12px var(--medal-glow); }
+.stat.elite .v      { color: var(--medal); }
 
 /* KV */
 .kv { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; font-size: 14px; }
@@ -1859,28 +2081,23 @@ main.wrap > .card:nth-of-type(3) { animation-delay: 0.15s; }
 main.wrap > .card:nth-of-type(4) { animation-delay: 0.20s; }
 main.wrap > .card:nth-of-type(5) { animation-delay: 0.25s; }
 
-/* Background accent &mdash; one slow drifting glow, not two competing auroras */
+/* Single static lane-yellow wash at the top edge — broadcast lower-third feel */
 body::before {
-  content: ''; position: fixed; inset: -20% -20% auto auto;
-  width: 720px; height: 720px;
+  content: ''; position: fixed;
+  top: 0; left: 0; right: 0; height: 320px;
   background:
-    radial-gradient(closest-side, rgba(34,211,238,0.07), transparent 70%);
-  filter: blur(40px);
+    radial-gradient(ellipse 60% 100% at 50% 0%, var(--lane-glow), transparent 70%);
+  opacity: 0.20;
+  filter: blur(80px);
   pointer-events: none; z-index: 0;
-  animation: mh-drift 32s ease-in-out infinite;
-}
-@keyframes mh-drift {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50%      { transform: translate(-40px, 30px) scale(1.08); }
 }
 
 /* Card hover */
-.card { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.card { transition: background var(--transition), border-color var(--transition); }
 a.card, .card[data-interactive] { cursor: pointer; }
 a.card:hover, .card[data-interactive]:hover {
-  transform: translateY(-2px);
-  border-color: rgba(34,211,238,0.3);
-  box-shadow: 0 12px 36px rgba(0,0,0,0.5), 0 0 0 1px rgba(34,211,238,0.15);
+  border-color: var(--rule);
+  background: var(--surface-2);
 }
 
 /* Loading overlay */
@@ -1899,20 +2116,21 @@ a.card:hover, .card[data-interactive]:hover {
   animation: mh-fade-in 0.4s ease-out;
 }
 .mh-spinner {
-  width: 72px; height: 72px;
+  width: 56px; height: 56px;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.15) 90deg, var(--accent) 270deg, transparent 360deg);
-  -webkit-mask: radial-gradient(circle at center, transparent 26px, black 28px);
-  mask: radial-gradient(circle at center, transparent 26px, black 28px);
-  animation: mh-spin 1s linear infinite;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--lane);
+  border-right-color: var(--lane);
+  animation: mh-spin 0.8s cubic-bezier(0.6,0,0.4,1) infinite;
   position: relative;
-  box-shadow: 0 0 40px rgba(34,211,238,0.25);
+  box-shadow: 0 0 24px var(--lane-glow);
 }
 .mh-spinner::after {
-  content: ''; position: absolute; inset: 10px;
+  content: ''; position: absolute; inset: 6px;
   border-radius: 50%;
-  background: radial-gradient(circle at center, rgba(34,211,238,0.18), transparent 70%);
-  animation: mh-pulse 1.4s ease-in-out infinite;
+  border: 1px dashed var(--lane);
+  opacity: 0.35;
+  animation: mh-spin 2s linear infinite reverse;
 }
 .mh-loader-text {
   font-family: var(--font-display);
@@ -1981,55 +2199,74 @@ a.card:hover, .card[data-interactive]:hover {
   border-radius: 8px;
 }
 
-/* Content card (AI-generated stub output) */
+/* Content card (AI-generated content output) — published-article aesthetic */
 .mh-content-card {
-  background: linear-gradient(180deg, rgba(34,211,238,0.04), rgba(34,211,238,0.01));
-  border: 1px solid rgba(34,211,238,0.15);
-  border-radius: var(--radius);
-  padding: 22px;
-  margin-bottom: 16px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--lane);
+  border-radius: 0;
+  padding: var(--sp-6);
+  margin-bottom: var(--sp-4);
   position: relative;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  transition: border-color var(--transition), background var(--transition);
 }
-.mh-content-card:hover { border-color: rgba(34,211,238,0.35); transform: translateY(-1px); }
+.mh-content-card:hover { background: var(--surface-2); border-left-color: var(--lane-h); }
 .mh-content-card .mh-card-platform {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--accent); margin-bottom: 10px;
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.18em;
+  color: var(--lane); margin-bottom: var(--sp-3);
 }
 .mh-content-card .mh-card-caption {
-  font-size: 15px; line-height: 1.6; color: var(--ink);
+  font-family: var(--font-serif);
+  font-variation-settings: 'opsz' 72;
+  font-size: 16px; line-height: 1.55; color: var(--ink);
   white-space: pre-wrap; word-wrap: break-word;
 }
 .mh-content-card .mh-card-tags {
-  margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: var(--sp-4); display: flex; flex-wrap: wrap; gap: 6px;
 }
 .mh-content-card .mh-card-tag {
-  font-size: 12px; color: var(--accent);
-  background: rgba(34,211,238,0.08);
-  border: 1px solid rgba(34,211,238,0.2);
-  border-radius: 6px; padding: 3px 8px;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px; color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 2px; padding: 3px 8px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 .mh-content-card .mh-card-confidence {
-  position: absolute; top: 22px; right: 22px;
-  font-size: 11px; color: var(--ink-muted);
+  position: absolute; top: var(--sp-6); right: var(--sp-6);
+  font-family: var(--font-mono);
+  font-size: 10.5px; color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.10em;
 }
 .mh-card-actions {
-  margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;
-  padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: var(--sp-4); display: flex; gap: var(--sp-2); flex-wrap: wrap;
+  padding-top: var(--sp-4); border-top: 1px solid var(--hairline);
 }
 .mh-card-actions button {
-  background: transparent; border: 1px solid rgba(255,255,255,0.1);
-  color: var(--ink-dim); font-size: 12px; padding: 5px 11px;
-  border-radius: 6px; cursor: pointer; font-family: inherit;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 2px;
+  cursor: pointer;
   transition: all var(--transition);
 }
-.mh-card-actions button:hover { color: var(--ink); border-color: rgba(255,255,255,0.2); }
-.mh-card-actions button.primary { color: var(--accent); border-color: rgba(34,211,238,0.3); }
-.mh-card-actions button.primary:hover { background: rgba(34,211,238,0.08); border-color: var(--accent); }
+.mh-card-actions button:hover { color: var(--ink); border-color: var(--rule); }
+.mh-card-actions button.primary { color: var(--lane); border-color: rgba(212,255,58,0.30); }
+.mh-card-actions button.primary:hover { background: rgba(212,255,58,0.08); border-color: var(--lane); }
+/* Achievement / medal variant — gold accent for PB / medal / first-time */
+.mh-content-card.medal { border-left-color: var(--medal); }
+.mh-content-card.medal .mh-card-platform { color: var(--medal); }
+.mh-content-card.medal:hover { border-left-color: var(--medal-h); }
 
 /* Disabled card / button visual state */
 [aria-disabled="true"], .is-disabled {
@@ -2042,63 +2279,75 @@ a.card:hover, .card[data-interactive]:hover {
   transform: none !important; box-shadow: none !important;
 }
 
-/* === Upload pipeline progress UI === */
+/* === Upload pipeline progress UI — pit-wall stage panel === */
 .mh-stages {
-  display: flex; gap: 12px; flex-wrap: wrap;
-  margin: 18px 0 22px;
+  display: flex; gap: 0; flex-wrap: wrap;
+  margin: var(--sp-5) 0 var(--sp-6);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 .mh-stage {
   flex: 1; min-width: 130px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: var(--sp-4) var(--sp-4);
   position: relative;
-  transition: border-color 0.25s ease, background 0.25s ease, color 0.25s ease;
+  transition: background var(--transition), color var(--transition);
 }
+.mh-stage:last-child { border-right: 0; }
 .mh-stage .mh-stage-label {
-  font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.07em;
-  color: var(--ink-muted); margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.20em;
+  color: var(--ink-muted); margin-bottom: var(--sp-2);
 }
 .mh-stage .mh-stage-text {
+  font-family: var(--font-body);
   font-size: 13px; color: var(--ink-dim);
   line-height: 1.4;
 }
 .mh-stage[data-state="done"] {
-  border-color: rgba(34,197,94,0.4);
-  background: rgba(34,197,94,0.05);
+  background: var(--good-bg);
 }
 .mh-stage[data-state="done"] .mh-stage-label { color: var(--good); }
-.mh-stage[data-state="active"] {
-  border-color: rgba(34,211,238,0.55);
-  background: rgba(34,211,238,0.06);
-  box-shadow: 0 0 24px rgba(34,211,238,0.18);
+.mh-stage[data-state="done"]::before {
+  content: '✓'; position: absolute; top: 12px; right: 12px;
+  color: var(--good); font-size: 13px; font-weight: 700;
 }
-.mh-stage[data-state="active"] .mh-stage-label { color: var(--accent); }
+.mh-stage[data-state="active"] {
+  background: rgba(212,255,58,0.05);
+  border-bottom: 2px solid var(--lane);
+}
+.mh-stage[data-state="active"] .mh-stage-label { color: var(--lane); }
 .mh-stage[data-state="active"]::after {
-  content: ''; position: absolute; top: 10px; right: 10px;
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--accent);
+  content: ''; position: absolute; top: 14px; right: 12px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--lane);
   animation: mh-pulse 1.1s ease-in-out infinite;
-  box-shadow: 0 0 12px var(--accent);
+  box-shadow: 0 0 12px var(--lane);
 }
 .mh-stage[data-state="error"] {
-  border-color: rgba(244,63,94,0.5);
-  background: rgba(244,63,94,0.06);
+  background: var(--bad-bg);
 }
 .mh-stage[data-state="error"] .mh-stage-label { color: var(--bad); }
+.mh-stage[data-state="error"]::before {
+  content: '✕'; position: absolute; top: 12px; right: 12px;
+  color: var(--bad); font-size: 13px; font-weight: 700;
+}
 
 .mh-progress-bar {
-  position: relative; height: 6px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 999px; overflow: hidden;
-  margin: 14px 0 6px;
+  position: relative; height: 3px;
+  background: var(--hairline);
+  border-radius: 0; overflow: hidden;
+  margin: var(--sp-4) 0 var(--sp-2);
 }
 .mh-progress-bar > span {
   position: absolute; top: 0; left: 0; bottom: 0;
-  background: linear-gradient(90deg, var(--accent) 0%, #7c3aed 100%);
-  border-radius: 999px;
+  background: var(--lane);
+  border-radius: 0;
   transition: width 0.4s ease;
   width: 0;
 }
@@ -2210,250 +2459,292 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 .mh-hero-trust > * { display: inline-flex; align-items: center; gap: 6px; }
 .mh-hero-trust svg { width: 13px; height: 13px; }
 
-/* Section heading */
+/* Section heading — left-aligned editorial, like a newspaper section header */
 .mh-section-eyebrow {
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: flex-start;
   gap: 14px;
   font-family: var(--font-mono);
   font-size: 11px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.24em;
-  color: var(--accent);
-  margin: var(--sp-8) 0 var(--sp-3);
+  text-transform: uppercase; letter-spacing: 0.22em;
+  color: var(--lane);
+  margin: var(--sp-9) 0 var(--sp-3);
+  text-align: left;
 }
-.mh-section-eyebrow::before,
-.mh-section-eyebrow::after {
+.mh-section-eyebrow::before {
   content: '';
-  height: 1px; width: 48px;
-  background: linear-gradient(90deg, transparent, rgba(34,211,238,0.5), transparent);
+  height: 1px; width: 36px;
+  background: var(--lane);
 }
+.mh-section-eyebrow::after { content: none; }
 .mh-section-title {
   font-family: var(--font-display);
-  font-size: clamp(32px, 4vw, 52px);
-  font-weight: 800;
+  font-size: clamp(36px, 4.2vw, 56px);
+  font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: -0.005em;
-  text-align: center;
+  letter-spacing: -0.01em;
+  text-align: left;
   margin: 0 0 var(--sp-7);
-  max-width: 820px; margin-left: auto; margin-right: auto;
-  line-height: 1.0;
+  max-width: 22ch;
+  line-height: 0.95;
   color: var(--ink);
 }
 .mh-section-title em.editorial {
-  font-size: 0.94em;
-  color: var(--gold);
-  padding: 0 0.04em;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-variation-settings: 'opsz' 144;
+  font-weight: 400;
+  font-size: 0.92em;
+  color: var(--medal);
+  padding: 0 0.05em;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 
-/* === Numbered step cards (How it works) — sport editorial === */
+/* === Numbered step cards (How it works) — bento-grid, varied weight === */
 .mh-steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--sp-5);
-  margin-bottom: var(--sp-8);
+  gap: 0;
+  margin-bottom: var(--sp-9);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--surface);
 }
 .mh-step {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.025), transparent 60%),
-    var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
   padding: var(--sp-6) var(--sp-6) var(--sp-7);
   position: relative;
-  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: background var(--transition);
   overflow: hidden;
+}
+@media (min-width: 760px) {
+  /* No bottom border on the last row, no right border on the last column */
+  .mh-step:nth-child(n+1):nth-last-child(-n+4):nth-child(4n+1) ~ .mh-step:last-child,
+  .mh-step:last-child { border-right: 0; }
+  .mh-step { border-bottom: 0; }
 }
 .mh-step::before {
   content: '';
   position: absolute; top: 0; left: 0; right: 0;
-  height: 2px;
-  background: var(--grad-cool);
-  opacity: 0; transform: scaleX(0.4);
-  transform-origin: left center;
-  transition: opacity var(--transition), transform var(--transition-slow);
+  height: 1px;
+  background: var(--lane);
+  opacity: 0;
+  transition: opacity var(--transition);
 }
 .mh-step:hover {
-  border-color: rgba(34,211,238,0.4);
-  transform: translateY(-3px);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+  background: rgba(245,242,232,0.025);
+  border-color: var(--hairline);
 }
-.mh-step:hover::before { opacity: 1; transform: scaleX(1); }
+.mh-step:hover::before { opacity: 1; }
 .mh-step-num {
   font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 56px;
-  line-height: 0.85;
+  font-weight: 900;
+  font-size: 64px;
+  line-height: 0.8;
   letter-spacing: -0.04em;
-  background: var(--grad-cool);
-  -webkit-background-clip: text; background-clip: text;
-  color: transparent;
+  color: var(--ink-faint);
   display: block;
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-4);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
+  font-feature-settings: 'tnum' 1, 'ss01' 1;
+  transition: color var(--transition);
 }
+.mh-step:hover .mh-step-num { color: var(--lane); }
 .mh-step-num::after {
   content: '';
   display: block;
-  width: 28px; height: 2px;
-  background: var(--accent);
-  border-radius: 2px;
+  width: 24px; height: 1px;
+  background: var(--lane);
+  border-radius: 0;
   margin-top: var(--sp-3);
-  opacity: 0.6;
+  opacity: 0.7;
 }
 .mh-step h3 {
-  font-family: var(--font-body);
-  font-size: 17px; font-weight: 700; color: var(--ink);
-  letter-spacing: -0.01em; margin: 0 0 var(--sp-2);
-  text-transform: none;
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0 0 var(--sp-2);
+  text-transform: uppercase;
 }
 .mh-step p {
   font-size: 14px; color: var(--ink-dim);
-  line-height: 1.55; margin: 0;
+  line-height: 1.5; margin: 0;
+  max-width: 36ch;
 }
 
 /* === Hero (rebuilt home page) — sport-editorial cover === */
+/* HERO — broadsheet masthead. No gradient text, no glass, no purple.
+   Type carries the weight. Lane-yellow earns its keep on the CTA only. */
 .mh-hero {
   position: relative;
-  padding: 80px 44px 60px;
+  padding: var(--sp-9) var(--sp-7) var(--sp-8);
   margin-bottom: var(--sp-8);
-  border-radius: var(--radius-lg);
-  background:
-    radial-gradient(1100px 360px at 12% 15%, rgba(168,85,247,0.22), transparent 60%),
-    radial-gradient(800px 300px at 92% 85%, rgba(34,211,238,0.18), transparent 65%),
-    linear-gradient(180deg, rgba(15,16,41,0.55), rgba(8,9,28,0.75)),
-    var(--bg);
-  border: 1px solid rgba(168,85,247,0.20);
-  box-shadow: var(--shadow-h);
-  overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--lane);
+  border-bottom: 1px solid var(--hairline);
+  overflow: visible;
   isolation: isolate;
 }
-/* Hairline rule grid inside hero — gives it a "stadium scoreboard" feel */
+/* Faint scoreboard grid behind the hero — earns "pit-wall" feel */
 .mh-hero::before {
   content: '';
   position: absolute; inset: 0;
   background:
-    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px) 0 0 / 100% 56px,
-    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px) 0 0 / 56px 100%;
+    linear-gradient(rgba(245,242,232,0.025) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(90deg, rgba(245,242,232,0.018) 1px, transparent 1px) 0 0 / 64px 100%;
   pointer-events: none;
-  mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 35%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 50%, black 35%, transparent 75%);
+  mask-image: radial-gradient(ellipse 80% 70% at 30% 50%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 30% 50%, black 30%, transparent 75%);
   z-index: -1;
 }
-/* Gradient edge ring */
+/* Lane-number watermark — huge faint display digit in the far-right corner */
 .mh-hero::after {
-  content: '';
-  position: absolute; inset: 0;
-  border-radius: var(--radius-lg);
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(34,211,238,0.55), rgba(168,85,247,0.35) 50%, rgba(244,114,182,0.35));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
+  content: attr(data-lane);
+  position: absolute;
+  top: var(--sp-4); right: var(--sp-6);
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(140px, 22vw, 280px);
+  line-height: 0.8;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  opacity: 0.035;
   pointer-events: none;
-  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+  z-index: -1;
+  white-space: nowrap;
 }
+
 .mh-hero-eyebrow {
   font-family: var(--font-mono);
   font-size: 11px; font-weight: 500;
-  letter-spacing: 0.24em; text-transform: uppercase;
-  color: var(--accent);
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--lane);
   display: inline-flex; align-items: center; gap: 10px;
-  padding: 7px 14px 7px 12px;
-  border: 1px solid rgba(34,211,238,0.30);
-  border-radius: 999px;
-  margin-bottom: var(--sp-6);
-  background: rgba(34,211,238,0.06);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  margin: 0 0 var(--sp-6);
+  background: transparent;
   position: relative;
 }
 .mh-hero-eyebrow::before {
   content: '';
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent);
+  width: 28px; height: 1px;
+  background: var(--lane);
+  display: inline-block;
+  margin-right: 4px;
+}
+.mh-hero-eyebrow::after {
+  content: '●';
+  color: var(--lane);
+  font-size: 8px;
   animation: mh-pulse 1.6s ease-in-out infinite;
+  margin-left: 4px;
 }
 .mh-hero h1 {
   font-family: var(--font-display);
-  font-size: clamp(46px, 7vw, 96px);
+  font-size: clamp(56px, 9vw, 132px);
   font-weight: 900;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.015em;
   text-transform: uppercase;
-  line-height: 0.95;
-  margin: 0 0 var(--sp-5);
-  max-width: 920px;
+  line-height: 0.88;
+  margin: 0 0 var(--sp-6);
+  max-width: 14ch;
   color: var(--ink);
+  text-wrap: balance;
 }
+/* legacy .grad alias — now just sets lane colour, no gradient */
 .mh-hero h1 .grad {
-  background: var(--grad-hot);
-  -webkit-background-clip: text; background-clip: text;
-  color: transparent;
-  display: inline-block;
+  color: var(--lane);
+  display: inline;
+  -webkit-text-fill-color: var(--lane);
 }
-/* Editorial italic emphasis inside the hero — pairs with display caps */
+/* Editorial italic — the strongest typographic move. Pulled-in serif. */
 .mh-hero h1 .editorial,
 .mh-hero h1 em.editorial {
   font-family: var(--font-serif);
   font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'wght' 400;
   font-weight: 400;
   text-transform: none;
   letter-spacing: -0.01em;
-  color: var(--gold);
-  font-size: 0.94em;
-  padding: 0 0.04em;
+  color: var(--medal);
+  font-size: 0.9em;
+  padding: 0 0.05em;
+  display: inline;
+  -webkit-text-fill-color: var(--medal);
 }
 .mh-hero p.lede {
-  font-family: var(--font-body);
-  font-size: clamp(16px, 1.45vw, 19px);
+  font-family: var(--font-serif);
+  font-variation-settings: 'opsz' 72;
+  font-size: clamp(17px, 1.6vw, 22px);
   color: var(--ink-dim);
   margin: 0 0 var(--sp-7);
-  max-width: 640px;
-  line-height: 1.6;
+  max-width: 52ch;
+  line-height: 1.45;
   font-weight: 400;
 }
 .mh-hero-actions {
-  display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center;
+  margin-top: var(--sp-6);
 }
+
+/* CTAs — flat lane yellow, sharp edges, broadcast voice */
 .mh-cta-primary,
 .mh-cta-secondary {
   display: inline-flex; align-items: center; gap: 10px;
-  padding: 14px 22px;
-  border-radius: 12px;
+  padding: 14px 26px;
+  border-radius: var(--radius-sm);
   font-weight: 700;
+  font-family: var(--font-body);
   font-size: 14px;
   text-decoration: none;
   border: 1px solid transparent;
-  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition), background var(--transition);
   cursor: pointer;
+  letter-spacing: 0.01em;
 }
 .mh-cta-primary {
-  background: var(--grad-hot);
-  color: #08091A;
-  box-shadow: 0 8px 28px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+  background: var(--lane);
+  color: var(--lane-ink);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.10);
 }
 .mh-cta-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 36px rgba(168,85,247,0.50), inset 0 1px 0 rgba(255,255,255,0.3);
-  color: #08091A;
+  transform: translateY(-1px);
+  background: var(--lane-h);
+  box-shadow: var(--shadow-lane);
+  color: var(--lane-ink);
 }
 .mh-cta-secondary {
-  background: rgba(255,255,255,0.04);
+  background: transparent;
   color: var(--ink);
-  border-color: rgba(255,255,255,0.10);
+  border-color: var(--chrome);
 }
 .mh-cta-secondary:hover {
-  background: rgba(255,255,255,0.08);
-  border-color: var(--accent);
+  background: rgba(245,242,232,0.04);
+  border-color: var(--lane);
   color: var(--ink);
   transform: translateY(-1px);
 }
 .mh-hero-meta {
-  margin-top: 18px;
-  font-size: 13px;
+  margin-top: var(--sp-7);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
   color: var(--ink-muted);
-  display: flex; gap: 14px; flex-wrap: wrap;
+  display: flex; gap: var(--sp-5); flex-wrap: wrap;
 }
-.mh-hero-meta .dot { color: var(--ink-muted); }
-.mh-hero-meta b { color: var(--ink-dim); font-weight: 600; }
+.mh-hero-meta .dot { color: var(--ink-faint); }
+.mh-hero-meta b { color: var(--lane); font-weight: 500; font-variant-numeric: tabular-nums; }
 
 /* === Sign-in profile cards === */
 .mh-profile-grid {
@@ -2484,180 +2775,221 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 }
 .mh-profile-card .logo {
   width: 56px; height: 56px;
-  border-radius: 14px;
+  border-radius: 0;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 14px;
-  font-family: 'Sora', sans-serif;
-  font-weight: 800; font-size: 22px;
-  color: #fff;
-  background: var(--grad-hot);
+  margin-bottom: var(--sp-4);
+  font-family: var(--font-display);
+  font-weight: 900; font-size: 22px;
+  letter-spacing: 0.04em;
+  color: var(--lane-ink);
+  background: var(--lane);
   overflow: hidden;
+  text-transform: uppercase;
 }
 .mh-profile-card .logo img {
   width: 100%; height: 100%; object-fit: cover;
 }
 .mh-profile-card .display-name {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
   color: var(--ink);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  line-height: 1.05;
 }
 .mh-profile-card .meta-line {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
   color: var(--ink-muted);
-  display: flex; gap: 8px; flex-wrap: wrap;
-  margin-bottom: 14px;
+  display: flex; gap: var(--sp-2); flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
 }
 .mh-profile-card .meta-line .pill {
-  padding: 2px 8px;
-  background: rgba(34,211,238,0.10);
-  border: 1px solid rgba(34,211,238,0.20);
-  border-radius: 999px;
-  color: var(--accent);
-  font-weight: 600;
+  padding: 3px 8px;
+  background: rgba(212,255,58,0.10);
+  border: 1px solid rgba(212,255,58,0.30);
+  border-radius: 2px;
+  color: var(--lane);
+  font-weight: 500;
+  font-family: var(--font-mono);
+  letter-spacing: 0.14em;
 }
 .mh-profile-card .actions {
   margin-top: auto;
-  display: flex; gap: 8px; flex-wrap: wrap;
+  display: flex; gap: var(--sp-2); flex-wrap: wrap;
 }
 .mh-profile-card .actions .btn-sign-in {
   flex: 1;
   text-align: center;
-  padding: 8px 12px;
-  background: var(--grad-cool);
-  color: #08091A;
+  padding: 10px 14px;
+  background: var(--lane);
+  color: var(--lane-ink);
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
   font-weight: 700;
-  font-size: 12px;
+  font-size: 13px;
   text-decoration: none;
   cursor: pointer;
+  transition: background var(--transition);
 }
+.mh-profile-card .actions .btn-sign-in:hover { background: var(--lane-h); }
 .mh-profile-card .actions .btn-delete {
-  padding: 8px 12px;
-  background: rgba(244,63,94,0.08);
-  border: 1px solid rgba(244,63,94,0.20);
-  color: #FCA5A5;
-  border-radius: 10px;
-  font-size: 12px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 1px solid rgba(255,107,107,0.30);
+  color: var(--bad);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
 }
 .mh-profile-card .actions .btn-delete:hover {
-  background: rgba(244,63,94,0.18);
-  border-color: rgba(244,63,94,0.40);
+  background: var(--bad-bg);
+  border-color: var(--bad);
 }
 
-/* === New org "+" tile === */
+/* === New org "+" tile — paper texture, sharp, lane-accented === */
 .mh-new-profile {
   display: flex;
+  flex-direction: column;
   align-items: center; justify-content: center;
   min-height: 180px;
   background:
-    repeating-linear-gradient(45deg, rgba(168,85,247,0.04) 0 12px, transparent 12px 24px),
-    var(--panel);
-  border: 1.5px dashed rgba(168,85,247,0.40);
+    repeating-linear-gradient(45deg, rgba(212,255,58,0.025) 0 10px, transparent 10px 20px),
+    var(--surface);
+  border: 1px dashed var(--chrome);
   border-radius: var(--radius);
   color: var(--ink-dim);
   text-decoration: none;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
   text-align: center;
+  padding: var(--sp-6);
   transition: var(--transition);
 }
 .mh-new-profile:hover {
   background:
-    repeating-linear-gradient(45deg, rgba(168,85,247,0.08) 0 12px, transparent 12px 24px),
-    var(--panel-h);
-  border-color: var(--accent2);
-  color: var(--ink);
+    repeating-linear-gradient(45deg, rgba(212,255,58,0.05) 0 10px, transparent 10px 20px),
+    var(--surface-2);
+  border-color: var(--lane);
+  color: var(--lane);
 }
 .mh-new-profile .plus {
-  font-size: 28px;
-  margin-bottom: 6px;
-  color: var(--accent2);
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: 36px;
+  margin-bottom: var(--sp-2);
+  color: var(--lane);
+  font-weight: 900;
+  line-height: 1;
 }
 
-/* === Template gallery cards === */
+/* === Template gallery cards — bento grid with sharper edge === */
 .mh-template-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-  margin-bottom: 40px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-8);
 }
 .mh-template {
   display: flex; flex-direction: column;
-  gap: 10px;
-  padding: 20px;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius);
   text-decoration: none;
   position: relative;
   overflow: hidden;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  transition: background var(--transition), border-color var(--transition);
 }
 .mh-template::before {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(34,211,238,0.06) 0%, transparent 60%);
-  opacity: 0; transition: opacity 0.25s ease;
-  pointer-events: none;
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 1px;
+  background: var(--lane);
+  opacity: 0;
+  transition: opacity var(--transition);
 }
 .mh-template:hover {
-  border-color: rgba(34,211,238,0.4);
-  transform: translateY(-2px);
+  background: var(--surface-2);
+  border-color: var(--rule);
   text-decoration: none;
 }
 .mh-template:hover::before { opacity: 1; }
 .mh-template-icon {
-  width: 38px; height: 38px;
-  border-radius: 10px;
-  background: rgba(34,211,238,0.1);
-  border: 1px solid rgba(34,211,238,0.25);
+  width: 40px; height: 40px;
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--chrome);
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent); flex-shrink: 0;
-  margin-bottom: 4px;
+  color: var(--lane); flex-shrink: 0;
+  margin-bottom: var(--sp-3);
+  transition: border-color var(--transition);
 }
-.mh-template-icon svg { width: 22px; height: 22px; }
+.mh-template:hover .mh-template-icon { border-color: var(--lane); }
+.mh-template-icon svg { width: 20px; height: 20px; }
 .mh-template h3 {
-  font-size: 15px; font-weight: 700; color: var(--ink);
-  letter-spacing: -0.01em; margin: 0;
-  text-transform: none;
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 800; color: var(--ink);
+  letter-spacing: 0.01em; margin: 0 0 var(--sp-1);
+  text-transform: uppercase;
 }
 .mh-template p {
+  font-family: var(--font-body);
   font-size: 13px; color: var(--ink-dim);
-  line-height: 1.5; margin: 0 0 10px;
+  line-height: 1.5; margin: 0 0 var(--sp-3);
   flex: 1;
 }
 .mh-template-cta {
-  font-size: 13px; font-weight: 600;
-  color: var(--accent);
-  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--lane);
+  display: inline-flex; align-items: center; gap: 8px;
   margin-top: auto;
 }
+.mh-template-cta::after {
+  content: '→';
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0;
+}
 
-/* === Provider badge on home === */
+/* === Provider badge on home — broadcast pill === */
 .mh-provider-badge {
   display: inline-flex; align-items: center; gap: 10px;
-  padding: 10px 16px;
-  background: rgba(34,197,94,0.06);
-  border: 1px solid rgba(34,197,94,0.25);
-  border-radius: 12px;
-  font-size: 13px;
-  margin-top: 8px;
+  padding: 8px 14px;
+  background: var(--good-bg);
+  border: 1px solid rgba(94,227,154,0.30);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: var(--sp-2);
+  color: var(--ink-dim);
 }
 .mh-provider-badge.warn {
-  background: rgba(245,158,11,0.06);
-  border-color: rgba(245,158,11,0.3);
+  background: var(--warn-bg);
+  border-color: rgba(255,180,84,0.30);
   color: var(--ink);
 }
 .mh-provider-badge.warn strong { color: var(--warn); }
 .mh-provider-badge .mh-provider-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%;
   background: var(--good);
+  box-shadow: 0 0 6px rgba(94,227,154,0.6);
 }
-.mh-provider-badge.warn .mh-provider-dot { background: var(--warn); }
+.mh-provider-badge.warn .mh-provider-dot { background: var(--warn); box-shadow: 0 0 6px rgba(255,180,84,0.6); }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
@@ -2747,6 +3079,20 @@ def _render_markdown(text: str) -> str:
 
 
 def _layout(title: str, body: str, active: str = "home") -> str:
+    # Compute whether the current request has an active organisation pinned
+    # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
+    try:
+        from flask import session as _sess
+        signed_in_pid = (_sess.get("active_profile_id") or "").strip()
+    except Exception:
+        signed_in_pid = ""
+    signed_in_name = ""
+    if signed_in_pid:
+        try:
+            _p = load_profile(signed_in_pid)
+            signed_in_name = (_p.display_name if _p else "") or ""
+        except Exception:
+            signed_in_name = ""
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="en">
@@ -2775,26 +3121,15 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <div id="mh-toast-container"></div>
 <header class="topnav">
   <a href="{{ url_for('home') }}" class="brand" aria-label="MediaHub — home">
-    <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="mhLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#22D3EE"/>
-          <stop offset="55%" stop-color="#A855F7"/>
-          <stop offset="100%" stop-color="#F472B6"/>
-        </linearGradient>
-        <linearGradient id="mhLogoEdge" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="rgba(255,255,255,0.45)"/>
-          <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
-        </linearGradient>
-      </defs>
-      <!-- Rounded plate -->
-      <rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#0B0C24" stroke="url(#mhLogoEdge)" stroke-width="1"/>
-      <!-- Ascending podium bars (silver, gold, bronze tonality) -->
-      <rect x="6"  y="20" width="5" height="7"  rx="1.2" fill="url(#mhLogoGrad)" opacity="0.55"/>
-      <rect x="13.5" y="14" width="5" height="13" rx="1.2" fill="url(#mhLogoGrad)" opacity="0.80"/>
-      <rect x="21" y="8"  width="5" height="19" rx="1.2" fill="url(#mhLogoGrad)"/>
-      <!-- Hairline baseline -->
-      <line x1="5" y1="27.5" x2="27" y2="27.5" stroke="rgba(255,255,255,0.18)" stroke-width="0.75"/>
+    <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <!-- Pit-wall plate, sharp corners -->
+      <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="#0A0B11" stroke="#262B33" stroke-width="1"/>
+      <!-- Ascending podium bars: silver / lane-yellow / medal -->
+      <rect x="6"  y="20" width="5" height="7"  fill="#F5F2E8" opacity="0.55"/>
+      <rect x="13.5" y="9"  width="5" height="18" fill="#D4FF3A"/>
+      <rect x="21" y="14" width="5" height="13" fill="#F4D58D"/>
+      <!-- Lane baseline -->
+      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="#D4FF3A" stroke-width="1"/>
     </svg>
     MediaHub
   </a>
@@ -2807,7 +3142,12 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     <a href="{{ url_for('privacy_page') }}" class="{{ 'active' if active=='privacy' else '' }}">Privacy</a>
     <a href="{{ url_for('status_page') }}" class="{{ 'active' if active=='status' else '' }}">Status</a>
-    <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    {% if signed_in %}
+      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
+      <a href="{{ url_for('sign_out') }}">Sign out</a>
+    {% else %}
+      <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    {% endif %}
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
@@ -2847,13 +3187,22 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       var dot = document.getElementById('backend-pill-dot');
       var txt = document.getElementById('backend-pill-text');
       if(!dot||!txt) return;
-      dot.style.background = ok ? '#2cc97f' : '#ff5d6c';
-      txt.textContent = ok ? 'online' : 'offline';
+      if (ok) {
+        dot.style.background = '#5EE39A';
+        dot.style.boxShadow  = '0 0 8px rgba(94,227,154,0.55)';
+        txt.textContent = 'online';
+      } else {
+        dot.style.background = '#FF6B6B';
+        dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
+        txt.textContent = 'offline';
+      }
     }).catch(function(){
       var dot = document.getElementById('backend-pill-dot');
       var txt = document.getElementById('backend-pill-text');
       if(!dot||!txt) return;
-      dot.style.background = '#ff5d6c'; txt.textContent='offline';
+      dot.style.background = '#FF6B6B';
+      dot.style.boxShadow  = '0 0 8px rgba(255,107,107,0.55)';
+      txt.textContent='offline';
     });
   }
   check(); setInterval(check, 30000);
@@ -3056,7 +3405,38 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </body>
 </html>
 """, title=title, css=BASE_CSS, body=body, active=active,
-               health_url=url_for("healthz"))
+               health_url=url_for("healthz"),
+               signed_in=bool(signed_in_pid),
+               signed_in_name=signed_in_name)
+
+
+def _recovery_page(
+    headline: str = "Not found",
+    detail: str = "The thing you were looking for isn't here. It may have been deleted, or the URL might be out of date.",
+    primary_cta: tuple[str, str] | None = None,
+    secondary_cta: tuple[str, str] | None = None,
+    code: int = 404,
+) -> tuple[str, int]:
+    """Render a friendly 404-style page with an H1 and at least one CTA.
+
+    The interaction audit found that every 404 / dead-end in MediaHub was
+    a blank-feeling text line with no escape hatch. This helper builds the
+    standard recovery page so users can always see what happened and where
+    to go next without using the browser back button.
+    """
+    pcta = primary_cta or ("Back to home", url_for("home"))
+    sects: list[str] = []
+    sects.append('<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">')
+    sects.append('<span class="mh-hero-eyebrow">Not found</span>')
+    sects.append(f'<h1>{_h(headline)}</h1>')
+    sects.append(f'<p class="lede">{_h(detail)}</p>')
+    sects.append('<div class="mh-hero-actions">')
+    sects.append(f'<a class="mh-cta-primary" href="{pcta[1]}">{_h(pcta[0])} &rarr;</a>')
+    if secondary_cta:
+        sects.append(f'<a class="mh-cta-secondary" href="{secondary_cta[1]}">{_h(secondary_cta[0])}</a>')
+    sects.append('</div>')
+    sects.append('</section>')
+    return _layout(headline, "".join(sects)), code
 
 
 # ---------------------------------------------------------------------
@@ -3128,6 +3508,7 @@ def create_app() -> Flask:
         "sign_in_page",
         "sign_in_post",
         "sign_in_delete",
+        "sign_out",
         # /settings now redirects to / so doesn't actually need exempting,
         # but we keep the endpoint name in the allow-list so a directly-
         # hit /settings URL doesn't get caught by the gate before reaching
@@ -3256,19 +3637,19 @@ def create_app() -> Flask:
             pass
 
         # --- Hero ----------------------------------------------------------
+        # Lane-number watermark sits behind the headline. The org name stays
+        # in default ink (no .grad span) so the only lane-yellow on the page
+        # is the live dot + the CTA. Editorial italic does the emphasis work.
         if prof and prof.is_ready():
-            # Returning user with a pinned org. Lead with "continue" + give
-            # secondary routes to sign-out / create another.
+            # Returning user with a pinned org.
             hero_h1 = (
-                f'<span class="grad">{_h(prof.display_name)}</span> '
-                'is <em class="editorial">ready</em><br>'
-                'let&rsquo;s make something.'
+                f'{_h(prof.display_name)}.<br>'
+                '<em class="editorial">Ready</em> to file.'
             )
             hero_lede = (
                 'Your brand voice, palette, and logo are loaded. Captions, '
-                'graphics, and motion videos will arrive on-brand. Anything '
-                'you generate goes through your approval before it leaves '
-                'this deployment.'
+                'graphics, and motion videos will arrive on-brand. Nothing '
+                'leaves this deployment without your approval.'
             )
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("add_input_page")}">'
@@ -3279,11 +3660,12 @@ def create_app() -> Flask:
                 'Edit profile</a>'
             )
             eyebrow = 'Pinned organisation'
+            lane_no = '04'
         else:
-            # Fresh visit (or signed-out). Two equally-weighted CTAs.
+            # Fresh visit (or signed-out). Display-caps + italic emphasis.
             hero_h1 = (
-                'Turn results into <em class="editorial">on-brand</em><br>'
-                '<span class="grad">content</span> in minutes.'
+                'Results in.<br>'
+                '<em class="editorial">On-brand</em> stories out.'
             )
             hero_lede = (
                 'MediaHub reads your club website, social profiles, and brand '
@@ -3306,26 +3688,27 @@ def create_app() -> Flask:
                     'See deployment status</a>'
                 )
             eyebrow = 'Sport content automation'
+            lane_no = '01'
 
-        # Meta line under the CTAs — honest counts, no fake numbers.
+        # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
         meta_parts = []
         if n_orgs:
             meta_parts.append(
-                f'<span><b>{n_orgs}</b> {"organisation" if n_orgs == 1 else "organisations"}</span>'
+                f'<span><b>{n_orgs:02d}</b> {"organisation" if n_orgs == 1 else "organisations"}</span>'
             )
         if n_runs:
             meta_parts.append(
-                f'<span><b>{n_runs}</b> total {"run" if n_runs == 1 else "runs"}</span>'
+                f'<span><b>{n_runs:03d}</b> total {"run" if n_runs == 1 else "runs"}</span>'
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append('<span>Brand voice <b>captured</b></span>')
         meta_html = ""
         if meta_parts:
-            sep = '<span class="dot">&middot;</span>'
+            sep = '<span class="dot">/</span>'
             meta_html = '<div class="mh-hero-meta">' + sep.join(meta_parts) + '</div>'
 
         hero_html = (
-            '<section class="mh-hero">'
+            f'<section class="mh-hero" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
             f'<h1>{hero_h1}</h1>'
             f'<p class="lede">{_h(hero_lede)}</p>'
@@ -3334,18 +3717,18 @@ def create_app() -> Flask:
             '</section>'
         )
 
-        # --- Four-step explainer (kept; still useful first-touch context) ---
+        # --- Four-step explainer — sport newsroom workflow ---
         steps_html = (
-            '<div class="mh-section-eyebrow">How it works</div>'
-            '<h2 class="mh-section-title">From results to <em class="editorial">ready-to-post</em> content</h2>'
+            '<div class="mh-section-eyebrow">The workflow</div>'
+            '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
             '<div class="mh-steps">'
             '<div class="mh-step"><div class="mh-step-num">01</div><h3>Add an input</h3>'
             '<p>Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.</p></div>'
-            '<div class="mh-step"><div class="mh-step-num">02</div><h3>We detect the moments</h3>'
+            '<div class="mh-step"><div class="mh-step-num">02</div><h3>We find the moments</h3>'
             '<p>The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.</p></div>'
             '<div class="mh-step"><div class="mh-step-num">03</div><h3>On-brand drafts appear</h3>'
             "<p>Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.</p></div>"
-            '<div class="mh-step"><div class="mh-step-num">04</div><h3>Approve and post</h3>'
+            '<div class="mh-step"><div class="mh-step-num">04</div><h3>Approve. Then post.</h3>'
             '<p>You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.</p></div>'
             '</div>'
         )
@@ -3945,13 +4328,39 @@ def create_app() -> Flask:
     def run_status(run_id):
         _status_url = url_for('api_status', run_id=run_id)
         _review_url = url_for('review', run_id=run_id)
+        # If the run already finished (e.g. user refreshes /runs/<id>
+        # post-completion, or bookmarks the URL), skip the holding pen
+        # and send them straight to the review queue. Same for error.
+        try:
+            _cur = _active_runs.copy_value(run_id)
+            _row_status = None
+            _row_error = None
+            if _cur and isinstance(_cur, dict):
+                _row_status = _cur.get("status")
+                _row_error = _cur.get("error")
+            if _row_status is None:
+                _c = _db()
+                _r = _c.execute(
+                    "SELECT status, error FROM runs WHERE id = ?", (run_id,)
+                ).fetchone()
+                _c.close()
+                if _r:
+                    _row_status = _r["status"]
+                    _row_error = _r["error"]
+            if _row_status == "done":
+                return redirect(_review_url)
+            # Note: don't auto-redirect on error — the page surfaces the
+            # error inline (see JS poll handler below) which is more useful
+            # than dropping the user into /review with no context.
+        except Exception:
+            pass
         # Five named stages, mapped from log message substrings.
         # Each stage shows "queued" by default, becomes "active" when its
         # keyword first appears in the log, "done" when the next stage's
         # keyword appears (or the run finishes successfully).
         body = f"""
-<h1>Run in progress</h1>
-<p class="dim" style="margin-bottom:6px">Sit tight &mdash; we're parsing, ranking and drafting. This usually takes 20&ndash;60 seconds.</p>
+<h1>Processing run</h1>
+<p class="lede" style="margin-bottom:var(--sp-5)">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds.</p>
 
 <div class="card">
   <div class="mh-stages" id="mh-stages">
@@ -4084,7 +4493,12 @@ def create_app() -> Flask:
     def review(run_id):
         data = _load_run(run_id)
         if not data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
 
         meet = data.get("meet") or {}
         cards = data.get("cards") or []
@@ -5902,12 +6316,32 @@ function addGraphicToPack(btn, visualId) {{
         """Full PB audit page with per-swimmer drill-down."""
         data = _load_run(run_id)
         if not data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
         pb_audit = data.get("pb_audit") or {}
         if not pb_audit:
-            return _layout("PB Audit",
-                           '<div class="card"><p class="muted">No detailed PB audit for this run. '
-                           'Re-run with PB fetching enabled.</p></div>', active="")
+            empty_body = (
+                '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">PB audit</span>'
+                '<h1>No PB audit on file</h1>'
+                '<p class="lede">'
+                'This run was processed without PB fetching, so there\'s nothing to '
+                'reconcile here. Re-run the same input from the upload page with PB '
+                'fetching enabled and the audit detail will appear.'
+                '</p>'
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("upload")}">'
+                'Re-upload with PB fetching &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("review", run_id=run_id)}">'
+                'Back to the review queue</a>'
+                '</div>'
+                '</section>'
+            )
+            return _layout("PB Audit", empty_body, active="")
         per_swimmer = pb_audit.get("per_swimmer") or []
         _review_url = url_for("review", run_id=run_id)
 
@@ -5972,7 +6406,12 @@ function addGraphicToPack(btn, visualId) {{
         """Form to enter correct ASA number for a needs-verification swimmer."""
         data = _load_run(run_id)
         if not data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
         _review_url = url_for("review", run_id=run_id)
         _audit_url = url_for("pb_audit_page", run_id=run_id)
 
@@ -6069,7 +6508,12 @@ function addGraphicToPack(btn, visualId) {{
         """Upload a CSV of expected outcomes and run the ground-truth harness."""
         data = _load_run(run_id)
         if not data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
         _audit_url = url_for('pb_audit_page', run_id=run_id)
         _action_url = url_for('pb_ground_truth', run_id=run_id)
 
@@ -6160,7 +6604,12 @@ function addGraphicToPack(btn, visualId) {{
     def ground_truth(run_id):
         data = _load_run(run_id)
         if not data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
 
         rep_html = ""
         if request.method == "POST":
@@ -7838,7 +8287,12 @@ Relay team broke club record"></textarea>
 
         run_data = _load_run(run_id)
         if not run_data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
 
         pack = build_spotlight_pack(run_data, swimmer_key)
         if not pack:
@@ -8196,8 +8650,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 """
         return _layout("Free text — chat", body, active="add_input")
 
-    @app.route("/free-text/chat/new", methods=["POST"])
+    @app.route("/free-text/chat/new", methods=["GET", "POST"])
     def free_text_chat_new():
+        """Create a fresh chat session and redirect into it.
+
+        Accepts GET in addition to POST so users who land on the URL via
+        browser back-button or shared link create a chat instead of 404'ing.
+        """
         from mediahub.free_text_chat.session import create_session
         s = create_session()
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
@@ -8207,9 +8666,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.free_text_chat.session import load_session
         s = load_session(chat_id)
         if not s:
-            return _layout("Chat not found",
-                           '<div class="empty">Chat not found.</div>',
-                           active="add_input"), 404
+            return _recovery_page(
+                "Chat not found",
+                "This chat may have expired or been deleted. Start a new one — your previous chats list is on the Free text page.",
+                primary_cta=("Start a new chat", url_for("free_text_chat_new")),
+                secondary_cta=("Free-text home", url_for("free_text_chat_page")),
+            )
         # Pre-render messages for the initial paint; JS keeps it live.
         msgs_html = ""
         for m in s.messages:
@@ -8296,9 +8758,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.free_text_chat.agent import next_assistant_turn
         s = load_session(chat_id)
         if not s:
-            return _layout("Chat not found",
-                           '<div class="empty">Chat not found.</div>',
-                           active="add_input"), 404
+            return _recovery_page(
+                "Chat not found",
+                "This chat may have expired or been deleted. Start a new one — your previous chats list is on the Free text page.",
+                primary_cta=("Start a new chat", url_for("free_text_chat_new")),
+                secondary_cta=("Free-text home", url_for("free_text_chat_page")),
+            )
         msg = (request.form.get("message") or "").strip()
         if msg:
             s.add_user_message(msg)
@@ -9506,11 +9971,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             'Create new organisation</div></a>'
         )
 
+        # Surface any error flashed by sign_in_post (silent failures fixed).
+        err = session.pop("sign_in_error", None)
+        err_html = ""
+        if err:
+            err_html = (
+                '<div class="mh-flash error" role="alert" style="'
+                'margin: 0 0 var(--sp-5);'
+                'padding: 14px 18px;'
+                'border: 1px solid rgba(255,107,107,0.30);'
+                'border-left: 3px solid var(--bad);'
+                'background: var(--bad-bg);'
+                'color: var(--ink);'
+                'font-family: var(--font-mono);'
+                'font-size: 12px;'
+                'letter-spacing: 0.10em;'
+                'text-transform: uppercase;'
+                f'">[ ERROR ] {_h(err)}</div>'
+            )
+
         body = (
-            '<h1 style="margin-top:8px;font-family:Sora,Inter,sans-serif;'
-            'font-size:32px;letter-spacing:-0.02em">Pick an organisation</h1>'
-            '<p class="dim" style="margin-bottom:24px;font-size:14px">'
-            f'{len(profiles)} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
+            '<h1>Pick an organisation</h1>'
+            f'{err_html}'
+            '<p class="lede" style="margin-bottom:var(--sp-7)">'
+            f'{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
             'Picking one loads its brand voice, palette, logo, and history. '
             'Switch any time from the home page.'
             '</p>'
@@ -9520,15 +10004,32 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/sign-in", methods=["POST"])
     def sign_in_post():
-        """Pin the chosen profile into the session and redirect home."""
+        """Pin the chosen profile into the session and redirect home.
+
+        Failure paths now surface an error via the flash session so the
+        sign-in picker can show the user why nothing happened.
+        """
         pid = (request.form.get("profile_id") or "").strip()
         if not pid:
+            session["sign_in_error"] = "Pick an organisation before signing in."
             return redirect(url_for("sign_in_page"))
         prof = load_profile(pid)
         if prof is None:
+            session["sign_in_error"] = (
+                f"Couldn't find a profile with id '{pid}'. "
+                "It may have been deleted."
+            )
             return redirect(url_for("sign_in_page"))
         session["active_profile_id"] = prof.profile_id
+        session.pop("sign_in_error", None)
         return redirect(url_for("home"))
+
+    @app.route("/sign-out", methods=["GET", "POST"])
+    def sign_out():
+        """Clear the active profile pin and return to the sign-in picker."""
+        session.pop("active_profile_id", None)
+        session.pop("sign_in_error", None)
+        return redirect(url_for("sign_in_page"))
 
     @app.route("/sign-in/delete", methods=["POST"])
     def sign_in_delete():
@@ -9964,7 +10465,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return _layout("Still processing", _in_progress_page(run_id, "content_pack_approved_only"), active="home")
         run_data = _load_run(run_id)
         if not run_data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
 
         profile_id = run_data.get("profile_id", "")
         try:
@@ -10098,7 +10604,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-2')">Copy + hashtags</button>
     <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-3')">Copy full brief</button>
     <button class="btn" style="font-size:12px;padding:5px 12px"
-      onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, 'pc-{card_uuid}')"
+      onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, "pc-{card_uuid}")'
       data-mh-schedule-btn>Schedule&hellip;</button>
     <textarea id="cap-text-{card_id}-1" style="display:none">{cap_plain_only}</textarea>
     <textarea id="cap-text-{card_id}-2" style="display:none">{cap_plain_hash}</textarea>
@@ -10706,7 +11212,12 @@ function tiRegenerate() {{
             return _layout("Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home")
         run_data = _load_run(run_id)
         if not run_data:
-            return _layout("Not found", '<div class="empty">Run not found.</div>'), 404
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
 
         profile_id = run_data.get("profile_id", "")
         meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
@@ -10771,7 +11282,7 @@ function tiRegenerate() {{
                 )
                 schedule_btn = (
                     f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
-                    f'onclick="mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \'g-{card_uuid}\')">'
+                    f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"g-{card_uuid}\")'>"
                     f'Schedule&hellip;</button>'
                 ) if card_id_raw else ""
                 # Per-card motion download — the endpoint renders (or
@@ -12093,17 +12604,19 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         accepts = request.headers.get("Accept", "") if request else ""
         if "application/json" in accepts or request.path.startswith("/api/"):
             return jsonify({"error": "not_found", "path": request.path}), 404
-        body = f"""
-<div style="text-align:center;padding:64px 24px">
-  <div style="font-size:72px;font-weight:800;letter-spacing:-0.04em;
-              background:linear-gradient(135deg,var(--accent),#7c3aed);
-              -webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px">404</div>
-  <h1 style="margin-bottom:8px">Page not found</h1>
-  <p class="dim" style="margin-bottom:24px">The page <code>{_h(request.path)}</code> doesn't exist.</p>
-  <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
-</div>
-"""
-        return _layout("Not found", body, active="home"), 404
+        body = (
+            '<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+            '<span class="mh-hero-eyebrow">404 / page not found</span>'
+            '<h1>Off the lane.</h1>'
+            f'<p class="lede">The page <code>{_h(request.path)}</code> doesn\'t exist on this deployment. '
+            'It may have been moved, renamed, or never minted.</p>'
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
+            f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Recent activity</a>'
+            '</div>'
+            '</section>'
+        )
+        return _layout("Not found", body, active=""), 404
 
     @app.errorhandler(500)
     def _server_error_page(e):
@@ -12114,35 +12627,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         accepts = request.headers.get("Accept", "") if request else ""
         if "application/json" in accepts or request.path.startswith("/api/"):
             return jsonify({"error": "internal_error"}), 500
-        body = f"""
-<div style="text-align:center;padding:64px 24px">
-  <div style="font-size:64px;margin-bottom:12px">&#x26A0;</div>
-  <h1 style="margin-bottom:8px">Something went wrong</h1>
-  <p class="dim" style="margin-bottom:24px;max-width:480px;margin-left:auto;margin-right:auto">
-    The page failed to load. Refresh, or try a different action. Nothing you uploaded was lost.
-  </p>
-  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-    <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
-    <a class="btn secondary" href="javascript:history.back()">Go back</a>
-  </div>
-</div>
-"""
-        return _layout("Error", body, active="home"), 500
+        body = (
+            '<section class="mh-hero" data-lane="500" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+            '<span class="mh-hero-eyebrow">500 / unhandled exception</span>'
+            '<h1>The engine stalled.</h1>'
+            '<p class="lede">'
+            'Something failed on the server. Nothing you uploaded was lost — '
+            'refresh, or try a different action. If it keeps happening, the '
+            'deployment status page has the latest health signal.'
+            '</p>'
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
+            '<a class="mh-cta-secondary" href="javascript:history.back()">Go back</a>'
+            f'<a class="mh-cta-secondary" href="{url_for("status_page")}">Check status</a>'
+            '</div>'
+            '</section>'
+        )
+        return _layout("Error", body, active=""), 500
 
     @app.errorhandler(413)
     def _payload_too_large(e):
         accepts = request.headers.get("Accept", "") if request else ""
         if "application/json" in accepts or request.path.startswith("/api/"):
             return jsonify({"error": "file_too_large", "max_mb": 50}), 413
-        body = f"""
-<div style="text-align:center;padding:64px 24px">
-  <div style="font-size:64px;margin-bottom:12px">&#x1F4E6;</div>
-  <h1 style="margin-bottom:8px">File too large</h1>
-  <p class="dim" style="margin-bottom:24px">The upload exceeded 50 MB. Try compressing or trimming the file first.</p>
-  <a class="btn" href="{url_for('home')}">&larr; Back to home</a>
-</div>
-"""
-        return _layout("File too large", body, active="home"), 413
+        body = (
+            '<section class="mh-hero" data-lane="413" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+            '<span class="mh-hero-eyebrow">413 / payload too large</span>'
+            '<h1>File too big.</h1>'
+            '<p class="lede">'
+            'The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first '
+            '— most meet exports are well under 5&nbsp;MB.'
+            '</p>'
+            '<div class="mh-hero-actions">'
+            f'<a class="mh-cta-primary" href="{url_for("upload")}">Try a smaller file &rarr;</a>'
+            f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+            '</div>'
+            '</section>'
+        )
+        return _layout("File too large", body, active=""), 413
 
     return app
 
