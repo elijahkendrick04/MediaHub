@@ -1,5 +1,5 @@
 # MediaHub — developer Makefile
-.PHONY: install test run build clean deploy-render deploy-fly docker docker-run lint
+.PHONY: install media-deps playwright remotion test run build clean deploy-render deploy-fly docker docker-run lint
 
 PYTHON ?= python3
 PIP    ?= pip
@@ -10,6 +10,23 @@ install:
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
 	$(PIP) install -e .
+	@echo
+	@echo "Python deps installed. For HTML->PNG (graphic_renderer) and MP4"
+	@echo "(motion) rendering, also run:"
+	@echo "    make media-deps"
+
+# Install everything graphic_renderer + motion need on top of `make install`:
+#   - Playwright's Chromium binary (~300 MB)
+#   - Remotion node_modules (~250 MB)
+# Without this, the /healthz/deps endpoint reports chromium:false and the
+# "Create graphic" / "Generate motion" buttons return errors.
+media-deps: playwright remotion
+
+playwright:
+	$(PYTHON) -m playwright install --with-deps chromium
+
+remotion:
+	cd src/mediahub/remotion && npm install --no-audit --no-fund
 
 test:
 	$(PYTHON) -m pytest tests/ -x -q
