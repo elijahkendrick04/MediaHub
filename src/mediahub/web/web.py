@@ -495,7 +495,7 @@ def _render_why_this_card(
             f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
             f'{label}{offset_tag}</div>'
             f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
-            f'background:rgba(34,211,238,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;'
+            f'background:rgba(212,255,58,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;'
             f'color:var(--ink)">{raw}</blockquote>'
             f'</li>'
         )
@@ -530,9 +530,9 @@ def _render_why_this_card(
     perf_block = ""
     if perf_ctx:
         perf_block = (
-            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(34,211,238,0.06);'
-            'border-left:2px solid #22D3EE;border-radius:4px">'
-            '<div style="font-size:10px;text-transform:uppercase;color:#22D3EE;letter-spacing:0.5px;'
+            '<div style="margin:8px 0 10px 0;padding:8px 10px;background:rgba(212,255,58,0.06);'
+            'border-left:2px solid var(--lane);border-radius:4px">'
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;'
             'margin-bottom:2px">Performance context (AI)</div>'
             f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(perf_ctx)}</div>'
             '</div>'
@@ -582,9 +582,9 @@ def _render_why_this_card(
     # collapse it via the disclosure triangle if they need pure
     # caption-density.
     return f"""
-<details open class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(139,92,246,0.06);
-  border:1px solid rgba(139,92,246,0.25);border-radius:8px">
-  <summary style="cursor:pointer;font-size:12px;font-weight:600;color:#A78BFA;user-select:none;
+<details open class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(212,255,58,0.06);
+  border:1px solid rgba(212,255,58,0.25);border-radius:8px">
+  <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);user-select:none;
     list-style:none;display:flex;align-items:center;gap:6px">
     <span aria-hidden="true">&#9432;</span> Why this card?
   </summary>
@@ -625,14 +625,14 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     btn = (
         f'<button class="btn secondary" type="button" '
         f'style="font-size:11px;padding:4px 10px;'
-        f'background:rgba(139,92,246,0.15);border-color:rgba(139,92,246,0.4);color:#A78BFA" '
+        f'background:rgba(212,255,58,0.15);border-color:rgba(212,255,58,0.40);color:var(--lane)" '
         f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
         f'Use in next caption</button>'
     )
     panel = (
         f'<div id="{panel_id}" data-mh-why-caption '
         f'style="display:none;margin-top:8px;padding:8px 10px;'
-        f'background:rgba(139,92,246,0.04);border:1px dashed rgba(139,92,246,0.3);'
+        f'background:rgba(212,255,58,0.04);border:1px dashed rgba(212,255,58,0.30);'
         f'border-radius:6px;font-size:12px;color:var(--ink);line-height:1.45"></div>'
     )
     return btn, panel
@@ -2170,7 +2170,7 @@ a.card:hover, .card[data-interactive]:hover {
 }
 .mh-toast.success { border-color: rgba(34,197,94,0.45); }
 .mh-toast.error   { border-color: rgba(244,63,94,0.45); }
-.mh-toast.info    { border-color: rgba(34,211,238,0.45); }
+.mh-toast.info    { border-color: rgba(212,255,58,0.45); }
 .mh-toast .mh-toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
 .mh-toast.success .mh-toast-icon { color: var(--good); }
 .mh-toast.error   .mh-toast-icon { color: var(--bad); }
@@ -2409,8 +2409,8 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 .mh-hero-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px;
-  background: rgba(34,211,238,0.08);
-  border: 1px solid rgba(34,211,238,0.2);
+  background: rgba(212,255,58,0.08);
+  border: 1px solid rgba(212,255,58,0.20);
   font-size: 12px; font-weight: 600;
   color: var(--accent);
   letter-spacing: 0.02em;
@@ -2432,7 +2432,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   max-width: 820px; margin-left: auto; margin-right: auto;
 }
 .mh-hero h1 .mh-gradient-text {
-  background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 60%, #f43f5e 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--lane) 60%, #f43f5e 100%);
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
@@ -3369,7 +3369,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         return;
       }
       if (caption) {
-        panel.innerHTML = '<div style="font-weight:600;color:#A78BFA;font-size:11px;'
+        panel.innerHTML = '<div style="font-weight:600;color:var(--lane);font-size:11px;'
           + 'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
           + 'Caption with reasoning woven in</div>'
           + '<div style="margin-bottom:8px">' + caption.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>'
@@ -3989,16 +3989,17 @@ def create_app() -> Flask:
             return redirect(url_for("upload_configure", run_id=temp_run_id))
 
         body = f"""
-<h1>Upload meet file</h1>
+<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Upload meet file</span>
+  <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
+  <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
+</section>
 <div class="card">
   <form method="post" enctype="multipart/form-data">
     <label>Meet results file</label>
     <input type="file" name="file" accept=".hy3,.zip,.pdf" required />
-    <p class="dim" style="margin-top:4px;font-size:12px">Accepted: Hytek Meet Manager .hy3 or .zip export, or a Sportsystems PDF results file.</p>
-    <p class="dim" style="margin-top:6px;font-size:12px">
-      You'll choose your club, upload your logo, and add photos on the next step &mdash; after we read your file.
-    </p>
-    <div style="margin-top:18px"><button class="btn" type="submit">Continue &rarr;</button></div>
+    <p class="dim" style="margin-top:var(--sp-2);font-size:12px">Accepted: Hytek Meet Manager .hy3 / .zip export, or a Sportsystems PDF results file.</p>
+    <div style="margin-top:var(--sp-5)"><button class="btn" type="submit">Continue &rarr;</button></div>
   </form>
 </div>
 """
@@ -4362,30 +4363,22 @@ def create_app() -> Flask:
         # keyword first appears in the log, "done" when the next stage's
         # keyword appears (or the run finishes successfully).
         body = f"""
-<h1>Processing run</h1>
-<p class="lede" style="margin-bottom:var(--sp-5)">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds.</p>
+<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Pipeline running</span>
+  <h1>Processing run</h1>
+  <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
+</section>
 
 <div class="card">
-  <div class="mh-stages" id="mh-stages">
-    <div class="mh-stage" data-stage="parse"    data-state="queued"><div class="mh-stage-label">1 &middot; Parse</div><div class="mh-stage-text">Reading the file</div></div>
-    <div class="mh-stage" data-stage="filter"   data-state="queued"><div class="mh-stage-label">2 &middot; Filter</div><div class="mh-stage-text">Finding your athletes</div></div>
-    <div class="mh-stage" data-stage="pb"       data-state="queued"><div class="mh-stage-label">3 &middot; Personal bests</div><div class="mh-stage-text">Checking historical times</div></div>
-    <div class="mh-stage" data-stage="detect"   data-state="queued"><div class="mh-stage-label">4 &middot; Detect</div><div class="mh-stage-text">Spotting achievements</div></div>
-    <div class="mh-stage" data-stage="generate" data-state="queued"><div class="mh-stage-label">5 &middot; Generate</div><div class="mh-stage-text">Drafting captions</div></div>
-  </div>
-
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-muted);margin-top:4px">
-    <span id="mh-current-stage">Starting&hellip;</span>
-    <span id="mh-step-count">0 steps</span>
-  </div>
 
-  <details style="margin-top:18px">
+  <details style="margin-top:var(--sp-5)">
     <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
-    <div class="progress-log" id="log" style="margin-top:10px">Starting&hellip;</div>
+    <div class="progress-log" id="log" style="margin-top:var(--sp-3)">Starting&hellip;</div>
   </details>
 
-  <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
     <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
   </div>
@@ -4393,56 +4386,27 @@ def create_app() -> Flask:
 
 <script>
 (function() {{
+  // Round-3 cleanup: the previous version had a STAGE_PATTERNS regex map,
+  // a parallel STAGES array, AND a duplicate labels[] array — all manually
+  // trying to categorise log lines into one of 5 stages. We trust the
+  // pipeline's own log voice instead: just surface the most recent line.
   var STATUS_URL = {json.dumps(_status_url)};
   var REVIEW_URL = {json.dumps(_review_url)};
-  var STAGES = ['parse','filter','pb','detect','generate'];
-  // Keyword &rarr; stage. First match wins; we scan each log line.
-  var STAGE_PATTERNS = [
-    {{re: /interpret|bridg|parse/i,                stage: 'parse'}},
-    {{re: /filter|club|swims for/i,                stage: 'filter'}},
-    {{re: /PB|personal best|cache/i,               stage: 'pb'}},
-    {{re: /detect|recogni|claim|achievement/i,     stage: 'detect'}},
-    {{re: /caption|card|generat|render|content/i,  stage: 'generate'}}
-  ];
-  function detectStage(logLines) {{
-    var idx = -1;
-    for (var i = 0; i < logLines.length; i++) {{
-      for (var k = 0; k < STAGE_PATTERNS.length; k++) {{
-        if (STAGE_PATTERNS[k].re.test(logLines[i])) {{
-          var s = STAGES.indexOf(STAGE_PATTERNS[k].stage);
-          if (s > idx) idx = s;
-        }}
-      }}
-    }}
-    return idx;
-  }}
-  function applyStages(currentIdx, status) {{
-    var stageEls = document.querySelectorAll('.mh-stage');
-    stageEls.forEach(function(el, i) {{
-      if (status === 'error') {{ el.setAttribute('data-state', i <= currentIdx ? 'error' : 'queued'); return; }}
-      if (status === 'done')  {{ el.setAttribute('data-state', 'done'); return; }}
-      if (i < currentIdx) el.setAttribute('data-state', 'done');
-      else if (i === currentIdx) el.setAttribute('data-state', 'active');
-      else el.setAttribute('data-state', 'queued');
-    }});
+  function setStatus(status, lastLine) {{
+    var statusEl = document.getElementById('mh-current-stage');
     var bar = document.querySelector('.mh-progress-bar');
     if (status === 'done')  {{
+      statusEl.textContent = 'Complete';
       bar.classList.remove('indeterminate');
       bar.firstElementChild.style.width = '100%';
     }} else if (status === 'error') {{
+      statusEl.textContent = 'Run failed';
       bar.classList.remove('indeterminate');
-      bar.firstElementChild.style.background = 'linear-gradient(90deg, var(--bad), #fb7185)';
+      bar.firstElementChild.style.background = 'var(--bad)';
       bar.firstElementChild.style.width = '100%';
     }} else {{
+      statusEl.textContent = lastLine || 'Starting…';
       bar.classList.add('indeterminate');
-    }}
-    var labelEl = document.getElementById('mh-current-stage');
-    if (status === 'error') labelEl.textContent = 'Run failed';
-    else if (status === 'done') labelEl.textContent = 'Complete';
-    else if (currentIdx < 0) labelEl.textContent = 'Starting&hellip;';
-    else {{
-      var labels = ['Reading the file&hellip;','Finding your athletes&hellip;','Checking personal bests&hellip;','Spotting achievements&hellip;','Drafting captions&hellip;'];
-      labelEl.textContent = labels[currentIdx] || 'Working&hellip;';
     }}
   }}
   async function poll() {{
@@ -4453,12 +4417,12 @@ def create_app() -> Flask:
       var logEl = document.getElementById('log');
       logEl.textContent = log.join('\\n');
       logEl.scrollTop = logEl.scrollHeight;
-      document.getElementById('mh-step-count').textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
-      var idx = detectStage(log);
-      applyStages(idx, j.status);
+      document.getElementById('mh-step-count').textContent =
+        log.length + ' step' + (log.length === 1 ? '' : 's');
+      setStatus(j.status, log[log.length - 1] || '');
       if (j.status === 'done') {{
         document.getElementById('review-link').style.display = 'inline-flex';
-        if (window.MH) MH.toast('Run complete &mdash; opening review queue', 'success', 2500);
+        if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
         setTimeout(function() {{ location.replace(REVIEW_URL); }}, 1200);
         return;
       }}
@@ -4550,10 +4514,13 @@ def create_app() -> Flask:
         n_analysed = rr.get('n_swims_analysed', data.get('our_swim_count', 0))
         n_cards = len(cards)
 
+        # Recognition stats — semantic .stat variants tell the story:
+        # medal = elite (rare achievements), live = strong (the working set),
+        # plain = story / context counts.
         rec_stats_html = "".join([
-            f'<div class="stat"><div class="l" style="color:#F59E0B">Elite</div><div class="v" style="color:#F59E0B">{n_elite}</div></div>',
-            f'<div class="stat"><div class="l" style="color:#22D3EE">Strong</div><div class="v" style="color:#22D3EE">{n_strong}</div></div>',
-            f'<div class="stat"><div class="l" style="color:#A78BFA">Story</div><div class="v" style="color:#A78BFA">{n_story}</div></div>',
+            f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
+            f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
+            f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
             f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
             f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
             f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
@@ -4800,12 +4767,12 @@ def create_app() -> Flask:
   <h2>PB Audit</h2>
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{_n_swimmers}</div></div>
-    <div class="stat"><div class="l" style="color:#22D3EE">Verified</div><div class="v" style="color:#22D3EE">{_n_verified}</div></div>
+    <div class="stat live"><div class="l">Verified</div><div class="v">{_n_verified}</div></div>
     <div class="stat"><div class="l" style="color:#F59E0B">Needs verification</div><div class="v" style="color:#F59E0B">{_n_needs}</div></div>
     <div class="stat"><div class="l">Fetch failed</div><div class="v">{_n_fetch_fail}</div></div>
     <div class="stat"><div class="l">PB decisions</div><div class="v">{_n_decisions}</div></div>
     <div class="stat"><div class="l" style="color:#4ADE80">Confirmed PBs</div><div class="v" style="color:#4ADE80">{_n_confirmed}</div></div>
-    <div class="stat" title="Time + date match SR all-time PB &mdash; strongest possible confirmation"><div class="l" style="color:#22D3EE">Official PBs</div><div class="v" style="color:#22D3EE">{_n_official}</div></div>
+    <div class="stat live" title="Time + date match SR all-time PB &mdash; strongest possible confirmation"><div class="l">Official PBs</div><div class="v">{_n_official}</div></div>
     <div class="stat"><div class="l">Likely PBs</div><div class="v">{_n_likely}</div></div>
     <div class="stat"><div class="l">Not PB</div><div class="v">{_n_not_pb}</div></div>
     <div class="stat"><div class="l">Unverified</div><div class="v">{_n_unverified}</div></div>
@@ -4908,7 +4875,7 @@ def create_app() -> Flask:
       </p>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none">
+      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
         &#x2726; Turn meet into content pack
       </button>
       <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack &rarr;</a>
@@ -4976,12 +4943,12 @@ function turnMeetIntoPack() {{
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div>
-      <h2 style="margin-bottom:10px">Workflow</h2>
+      <h2 style="margin-bottom:var(--sp-3)">Workflow</h2>
       <div class="stat-block">
         <div class="stat"><div class="l">Queue</div><div class="v">{_wf_n_queue or len(ranked_achs)}</div></div>
-        <div class="stat"><div class="l" style="color:#22C55E">Approved</div><div class="v" style="color:#22C55E">{_wf_n_approved}</div></div>
-        <div class="stat"><div class="l" style="color:#F43F5E">Rejected</div><div class="v" style="color:#F43F5E">{_wf_n_rejected}</div></div>
-        <div class="stat"><div class="l" style="color:#22D3EE">Posted</div><div class="v" style="color:#22D3EE">{_wf_n_posted}</div></div>
+        <div class="stat good"><div class="l">Approved</div><div class="v">{_wf_n_approved}</div></div>
+        <div class="stat bad"><div class="l">Rejected</div><div class="v">{_wf_n_rejected}</div></div>
+        <div class="stat live"><div class="l">Posted</div><div class="v">{_wf_n_posted}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -5032,7 +4999,7 @@ function turnMeetIntoPack() {{
                 "queue": ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
                 "approved": ("rgba(34,197,94,0.15)", "#22C55E"),
                 "rejected": ("rgba(244,63,94,0.15)", "#F43F5E"),
-                "posted": ("rgba(34,211,238,0.15)", "var(--accent)"),
+                "posted": ("rgba(212,255,58,0.15)", "var(--accent)"),
                 "edited": ("rgba(245,158,11,0.15)", "var(--warn)"),
             }
             s_bg, s_fg = status_colours.get(wf_status, status_colours["queue"])
@@ -5074,16 +5041,16 @@ function turnMeetIntoPack() {{
             # Order: AI (first, active) &rarr; Warm &rarr; Hype &rarr; Precise
             _STD_TONES = [
                 ("ai",        "✦ AI", True,  "tone-tab-ai",
-                 "rgba(139,92,246,0.15)", "#A78BFA",
+                 "rgba(212,255,58,0.15)", "var(--lane)",
                  "Live AI caption. Generates fresh each time."),
                 ("warm-club", "Warm",    False, "",
-                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "rgba(212,255,58,0.15)", "var(--accent)",
                  "Warm & community — friendly, first-name, inclusive."),
                 ("hype",      "Hype",    False, "",
-                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "rgba(212,255,58,0.15)", "var(--accent)",
                  "Energetic & hype — race-day language, high energy."),
                 ("data-led",  "Precise", False, "",
-                 "rgba(34,211,238,0.15)", "var(--accent)",
+                 "rgba(212,255,58,0.15)", "var(--accent)",
                  "Data-led — numbers first, sponsor-friendly, no fluff."),
             ]
 
@@ -5121,19 +5088,19 @@ function turnMeetIntoPack() {{
             _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
             _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
             tone_tabs_html = (
-                f'<div class="tone-picker" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">'
+                f'<div class="tone-picker" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
                 f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
                 f'<div style="margin-bottom:8px">{tabs_html}</div>'
                 f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
                 f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
                 f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#8B5CF6,#22D3EE);color:#fff;border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
+                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
                 f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
                 f'</div>'
-                f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px"></div>'
-                f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+                f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+                f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
                 f'</div>'
             )
             brand_cap_html = tone_tabs_html
@@ -5169,7 +5136,7 @@ function turnMeetIntoPack() {{
       <details style="margin-top:8px">
         <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption &middot; view factors &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
-          <div style="padding:12px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
+          <div style="padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
             <strong style="font-size:13px">Caption editor</strong>
             <span class="muted" style="font-size:11px;margin-left:6px">(warm-club tone &mdash; leave blank to use the default)</span>
             <div style="margin-top:10px">
@@ -5217,28 +5184,31 @@ function turnMeetIntoPack() {{
 @keyframes spin {{ from {{ transform:rotate(0deg) }} to {{ transform:rotate(360deg) }} }}
 </style>
 
-<h1>{_h(meet.get('name', '(unknown meet)'))}</h1>
-<p class="dim">
-  {_h(data.get('profile_display',''))} &middot;
-  {_h(meet.get('start_date','?'))} &ndash; {_h(meet.get('end_date','?'))} &middot;
-  {_h(meet.get('course',''))} &middot;
-  {_h(meet.get('venue') or 'venue unknown')} &middot;
-  source: {_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}
-  ({_h(dispatch_log.get('chosen_adapter','?'))})
-</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
+  <span class="mh-hero-eyebrow">Review queue</span>
+  <h1>{_h(meet.get('name', '(unknown meet)'))}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(data.get('profile_display','—'))}</span><span class="sep">·</span>
+    <span>{_h(meet.get('start_date','?'))} – {_h(meet.get('end_date','?'))}</span><span class="sep">·</span>
+    <span>{_h(meet.get('course','?'))}</span><span class="sep">·</span>
+    <span>{_h(meet.get('venue') or 'venue unknown')}</span><span class="sep">·</span>
+    <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))} ({_h(dispatch_log.get('chosen_adapter','?'))})</span>
+  </div>
+</section>
 
 <div class="card">
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
-  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn" href="{_pack_url}">Open content pack &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
-    <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently?')">
+    <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
     </form>
   </div>
-  <details style="margin-top:12px">
-    <summary style="font-size:12px;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+  <details style="margin-top:var(--sp-4)">
+    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
+    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
       <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
       <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
     </div>
@@ -5256,10 +5226,10 @@ function turnMeetIntoPack() {{
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
-    <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+    <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
             onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
   </div>
-  <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
+  <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
   <div class="filters-bar">
     <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
@@ -5350,7 +5320,7 @@ const WF_COLOURS = {{
   queue:    ['rgba(255,255,255,0.06)','var(--ink-muted)'],
   approved: ['rgba(34,197,94,0.15)','#22C55E'],
   rejected: ['rgba(244,63,94,0.15)','#F43F5E'],
-  posted:   ['rgba(34,211,238,0.15)','var(--accent)'],
+  posted:   ['rgba(212,255,58,0.15)','var(--accent)'],
   edited:   ['rgba(245,158,11,0.15)','var(--warn)'],
 }};
 const WF_API_BASE = {_wf_api_base_js};
@@ -5401,8 +5371,8 @@ function switchTone(btn) {{
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {{
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(139,92,246,0.15)' : 'rgba(34,211,238,0.15)';
-      tab.style.color = tab.classList.contains('tone-tab-ai') ? '#A78BFA' : 'var(--accent)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
     }} else {{
       tab.style.background = 'transparent';
       tab.style.color = 'var(--ink-dim)';
@@ -5428,8 +5398,8 @@ function switchToneLive(btn, captionUrl, cardId) {{
     var isActive = tab.dataset.tone === newTone;
     tab.classList.toggle('active', isActive);
     if (isActive) {{
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(139,92,246,0.15)' : 'rgba(34,211,238,0.15)';
-      tab.style.color = tab.classList.contains('tone-tab-ai') ? '#A78BFA' : 'var(--accent)';
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
       tab.style.fontWeight = '600';
     }} else {{
       tab.style.background = 'transparent';
@@ -5495,7 +5465,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
       }}
       if (isTransient) {{
         if (captionDiv) {{
-          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(34,211,238,0.20);border-radius:6px;background:rgba(34,211,238,0.04)">'
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(212,255,58,0.20);border-radius:6px;background:rgba(212,255,58,0.04)">'
             + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
             + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
             + '</div>';
@@ -5516,7 +5486,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
           if (variants.length > 1) {{
             var pills = variants.map(function(_, i) {{
               var sel = (i === idx);
-              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(34,211,238,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
+              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(212,255,58,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
             }}).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }}
@@ -5673,7 +5643,7 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
   btn.disabled = true;
   btn.textContent = 'Generating&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(139,92,246,0.3);border-top-color:#8B5CF6;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Generating graphic&hellip; this may take 5-15 seconds</div>';
   var cacheKey = cardId + '|' + fmt;
   if (_visualCache[cacheKey]) {{
@@ -5722,7 +5692,7 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {{
   var formatLabels = {{'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'}};
   var tabsHtml = formats.map(function(f) {{
     var active = (f === (v.format_name || 'feed_portrait'));
-    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(139,92,246,0.15)' : 'transparent') + ';color:' + (active ? '#A78BFA' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
+    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
   }}).join('');
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
@@ -5753,7 +5723,7 @@ function generateMotion(btn, motionUrl, cardId) {{
   btn.disabled = true;
   btn.textContent = 'Rendering motion&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
   fetch(motionUrl, {{method:'POST'}})
     .then(function(r) {{
@@ -5804,7 +5774,7 @@ function generateReel(btn, reelUrl) {{
   btn.disabled = true;
   btn.textContent = 'Rendering reel&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(249,115,22,0.3);border-top-color:#F97316;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
   fetch(reelUrl, {{method:'POST'}})
     .then(function(r) {{
@@ -5852,7 +5822,7 @@ function regenerateGraphic(btn, createUrl, cardId) {{
   btn.disabled = true;
   btn.textContent = 'Generating 3 options&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(139,92,246,0.3);border-top-color:#8B5CF6;border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
   fetch(variantsUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
     .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, body:j}}; }}); }})
@@ -5885,7 +5855,7 @@ function _renderVariantPicker(panel, variants, cardId, createUrl) {{
     var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
     var hook = (vt.brief && vt.brief.primary_hook) || '';
     return (
-      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(139,92,246,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
         '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
         (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
@@ -6386,7 +6356,7 @@ function addGraphicToPack(btn, visualId) {{
 <div class="card">
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get('swimmers_total',0)}</div></div>
-    <div class="stat"><div class="l" style="color:#22D3EE">Verified</div><div class="v" style="color:#22D3EE">{pb_audit.get('swimmers_matched_verified',0)}</div></div>
+    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get('swimmers_matched_verified',0)}</div></div>
     <div class="stat"><div class="l" style="color:#F59E0B">Needs verification</div><div class="v" style="color:#F59E0B">{pb_audit.get('swimmers_needs_verification',0)}</div></div>
     <div class="stat"><div class="l">Confirmed PBs</div><div class="v" style="color:#4ADE80">{pb_audit.get('pb_confirmed_count',0)}</div></div>
     <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get('pb_decisions_count',0)}</div></div>
@@ -8486,7 +8456,7 @@ Relay team broke club record"></textarea>
     # V7 NEW ROUTES
     # ====================================================================
 
-    # ---- /make &mdash; content-type chooser ----------------------------------
+    # ---- /make &mdash; legacy alias, redirects to /add-input ------------------
     @app.route("/make")
     def make_page():
         # The Create page consolidates two card groups:
@@ -8754,15 +8724,20 @@ Relay team broke club record"></textarea>
 
         # Empty state when no meets have been processed yet
         if not recent_runs:
-            empty_body = f"""
-<h1>Athlete Spotlight</h1>
-<p class="dim">Generate a single-athlete content pack from a processed meet.</p>
-<div class="card">
-  <h2>No meets yet</h2>
-  <p>You'll need to upload a meet results file before you can spotlight a swimmer.
-  Once a meet is processed, every swimmer in your club will be available here.</p>
-  <a class="btn" href="{url_for('upload')}" style="margin-top:14px">Upload a meet &rarr;</a>
-</div>"""
+            empty_body = (
+                '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+                '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
+                '<h1>One swimmer.<br><em class="editorial">One story.</em></h1>'
+                '<p class="lede">'
+                'Upload a meet first, and every swimmer in your club becomes '
+                'a single-athlete content pack — every achievement, ranked.'
+                '</p>'
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("add_input_page")}">All input types</a>'
+                '</div>'
+                '</section>'
+            )
             return _layout("Athlete Spotlight", empty_body, active="create")
 
         runs_opts = '<option value="">Select a meet&hellip;</option>'
@@ -8793,8 +8768,11 @@ Relay team broke club record"></textarea>
 
         change_js = url_for("spotlight_landing")
         body = f"""
-<h1>Athlete Spotlight</h1>
-<p class="dim">Pick a meet, then pick a swimmer to generate a single-athlete content pack.</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Athlete spotlight</span>
+  <h1>One swimmer. <em class="editorial">One story.</em></h1>
+  <p class="lede">Pick a processed meet, then pick a swimmer. We pull every achievement they earned into a single-athlete content pack ranked by impact.</p>
+</section>
 
 <div class="card">
   <h2>Choose a meet</h2>
@@ -8802,7 +8780,7 @@ Relay team broke club record"></textarea>
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
-    <noscript><button class="btn" type="submit" style="margin-top:10px">Load swimmers &rarr;</button></noscript>
+    <noscript><button class="btn" type="submit" style="margin-top:var(--sp-3)">Load swimmers &rarr;</button></noscript>
   </form>
   {swimmers_html}
 </div>
@@ -8851,7 +8829,7 @@ Relay team broke club record"></textarea>
             "queue":    ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
             "approved": ("rgba(34,197,94,0.15)", "#22C55E"),
             "rejected": ("rgba(244,63,94,0.15)", "#F43F5E"),
-            "posted":   ("rgba(34,211,238,0.15)", "var(--accent)"),
+            "posted":   ("rgba(212,255,58,0.15)", "var(--accent)"),
             "edited":   ("rgba(245,158,11,0.15)", "var(--warn)"),
         }
 
@@ -8909,8 +8887,8 @@ Relay team broke club record"></textarea>
 <div class="card">
   <div class="stat-block">
     <div class="stat"><div class="l" style="color:#F59E0B">Elite</div><div class="v" style="color:#F59E0B">{pack["n_elite"]}</div></div>
-    <div class="stat"><div class="l" style="color:#22D3EE">Strong</div><div class="v" style="color:#22D3EE">{pack["n_strong"]}</div></div>
-    <div class="stat"><div class="l" style="color:#A78BFA">Story</div><div class="v" style="color:#A78BFA">{pack["n_story"]}</div></div>
+    <div class="stat live"><div class="l">Strong</div><div class="v">{pack["n_strong"]}</div></div>
+    <div class="stat"><div class="l" style="color:var(--lane)">Story</div><div class="v" style="color:var(--lane)">{pack["n_story"]}</div></div>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -8934,7 +8912,7 @@ const SP_WF_COLOURS = {{
   queue:    ['rgba(255,255,255,0.06)','var(--ink-muted)'],
   approved: ['rgba(34,197,94,0.15)','#22C55E'],
   rejected: ['rgba(244,63,94,0.15)','#F43F5E'],
-  posted:   ['rgba(34,211,238,0.15)','var(--accent)'],
+  posted:   ['rgba(212,255,58,0.15)','var(--accent)'],
   edited:   ['rgba(245,158,11,0.15)','var(--warn)'],
 }};
 function _spApply(btn, next) {{
@@ -9212,8 +9190,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             role = m.get("role", "")
             text = _h(m.get("content", "") or "")
             who = "You" if role == "user" else "Assistant"
-            bg = ("rgba(34,211,238,0.06)" if role == "user"
-                  else "rgba(139,92,246,0.06)")
+            bg = ("rgba(212,255,58,0.06)" if role == "user"
+                  else "rgba(212,255,58,0.06)")
             msgs_html += (
                 f'<div class="chat-msg" data-role="{_h(role)}" '
                 f'style="margin-bottom:10px;padding:10px 12px;background:{bg};'
@@ -9252,8 +9230,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             except Exception:
                 pretty_a = str(s.accepted_brief)
             accepted_html = f"""
-<div class="card" style="margin-top:14px;border-color:rgba(34,211,238,0.35);background:rgba(34,211,238,0.04)">
-  <div style="font-size:10px;text-transform:uppercase;color:#22D3EE;letter-spacing:0.5px;margin-bottom:4px">Accepted brief</div>
+<div class="card" style="margin-top:14px;border-color:rgba(212,255,58,0.35);background:rgba(212,255,58,0.04)">
+  <div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;margin-bottom:4px">Accepted brief</div>
   <pre style="font-size:12px;white-space:pre-wrap;margin:0">{_h(pretty_a)}</pre>
   <form method="post" action="{generate_url}" style="margin-top:12px">
     <button type="submit" class="btn">Generate content from this brief →</button>
@@ -9634,8 +9612,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 badge = '<span class="tag" style="font-size:11px">Coming soon</span>'
                 btn_label = "Preview &rarr;"
             try:
-                card_url = url_for(card["endpoint"])
-                href_attr = f'href="{card_url}"'
+                href = url_for(meta.primary_route_endpoint)
+                disabled = False
             except Exception:
                 href_attr = 'href="#" onclick="return false"'
             cards_html += f"""
@@ -10129,7 +10107,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'</p>'
                 )
             brand_preview_html = f"""
-<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(34,211,238,0.03)">
+<div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(212,255,58,0.03)">
   <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Brand DNA preview</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
@@ -10222,10 +10200,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         body = f"""
 {saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
-<h1>Organisation</h1>
-<p class="dim" style="margin-bottom:24px">Tell MediaHub about your club, society or team so the AI can produce on-brand content.</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Organisation profile</span>
+  <h1>{_h(profile.display_name) if profile.display_name else 'Your organisation'}</h1>
+  <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
+</section>
 
-<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(34,211,238,0.04)">
+<div class="card" style="margin-bottom:20px;border:1px solid var(--accent);background:rgba(212,255,58,0.04)">
   <h2 style="margin-top:0">Re-analyse brand from website + social links</h2>
   <p class="dim" style="margin-bottom:12px;font-size:13px">Paste your club's website URL and/or social profile links. MediaHub reads each link, extracts the palette, tone of voice, characteristic phrases and recent captions, and updates the brand profile below. AI-driven &mdash; no manual style guide needed.</p>
   <form method="POST">
@@ -10653,7 +10634,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
-     background:rgba(34,211,238,0.04)">
+     background:rgba(212,255,58,0.04)">
   <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
   <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
     {_h(prof.brand_voice_summary or '(no voice summary yet — capture again from a richer source)')}</p>
@@ -10733,17 +10714,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         capture_url = url_for("organisation_setup_capture")
         body = f"""
-<div style="max-width:760px;margin:0 auto">
-<div class="mh-section-eyebrow">Step 1 of 1 &middot; First-run setup</div>
-<h1 style="margin-top:6px">Tell MediaHub about your organisation</h1>
-<p class="dim" style="font-size:15px;line-height:1.5;margin-bottom:28px">
-  The content engine learns who you are from your existing online
+<div style="max-width:840px;margin:0 auto">
+<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">First-run setup · Step 1 of 1</span>
+  <h1>Tell us about<br><em class="editorial">your club.</em></h1>
+  <p class="lede">
+  The engine learns who you are from your existing online
   presence &mdash; your website and social profiles. Paste whichever
   links you have and click <b>Build my brand</b>. The AI reads your
   posts, palette, tone of voice, and what you talk about, and uses
   that on every caption it writes. You can come back any time to
   re-run it.
-</p>
+  </p>
+</section>
 
 {preview_html}
 
@@ -11092,7 +11075,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         f'<button class="tone-tab {("active" if is_active else "")}" '
                         f'data-card="pc-{card_uuid}" data-tone="{t_key}" onclick="switchTone(this)" '
                         f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;'
-                        f'background:{("rgba(34,211,238,0.15)" if is_active else "transparent")};'
+                        f'background:{("rgba(212,255,58,0.15)" if is_active else "transparent")};'
                         f'color:{("var(--accent)" if is_active else "var(--ink-dim)")};font-family:inherit;margin-right:4px">'
                         f'{t_label}</button>'
                     )
@@ -12031,10 +12014,10 @@ function tiRegenerate() {{
     <div style="font-size:13px;font-weight:700">Meet reel</div>
     <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
   </div>
-  <button class="btn" style="font-size:12px;padding:6px 14px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border:none"
+  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
           onclick="generateReelGrouped(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
 </div>
-<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(249,115,22,0.04);border:1px solid var(--border);border-radius:8px"></div>
+<div id="reel-panel-grouped" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
 
 <div class="card" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -12146,7 +12129,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   // Visual marker on the active sort button.
   var allBtns = section.querySelectorAll('button[onclick*="mhSortPackSection"]');
   Array.prototype.forEach.call(allBtns, function(b) {{
-    b.style.background = (b === btn) ? 'rgba(34,211,238,0.18)' : '';
+    b.style.background = (b === btn) ? 'rgba(212,255,58,0.18)' : '';
     b.style.color = (b === btn) ? 'var(--accent)' : '';
   }});
 }};
