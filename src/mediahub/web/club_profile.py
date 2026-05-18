@@ -124,6 +124,31 @@ class ClubProfile:
     brand_guidelines_extractor: str = ""
     brand_guidelines_byte_size: int = 0
 
+    # Non-negotiable rules extracted from brand_guidelines_raw_excerpt as a
+    # dedicated second LLM pass. Each entry is one literal MUST / NEVER /
+    # ALWAYS / REQUIRED / SHALL statement from the user's uploaded
+    # document. brand.context surfaces these at the TOP of every system
+    # prompt with explicit override framing so the AI cannot quietly drown
+    # them out under website-derived voice signals.
+    brand_guidelines_mandatory_rules: list[str] = field(default_factory=list)
+
+    # ---- Multi-logo upload (D1) -----------------------------------------
+    # Each entry: {logo_id, original_filename, stored_path, mime,
+    # byte_size, uploaded_at, label, ai_description, ai_dominant_colours}.
+    # The AI description + dominant colours come from a vision LLM pass
+    # when available so downstream image/motion generators can pick the
+    # right logo variant (full-colour vs mono, wordmark vs icon, etc.)
+    # without the user having to label each file manually.
+    brand_logos: list[dict] = field(default_factory=list)
+
+    # ---- Per-link capture state (B11) -----------------------------------
+    # Mirrors social_links but carries the AI's interpretation outcome
+    # per link: which playbook succeeded, when it last validated, the
+    # last block/auth/rate-limit status, and a per-link voice digest.
+    # Schema: {platform: {url, status, playbook_domain, last_attempt_at,
+    # last_success_at, voice_digest}}.
+    link_capture_state: dict = field(default_factory=dict)
+
     # ---- Derived operating profile (one-shot LLM derivation, cached) ----
     # Populated by brand.derived.derive_operating_profile at profile-save
     # time. Contains per-org tone prose, achievement priority weights,

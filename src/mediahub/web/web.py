@@ -10065,6 +10065,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         governing_body = (prof.governing_body if prof else "")
         website_url = (prof.brand_source_url if prof else "")
         social = dict(prof.social_links) if prof and prof.social_links else {}
+        brand_logos = list(prof.brand_logos) if prof and prof.brand_logos else []
+        mandatory_rules = list(prof.brand_guidelines_mandatory_rules) if prof and prof.brand_guidelines_mandatory_rules else []
+        link_state = dict(prof.link_capture_state) if prof and prof.link_capture_state else {}
+
+        from mediahub.web._countries import COUNTRIES
+        # JSON-safe array literal for inlining into the combobox JS.
+        # Each country is HTML-escaped because the same string is also
+        # rendered into list-item innerHTML below.
+        _countries_js_array = "[" + ",".join(
+            '"' + c.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for c in COUNTRIES
+        ) + "]"
 
         # --- Preview block (only when the AI has already run once) ---
         preview_html = ""
@@ -10198,13 +10210,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       </label>
       <select name="org_type" style="{_input_style}">{org_type_opts}</select>
     </div>
-    <div>
-      <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
+    <div class="mh-combobox" data-mh-combobox="country">
+      <label for="country-input" style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
         Country
       </label>
-      <input type="text" name="country" value="{_h(country)}"
-             placeholder="e.g. United Kingdom"
+      <input id="country-input" type="text" name="country" value="{_h(country)}"
+             placeholder="Start typing your country…"
+             autocomplete="off" spellcheck="false"
+             role="combobox" aria-autocomplete="list"
+             aria-controls="country-options" aria-expanded="false"
              style="{_input_style}"/>
+      <ul id="country-options" role="listbox" class="mh-combobox-options" hidden></ul>
     </div>
     <div>
       <label style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
@@ -10264,6 +10280,161 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </div>
 </form>
 </div>
+
+<style>
+.mh-combobox {{ position: relative; }}
+.mh-combobox-options {{
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome, var(--border, rgba(245,242,232,0.14)));
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 14px 32px rgba(0,0,0,0.45);
+  z-index: 60;
+}}
+.mh-combobox-options li {{
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--ink, #F5F2E8);
+  cursor: pointer;
+  line-height: 1.3;
+}}
+.mh-combobox-options li:hover,
+.mh-combobox-options li.mh-combobox-active {{
+  background: rgba(212,255,58,0.10);
+  color: var(--lane, var(--accent, #D4FF3A));
+}}
+.mh-combobox-options li.mh-combobox-empty {{
+  color: var(--ink-muted, var(--ink-dim, #7A7869));
+  font-style: italic;
+  cursor: default;
+}}
+.mh-combobox-options li.mh-combobox-empty:hover {{
+  background: transparent;
+  color: var(--ink-muted, var(--ink-dim, #7A7869));
+}}
+</style>
+<script>
+(function() {{
+  var COUNTRIES = {_countries_js_array};
+  var MAX_RENDER = 250;
+
+  function escapeHTML(s) {{
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }}
+
+  document.querySelectorAll('[data-mh-combobox="country"]').forEach(function(box) {{
+    var input = box.querySelector('input[name="country"]');
+    var listEl = box.querySelector('.mh-combobox-options');
+    if (!input || !listEl) return;
+    var activeIdx = -1;
+
+    function render(filter) {{
+      var q = (filter || '').trim().toLowerCase();
+      var matches;
+      if (!q) {{
+        matches = COUNTRIES.slice();
+      }} else {{
+        matches = COUNTRIES.filter(function(c) {{
+          return c.toLowerCase().indexOf(q) !== -1;
+        }});
+        matches.sort(function(a, b) {{
+          var ap = a.toLowerCase().indexOf(q);
+          var bp = b.toLowerCase().indexOf(q);
+          if (ap !== bp) return ap - bp;
+          return a.localeCompare(b);
+        }});
+      }}
+      if (matches.length === 0) {{
+        listEl.innerHTML = '<li class="mh-combobox-empty" role="option" aria-disabled="true">No matches — type a different country.</li>';
+      }} else {{
+        listEl.innerHTML = matches.slice(0, MAX_RENDER).map(function(c) {{
+          var esc = escapeHTML(c);
+          return '<li role="option" data-value="' + esc + '" tabindex="-1">' + esc + '</li>';
+        }}).join('');
+      }}
+      listEl.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      activeIdx = -1;
+    }}
+
+    function close() {{
+      listEl.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      activeIdx = -1;
+    }}
+
+    function pick(value) {{
+      input.value = value;
+      close();
+      input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    }}
+
+    function updateActive() {{
+      var items = listEl.querySelectorAll('li[role="option"]:not([aria-disabled="true"])');
+      items.forEach(function(it, i) {{
+        if (i === activeIdx) {{
+          it.classList.add('mh-combobox-active');
+          it.scrollIntoView({{ block: 'nearest' }});
+        }} else {{
+          it.classList.remove('mh-combobox-active');
+        }}
+      }});
+    }}
+
+    input.addEventListener('input', function() {{ render(input.value); }});
+    input.addEventListener('focus', function() {{ render(input.value); }});
+    input.addEventListener('blur', function() {{
+      // small delay so a click on a <li> registers before we hide
+      setTimeout(close, 160);
+    }});
+
+    input.addEventListener('keydown', function(e) {{
+      var items = listEl.querySelectorAll('li[role="option"]:not([aria-disabled="true"])');
+      if (e.key === 'ArrowDown') {{
+        e.preventDefault();
+        if (listEl.hidden) {{ render(input.value); return; }}
+        if (items.length === 0) return;
+        activeIdx = (activeIdx + 1) % items.length;
+        updateActive();
+      }} else if (e.key === 'ArrowUp') {{
+        e.preventDefault();
+        if (listEl.hidden) {{ render(input.value); return; }}
+        if (items.length === 0) return;
+        activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
+        updateActive();
+      }} else if (e.key === 'Enter') {{
+        if (!listEl.hidden && activeIdx >= 0 && items[activeIdx]) {{
+          e.preventDefault();
+          pick(items[activeIdx].getAttribute('data-value'));
+        }}
+      }} else if (e.key === 'Escape') {{
+        if (!listEl.hidden) {{
+          e.preventDefault();
+          close();
+        }}
+      }} else if (e.key === 'Tab') {{
+        close();
+      }}
+    }});
+
+    listEl.addEventListener('mousedown', function(e) {{
+      var li = e.target.closest('li[role="option"]');
+      if (!li || li.getAttribute('aria-disabled') === 'true') return;
+      e.preventDefault(); // keep focus on the input
+      pick(li.getAttribute('data-value'));
+    }});
+  }});
+}})();
+</script>
 """
         return _layout("Set up your organisation", body, active="organisation")
 
@@ -10297,7 +10468,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         prof.display_name = display_name
         prof.org_type = (request.form.get("org_type") or "other").strip()
-        prof.country = (request.form.get("country") or "").strip()
+        raw_country = (request.form.get("country") or "").strip()
+        if raw_country:
+            from mediahub.web._countries import COUNTRIES
+            # Case-insensitive canonicalisation — if the user typed
+            # "united kingdom" the combobox will already have offered the
+            # canonical "United Kingdom", but defending in depth in case
+            # someone bypasses the dropdown (paste, autofill, JS off).
+            canon = next(
+                (c for c in COUNTRIES if c.casefold() == raw_country.casefold()),
+                None,
+            )
+            prof.country = canon or raw_country
+        else:
+            prof.country = ""
         prof.governing_body = (request.form.get("governing_body") or "").strip()
 
         website_url = (request.form.get("website_url") or "").strip()
