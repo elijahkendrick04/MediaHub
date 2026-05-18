@@ -9680,11 +9680,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         accepted_html = ""
         if s.accepted_brief:
             generate_url = url_for("free_text_chat_generate", chat_id=chat_id)
+            # Offer the active org's library as a final step before generating
+            # content. Picks ride through on the generate POST and land on the
+            # saved pack so the chat flow has the same media-attachment story
+            # as the legacy /free-text/quick form.
+            chat_picker_html = _render_library_picker_for_active_profile()
             accepted_html = f"""
 <div class="card" style="margin-top:var(--sp-4);border-left:2px solid var(--lane);background:rgba(212,255,58,0.04)">
   <div class="strap live" style="margin-bottom:var(--sp-3)">Accepted brief</div>
   {_format_brief_html(s.accepted_brief)}
   <form method="post" action="{generate_url}" style="margin-top:var(--sp-3)">
+    {chat_picker_html}
     <button type="submit" class="btn">Generate content from this brief →</button>
   </form>
 </div>
@@ -9801,12 +9807,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "notes":      brief.get("visual_concept", "") or "",
             "status":     "queue",
         }
-        saved = save_pack(
-            "free_text",
-            {"free_text": s.title or "Chat brief",
-             "source": "chat", "chat_id": chat_id},
-            [card],
-        )
+        pack_form_data = {
+            "free_text": s.title or "Chat brief",
+            "source": "chat",
+            "chat_id": chat_id,
+        }
+        # Resolve library picks the same way _render_stub does — strictly
+        # scoped to the active organisation; foreign ids are silently dropped.
+        active_pid_for_pack = _active_profile_id() or ""
+        selected_ids = request.form.getlist("library_asset_id")
+        if selected_ids and _v8_get_media_store is not None:
+            try:
+                _ml = _v8_get_media_store()
+                resolved = []
+                for aid in selected_ids:
+                    a = _ml.get(aid)
+                    if not a or a.profile_id != active_pid_for_pack:
+                        continue
+                    resolved.append({"id": a.id, "path": a.path, "filename": a.filename})
+                if resolved:
+                    pack_form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved)
+                    pack_form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved)
+                    pack_form_data["attached_photo_path"] = resolved[0]["path"]
+                    pack_form_data["attached_photo_filename"] = resolved[0]["filename"]
+                    pack_form_data["profile_id"] = active_pid_for_pack
+            except Exception:
+                app.logger.exception("free-text chat library picker resolve failed")
+        saved = save_pack("free_text", pack_form_data, [card])
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
@@ -13667,6 +13694,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
         # Slugify
         profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        # Defense-in-depth: if this run is pinned to an organisation, only
+        # that organisation's session may pull its library into the render.
+        # Run-scoped synthetic profiles are still allowed for everyone.
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
         brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id)
 
         # Pull media library assets for this profile
@@ -13828,6 +13860,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 }
                 resolved_pid = profile_id or "_run_" + run_id
                 resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or ("_run_" + run_id)
+                if not _session_can_access_profile(resolved_pid):
+                    visual_error = "forbidden"
+                    raise RuntimeError("forbidden")
                 brand_kit = _v8_brand_kit_for(resolved_pid, run_id=run_id)
                 media_assets = []
                 try:
@@ -13995,6 +14030,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # V8.1: profile_id optional; fall back to club_filter / synthetic id
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
         profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        # Defense-in-depth: same per-org gate as create-graphic.
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
         brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id)
 
         media_assets = []

@@ -348,3 +348,146 @@ class TestStubPickPersistence:
             "alpha's session must not be able to attach beta's asset id "
             "to a saved pack"
         )
+
+
+class TestFreeTextChatPicker:
+    """The /free-text/chat brief-builder must also expose the library."""
+
+    def test_picker_renders_on_accepted_brief(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+
+            from mediahub.free_text_chat.session import create_session, save_session
+            s = create_session()
+            s.accepted_brief = {
+                "headline": "Test headline",
+                "body": "Test body content.",
+                "platform": "Instagram",
+                "hashtags": ["test"],
+            }
+            save_session(s)
+
+            resp = c.get(f"/free-text/chat/{s.chat_id}")
+        body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert "Pick from your library" in body, (
+            "free-text chat accepted-brief panel must offer the library picker"
+        )
+        assert alpha_id in body, (
+            "the chat picker should list the active org's asset id"
+        )
+
+    def test_chat_generate_carries_library_pick(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+
+            from mediahub.free_text_chat.session import create_session, save_session
+            s = create_session()
+            s.accepted_brief = {
+                "headline": "Test headline",
+                "body": "Test body.",
+                "platform": "Instagram",
+            }
+            save_session(s)
+
+            resp = c.post(
+                f"/free-text/chat/{s.chat_id}/generate",
+                data={"library_asset_id": alpha_id},
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        assert resp.status_code == 302, (
+            f"chat-generate must redirect to the saved pack; "
+            f"got {resp.status_code}"
+        )
+        packs_dir = tmp_path / "stub_packs"
+        all_files = list(packs_dir.glob("*.json"))
+        assert all_files
+        pack = json.loads(all_files[0].read_text())
+        form_data = pack.get("form_data") or {}
+        assert alpha_id in (form_data.get("library_asset_ids") or ""), (
+            "chat-generate must persist the picked library_asset_id onto "
+            f"the saved pack; got form_data={form_data!r}"
+        )
+
+
+class TestRunGraphicDefenseInDepth:
+    """Cross-org access to a run's library via the graphic-creation route."""
+
+    def _seed_run(self, tmp_path: Path, run_id: str, profile_id: str) -> None:
+        """Write a minimal run JSON pinned to a specific organisation."""
+        run_dir = tmp_path / "runs_v4"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / f"{run_id}.json").write_text(json.dumps({
+            "run_id": run_id,
+            "profile_id": profile_id,
+            "meet": {"name": "Test Meet"},
+            "recognition_report": {
+                "ranked_achievements": [{
+                    "achievement": {
+                        "swim_id": "card1",
+                        "swimmer_name": "Test Swimmer",
+                        "event": "100 Free",
+                        "headline": "PB!",
+                    },
+                    "safe_to_post": {"level": "safe"},
+                }],
+            },
+        }))
+
+    def test_foreign_session_cannot_render_run_graphic(self, two_org_app):
+        app, tmp_path = two_org_app
+        # Run pinned to beta. Alpha session must NOT be able to render
+        # a graphic that would pull beta's library into the output.
+        self._seed_run(tmp_path, "run_beta_1", "beta")
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/runs/run_beta_1/cards/card1/create-graphic",
+            )
+        assert resp.status_code == 403, (
+            f"alpha session must not be able to render a graphic for a run "
+            f"pinned to beta; got {resp.status_code} {resp.data!r}"
+        )
+
+    def test_same_session_can_render_run_graphic(self, two_org_app, monkeypatch):
+        app, tmp_path = two_org_app
+        self._seed_run(tmp_path, "run_alpha_1", "alpha")
+
+        # Stub the visual generator so we don't have to set up the
+        # full creative-brief + renderer stack just to check the gate.
+        import mediahub.web.web as wm
+
+        def _fake_visual(item, brand_kit, **kwargs):
+            return {"visuals": [], "brief": None, "errors": []}
+
+        monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
+        # Also patch into create_app's closure: the route resolves the
+        # symbol at module import time. Re-create the app for this test.
+        import importlib
+        importlib.reload(wm)
+        monkeypatch.setattr(wm, "_v8_create_visual_for_item", _fake_visual, raising=False)
+        app2 = wm.create_app()
+        app2.config["TESTING"] = True
+
+        # Re-seed the asset/run for the fresh app context
+        from mediahub.web.club_profile import ClubProfile, save_profile
+        save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
+        save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
+        self._seed_run(tmp_path, "run_alpha_1", "alpha")
+
+        with app2.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/runs/run_alpha_1/cards/card1/create-graphic",
+            )
+        # The route may return 200/500 depending on whether the visual
+        # pipeline could fully execute, but it must NOT return 403.
+        assert resp.status_code != 403, (
+            f"alpha session must be allowed to render its own run's "
+            f"graphic; got {resp.status_code} {resp.data!r}"
+        )
