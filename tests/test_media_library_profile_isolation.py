@@ -1,0 +1,350 @@
+"""Media library profile isolation tests.
+
+Verifies the two halves of the "library per profile, wired into creator tools"
+change:
+
+  1. Profile isolation — one org's media is never reachable from another
+     org's session. Covers the file-serve route, the JSON list endpoint,
+     the upload endpoint, and the picker rendered into stub forms.
+
+  2. Creator-tool wiring — the active profile's library is offered as a
+     picker on every stub creator form, picks survive the POST onto the
+     saved pack, and foreign ids are silently dropped (not 500'd).
+"""
+from __future__ import annotations
+
+import importlib
+import io
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+@pytest.fixture
+def two_org_app(tmp_path, monkeypatch):
+    """A fresh Flask app with two saved profiles + the org gate disabled.
+
+    The org gate is bypassed because these tests focus on the media
+    library access rules, not the gate itself.
+    """
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+    importlib.reload(cp)
+    importlib.reload(wm)
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+
+    from mediahub.web.club_profile import ClubProfile, save_profile
+    save_profile(ClubProfile(profile_id="alpha", display_name="Alpha SC"))
+    save_profile(ClubProfile(profile_id="beta", display_name="Beta SC"))
+
+    return app, tmp_path
+
+
+def _seed_asset(tmp_path: Path, profile_id: str, filename: str = "p.jpg") -> tuple[str, Path]:
+    """Save a real asset file + a media_library row for a given profile."""
+    from mediahub.media_library.store import get_store
+    from mediahub.media_library.models import MediaAsset
+
+    asset_path = tmp_path / f"{profile_id}_{filename}"
+    asset_path.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+    store = get_store()
+    asset = MediaAsset(
+        id="",
+        filename=filename,
+        path=str(asset_path),
+        type="athlete_photo",
+        profile_id=profile_id,
+        permission_status="approved_by_club",
+        approval_status="approved",
+        linked_athlete_names=[f"{profile_id.title()} Swimmer"],
+    )
+    saved = store.save(asset)
+    return saved.id, asset_path
+
+
+class TestFileServeIsolation:
+    """The /api/media-library/file/<id> route must enforce profile scope."""
+
+    def test_same_profile_can_view(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha")
+            resp = c.get(f"/api/media-library/file/{alpha_id}")
+        assert resp.status_code == 200, (
+            "session pinned to alpha must see its own asset"
+        )
+
+    def test_other_profile_is_forbidden(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            _alpha_id, _ = _seed_asset(tmp_path, "alpha")
+            beta_id, _ = _seed_asset(tmp_path, "beta")
+            resp = c.get(f"/api/media-library/file/{beta_id}")
+        assert resp.status_code == 403, (
+            "session pinned to alpha must not be able to read beta's "
+            f"asset; got {resp.status_code} {resp.data!r}"
+        )
+
+    def test_run_scoped_profile_is_allowed(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            run_id, _ = _seed_asset(tmp_path, "_run_abcdef123")
+            resp = c.get(f"/api/media-library/file/{run_id}")
+        assert resp.status_code == 200, (
+            "run-scoped synthetic profiles are allowed because privacy "
+            "is enforced at the run level — got 403 unexpectedly"
+        )
+
+
+class TestListJsonIsolation:
+    """The /api/media-library/list.json route must scope to the active profile."""
+
+    def test_list_returns_active_profile_assets(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            a_id, _ = _seed_asset(tmp_path, "alpha", filename="a.jpg")
+            _b_id, _ = _seed_asset(tmp_path, "beta", filename="b.jpg")
+            resp = c.get("/api/media-library/list.json")
+        assert resp.status_code == 200
+        body = json.loads(resp.data.decode("utf-8"))
+        assert body["profile_id"] == "alpha"
+        returned_ids = {a["id"] for a in body["assets"]}
+        assert a_id in returned_ids
+        assert all(a["id"] != _b_id for a in body["assets"]), (
+            "beta's asset must not appear in alpha's list"
+        )
+
+    def test_explicit_foreign_profile_id_rejected(self, two_org_app):
+        app, _ = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.get("/api/media-library/list.json?profile_id=beta")
+        assert resp.status_code == 403, (
+            "asking the JSON endpoint for another org's library must be "
+            f"rejected; got {resp.status_code} {resp.data!r}"
+        )
+
+
+class TestUploadIsolation:
+    """POST /api/media-library must reject uploads aimed at another org."""
+
+    def test_upload_to_active_profile_succeeds(self, two_org_app):
+        app, _ = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/media-library",
+                data={
+                    "file": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"), "x.jpg"),
+                    "profile_id": "alpha",
+                    "description": "test asset",
+                    "asset_type": "athlete_photo",
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        assert resp.status_code in (200, 302), (
+            f"alpha session uploading to alpha must be allowed; "
+            f"got {resp.status_code}"
+        )
+
+    def test_upload_to_foreign_profile_is_forbidden(self, two_org_app):
+        app, _ = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.post(
+                "/api/media-library",
+                data={
+                    "file": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"), "x.jpg"),
+                    "profile_id": "beta",
+                    "description": "should be blocked",
+                    "asset_type": "athlete_photo",
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        assert resp.status_code == 403, (
+            "alpha session must not be able to upload into beta's "
+            f"library; got {resp.status_code} {resp.data!r}"
+        )
+
+
+class TestLibraryPageScope:
+    """The /media-library page must honour the active org pin."""
+
+    def test_default_shows_active_profile(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+            resp = c.get("/media-library")
+        body = resp.get_data(as_text=True)
+        assert "alpha" in body, (
+            "library page should default to the session's active profile"
+        )
+
+    def test_query_string_for_foreign_profile_redirects(self, two_org_app):
+        app, _ = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.get("/media-library?profile_id=beta", follow_redirects=False)
+        assert resp.status_code == 302, (
+            "asking /media-library to render another org's library must "
+            "redirect back to the active org's library, not silently show "
+            "the foreign assets"
+        )
+
+
+class TestStubLibraryPicker:
+    """Stub creator forms must expose the active profile's library."""
+
+    def test_picker_renders_active_library_thumbnails(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+            resp = c.get("/weekend-preview")
+        body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert "Pick from your library" in body, (
+            "weekend-preview must render the library picker section"
+        )
+        assert alpha_id in body, (
+            "the picker should list the active org's asset by id"
+        )
+
+    def test_picker_does_not_show_foreign_assets(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+            beta_id, _ = _seed_asset(tmp_path, "beta", filename="beta_pic.jpg")
+            resp = c.get("/weekend-preview")
+        body = resp.get_data(as_text=True)
+        assert beta_id not in body, (
+            "the picker on alpha's weekend-preview must NEVER show "
+            "beta's asset id"
+        )
+
+    def test_picker_appears_on_all_stub_forms(self, two_org_app):
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            _seed_asset(tmp_path, "alpha")
+            for url in ("/weekend-preview", "/sponsor-post",
+                        "/session-update", "/free-text/quick"):
+                resp = c.get(url)
+                assert resp.status_code == 200, f"{url} returned {resp.status_code}"
+                assert "Pick from your library" in resp.get_data(as_text=True), (
+                    f"{url} is missing the media-library picker — content "
+                    "creator tools must be wired to the library"
+                )
+
+
+class TestStubPickPersistence:
+    """Selected library_asset_id values must be carried onto the saved pack."""
+
+    def test_selected_id_persists_on_saved_pack(self, two_org_app, monkeypatch):
+        # Force the LLM path to return one deterministic card so we don't
+        # need a real provider just to verify the persistence behaviour.
+        import mediahub.club_platform.stubs as _stubs
+
+        def _stub_generate(brief_prose, extra_context=""):
+            return {"cards": [{
+                "platform": "Instagram",
+                "caption": "Test caption",
+                "hashtags": ["test"],
+                "confidence": 0.7,
+                "notes": "from test",
+            }]}
+
+        monkeypatch.setattr(_stubs, "_generate_cards_via_llm", _stub_generate)
+
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            alpha_id, _ = _seed_asset(tmp_path, "alpha", filename="alpha_pic.jpg")
+            resp = c.post(
+                "/weekend-preview",
+                data={
+                    "meet_name": "Test Meet",
+                    "date_venue": "today, here",
+                    "athletes": "Alex — 50 Free",
+                    "library_asset_id": alpha_id,
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        assert resp.status_code == 200
+
+        # The saved pack JSON should now mention this asset id.
+        packs_dir = tmp_path / "stub_packs"
+        all_files = list(packs_dir.glob("*.json"))
+        assert all_files, f"no stub_packs persisted under {packs_dir}"
+        pack = json.loads(all_files[0].read_text())
+        form_data = pack.get("form_data") or {}
+        assert alpha_id in (form_data.get("library_asset_ids") or ""), (
+            f"saved pack must carry library_asset_ids that include the "
+            f"picked id {alpha_id}; got {form_data!r}"
+        )
+
+    def test_foreign_id_dropped_silently(self, two_org_app, monkeypatch):
+        import mediahub.club_platform.stubs as _stubs
+
+        def _stub_generate(brief_prose, extra_context=""):
+            return {"cards": [{
+                "platform": "Instagram",
+                "caption": "Test",
+                "hashtags": [],
+                "confidence": 0.5,
+                "notes": "",
+            }]}
+
+        monkeypatch.setattr(_stubs, "_generate_cards_via_llm", _stub_generate)
+
+        app, tmp_path = two_org_app
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            beta_id, _ = _seed_asset(tmp_path, "beta", filename="beta_pic.jpg")
+            resp = c.post(
+                "/weekend-preview",
+                data={
+                    "meet_name": "Test Meet",
+                    "library_asset_id": beta_id,
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        assert resp.status_code == 200, (
+            "submitting a foreign asset id must not 500; the server "
+            "should silently drop the id and persist the pack regardless"
+        )
+
+        packs_dir = tmp_path / "stub_packs"
+        all_files = list(packs_dir.glob("*.json"))
+        assert all_files
+        pack = json.loads(all_files[0].read_text())
+        form_data = pack.get("form_data") or {}
+        assert beta_id not in (form_data.get("library_asset_ids") or ""), (
+            "alpha's session must not be able to attach beta's asset id "
+            "to a saved pack"
+        )

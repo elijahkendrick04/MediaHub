@@ -9305,6 +9305,43 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     form_data["attached_photo_filename"] = Path(photo.filename).name
                 except Exception:
                     app.logger.exception("stub photo upload failed")
+
+            # Media-library picks — strictly profile-scoped. Resolve each
+            # selected asset id against the active profile only; foreign ids
+            # are silently dropped so a tampered form can't pull another
+            # org's photos into this pack.
+            active_pid_for_pack = _active_profile_id() or ""
+            selected_ids = request.form.getlist("library_asset_id")
+            resolved_assets: list[dict] = []
+            if selected_ids and _v8_get_media_store is not None:
+                try:
+                    _ml = _v8_get_media_store()
+                    for aid in selected_ids:
+                        a = _ml.get(aid)
+                        if not a:
+                            continue
+                        if a.profile_id != active_pid_for_pack:
+                            continue
+                        resolved_assets.append({
+                            "id": a.id,
+                            "path": a.path,
+                            "filename": a.filename,
+                            "type": a.type,
+                        })
+                except Exception:
+                    app.logger.exception("stub library picker resolve failed")
+            if resolved_assets:
+                form_data["library_asset_ids"] = ",".join(r["id"] for r in resolved_assets)
+                form_data["library_asset_paths"] = ",".join(r["path"] for r in resolved_assets)
+                # Promote the first selected asset into attached_photo_path
+                # when the user didn't also upload a one-off file. Downstream
+                # visual generators read attached_photo_path as their primary
+                # photo source — without this promotion, library picks would
+                # show up in the pack metadata but never reach the renderer.
+                if not form_data.get("attached_photo_path"):
+                    form_data["attached_photo_path"] = resolved_assets[0]["path"]
+                    form_data["attached_photo_filename"] = resolved_assets[0]["filename"]
+                form_data["profile_id"] = active_pid_for_pack
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -9370,6 +9407,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
         body = _stub_hero(title) + stub.render_stub_html()
+        # Inject the "Pick from your library" widget. The form-level photo
+        # upload (stubs._PHOTO_INPUT_HTML) handles one-off uploads; this
+        # picker pulls from the active organisation's library so the user
+        # doesn't have to re-upload assets they already saved.
+        picker_html = _render_library_picker_for_active_profile()
+        if picker_html:
+            body = body.replace(
+                'Leave blank to use a library photo or no photo.</p></div>',
+                'Or pick one from your library below.</p></div>' + picker_html,
+                1,
+            )
         try:
             _packs_url = url_for("stub_packs_list")
             body += (
@@ -9381,6 +9429,77 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         except Exception:
             body += f'<p style="margin-top:var(--sp-5)"><a href="{url_for("add_input_page")}">&larr; All input types</a></p>'
         return _layout(title, body, active=active_tab)
+
+    def _render_library_picker_for_active_profile() -> str:
+        """Server-render a multi-select widget showing the active profile's
+        media-library assets. Returns "" when there's no active profile or
+        no v8 media engine — callers should treat empty as "don't inject".
+        """
+        if not _v8_ok or _v8_get_media_store is None:
+            return ""
+        pid = _active_profile_id()
+        if not pid:
+            return ""
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=pid, limit=60)
+        except Exception:
+            return ""
+        if not assets:
+            _ml_url = url_for("media_library_page")
+            return (
+                '<div style="margin:0 0 14px;padding:12px;background:rgba(255,255,255,0.02);'
+                'border:1px dashed var(--border);border-radius:6px">'
+                '<div style="font-weight:600;margin-bottom:4px">Pick from your library</div>'
+                '<p class="muted" style="font-size:12px;margin:0">'
+                f'No saved assets yet for this organisation. '
+                f'<a href="{_h(_ml_url)}" style="text-decoration:underline">'
+                'Open your media library &rarr;</a></p></div>'
+            )
+        tiles = []
+        for a in assets[:60]:
+            ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+            aid = ad.get("id", "")
+            if not aid:
+                continue
+            file_url = url_for("api_media_library_file", asset_id=aid)
+            label_bits = []
+            for n in (ad.get("linked_athlete_names") or []):
+                if n:
+                    label_bits.append(str(n))
+                    break
+            if ad.get("type"):
+                label_bits.append(str(ad["type"]))
+            label = _h(" · ".join(label_bits) or (ad.get("filename") or "")[:40])
+            tiles.append(
+                '<label class="lib-pick" style="position:relative;cursor:pointer;'
+                'border:1px solid var(--border);border-radius:6px;overflow:hidden;'
+                'background:#0a0a0a;display:block">'
+                f'<input type="checkbox" name="library_asset_id" value="{_h(aid)}" '
+                'style="position:absolute;top:6px;left:6px;z-index:2;cursor:pointer"/>'
+                f'<img src="{_h(file_url)}" alt="" loading="lazy" '
+                'style="display:block;width:100%;height:90px;object-fit:cover"/>'
+                f'<div style="padding:6px 8px;font-size:11px;color:var(--ink-dim);'
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+                f'{label}</div></label>'
+            )
+        if not tiles:
+            return ""
+        _ml_url = url_for("media_library_page")
+        grid = "".join(tiles)
+        return (
+            '<div style="margin:0 0 14px;padding:12px;background:rgba(34,211,238,0.03);'
+            'border:1px dashed var(--border);border-radius:6px">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+            '<div style="font-weight:600">Pick from your library</div>'
+            f'<a href="{_h(_ml_url)}" style="font-size:12px;text-decoration:underline;color:var(--ink-muted)">'
+            'Manage library &rarr;</a></div>'
+            '<p class="muted" style="font-size:11px;margin:0 0 10px 0">'
+            "Tick photos already saved to this organisation's library. "
+            'Selected photos flow into the visual generator without re-upload.</p>'
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">'
+            f'{grid}</div></div>'
+        )
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
     def stub_weekend_preview():
@@ -9800,6 +9919,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
+        # Show any media-library assets the draft was created with so the
+        # user can see which photos are attached without re-opening the
+        # source form. Profile-scoped: only assets that still belong to
+        # the active org are surfaced; foreign or deleted ids are silently
+        # skipped so the panel can't leak photos across orgs.
+        attached_html = _render_pack_attached_media(rec)
         # Replace the renderer's default action row
         cards_html = cards_html.replace(
             f'<div style="margin-top:24px;display:flex;gap:10px">'
@@ -9808,8 +9933,65 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             footer,
             1,
         )
-        body = header + cards_html
+        body = header + attached_html + cards_html
         return _layout(rec.get("title") or "Draft", body, active="add_input")
+
+    def _render_pack_attached_media(rec: dict) -> str:
+        """Render thumbnails for the library assets attached to a saved pack.
+
+        Reads ``library_asset_ids`` (comma-separated) from the pack's
+        form_data, drops any id that no longer belongs to the active
+        organisation, and renders the survivors as a small thumbnail row.
+        Returns "" when there's nothing safely visible.
+        """
+        if not _v8_ok or _v8_get_media_store is None:
+            return ""
+        form_data = rec.get("form_data") or {}
+        raw_ids = form_data.get("library_asset_ids") or ""
+        if not raw_ids:
+            return ""
+        ids = [s.strip() for s in raw_ids.split(",") if s.strip()]
+        if not ids:
+            return ""
+        active_pid = _active_profile_id() or ""
+        try:
+            store = _v8_get_media_store()
+        except Exception:
+            return ""
+        tiles = []
+        for aid in ids:
+            try:
+                a = store.get(aid)
+            except Exception:
+                continue
+            if not a:
+                continue
+            if a.profile_id != active_pid and not (a.profile_id or "").startswith("_run_"):
+                continue
+            file_url = url_for("api_media_library_file", asset_id=a.id)
+            label = _h((a.linked_athlete_names[0] if a.linked_athlete_names else a.type) or a.filename)
+            tiles.append(
+                f'<div style="display:inline-flex;flex-direction:column;align-items:center;'
+                f'gap:4px;width:90px">'
+                f'<img src="{_h(file_url)}" alt="" loading="lazy" '
+                f'style="width:90px;height:90px;object-fit:cover;border-radius:6px;'
+                f'border:1px solid var(--border);background:#0a0a0a"/>'
+                f'<div style="font-size:10px;color:var(--ink-muted);text-align:center;'
+                f'width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+                f'{label}</div></div>'
+            )
+        if not tiles:
+            return ""
+        _ml_url = url_for("media_library_page")
+        return (
+            '<div class="card" style="margin-bottom:14px;background:rgba(34,211,238,0.03)">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'margin-bottom:10px">'
+            '<div style="font-weight:600;font-size:13px">Library assets attached</div>'
+            f'<a href="{_h(_ml_url)}" style="font-size:12px;color:var(--ink-muted);'
+            'text-decoration:underline">Manage library &rarr;</a></div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:10px">{"".join(tiles)}</div></div>'
+        )
 
     @app.route("/drafts/<pack_id>/export.txt")
     def stub_pack_export(pack_id):
@@ -13223,11 +13405,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _v8_ok:
             return _layout("Media library", '<div class="empty">V8 media engine unavailable.</div>'), 503
         from flask import request as _req
-        profile_id = _req.args.get("profile_id")
+        requested_pid = _req.args.get("profile_id")
+        active_pid = _active_profile_id()
+        # Strict isolation: even if the caller asks for another profile by
+        # query string, only show the active organisation (or a run-scoped
+        # synthetic profile, which has its own per-run privacy semantics).
+        if requested_pid and requested_pid != active_pid and not requested_pid.startswith("_run_"):
+            return redirect(url_for("media_library_page"))
+        profile_id = requested_pid or active_pid
         if not profile_id:
-            # Pick the first available profile as a sensible default; if no
-            # profiles exist, show an explicit empty state pointing at the
-            # Organisation page instead of silently bouncing back to home.
             _profs = list_profiles()
             if not _profs:
                 _org_url = url_for('organisation_page')
@@ -13318,6 +13504,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         profile_id = (_req.form.get("profile_id") or "").strip()
         if not profile_id:
             return jsonify({"error": "profile_id_required"}), 400
+        active_pid = _active_profile_id() or ""
+        # Strict isolation: reject uploads aimed at a different organisation
+        # than the one the session is on. Run-scoped synthetic profiles are
+        # allowed through since they're tied to a run the user just started.
+        if profile_id != active_pid and not profile_id.startswith("_run_"):
+            return jsonify({"error": "forbidden"}), 403
         description = _req.form.get("description", "").strip()
         asset_type = _req.form.get("asset_type", "athlete_photo").strip()
 
@@ -13354,6 +13546,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset})
         return redirect(url_for("media_library_page", profile_id=profile_id))
 
+    def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
+        """Profile-scoped access guard for media-library files.
+
+        Run-scoped synthetic profiles (``_run_<id>``) are tied to a single
+        run and inherit that run's privacy semantics, so they're allowed
+        through. Otherwise the asset's profile must match the session's
+        currently-active organisation pin: this keeps one org's photos
+        out of another org's reach even if the asset id leaks.
+        """
+        if not asset_profile_id:
+            return False
+        if asset_profile_id.startswith("_run_"):
+            return True
+        return asset_profile_id == _active_profile_id()
+
     @app.route("/api/media-library/file/<asset_id>")
     def api_media_library_file(asset_id: str):
         if not _v8_ok:
@@ -13362,11 +13569,48 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         a = store.get(asset_id)
         if not a:
             return "", 404
+        if not _session_can_access_profile(a.profile_id):
+            return "", 403
         from flask import send_file
         try:
             return send_file(a.path)
         except Exception:
             return "", 404
+
+    @app.route("/api/media-library/list.json")
+    def api_media_library_list_json():
+        """Return media assets for the active profile as JSON.
+
+        Used by the content-creator tools to render an in-form picker
+        without re-uploading. Strictly profile-scoped: only the
+        session's active organisation's assets are returned.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable", "assets": []}), 503
+        from flask import request as _req
+        requested_pid = (_req.args.get("profile_id") or "").strip()
+        active_pid = _active_profile_id() or ""
+        profile_id = requested_pid or active_pid
+        if not profile_id:
+            return jsonify({"profile_id": "", "assets": []})
+        if requested_pid and requested_pid != active_pid and not requested_pid.startswith("_run_"):
+            return jsonify({"error": "forbidden", "assets": []}), 403
+        store = _v8_get_media_store()
+        assets_out = []
+        for a in store.list(profile_id=profile_id, limit=200):
+            ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
+            assets_out.append({
+                "id": ad.get("id", ""),
+                "filename": ad.get("filename", ""),
+                "type": ad.get("type", ""),
+                "linked_athlete_names": ad.get("linked_athlete_names") or [],
+                "linked_venue": ad.get("linked_venue") or "",
+                "linked_event": ad.get("linked_event") or "",
+                "permission_status": ad.get("permission_status", ""),
+                "approval_status": ad.get("approval_status", ""),
+                "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
+            })
+        return jsonify({"profile_id": profile_id, "assets": assets_out})
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/create-graphic", methods=["POST"])
     def api_create_graphic(run_id: str, card_id: str):
