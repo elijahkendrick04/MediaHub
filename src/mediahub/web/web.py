@@ -10555,6 +10555,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 prof.brand_primary = pal["primary"]
             if pal.get("secondary") and prof.brand_secondary in ("", "#000000"):
                 prof.brand_secondary = pal["secondary"]
+            # Per-link audit state for the next-page transfer audits
+            # (E6-E8): the user wants to be able to see, for each link,
+            # what the AI extracted, which playbook served it, and
+            # whether drift detection regenerated the strategy.
+            lcs = result.get("link_capture_state") or {}
+            if isinstance(lcs, dict):
+                prof.link_capture_state = lcs
         elif status == "no_sources":
             # User submitted no links at all — keep the identity fields
             # and let them try again. The gate will keep them here until
