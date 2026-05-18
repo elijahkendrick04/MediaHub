@@ -111,7 +111,9 @@ class TestMotionErrorClassification:
             )
             resp = c.post(f"/api/runs/{run_id}/card/alpha/motion")
 
-        assert resp.status_code == 500
+        # 503 (Service Unavailable) is the correct HTTP class for "feature
+        # not configured on this deployment". Previously returned 500.
+        assert resp.status_code == 503
         body = resp.get_json() or {}
         assert body.get("error") == "render_failed"
         assert body.get("kind") == "infra_missing"
