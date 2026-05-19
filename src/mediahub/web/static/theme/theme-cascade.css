@@ -1,0 +1,71 @@
+/* =====================================================================
+   THEME CASCADE — Phase 1.6 Stage E (the "Looks right" moment)
+   ---------------------------------------------------------------------
+   Three pieces, all declarative CSS:
+
+     1. @view-transition { navigation: auto } — cross-document crossfade
+        triggered automatically on same-origin full-page navigations.
+        Chrome 126+, Safari 18.2+ (May 2026 coverage ≈ 75%). Older
+        browsers silently ignore the at-rule → instant navigation.
+
+     2. :root { transition: --mh-brand-seed 600ms cubic-bezier(.2,.7,.2,1) }
+        — every time the seed changes value, the browser interpolates
+        OKLCH-space between old and new over 600ms. Because Stage C
+        wired every primitive as a live oklch(from var(--mh-brand-seed)
+        ...) expression, the entire derived palette interpolates in
+        lockstep automatically.
+
+     3. @media (prefers-reduced-motion: reduce) — instant swap. Both
+        the :root transition AND the View-Transition pseudo-element
+        animations are turned off. Belt-and-braces (the global
+        guardrails layer already covers the :root case; this rule
+        adds the View-Transition pseudo coverage explicitly).
+
+   References:
+     - W3C CSS View Transitions Module Level 2 — cross-doc support
+       https://drafts.csswg.org/css-view-transitions-2/
+     - CSS Properties and Values API Level 1 — interpolation
+       https://www.w3.org/TR/css-properties-values-api-1/
+     - WCAG 2.3.3 Animation from Interactions (AAA)
+       https://www.w3.org/WAI/WCAG21/Understanding/animation-from-interactions
+     - docs/stage_e_looks_right_cascade_plan.md
+   ===================================================================== */
+
+/* E2 — cross-document View Transition.
+   Browsers that support this (Chrome 126+, Safari 18.2+) crossfade
+   between same-origin navigations automatically. Older browsers
+   silently ignore the at-rule and navigate instantly. */
+@view-transition {
+  navigation: auto;
+}
+
+/* E3 — seed interpolation.
+   When --mh-brand-seed changes value (whether mid-page via JS or
+   across a cross-doc navigation that re-declares the override), the
+   browser interpolates the @property-registered <color> over 600ms.
+   Every Stage C oklch(from var(--mh-brand-seed) ...) expression
+   re-evaluates per frame → entire derived palette moves in lockstep. */
+:root {
+  transition:
+    --mh-brand-seed     600ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    --mh-tertiary-seed  600ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* E4 — reduced-motion override.
+   WCAG 2.3.3 + the European Accessibility Act require respecting
+   prefers-reduced-motion. The global responsive-guardrails layer
+   already disables most transitions for these users, but the
+   View Transitions pseudo-elements (::view-transition-old/new/group)
+   live outside that rule's reach — so we override them explicitly
+   here. The !important is intentional and minimal; it ONLY appears
+   inside the reduced-motion media query, where it's the correct tool. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    transition: none !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}

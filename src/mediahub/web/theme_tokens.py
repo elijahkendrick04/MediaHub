@@ -73,6 +73,7 @@ __all__ = [
     "THEME_BASE_CSS",
     "THEME_FALLBACK_CSS",
     "THEME_DERIVE_CSS",
+    "THEME_CASCADE_CSS",
     "STATIC_THEME_DIR",
 ]
 
@@ -84,14 +85,14 @@ def _load(filename: str) -> str:
     """Read a CSS file under static/theme/.
 
     Raises ``FileNotFoundError`` with a useful message if the file is
-    missing — this is a hard requirement; Stage C cannot fall back
-    silently because the Python loader is the single source of truth
-    for what gets concatenated into BASE_CSS at import time.
+    missing — this is a hard requirement; the loader is the single
+    source of truth for what gets concatenated into BASE_CSS at
+    import time.
     """
     path = STATIC_THEME_DIR / filename
     if not path.is_file():
         raise FileNotFoundError(
-            f"Stage C theme CSS missing: {path}. "
+            f"Theme CSS file missing: {path}. "
             f"Expected file in src/mediahub/web/static/theme/."
         )
     return path.read_text(encoding="utf-8")
@@ -103,16 +104,24 @@ def _load(filename: str) -> str:
 THEME_BASE_CSS: str = _load("theme-base.css")
 THEME_FALLBACK_CSS: str = _load("theme-fallback.css")
 THEME_DERIVE_CSS: str = _load("theme-derive.css")
+# Stage E — cascade-animation layer (@view-transition + :root seed
+# transition + reduced-motion override).
+THEME_CASCADE_CSS: str = _load("theme-cascade.css")
 
 
 # The single module-level constant every other module consumes.
-# Order matters: base first (seeds + role tokens + @property),
-# then fallback (Safari ≤ 16.3 primitive values), then derive
-# (modern oklch(from …) values, last so they win the cascade).
+# Order matters:
+#   1. base       — seeds + role tokens + @property registrations
+#   2. fallback   — Safari ≤ 16.3 primitive values inside @supports not
+#   3. derive     — modern oklch(from …) values inside @supports
+#   4. cascade    — Stage E animation rules (last so they apply
+#                   regardless of @supports branch)
 THEME_TOKENS_CSS: str = (
     THEME_BASE_CSS
     + "\n"
     + THEME_FALLBACK_CSS
     + "\n"
     + THEME_DERIVE_CSS
+    + "\n"
+    + THEME_CASCADE_CSS
 )
