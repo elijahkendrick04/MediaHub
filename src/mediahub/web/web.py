@@ -3317,6 +3317,113 @@ def _render_markdown(text: str) -> str:
     return "\n".join(out)
 
 
+def _logo_chip_html(
+    src_url: str,
+    alt: str = "",
+    *,
+    height: int = 96,
+    dominant_hex: Optional[str] = None,
+    surface_hex: Optional[str] = None,
+    force_chip: bool = False,
+    force_bare: bool = False,
+    extra_attrs: str = "",
+) -> str:
+    """Render an uploaded logo with the chip-vs-bare decision.
+
+    Phase 1.6 Stage F:
+      F1 — default to a neutral chip behind every uploaded logo
+      F2 — auto-detect "safe to drop chip" via ΔE2000 + APCA gates
+
+    The chip's neutral-background styling lives in theme-base.css
+    (.mh-logo-chip class); this helper picks the wrapping
+    structure. Reads the active profile's derived palette for the
+    surface colour (so a re-themed chrome uses the correct
+    surface) and the logo's AI dominant colour for the gates.
+
+    Parameters
+    ----------
+    src_url : str
+        The logo URL (already HTML-escape-safe — callers pass
+        the output of ``url_for`` or pre-escaped).
+    alt : str
+        Alt text for the ``<img>``. Will be HTML-escaped.
+    height : int
+        Max-height for the logo image in CSS px.
+    dominant_hex : str | None
+        The logo's dominant non-neutral colour, typically
+        ``logo_meta['ai_dominant_colours'][0]``. If None, the
+        helper falls back to safe-by-default chip mode.
+    surface_hex : str | None
+        Surface colour the logo will sit on. Defaults to the
+        active profile's resolved surface, or ``#0A0B11`` (the
+        Stage A default).
+    force_chip / force_bare : bool
+        Override the auto-detection. ``force_chip=True`` is used
+        for grids / thumbnails where visual consistency matters
+        more than per-logo lightness.
+    extra_attrs : str
+        Already-escaped attribute fragment appended to the
+        ``<img>`` element (e.g. additional inline style).
+    """
+    safe_src = _h(src_url)
+    safe_alt = _h(alt or "")
+
+    if force_chip and force_bare:
+        force_chip = False  # bare wins on contradiction
+
+    if force_bare:
+        decision_mode = "bare"
+    elif force_chip or dominant_hex is None:
+        decision_mode = "chip"
+    else:
+        if surface_hex is None:
+            surface_hex = _active_surface_hex()
+        try:
+            from mediahub.theming.logo_chip import decide_logo_chip
+            decision = decide_logo_chip(dominant_hex, surface_hex)
+            decision_mode = decision.mode
+        except Exception:
+            decision_mode = "chip"
+
+    img_tag = (
+        f'<img src="{safe_src}" alt="{safe_alt}" '
+        f'style="max-height:{int(height)}px;max-width:100%;'
+        f'object-fit:contain;display:block"{extra_attrs} />'
+    )
+    if decision_mode == "bare":
+        return img_tag
+    return f'<span class="mh-logo-chip">{img_tag}</span>'
+
+
+def _active_surface_hex() -> str:
+    """Resolved value of the active theme's --mh-surface, or
+    ``#0A0B11`` (Stage A default) when no profile is active or the
+    derived palette is missing.
+
+    Stage F uses the dark-scheme surface because MediaHub's chrome
+    is dark-only today; Stage J may revisit when light-mode visual
+    design ships."""
+    try:
+        from flask import current_app
+        get_active = getattr(current_app, "active_profile", None)
+        if not get_active:
+            return "#0A0B11"
+        prof = get_active()
+    except (RuntimeError, Exception):
+        return "#0A0B11"
+    if not prof:
+        return "#0A0B11"
+    try:
+        kit = prof.get_brand_kit()
+        palette = kit.ensure_derived_palette() or {}
+    except Exception:
+        return "#0A0B11"
+    roles = palette.get("roles") or {}
+    dark = roles.get("dark") or {}
+    surface = dark.get("surface")
+    return surface if isinstance(surface, str) and surface.startswith("#") else "#0A0B11"
+
+
 def _theme_seed_style_block() -> str:
     """Return the inline <style id="mh-theme-seed"> block carrying the
     active organisation's brand-seed override.
@@ -3424,14 +3531,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <header class="topnav">
   <a href="{{ url_for('home') }}" class="brand" aria-label="MediaHub — home">
     <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <!-- Pit-wall plate, sharp corners -->
-      <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="#0A0B11" stroke="#262B33" stroke-width="1"/>
-      <!-- Ascending podium bars: silver / lane-yellow / medal -->
-      <rect x="6"  y="20" width="5" height="7"  fill="#F5F2E8" opacity="0.55"/>
-      <rect x="13.5" y="9"  width="5" height="18" fill="#D4FF3A"/>
-      <rect x="21" y="14" width="5" height="13" fill="#F4D58D"/>
-      <!-- Lane baseline -->
-      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="#D4FF3A" stroke-width="1"/>
+      <!-- Pit-wall plate — follows the cascade surface so a re-skinned
+           chrome shows a proper backplate (Phase 1.6 Stage F3). -->
+      <rect x="0.5" y="0.5" width="31" height="31" rx="2" fill="var(--mh-surface)" stroke="var(--mh-outline-rule)" stroke-width="1"/>
+      <!-- Ascending podium bars: silver (ink) / brand primary / brand tertiary.
+           The silver bar uses currentColor so it inherits the link's ink
+           colour (var(--ink)) — Stage F3's "MediaHub's own marks use
+           currentColor + var()" rule. -->
+      <rect x="6"  y="20" width="5" height="7"  fill="currentColor" opacity="0.55"/>
+      <rect x="13.5" y="9"  width="5" height="18" fill="var(--mh-primary)"/>
+      <rect x="21" y="14" width="5" height="13" fill="var(--mh-tertiary)"/>
+      <!-- Lane baseline — brand primary stroke -->
+      <line x1="4" y1="27.5" x2="28" y2="27.5" stroke="var(--mh-primary)" stroke-width="1"/>
     </svg>
     MediaHub
   </a>
@@ -10794,10 +10905,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             avoid_html = "".join(_chip(p, "bad") for p in (profile.brand_phrases_to_avoid or [])[:5])
             logo_html = ""
             if profile.brand_logo_url:
-                logo_html = (
-                    f'<img src="{_h(profile.brand_logo_url)}" alt="Detected logo" '
-                    f'style="max-height:60px;max-width:200px;background:var(--panel);'
-                    f'padding:6px;border:1px solid var(--border);border-radius:6px"/>'
+                # Phase 1.6 Stage F: wrap detected logo in a neutral
+                # chip by default; auto-drop if the dominant colour
+                # is visually distinct from the active surface.
+                _extracted = profile.brand_palette_extracted or {}
+                _dominant = (_extracted.get("primary") or "").strip() or None
+                logo_html = _logo_chip_html(
+                    profile.brand_logo_url,
+                    alt="Detected logo",
+                    height=60,
+                    dominant_hex=_dominant,
                 )
             captured_meta = ""
             if profile.brand_captured_at or profile.brand_source_url:
@@ -11168,7 +11285,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             logo_html = ""
             logo_url = (getattr(p, "brand_logo_url", "") or "").strip()
             if logo_url and (logo_url.startswith("http://") or logo_url.startswith("https://")):
-                logo_html = f'<img src="{_h(logo_url)}" alt="" />'
+                # Phase 1.6 Stage F: profile-card logos are tiny
+                # uniform tiles inside a fixed .logo container; force
+                # chip mode for visual consistency across the grid
+                # (sign-in page renders many orgs side-by-side and
+                # one bare logo amid chipped ones reads as a glitch).
+                logo_html = _logo_chip_html(
+                    logo_url, alt="", height=48, force_chip=True,
+                )
             else:
                 logo_html = _h(_initials(p.display_name))
 
@@ -11563,10 +11687,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                                      logo_id=logo.get("logo_id", ""))
                 preview = ""
                 if mime.startswith("image/"):
-                    preview = (
-                        f'<img src="{_h(serve_url)}" alt="{_h(label)}" '
-                        'style="display:block;max-width:100%;max-height:96px;'
-                        'object-fit:contain;background:var(--mh-prim-neutral-0);border-radius:4px"/>'
+                    # Phase 1.6 Stage F: thumbnail grid — every uploaded
+                    # logo gets the .mh-logo-chip wrapper (visual
+                    # consistency matters more than per-logo lightness).
+                    _dom = (logo.get("ai_dominant_colours") or [None])[0]
+                    preview = _logo_chip_html(
+                        serve_url, alt=label, height=96,
+                        dominant_hex=_dom, force_chip=True,
                     )
                 else:
                     preview = (
