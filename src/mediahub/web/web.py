@@ -4929,15 +4929,27 @@ def create_app() -> Flask:
         if prof is None:
             return redirect(url_for("organisation_setup"))
 
-        conn = _db()
-        rows = conn.execute(
-            "SELECT id, created_at, finished_at, status, profile_id, "
-            "meet_name, our_swims, n_cards, n_queue, error, file_name "
-            "FROM runs WHERE profile_id = ? "
-            "ORDER BY created_at DESC LIMIT 100",
-            (prof.profile_id,),
-        ).fetchall()
-        conn.close()
+        # DB-read is fail-soft: a corrupted/missing data.db or a partial
+        # schema would otherwise 500 the entire Activity page. Treat the
+        # failure as "no runs visible" and surface a recovery hero so the
+        # user knows the page loaded but the store wasn't reachable.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("activity: runs DB unreachable: %s", e)
+            db_failed = True
 
         # Phase 1.3 — Recent posting activity. Last 20 Buffer attempts for
         # this organisation. Fail-soft: if the log module isn't available
@@ -4979,6 +4991,27 @@ def create_app() -> Flask:
                 summaries[run_id] = summary
 
         if not rows:
+            if db_failed:
+                # DB on disk but unreadable — surface honestly so the user
+                # doesn't think their runs vanished. Same shape as the
+                # quiet-weekend hero so the chrome stays familiar.
+                empty_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Activity</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">runs</em>.</h1>'
+                    '<p class="lede">'
+                    "The runs database wasn't readable on this deployment, "
+                    "so the run list is empty even if work was done earlier. "
+                    "Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("activity_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Activity", empty_body, active="activity")
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity</span>'
@@ -5937,10 +5970,13 @@ def create_app() -> Flask:
             )
 
         # --- Legacy V4 cards (collapsed)
-        tcards = {t["card_id"]: t for t in trust.get("cards", [])}
+        # ``card_id`` is canonically present on every card / trust entry,
+        # but an old or hand-edited run JSON might omit it. Use .get()
+        # so a malformed card doesn't 500 the entire Review page.
+        tcards = {t.get("card_id", ""): t for t in trust.get("cards", []) if t.get("card_id")}
         v4_rows = []
         for c in cards:
-            t = tcards.get(c["card_id"], {})
+            t = tcards.get(c.get("card_id", ""), {})
             conf = t.get("confidence", "medium")
             safe = t.get("safe_to_post", "review")
             badge = {"high": "good", "medium": "warn", "low": "bad"}.get(conf, "")
@@ -8057,17 +8093,36 @@ Relay team broke club record"></textarea>
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")
     def privacy_page():
-        conn = _db()
-        n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-        conn.close()
-        n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
-        n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+        # Every inventory probe is fail-soft so a corrupted DB or missing
+        # directory falls through to a "0" count instead of 500ing this
+        # page — the user came here precisely BECAUSE they want to know
+        # what's on disk and how to delete it.
+        n_runs = 0
+        try:
+            conn = _db()
+            try:
+                n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("privacy: runs DB unreachable: %s", e)
+        try:
+            n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
+        except Exception:
+            n_files = 0
+        try:
+            n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+        except Exception:
+            n_uploads = 0
         cache_dir = DATA_DIR / ".cache" / "pb_lookup"
         legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
-        n_cache = (
-            (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
-            + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
-        )
+        try:
+            n_cache = (
+                (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
+                + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
+            )
+        except Exception:
+            n_cache = 0
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
@@ -9975,17 +10030,47 @@ Relay team broke club record"></textarea>
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
             from mediahub.club_platform.stub_pack_store import save_pack
         except ImportError:
-            return _layout("Spotlight",
-                           '<div class="card"><p class="muted">club_platform not available.</p></div>',
-                           active="create"), 501
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "spotlight posts can't be built. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
         run_data = _load_run(run_id)
         if not run_data:
-            return _layout("Not found",
-                           '<div class="empty">Run not found.</div>'), 404
-        pack = build_spotlight_pack(run_data, swimmer_key)
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, "
+                "or the URL might be from a different deployment.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+        try:
+            pack = build_spotlight_pack(run_data, swimmer_key)
+        except Exception as e:
+            log.warning(
+                "spotlight_build: build_spotlight_pack failed for %s/%s: %s",
+                run_id, swimmer_key, e,
+            )
+            pack = None
         if not pack:
-            return _layout("No data",
-                           f'<div class="empty">No achievements for "{_h(swimmer_key)}".</div>'), 404
+            return _recovery_page(
+                "Swimmer not found",
+                f"No achievements were recorded for \"{swimmer_key}\" in this meet. "
+                "Pick another swimmer, or open the meet review to see who's in "
+                "the recognition report.",
+                eyebrow="Athlete spotlight",
+                primary_cta=(
+                    "Choose another swimmer",
+                    url_for("spotlight_landing") + f"?run_id={run_id}",
+                ),
+                secondary_cta=("Open review", url_for("review", run_id=run_id)),
+            )
 
         wf_states = {}
         try:
@@ -10185,19 +10270,56 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import list_swimmers_in_run
         except ImportError:
-            return _layout("Athlete Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create")
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "spotlights can't be browsed. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
 
-        # List recent runs that have a recognition report
-        conn = _db()
-        recent_runs = conn.execute(
-            "SELECT id, meet_name, file_name, created_at FROM runs WHERE status='done' ORDER BY created_at DESC LIMIT 20"
-        ).fetchall()
-        conn.close()
+        # List recent runs that have a recognition report. DB-read is
+        # fail-soft so a corrupted data.db or missing schema doesn't 500
+        # the spotlight landing page — the user gets a recovery hero
+        # instead of a stack trace.
+        recent_runs: list = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                recent_runs = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at FROM runs WHERE status='done' ORDER BY created_at DESC LIMIT 20"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("spotlight: runs DB unreachable: %s", e)
+            db_failed = True
 
         run_id_param = request.args.get("run_id", "")
 
         # Empty state when no meets have been processed yet
         if not recent_runs:
+            if db_failed:
+                empty_body = (
+                    '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+                    '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">meets</em>.</h1>'
+                    '<p class="lede">'
+                    "The runs database wasn't readable on this deployment, "
+                    "so the meet picker is empty. Try refreshing &mdash; if it "
+                    "keeps happening, ask your operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("spotlight_landing")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Athlete Spotlight", empty_body, active="create")
             empty_body = (
                 '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
@@ -10224,7 +10346,17 @@ Relay team broke club record"></textarea>
         if run_id_param:
             run_data = _load_run(run_id_param)
             if run_data:
-                swimmers = list_swimmers_in_run(run_data)
+                # A malformed run_data (missing recognition_report keys,
+                # weird achievement shapes) would otherwise bubble out of
+                # list_swimmers_in_run and 500 the page.
+                try:
+                    swimmers = list_swimmers_in_run(run_data)
+                except Exception as e:
+                    log.warning(
+                        "spotlight: list_swimmers_in_run failed for %s: %s",
+                        run_id_param, e,
+                    )
+                    swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
@@ -10267,7 +10399,16 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
         except ImportError:
-            return _layout("Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create"), 501
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "this spotlight can't be opened. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
 
         run_data = _load_run(run_id)
         if not run_data:
@@ -10278,7 +10419,17 @@ Relay team broke club record"></textarea>
                 secondary_cta=("Back to home", url_for("home")),
             )
 
-        pack = build_spotlight_pack(run_data, swimmer_key)
+        # A malformed run_data shape would otherwise bubble out of
+        # build_spotlight_pack and 500 the page; treat it as "no pack"
+        # so the recovery hero below renders.
+        try:
+            pack = build_spotlight_pack(run_data, swimmer_key)
+        except Exception as e:
+            log.warning(
+                "spotlight_view: build_spotlight_pack failed for %s/%s: %s",
+                run_id, swimmer_key, e,
+            )
+            pack = None
         if not pack:
             return _recovery_page(
                 "Swimmer not found",
@@ -10797,7 +10948,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/free-text", methods=["GET"])
     def free_text_chat_page():
         from mediahub.free_text_chat.session import list_sessions
-        sessions = list_sessions(limit=20)
+        # Fail-soft: a corrupted chat store would otherwise 500 the
+        # Free-text landing page. Treat the failure as "no sessions
+        # visible" so the user can still start a new chat.
+        sessions: list = []
+        store_failed = False
+        try:
+            sessions = list_sessions(limit=20)
+        except Exception as e:
+            log.warning("free-text: list_sessions failed: %s", e)
+            store_failed = True
         rows_html = ""
         for it in sessions:
             view_url = url_for("free_text_chat_view", chat_id=it["chat_id"])
@@ -10835,7 +10995,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h2>Past chats</h2>
   {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
     '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
-   if rows_html else '<p class="muted">No chats yet.</p>'}
+   if rows_html else (
+       '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
+       'readable. You can still start a new chat above; if this persists, ask '
+       'your operator to check the data volume.</p>'
+       if store_failed else
+       '<p class="muted">No chats yet.</p>'
+   )}
 </div>
 
 <p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
@@ -11163,8 +11329,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/drafts")
     def stub_packs_list():
         from mediahub.club_platform.stub_pack_store import list_packs
-        items = list_packs(limit=100)
+        # Fail-soft: a corrupted pack store would otherwise 500 the
+        # Drafts page. Treat the failure as "no packs visible" and tell
+        # the user the store wasn't reachable so they don't think their
+        # drafts were silently deleted.
+        items: list = []
+        store_failed = False
+        try:
+            items = list_packs(limit=100)
+        except Exception as e:
+            log.warning("drafts: list_packs failed: %s", e)
+            store_failed = True
         if not items:
+            if store_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Saved drafts</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">drafts</em>.</h1>'
+                    '<p class="lede">'
+                    "The draft store wasn't readable on this deployment, "
+                    "so the list is empty even if you saved drafts earlier. "
+                    "Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("stub_packs_list")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("make_page")}">Start fresh</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Saved drafts", body, active="create")
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
@@ -11220,10 +11414,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_pack_view(pack_id):
         from mediahub.club_platform.stub_pack_store import load_pack
         from mediahub.club_platform.stubs import render_cards_html
-        rec = load_pack(pack_id)
+        # ``load_pack`` reads from the saved-drafts store; a corrupt
+        # row or missing file should land on the same recovery hero as a
+        # genuinely-deleted draft, not a 500.
+        try:
+            rec = load_pack(pack_id)
+        except Exception as e:
+            log.warning("drafts: load_pack(%s) failed: %s", pack_id, e)
+            rec = None
         if not rec:
-            body = '<div class="empty">Draft not found.</div>'
-            return _layout("Draft not found", body, active="create"), 404
+            return _recovery_page(
+                "Draft not found",
+                "This draft may have been deleted, or the link could be stale. "
+                "Your other drafts are on the Saved drafts page.",
+                eyebrow="Saved drafts",
+                primary_cta=("All drafts", url_for("stub_packs_list")),
+                secondary_cta=("Start a new draft", url_for("make_page")),
+            )
 
         stub_type = rec.get("stub_type", "other")
         type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
@@ -15094,7 +15301,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     def media_library_page():
         """Browse and upload reusable media assets."""
         if not _v8_ok:
-            return _layout("Media library", '<div class="empty">V8 media engine unavailable.</div>'), 503
+            # The V8 media engine is required for everything below — surface
+            # a recovery hero instead of a bare ``<div class="empty">`` so
+            # the user has somewhere to go.
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so the "
+                "library can't be browsed or uploaded to. Other parts of MediaHub "
+                "still work; ask your operator to enable the V8 engine if you need "
+                "a per-org photo library.",
+                eyebrow="Media library",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=503,
+            )
         from flask import request as _req
         requested_pid = _req.args.get("profile_id")
         active_pid = _active_profile_id()
@@ -15126,8 +15346,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
-        store = _v8_get_media_store()
-        assets = store.list(profile_id=profile_id)
+        # Fail-soft on the media store. A corrupted assets DB used to 500
+        # the whole page; now we keep the upload form visible and tell
+        # the user the listing wasn't loadable so they can keep working.
+        assets: list = []
+        store_failed = False
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=profile_id)
+        except Exception as e:
+            log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
+            store_failed = True
         rows_html = ""
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
@@ -15178,7 +15407,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
   <table style="width:100%">
     <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th></tr></thead>
-    <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'}</tbody>
+    <tbody>{rows_html or (
+        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+        'Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. '
+        'Uploads above still work; if this persists, ask your operator to check the data volume.'
+        '</td></tr>' if store_failed else
+        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+    )}</tbody>
   </table>
 </div>
 """
