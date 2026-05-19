@@ -1,0 +1,48 @@
+{
+  "harmonic_fit": {
+    "energy": 23.0,
+    "hue_count": 9,
+    "rotation": 75.0,
+    "template": "X"
+  },
+  "label": "orange",
+  "palette_anchors": {
+    "error_hue": 25.0,
+    "info_hue": 240.0,
+    "neutral_hue": 58.1,
+    "primary_hue": 58.1,
+    "primary_tone40": "#855327",
+    "secondary_hue": 58.1,
+    "success_hue": 142.0,
+    "tertiary_hue": 106.1,
+    "warning_hue": 80.0
+  },
+  "quality_summary": {
+    "n_adjacency_failures": 11,
+    "n_contrast_failures": 0,
+    "n_cvd_failures": 0,
+    "n_status_distance_failures": 0,
+    "passed": true
+  },
+  "roles_dark": {
+    "on_primary": "#4D2600",
+    "on_surface": "#EEE0D8",
+    "primary": "#FBB983",
+    "surface": "#211A15"
+  },
+  "roles_light": {
+    "on_primary": "#FFFFFF",
+    "on_surface": "#211A15",
+    "primary": "#855327",
+    "surface": "#FFFBFF"
+  },
+  "schema_version": "1",
+  "seed_hct": [
+    58.1,
+    65.1,
+    69.5
+  ],
+  "seed_hex": "#FF8C00",
+  "seed_source": "hex",
+  "was_repaired": false
+}
