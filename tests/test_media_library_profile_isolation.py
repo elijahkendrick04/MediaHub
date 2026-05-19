@@ -449,7 +449,10 @@ class TestRunGraphicDefenseInDepth:
             resp = c.post(
                 "/api/runs/run_beta_1/cards/card1/create-graphic",
             )
-        assert resp.status_code == 403, (
+        # The tenant-isolation guard returns 404 (existence oracle
+        # prevention) before the older 403 per-profile gate is reached;
+        # either is acceptable as long as the request is refused.
+        assert resp.status_code in (403, 404), (
             f"alpha session must not be able to render a graphic for a run "
             f"pinned to beta; got {resp.status_code} {resp.data!r}"
         )

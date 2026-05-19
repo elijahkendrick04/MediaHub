@@ -897,6 +897,74 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
 
 
+def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
+    """Resolve the owning profile_id for a run.
+
+    Prefers the JSON's stamped owner, falls back to the runs DB row so
+    legacy files that pre-date the JSON-side stamp still attribute
+    correctly. Returns "" when no owner is recorded anywhere.
+    """
+    if run_data:
+        pid = (run_data.get("profile_id") or "").strip()
+        if pid:
+            return pid
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT profile_id FROM runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        conn.close()
+    except Exception:
+        return ""
+    if not row:
+        return ""
+    return (row["profile_id"] or "").strip()
+
+
+def _can_access_run(run_id: str, run_data: Optional[dict],
+                     active_pid: Optional[str]) -> bool:
+    """Tenant isolation guard for run-scoped routes.
+
+    A run that records an owning ``profile_id`` is only accessible to
+    that organisation's session — direct hits from another org return
+    "not found" (per-route). Runs with no owner stamped (legacy /
+    pre-multi-tenant) stay readable so we don't orphan historical data.
+
+    ``active_pid`` of ``None`` means the deployment has no organisations
+    configured at all (the org gate would have caught a real user before
+    they reached any of these routes, so this code path only fires in
+    test fixtures and pre-onboarding sandboxes). Treat that as a single-
+    tenant sandbox where nothing to isolate exists yet.
+    """
+    if active_pid is None:
+        return True
+    owner = _run_owner_id(run_id, run_data)
+    if not owner:
+        return True
+    return owner == active_pid
+
+
+def _can_access_pack(rec: Optional[dict], active_pid: Optional[str]) -> bool:
+    """Tenant isolation guard for stub draft packs.
+
+    Mirrors the run guard: a pack with no owner stamped is legacy and
+    accessible; otherwise only the owning org's session may read or
+    mutate it. ``rec`` is the dict returned by ``stub_pack_store.load_pack``;
+    callers pass ``None`` for "pack not found", which keeps the 404
+    branch indistinguishable from a foreign-org probe.
+
+    See ``_can_access_run`` for the ``active_pid is None`` sandbox rule.
+    """
+    if active_pid is None:
+        return True
+    if not rec:
+        return True
+    owner = (rec.get("profile_id") or "").strip()
+    if not owner:
+        return True
+    return owner == active_pid
+
+
 def _run_state(run_id: str) -> str:
     """Return one of ``unknown`` | ``in_progress`` | ``done``.
 
@@ -5570,6 +5638,16 @@ def create_app() -> Flask:
     def run_status(run_id):
         _status_url = url_for('api_status', run_id=run_id)
         _review_url = url_for('review', run_id=run_id)
+        # Tenant gate: prevent the progress page from acting as an
+        # existence oracle for runs owned by a different org.
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk or in memory. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Run status",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Upload a new file", url_for("upload")),
+            )
         # If the run already finished (e.g. user refreshes /runs/<id>
         # post-completion, or bookmarks the URL), skip the holding pen
         # and send them straight to the review queue. Same for error.
@@ -5709,6 +5787,10 @@ def create_app() -> Flask:
 
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
+        # Tenant gate: status polling would otherwise let a foreign org
+        # infer when another org's pipeline finishes.
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"status": "unknown", "error": "Run not found"}), 404
         active = _active_runs.copy_value(run_id)
         if active:
             return jsonify(active)
@@ -5726,6 +5808,8 @@ def create_app() -> Flask:
     @app.route("/review/<run_id>")
     def review(run_id):
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
         if not data:
             return _recovery_page(
                 "Run not found",
@@ -7262,6 +7346,8 @@ function addGraphicToPack(btn, visualId) {{
     @app.route("/api/runs/<run_id>/recognition")
     def api_recognition(run_id):
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "not found"}), 404
         if not data:
             return jsonify({"error": "not found"}), 404
         rr = data.get("recognition_report")
@@ -7272,6 +7358,8 @@ function addGraphicToPack(btn, visualId) {{
     @app.route("/api/runs/<run_id>/swim/<swim_id>/trace")
     def api_swim_trace(run_id, swim_id):
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "not found"}), 404
         if not data:
             return jsonify({"error": "not found"}), 404
         rr = data.get("recognition_report") or {}
@@ -7315,6 +7403,8 @@ function addGraphicToPack(btn, visualId) {{
 
         # Load run data
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
         if not data:
             return jsonify({"error": "run not found"}), 404
 
@@ -7636,6 +7726,8 @@ function addGraphicToPack(btn, visualId) {{
     def pb_audit_page(run_id):
         """Full PB audit page with per-swimmer drill-down."""
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
         if not data:
             return _recovery_page(
                 "Run not found",
@@ -7734,6 +7826,8 @@ function addGraphicToPack(btn, visualId) {{
     def pb_verify_form(run_id, swimmer_key):
         """Form to enter correct ASA number for a needs-verification swimmer."""
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
         if not data:
             return _recovery_page(
                 "Run not found",
@@ -7832,6 +7926,9 @@ function addGraphicToPack(btn, visualId) {{
     @app.route("/audit/<run_id>/ignore/<path:swimmer_key>", methods=["POST"])
     def pb_ignore(run_id, swimmer_key):
         """Mark 'ignore PBs for this swimmer in this meet'."""
+        # Refuse to mutate corrections for a run that isn't ours.
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return redirect(url_for("home"))
         reason = request.form.get("reason", "User requested ignore")
         from swim_content_pb.corrections import CorrectionsStore
         cs = CorrectionsStore()
@@ -7842,6 +7939,8 @@ function addGraphicToPack(btn, visualId) {{
     def pb_ground_truth(run_id):
         """Upload a CSV of expected outcomes and run the ground-truth harness."""
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
         if not data:
             return _recovery_page(
                 "Run not found",
@@ -7913,6 +8012,8 @@ function addGraphicToPack(btn, visualId) {{
         if state == "in_progress":
             return jsonify({"error": "in_progress", "retry_after": 4}), 202
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "not found"}), 404
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data.get("cards", []))
@@ -7920,6 +8021,8 @@ function addGraphicToPack(btn, visualId) {{
     @app.route("/api/runs/<run_id>/trust")
     def api_trust(run_id):
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "not found"}), 404
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data.get("trust", {}))
@@ -7930,6 +8033,8 @@ function addGraphicToPack(btn, visualId) {{
         if state == "in_progress":
             return jsonify({"error": "in_progress", "retry_after": 4}), 202
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return jsonify({"error": "not found"}), 404
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data)
@@ -7938,6 +8043,8 @@ function addGraphicToPack(btn, visualId) {{
     @app.route("/ground-truth/<run_id>", methods=["GET", "POST"])
     def ground_truth(run_id):
         data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
         if not data:
             return _recovery_page(
                 "Run not found",
@@ -8108,6 +8215,15 @@ Relay team broke club record"></textarea>
 
     @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
     def privacy_delete_run(run_id):
+        # CRITICAL: this is a destructive primitive. Without an owner
+        # check anyone signed in to any org could delete any other org's
+        # run by POSTing the URL. The guard is permissive for un-owned
+        # legacy runs (matching every other run route's behaviour) and
+        # silently no-ops when the active org doesn't own the run so a
+        # foreign session can't even confirm the run exists.
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            return redirect(url_for("home"))
         _delete_run(run_id)
         return redirect(url_for("home"))
 
@@ -9446,6 +9562,8 @@ Relay team broke club record"></textarea>
         import zipfile
 
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
         if run_data is None:
             return jsonify({"error": "run_not_found"}), 404
 
@@ -9979,6 +10097,8 @@ Relay team broke club record"></textarea>
                            '<div class="card"><p class="muted">club_platform not available.</p></div>',
                            active="create"), 501
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
         if not run_data:
             return _layout("Not found",
                            '<div class="empty">Run not found.</div>'), 404
@@ -10176,6 +10296,7 @@ Relay team broke club record"></textarea>
              "swimmer_key":  swimmer_key,
              "n_approved":   len(approved)},
             [card],
+            profile_id=_active_profile_id(),
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
@@ -10270,6 +10391,8 @@ Relay team broke club record"></textarea>
             return _layout("Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create"), 501
 
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
         if not run_data:
             return _recovery_page(
                 "Run not found",
@@ -10651,6 +10774,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     _STUB_TYPE_BY_CLASS.get(stub_cls_name, "other"),
                     form_data,
                     cards_payload.get("cards") or [],
+                    profile_id=_active_profile_id(),
                 )
             except Exception:
                 app.logger.exception("stub save_pack failed")
@@ -11149,7 +11273,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     pack_form_data["profile_id"] = active_pid_for_pack
             except Exception:
                 app.logger.exception("free-text chat library picker resolve failed")
-        saved = save_pack("free_text", pack_form_data, [card])
+        saved = save_pack("free_text", pack_form_data, [card],
+                          profile_id=_active_profile_id())
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
@@ -11221,6 +11346,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.club_platform.stub_pack_store import load_pack
         from mediahub.club_platform.stubs import render_cards_html
         rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            # Foreign org probing for the pack — surface the same
+            # "not found" body as a real miss so the existence of the
+            # other org's draft can't be inferred.
+            rec = None
         if not rec:
             body = '<div class="empty">Draft not found.</div>'
             return _layout("Draft not found", body, active="create"), 404
@@ -11340,6 +11470,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_pack_export(pack_id):
         from mediahub.club_platform.stub_pack_store import load_pack, export_pack_text
         rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            rec = None
         if not rec:
             return ("Pack not found", 404)
         text = export_pack_text(rec)
@@ -11353,7 +11485,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/drafts/<pack_id>/delete", methods=["POST"])
     def stub_pack_delete(pack_id):
-        from mediahub.club_platform.stub_pack_store import delete_pack
+        # CRITICAL destructive primitive — see /privacy/run/<id>/delete.
+        # Resolve the pack first, gate on ownership, then delegate. A
+        # foreign session sees the same redirect either way.
+        from mediahub.club_platform.stub_pack_store import (
+            load_pack, delete_pack,
+        )
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            return redirect(url_for("stub_packs_list"))
         delete_pack(pack_id)
         return redirect(url_for("stub_packs_list"))
 
@@ -11367,7 +11507,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         queue → approved → rejected and persists the state in the pack JSON
         so reviewers can come back to it across sessions.
         """
-        from mediahub.club_platform.stub_pack_store import update_card_status
+        from mediahub.club_platform.stub_pack_store import (
+            load_pack, update_card_status,
+        )
+        # Tenant-isolation guard: only the owning org may mutate card
+        # status. Probe the pack first; if it's foreign, return the same
+        # generic 400 as a malformed status string so existence isn't
+        # confirmable from the response shape.
+        existing = load_pack(pack_id)
+        if not _can_access_pack(existing, _active_profile_id()):
+            return jsonify({"ok": False, "error": "invalid_request"}), 400
         status = (request.form.get("status") or "").strip().lower()
         rec = update_card_status(pack_id, card_idx, status)
         if not rec:
@@ -13831,6 +13980,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if _run_state(run_id) == "in_progress":
             return _layout("Still processing", _in_progress_page(run_id, "content_pack_approved_only"), active="home")
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
         if not run_data:
             return _recovery_page(
                 "Run not found",
@@ -14066,6 +14217,8 @@ function copyWhyCard(btn, taId) {{
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
     def api_workflow_set(run_id, card_id):
         """Set workflow status or edits for a card."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
         ws = _get_wf_store()
         if ws is None:
             return jsonify({"error": "workflow not available"}), 503
@@ -14102,6 +14255,8 @@ function copyWhyCard(btn, taId) {{
 
     @app.route("/api/workflow/<run_id>/mark-all-posted", methods=["POST"])
     def api_workflow_mark_all_posted(run_id):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return redirect(url_for("home"))
         ws = _get_wf_store()
         if ws is None:
             return redirect(url_for("review", run_id=run_id))
@@ -14121,6 +14276,8 @@ function copyWhyCard(btn, taId) {{
         GET /api/runs/<run_id>/turn-into-status/<job_id> for result.
         """
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
         if not run_data:
             return jsonify({"error": "run not found"}), 404
 
@@ -14194,6 +14351,8 @@ function copyWhyCard(btn, taId) {{
     @app.route("/api/runs/<run_id>/turn-into-status/<job_id>", methods=["GET"])
     def api_turn_into_status(run_id: str, job_id: str):
         """Poll Turn-Into job status. Returns { status: running|done|error, ... }."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
         job = _turn_into_jobs.get(job_id)
         if job is None:
             return jsonify({"status": "not_found", "error": "job not found"}), 404
@@ -14221,6 +14380,8 @@ function copyWhyCard(btn, taId) {{
             "text":           str,
           }
         """
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "pack not found"}), 404
         from mediahub.turn_into import load_pack, save_pack
         base = DATA_DIR / "turn_into_packs"
         pack = load_pack(run_id, pack_id, base_dir=base)
@@ -14283,6 +14444,8 @@ function copyWhyCard(btn, taId) {{
         download = request.args.get("download") == "1"
 
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
         if run_data is None:
             return jsonify({"error": "run_not_found"}), 404
 
@@ -14352,6 +14515,11 @@ function copyWhyCard(btn, taId) {{
     @app.route("/runs/<run_id>/pack/<pack_id>")
     def turn_into_pack_view(run_id, pack_id):
         """Render a saved Turn-Into pack with the 7 artefacts."""
+        # Turn-Into packs are namespaced under <run_id>/<pack_id> on
+        # disk, so the run's owner check is the right gate.
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return _layout("Not found",
+                           '<div class="empty">Repurpose pack not found.</div>'), 404
         from mediahub.turn_into import load_pack
         pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
         if pack is None:
@@ -14615,6 +14783,8 @@ function tiRegenerate() {{
         if state == "in_progress":
             return _layout("Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home")
         run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
         if not run_data:
             return _recovery_page(
                 "Run not found",
@@ -15414,6 +15584,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     return jsonify({"error": f"run_load_failed: {e}"}), 500
             else:
                 return jsonify({"error": "run_not_found"}), 404
+        # Tenant isolation: even though the per-profile gate below
+        # catches most cross-org access, an owned run could in theory
+        # have a derived profile_id that slips through if club_filter
+        # falls back to a foreign-club code. Gate on the run's stored
+        # owner first.
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
 
         # Find the matching card / achievement
         rr = run_data.get("recognition_report") or {}
@@ -15603,6 +15780,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     def sponsor_variant_view(run_id: str, card_id: str):
         """Server-rendered sponsor variant page for one card."""
         run_data, target = _load_run_for_card(run_id, card_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            run_data = None
+            target = None
         if run_data is None:
             return _recovery_page(
                 "Run not found",
@@ -15795,6 +15975,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     return jsonify({"error": f"run_load_failed: {e}"}), 500
             else:
                 return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
 
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
@@ -16008,6 +16190,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     return jsonify({"error": f"run_load_failed: {e}"}), 500
             else:
                 return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
 
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
@@ -16112,6 +16296,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     return jsonify({"error": f"run_load_failed: {e}"}), 500
             else:
                 return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
 
         try:
             n = int(request.args.get("n", "3"))
@@ -16267,6 +16453,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     def api_venue_search(run_id: str):
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
         from flask import request as _req
         q = _req.args.get("q", "").strip()
         if not q:
@@ -16291,6 +16479,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return _layout(
+                "No visuals",
+                '<div class="empty">No graphics have been generated for this run yet. Open the recognition page and use "Create graphic" on cards to add some.</div>',
+            ), 404
         from flask import send_file
         import io, zipfile
 
