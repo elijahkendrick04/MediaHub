@@ -107,6 +107,12 @@ THEME_DERIVE_CSS: str = _load("theme-derive.css")
 # Stage E — cascade-animation layer (@view-transition + :root seed
 # transition + reduced-motion override).
 THEME_CASCADE_CSS: str = _load("theme-cascade.css")
+# Polish layer — additive component primitives (drag-drop, modals,
+# mobile nav, type/easing scales, focus rings on non-button controls,
+# WCAG-safe brand-link lift). Exported separately because it must
+# load AFTER BASE_CSS in web.py so it can override legacy component
+# rules with the same specificity.
+THEME_COMPONENTS_CSS: str = _load("theme-components.css")
 
 
 # The single module-level constant every other module consumes.
