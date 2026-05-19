@@ -43,15 +43,19 @@ def test_save_get_list_round_trip():
     assert any(r.id == saved.id for r in rows)
 
 
-def test_describe_heuristic_extracts_athlete_and_venue():
+def test_describe_returns_schema_shape_without_provider():
+    """Without a cloud LLM provider configured, parse_description
+    returns the canonical empty-result shape (no regex fabrication).
+    The asset still uploads; the user edits tags manually."""
     out = parse_description("Eira Hughes swimming 200m Freestyle at Wales National Pool")
-    # Heuristic fallback should populate the standard schema.
     assert isinstance(out, dict)
-    for key in ("athletes", "venue", "event", "tags"):
+    for key in ("athletes", "venue", "event", "tags", "asset_type", "permission_hint"):
         assert key in out
-    # Specific extractions:
-    assert any("Eira" in n for n in out.get("athletes") or [])
-    assert "Wales" in (out.get("venue") or "")
+    # Empty lists / None values — no heuristic extraction.
+    assert out["athletes"] == []
+    assert out["venue"] is None
+    assert out["event"] is None
+    assert out["tags"] == []
 
 
 def test_score_asset_returns_float():

@@ -13,17 +13,19 @@ ignored. This module fixes that by:
 
   1. ``gather_colour_sources(...)``  — collect every colour signal,
      labelled by source so the AI can weight them differently.
-  2. ``resolve_palette(...)``        — ask the LLM to pick the actual
-     brand primary / secondary / accent (and optionally a fourth) from
-     ALL signals. Falls back to a frequency-based heuristic when no
-     LLM is reachable.
+  2. ``resolve_palette(...)``        — ask the cloud LLM (Gemini /
+     Anthropic) to pick the actual brand primary / secondary / accent
+     (and optionally a fourth) from ALL signals. Raises
+     ``ClaudeUnavailableError`` when no provider is configured — the
+     palette pick is a judgement call with no honest non-AI substitute.
   3. ``apply_manual_override(...)``  — if the user supplied a manual
      override on the confirmation form, that wins; the AI only runs
      when the manual override is empty or invalid.
 
-No hardcoded "first 3 hex codes" logic. The LLM reasons about which
-sources are deliberate (guidelines doc, logo dominant colours) vs
-incidental (every CSS hex on a website) and picks accordingly.
+No hardcoded "first 3 hex codes" logic, no regex frequency-ranking
+fallback. The LLM reasons about which sources are deliberate
+(guidelines doc, logo dominant colours) vs incidental (every CSS hex
+on a website) and picks accordingly.
 """
 from __future__ import annotations
 
@@ -232,47 +234,6 @@ def _validate_picks(raw: object, *, allow_fourth: bool,
     return out
 
 
-def _heuristic_pick(sources: dict[str, list[str]], *, allow_fourth: bool) -> dict:
-    """Frequency-weighted heuristic when no LLM is reachable.
-
-    Source weights mirror the LLM guidance:
-      guidelines = 4, logo = 3, social = 2, website = 1, other = 1
-    Pure white/black are demoted heavily so they only appear when they
-    dominate the explicit sources.
-    """
-    if not sources:
-        return {}
-
-    scores: dict[str, float] = {}
-    for label, hexes in sources.items():
-        ll = label.lower()
-        if "guidelines" in ll:
-            weight = 4.0
-        elif ll.startswith("logo:") or " logo " in ll:
-            weight = 3.0
-        elif ll.startswith("website "):
-            weight = 1.0
-        else:
-            weight = 2.0
-        for i, h in enumerate(hexes):
-            rank_bonus = max(0.0, 1.0 - i * 0.1)
-            base = weight + rank_bonus
-            if h in ("#ffffff", "#000000"):
-                base *= 0.15
-            scores[h] = scores.get(h, 0.0) + base
-
-    ranked = sorted(scores.items(), key=lambda kv: -kv[1])
-    picks = [h for h, _ in ranked]
-    out: dict = {}
-    for slot, h in zip(SLOTS, picks):
-        out[slot] = h
-    if allow_fourth and len(picks) >= 4:
-        out[FOURTH_SLOT] = picks[3]
-    if out:
-        out["reasoning"] = "Heuristic frequency ranking (no LLM available)."
-    return out
-
-
 def resolve_palette(
     *,
     org_name: str,
@@ -283,22 +244,32 @@ def resolve_palette(
     """Decide the brand palette from all gathered colour signals.
 
     Returns a dict with keys ``primary``, ``secondary``, ``accent``, an
-    optional ``fourth`` (only present when the AI / heuristic actually
-    surfaced a fourth colour), and a ``reasoning`` string. Always
-    returns; never raises. An empty dict is returned only when there
-    are zero usable colour signals AND no LLM is available.
+    optional ``fourth``, and a ``reasoning`` string. Returns an empty
+    dict when no usable colour signals are supplied.
+
+    Raises:
+        ClaudeUnavailableError: when colour signals exist but the
+        configured cloud LLM is unreachable. The palette decision is a
+        judgement call about which of the org's signals are the actual
+        brand colours — there is no honest non-AI substitute, so we
+        surface the error to the caller (web.py wraps the call in
+        try/except and leaves the existing palette untouched).
     """
     sources = sources or {}
+    if not sources:
+        return {}
     universe: set[str] = set()
     for hexes in sources.values():
         universe.update(hexes)
 
-    try:
-        from mediahub.media_ai.llm import generate_json, is_available
-    except Exception:
-        return _heuristic_pick(sources, allow_fourth=allow_fourth)
-    if not is_available() or not sources:
-        return _heuristic_pick(sources, allow_fourth=allow_fourth)
+    from mediahub.media_ai.llm import (
+        ClaudeUnavailableError, generate_json, is_available,
+    )
+    if not is_available():
+        raise ClaudeUnavailableError(
+            "No cloud LLM provider is reachable; cannot resolve brand "
+            "palette. Configure GEMINI_API_KEY or ANTHROPIC_API_KEY."
+        )
 
     prompt = _build_llm_prompt(
         org_name=org_name,
@@ -311,20 +282,15 @@ def resolve_palette(
                             max_tokens=600, fallback={})
     except Exception as e:
         log.debug("palette resolver LLM call failed: %s", e)
-        return _heuristic_pick(sources, allow_fourth=allow_fourth)
+        raise ClaudeUnavailableError(
+            f"Palette resolver LLM call failed: {e}"
+        ) from e
 
     picks = _validate_picks(raw, allow_fourth=allow_fourth, universe=universe)
-    # If the LLM only returned a partial palette, top up from the heuristic
-    # so the org always gets three slots when sources are available.
-    needed = [k for k in SLOTS if k not in picks]
-    if needed:
-        fallback = _heuristic_pick(sources, allow_fourth=allow_fourth)
-        for k in needed:
-            v = fallback.get(k)
-            if v and v not in picks.values():
-                picks[k] = v
     if not picks:
-        return _heuristic_pick(sources, allow_fourth=allow_fourth)
+        raise ClaudeUnavailableError(
+            "The LLM returned no usable palette picks."
+        )
     return picks
 
 

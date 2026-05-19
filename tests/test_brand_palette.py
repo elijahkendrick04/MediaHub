@@ -2,14 +2,16 @@
 
 The brand.palette module unifies colour signals from every source the
 org supplied (website + social links + brand-guidelines document +
-uploaded logos) and asks the AI to pick the actual brand palette. A
-heuristic fallback runs when no LLM is reachable.
+uploaded logos) and asks the cloud LLM (Gemini / Anthropic) to pick
+the actual brand palette. There is no heuristic fallback — when no
+provider is configured the resolver raises ClaudeUnavailableError
+and the caller leaves the existing palette untouched.
 
 Covered:
   1. gather_colour_sources merges every source, labelled, cleaned
   2. _normalise / sanitise_manual_palette guard against bad hex
   3. resolve_palette uses the LLM when available
-  4. resolve_palette falls back to a frequency heuristic when LLM is off
+  4. resolve_palette raises ClaudeUnavailableError when LLM is off
   5. LLM hallucinations (hex codes not in the supplied sources) are dropped
   6. effective_palette merges manual override on top of AI pick
 """
@@ -137,7 +139,10 @@ def test_resolve_uses_llm_when_available(monkeypatch):
     assert out["reasoning"].startswith("Primary")
 
 
-def test_resolve_falls_back_when_llm_unavailable(monkeypatch):
+def test_resolve_raises_when_llm_unavailable(monkeypatch):
+    """When no cloud LLM provider is configured, resolve_palette raises
+    ClaudeUnavailableError. Callers (web.py) wrap the call in
+    try/except and leave the existing palette untouched."""
     from mediahub.media_ai import llm as _llm
     monkeypatch.setattr(_llm, "is_available", lambda: False)
 
@@ -146,19 +151,15 @@ def test_resolve_falls_back_when_llm_unavailable(monkeypatch):
         brand_guidelines={"palette_mentions": ["#ff0000", "#00aaff"]},
         brand_logos=None,
     )
-    out = palette.resolve_palette(
-        org_name="Demo", voice_summary="", sources=sources, allow_fourth=False,
-    )
-    # Heuristic prefers guidelines-mentioned colours over website CSS
-    assert out["primary"] == "#ff0000"
-    # Pure black should be demoted heavily
-    assert out.get("secondary") != "#000000" or out.get("accent") != "#000000"
+    with pytest.raises(_llm.ClaudeUnavailableError):
+        palette.resolve_palette(
+            org_name="Demo", voice_summary="", sources=sources, allow_fourth=False,
+        )
 
 
 def test_resolve_drops_hallucinated_hex(monkeypatch):
     """The LLM is instructed to only pick from the supplied colours; if
-    it picks a colour we didn't show it, we drop the slot (and the
-    heuristic backfills)."""
+    it picks a colour we didn't show it, we drop the slot."""
     from mediahub.media_ai import llm as _llm
     monkeypatch.setattr(_llm, "is_available", lambda: True)
     monkeypatch.setattr(
@@ -178,12 +179,13 @@ def test_resolve_drops_hallucinated_hex(monkeypatch):
     )
     assert out["primary"] == "#0066cc"
     assert out["accent"] == "#ff0000"
-    # The hallucinated #abcdef is dropped; the heuristic backfills
-    # secondary from the available pool. It should NOT be #abcdef.
+    # The hallucinated #abcdef is dropped — the slot is simply absent
+    # from the result since there's no longer a heuristic backfill.
     assert out.get("secondary") != "#abcdef"
 
 
-def test_resolve_returns_empty_when_no_sources_and_no_llm(monkeypatch):
+def test_resolve_returns_empty_when_no_sources(monkeypatch):
+    """No colour signals at all → empty dict, no LLM call needed."""
     from mediahub.media_ai import llm as _llm
     monkeypatch.setattr(_llm, "is_available", lambda: False)
     assert palette.resolve_palette(
