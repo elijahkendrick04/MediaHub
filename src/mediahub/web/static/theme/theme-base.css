@@ -120,6 +120,39 @@
 }
 
 /* =====================================================================
+   STAGE F — Logo Intelligence
+   ---------------------------------------------------------------------
+   The .mh-logo-chip utility wraps every uploaded logo by default
+   (safe-by-default). The server-side helper _logo_chip_html in
+   web.py decides chip vs bare via the OKLCH ΔE2000 + APCA dual-
+   polarity gates in src/mediahub/theming/logo_chip.py.
+
+   Chip background is a near-white anchor so logos designed against
+   white papers preserve their identity regardless of the surrounding
+   theme. Elevation-1 shadow keeps the chip readable as foreground
+   on both light and dark surfaces. The 8/12 padding gives 1× the
+   logo's typical clear-space; 6px radius matches the platform's
+   standard card radius.
+   ===================================================================== */
+.mh-logo-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--mh-prim-neutral-0);
+  border-radius: 6px;
+  border: 1px solid var(--mh-outline-variant);
+  box-shadow: var(--mh-elevation-1);
+}
+.mh-logo-chip > img,
+.mh-logo-chip > svg {
+  display: block;
+  max-height: 96px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* =====================================================================
    @PROPERTY REGISTRATIONS
    ---------------------------------------------------------------------
    Every animatable colour token is registered so Stage E's cascade
