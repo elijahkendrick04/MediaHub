@@ -107,6 +107,45 @@ def _resolve_email_primary(profile) -> str:
     return _safe_hex(_get(profile, "brand_primary"), "#0A2540")
 
 
+def _resolve_email_secondary(profile) -> str:
+    """Resolve the secondary colour the email accent line + footer
+    sub-rule should use. Honours the user's confirmed secondary so a
+    navy + gold club shows the gold strip instead of MediaHub default.
+
+    Order of preference:
+      1. ``brand_palette_manual["secondary"]`` — explicit override
+      2. ``brand_palette_extracted["secondary"]`` — AI's confirmed pick
+      3. theme-store secondary_container (HCT-derived from primary)
+      4. legacy ``brand_secondary`` field
+      5. neutral slate
+
+    The theme-store value is third (not first) because HCT derives the
+    secondary container from the primary's hue — so a navy + gold club
+    that confirmed "secondary = gold" would otherwise see a muted navy
+    band as the "secondary", erasing the second brand colour.
+    """
+    manual = _get(profile, "brand_palette_manual") or {}
+    extracted = _get(profile, "brand_palette_extracted") or {}
+    for src in (manual, extracted):
+        if isinstance(src, dict):
+            v = src.get("secondary")
+            if isinstance(v, str) and v.startswith("#"):
+                return _safe_hex(v, "#475569")
+    pid = _get(profile, "profile_id")
+    if pid:
+        try:
+            from mediahub.theming.theme_store import read_theme, palette_for_email
+            theme_json = read_theme(pid)
+            if theme_json:
+                p = palette_for_email(theme_json)
+                hex_value = p.get("secondary")
+                if isinstance(hex_value, str) and hex_value.startswith("#"):
+                    return _safe_hex(hex_value, "#475569")
+        except Exception:
+            pass
+    return _safe_hex(_get(profile, "brand_secondary"), "#475569")
+
+
 def _para_html(text: str) -> str:
     """Convert plaintext (double-newline-separated paragraphs) into
     a series of <p> tags with inline styles. Single newlines become
@@ -146,6 +185,7 @@ def render_email_html(
     org_name = _get(profile, "display_name") or _get(profile, "short_name") or ""
     # Phase 1.6 Stage G — prefer theme-store light primary over legacy field.
     brand_primary = _resolve_email_primary(profile)
+    brand_secondary = _resolve_email_secondary(profile)
     logo_url = _get(profile, "brand_logo_url") or ""
 
     meet_summary = meet_summary or {}
@@ -208,13 +248,22 @@ def render_email_html(
            if subtitle else "")
         + '</td></tr>\n'
 
+        # Brand-secondary accent band. Without this the user's
+        # confirmed secondary never appeared in the rendered email —
+        # the header used the primary, the body used neutral ink, the
+        # footer used grey. A 4px strip is non-invasive but visually
+        # confirms the second brand colour carried through.
+        '<tr><td style="padding:0;background:' + brand_secondary
+        + ';height:4px;line-height:4px;font-size:0">&nbsp;</td></tr>\n'
+
         # Body
         '<tr><td style="padding:28px 32px 8px 32px">\n'
         + body_html
         + '</td></tr>\n'
 
         # Footer
-        '<tr><td style="padding:0 32px 28px 32px">\n'
+        '<tr><td style="padding:0 32px 28px 32px;'
+        'border-top:1px solid ' + brand_secondary + '">\n'
         + footer_html
         + '</td></tr>\n'
 

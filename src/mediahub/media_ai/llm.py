@@ -238,6 +238,66 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
 _GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 _GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
 
+# ---------------------------------------------------------------------------
+# Gemini overload circuit breaker
+# ---------------------------------------------------------------------------
+# When Gemini returns repeated 5xx / overload responses, every subsequent
+# call in the same request still pays the round-trip cost before falling
+# through to Anthropic. The org-setup capture step is the worst offender —
+# it fires ~24 sequential Gemini calls (block_detector, content_extractor,
+# endpoint_discoverer, strategy × every link), so a sustained Gemini
+# outage turns a normal ~10s capture into a 60-80s hang and the user
+# stares at a loader assuming the app is broken.
+#
+# The breaker is a tiny in-process trip switch: once we see N consecutive
+# Gemini failures within a short window, skip Gemini entirely for a cool-
+# off period and go straight to whatever's next in the provider order.
+# Any Gemini success clears the trip.
+#
+# This is intentionally per-process, not cluster-wide. With two gunicorn
+# workers on Render Standard the cost of the second worker independently
+# discovering the outage is one wasted call per request batch, which is
+# fine — we'd rather not bring in Redis just for this signal.
+import threading as _bt
+
+_GEMINI_BREAKER_THRESHOLD = int(
+    os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3")
+)
+_GEMINI_BREAKER_COOLDOWN_S = float(
+    os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60")
+)
+_gemini_breaker_lock = _bt.Lock()
+_gemini_breaker_state: dict[str, float] = {
+    "consecutive_failures": 0.0,  # float so it round-trips through env
+    "tripped_until": 0.0,         # time.monotonic() value
+}
+
+
+def _gemini_breaker_is_open() -> bool:
+    """True while we're skipping Gemini after sustained failures."""
+    with _gemini_breaker_lock:
+        return time.monotonic() < _gemini_breaker_state["tripped_until"]
+
+
+def _gemini_breaker_record_failure() -> None:
+    """Count a failure; trip the breaker when the threshold is hit."""
+    with _gemini_breaker_lock:
+        _gemini_breaker_state["consecutive_failures"] += 1
+        if (
+            _gemini_breaker_state["consecutive_failures"]
+            >= _GEMINI_BREAKER_THRESHOLD
+        ):
+            _gemini_breaker_state["tripped_until"] = (
+                time.monotonic() + _GEMINI_BREAKER_COOLDOWN_S
+            )
+
+
+def _gemini_breaker_record_success() -> None:
+    """Any success clears the trip and resets the failure counter."""
+    with _gemini_breaker_lock:
+        _gemini_breaker_state["consecutive_failures"] = 0
+        _gemini_breaker_state["tripped_until"] = 0.0
+
 
 def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
     """Call Google Gemini generateContent. Returns text or None.
@@ -245,9 +305,20 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
     Free-tier limits (gemini-2.5-flash): 15 RPM, 1,500 RPD. Plenty for
     a small-club deployment; the dissertation's cost model assumes
     free tier handles the entire small-club tier.
+
+    Returns None immediately (without an HTTP round-trip) while the
+    overload circuit breaker is tripped — see ``_gemini_breaker_*``
+    above. The caller's normal fall-through to Anthropic kicks in
+    the same way it would on a real Gemini failure.
     """
     key = _resolve_gemini_key()
     if not key:
+        return None
+    if _gemini_breaker_is_open():
+        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
+                  duration_ms=0.0, error_kind="breaker_open",
+                  error_message="Gemini circuit breaker is open; "
+                                "skipping to next provider")
         return None
     try:
         import requests
@@ -305,6 +376,12 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
                   duration_ms=dur_ms, error_kind=f"http_{r.status_code}",
                   error_message=(r.text or "")[:300])
+        # 5xx / overload signals warrant tripping the breaker so the
+        # next call this request doesn't waste another round-trip.
+        # 4xx (other than 429, handled above) are usually our fault
+        # (bad payload) — don't trip on those.
+        if r.status_code >= 500:
+            _gemini_breaker_record_failure()
         return None
     try:
         data = r.json()
@@ -342,6 +419,7 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
             provider="gemini", ok=True, model=_GEMINI_MODEL,
             tokens_in=tin, tokens_out=tout, duration_ms=dur_ms,
         )
+        _gemini_breaker_record_success()
         return out
     _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
               duration_ms=dur_ms, error_kind="empty_response",
@@ -351,9 +429,16 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
 
 def _call_gemini_vision(image_paths: list[str], prompt: str,
                         system: Optional[str], max_tokens: int) -> Optional[str]:
-    """Gemini multimodal generateContent — same REST endpoint, inline_data parts."""
+    """Gemini multimodal generateContent — same REST endpoint, inline_data parts.
+
+    Honours the same overload circuit breaker as ``_call_gemini`` so a
+    Gemini outage doesn't waste vision round-trips when text calls
+    have already noticed the failure.
+    """
     key = _resolve_gemini_key()
     if not key:
+        return None
+    if _gemini_breaker_is_open():
         return None
     try:
         import requests
@@ -381,6 +466,8 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
     except Exception:
         return None
     if not r.ok:
+        if r.status_code >= 500:
+            _gemini_breaker_record_failure()
         return None
     try:
         data = r.json()
@@ -396,6 +483,8 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
         return None
     texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
     out = "".join(texts).strip()
+    if out:
+        _gemini_breaker_record_success()
     return out or None
 
 

@@ -678,23 +678,15 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 
 # Both dicts are in-memory progress trackers — the source of truth for
 # runs is the SQLite `runs` table + `runs_v4/<id>.json`; for Turn-Into
-# jobs it's the pack file on disk. The dicts keep transient state (live
-# log lines, in-flight status) and must NOT grow unbounded — Render
-# Standard is 2 GB across two workers, so an unchecked leak here is
-# still one of the things that causes the ~6-minute container restarts
-# the user reported in the gunicorn logs (and was even worse on the
-# 512 MB Starter the bounds were originally sized for). Bound both
-# with FIFO eviction.
-_active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
-_turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
-_active_lock = threading.Lock()
-# In-process registry of running pipeline uploads. Bounded LRU so a
-# leaking worker can't accumulate run dicts under Render's 2 GB
-# Standard ceiling (originally sized for the 512 MB Starter). The
-# /api/runs/<id>/status endpoint falls back to the SQLite row when an
-# entry has been evicted, so the user only loses in-memory
+# jobs it's the pack file on disk. The in-process registries below keep
+# transient state (live log lines, in-flight status) and must NOT grow
+# unbounded — Render Standard is 2 GB across two workers, so an
+# unchecked leak here is one of the things that causes the ~6-minute
+# container restarts the user reported in the gunicorn logs (and was
+# even worse on the 512 MB Starter the bounds were originally sized
+# for). The /api/runs/<id>/status endpoint falls back to the SQLite
+# row when an entry has been evicted, so the user only loses in-memory
 # progress-log streaming, never run completion.
-_MAX_LOG_LINES = 200
 _active_runs: BoundedCache = BoundedCache(max_size=64)
 # Turn-Into job tracker. The "pack" payload is stripped at completion
 # time (the pack is already persisted to disk by save_pack), so each
@@ -894,7 +886,15 @@ def _load_run(run_id: str) -> Optional[dict]:
     p = RUNS_DIR / f"{run_id}.json"
     if not p.exists():
         return None
-    return json.loads(p.read_text())
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        # A corrupted run JSON would otherwise 500 every route that
+        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+        # "run not found" instead so the recovery_page renders cleanly;
+        # the operator can find the offending file in the log.
+        log.warning("run %s on disk but unreadable: %s", run_id, e)
+        return None
 
 
 def _run_state(run_id: str) -> str:
@@ -1394,11 +1394,12 @@ def _start_run(file_bytes: bytes, file_name: str,
                profile_id: Optional[str], use_pb_cache: bool,
                fetch_pbs: bool, club_filter: Optional[str] = None) -> str:
     run_id = uuid.uuid4().hex[:12]
+    started_at = datetime.now(timezone.utc).isoformat()
     with _active_lock:
         _active_runs[run_id] = {
             "status": "queued",
             "log": ["Run queued"],
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
             "file_name": file_name,
         }
         # Evict completed older runs to keep the dict bounded.
@@ -1407,39 +1408,50 @@ def _start_run(file_bytes: bytes, file_name: str,
     conn.execute(
         """INSERT INTO runs (id, created_at, status, file_name, profile_id)
            VALUES (?,?,?,?,?)""",
-        (run_id, _active_runs[run_id]["started_at"], "queued",
-         file_name, profile_id or ""),
+        (run_id, started_at, "queued", file_name, profile_id or ""),
     )
     conn.commit()
     conn.close()
 
     def _worker():
         with _active_lock:
-            _active_runs[run_id]["status"] = "running"
+            entry = _active_runs.get(run_id)
+            if entry is not None:
+                entry["status"] = "running"
 
         def cb(msg: str):
             with _active_lock:
-                log_list = _active_runs[run_id]["log"]
-                log_list.append(msg)
-                # Cap each run's progress log so a buggy progress
-                # callback can't grow the in-memory list to thousands
-                # of entries × hundreds of bytes.
-                if len(log_list) > _RUN_LOG_LIMIT:
-                    # Keep the first 5 (queue/start markers — useful
-                    # for diagnosis) and the most recent N-5.
-                    keep_tail = _RUN_LOG_LIMIT - 5
-                    _active_runs[run_id]["log"] = (
-                        log_list[:5] + log_list[-keep_tail:]
-                    )
                 entry = _active_runs.get(run_id)
                 if entry is None:
+                    # Run was evicted from the bounded cache while in
+                    # flight — silently drop the progress line.
                     return
                 log_list = entry.setdefault("log", [])
                 log_list.append(msg)
-                if len(log_list) > _MAX_LOG_LINES:
-                    drop = len(log_list) - _MAX_LOG_LINES
-                    del log_list[:drop]
-                    log_list[0] = f"[truncated earlier {drop} log lines]"
+                # Cap each run's progress log so a buggy progress
+                # callback can't grow the in-memory list to thousands
+                # of entries × hundreds of bytes. Keep the first 5
+                # entries (queue/start markers — useful for diagnosis)
+                # and the most recent N-5 of the tail.
+                if len(log_list) > _RUN_LOG_LIMIT:
+                    keep_tail = _RUN_LOG_LIMIT - 5
+                    entry["log"] = (
+                        log_list[:5] + log_list[-keep_tail:]
+                    )
+
+        def _record_terminal(status: str, error: Optional[str] = None) -> None:
+            """Stamp the in-memory entry with a terminal status. The
+            entry may have been evicted from the bounded cache (a
+            long-running pipeline outliving the LRU window), in
+            which case the on-disk DB row remains the source of
+            truth and the polling endpoint falls back to it."""
+            with _active_lock:
+                entry = _active_runs.get(run_id)
+                if entry is None:
+                    return
+                entry["status"] = status
+                if error is not None:
+                    entry["error"] = error
 
         try:
             run = run_pipeline_v4(
@@ -1449,16 +1461,14 @@ def _start_run(file_bytes: bytes, file_name: str,
                 club_filter=club_filter,
             )
             _persist_run(run, file_name)
-            with _active_lock:
-                _active_runs[run_id]["status"] = "error" if run.error else "done"
-                if run.error:
-                    _active_runs[run_id]["error"] = run.error
+            _record_terminal(
+                "error" if run.error else "done",
+                run.error if run.error else None,
+            )
         except Exception as e:
             import traceback
             traceback.print_exc()
-            with _active_lock:
-                _active_runs[run_id]["status"] = "error"
-                _active_runs[run_id]["error"] = str(e)
+            _record_terminal("error", str(e))
             conn = _db()
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?",
                          (str(e), run_id))
@@ -2532,6 +2542,10 @@ a.card:hover, .card[data-interactive]:hover {
   }
   /* Hide the backend pill on narrow widths — it's available on /status */
   #backend-pill { display: none; }
+  /* Active-org chip shrinks on narrow widths so the brand chip + nav
+     items both fit on one line under iPad / small-laptop viewports. */
+  #active-org-chip { font-size: 11px; padding: 4px 8px; }
+  #active-org-chip span:last-child { max-width: 92px; }
 }
 /* Wider 720px treatment: smaller spacing, table tweaks, stat squeeze */
 @media (max-width: 720px) {
@@ -3811,6 +3825,8 @@ def _theme_seed_style_block() -> str:
 
     # Tier 2 — active profile (the Stage E original behaviour)
     palette = None
+    secondary_hex = ""
+    accent_hex = ""
     try:
         from flask import current_app
         get_active = getattr(current_app, "active_profile", None)
@@ -3818,10 +3834,47 @@ def _theme_seed_style_block() -> str:
             prof = get_active()
             if prof:
                 try:
-                    kit = prof.get_brand_kit()
-                    palette = kit.ensure_derived_palette()
+                    from mediahub.brand.palette import effective_palette
+                    eff = effective_palette(
+                        manual=getattr(prof, "brand_palette_manual", {}) or {},
+                        extracted=getattr(prof, "brand_palette_extracted", {}) or {},
+                    )
                 except Exception:
-                    palette = None
+                    eff = {}
+                # Only override the chrome when the org has SOME
+                # explicit brand signal. Without this guard, brand-new
+                # profiles whose AI capture failed (no LLM key, DNS
+                # error, blocked socials) would still drive the seed
+                # off ``ClubProfile.brand_primary`` — and that field
+                # defaults to ``#A30D2D`` (legacy red), so the user
+                # saw a red theme they never picked. We treat any
+                # of these as "the user has a brand pinned":
+                #   - manual override set (any slot)
+                #   - AI-extracted slot set (any slot)
+                #   - brand_kit dict has a primary_colour explicitly
+                #   - legacy ``brand_primary`` differs from the class
+                #     default (someone actively set it)
+                bk_dict = dict(getattr(prof, "brand_kit", {}) or {})
+                _CLUB_PROFILE_DEFAULT_PRIMARY = "#A30D2D"
+                explicit_legacy_primary = (
+                    (getattr(prof, "brand_primary", "") or "").strip()
+                    not in ("", _CLUB_PROFILE_DEFAULT_PRIMARY)
+                )
+                has_confirmed_primary = bool(
+                    eff.get("primary")
+                    or eff.get("secondary")
+                    or eff.get("accent")
+                    or bk_dict.get("primary_colour")
+                    or explicit_legacy_primary
+                )
+                if has_confirmed_primary:
+                    try:
+                        kit = prof.get_brand_kit()
+                        palette = kit.ensure_derived_palette()
+                    except Exception:
+                        palette = None
+                    secondary_hex = (eff.get("secondary") or "").strip()
+                    accent_hex = (eff.get("accent") or "").strip()
     except (RuntimeError, Exception):
         palette = None
 
@@ -3837,9 +3890,22 @@ def _theme_seed_style_block() -> str:
         return ""
     if not _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", seed_hex):
         return ""
+
+    overrides = [f"--mh-brand-seed: {seed_hex};"]
+    # Secondary → tertiary ramp (the "medal gold" slot). Honouring the
+    # user's secondary here means a navy+gold org sees navy chrome AND
+    # gold medal/accent ribbons instead of the MediaHub default cream.
+    if secondary_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", secondary_hex):
+        overrides.append(f"--mh-tertiary-seed: {secondary_hex};")
+    # Accent is a third brand colour with no dedicated seed in
+    # theme-base.css yet; expose it as a custom property so component
+    # code that wants it can opt in via var(--mh-brand-accent).
+    if accent_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", accent_hex):
+        overrides.append(f"--mh-brand-accent: {accent_hex};")
+
     return (
         f'<style id="mh-theme-seed">'
-        f':root {{ --mh-brand-seed: {seed_hex}; }}'
+        f':root {{ {" ".join(overrides)} }}'
         f'</style>'
     )
 
@@ -3853,10 +3919,23 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     except Exception:
         signed_in_pid = ""
     signed_in_name = ""
+    signed_in_primary = ""
+    signed_in_secondary = ""
     if signed_in_pid:
         try:
             _p = load_profile(signed_in_pid)
             signed_in_name = (_p.display_name if _p else "") or ""
+            if _p is not None:
+                try:
+                    from mediahub.brand.palette import effective_palette as _eff
+                    _eff_pal = _eff(
+                        manual=getattr(_p, "brand_palette_manual", {}) or {},
+                        extracted=getattr(_p, "brand_palette_extracted", {}) or {},
+                    )
+                    signed_in_primary = (_eff_pal.get("primary") or "").strip()
+                    signed_in_secondary = (_eff_pal.get("secondary") or "").strip()
+                except Exception:
+                    pass
         except Exception:
             signed_in_name = ""
     return render_template_string("""
@@ -3931,6 +4010,33 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       <span id="backend-pill-dot"></span>
       <span id="backend-pill-text">checking&hellip;</span>
     </a>
+    {% if signed_in and signed_in_name %}
+    <a id="active-org-chip"
+       href="{{ url_for('organisation_setup') }}"
+       title="Active organisation — click to review brand setup"
+       style="display:inline-flex;align-items:center;gap:8px;
+              padding:5px 10px;border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
+              border-radius:999px;text-decoration:none;
+              color:var(--ink);font-size:12px;line-height:1;
+              background:rgba(245,242,232,0.03);margin-left:8px">
+      {% if signed_in_primary %}
+      <span aria-hidden="true"
+            style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                   background:{{ signed_in_primary }};
+                   border:1px solid rgba(245,242,232,0.20)"></span>
+      {% endif %}
+      {% if signed_in_secondary %}
+      <span aria-hidden="true"
+            style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                   background:{{ signed_in_secondary }};
+                   border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
+      {% endif %}
+      <span style="font-weight:600;letter-spacing:0.01em;max-width:140px;
+                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        {{ signed_in_name }}
+      </span>
+    </a>
+    {% endif %}
   </nav>
 </header>
 <main class="wrap" id="mh-main">
@@ -4245,6 +4351,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                health_url=url_for("healthz"),
                signed_in=bool(signed_in_pid),
                signed_in_name=signed_in_name,
+               signed_in_primary=signed_in_primary,
+               signed_in_secondary=signed_in_secondary,
                theme_seed_style=_theme_seed_style_block())
 
 
@@ -4900,6 +5008,7 @@ def create_app() -> Flask:
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
+{_llm_unavailable_banner()}
 <div class="card">
   <form method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
@@ -5028,8 +5137,8 @@ def create_app() -> Flask:
   <form method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
     <input type="hidden" name="run_id" value="{_h(run_id)}" />
 
-    <label>Club to feature</label>
-    <select name="club_filter" required>{opts}</select>
+    <label for="run-config-club">Club to feature</label>
+    <select name="club_filter" id="run-config-club" required>{opts}</select>
     <p class="dim" style="margin-top:4px;font-size:12px">Only clubs that actually appear in this meet are listed.</p>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
@@ -5041,16 +5150,16 @@ def create_app() -> Flask:
       {prof_logo_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
-        <div><label>Primary</label><input type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
-        <div><label>Secondary</label><input type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
-        <div><label>Accent</label><input type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
+        <div><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
+        <div><label for="run-config-secondary">Secondary</label><input id="run-config-secondary" type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
+        <div><label for="run-config-accent">Accent</label><input id="run-config-accent" type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
     </fieldset>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
       <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Photos (optional)</legend>
-      <label>Athlete portraits, action shots, venue images (multi-select)</label>
-      <input type="file" name="club_photos" multiple accept="image/*" />
+      <label for="run-config-photos">Athlete portraits, action shots, venue images (multi-select)</label>
+      <input id="run-config-photos" type="file" name="club_photos" multiple accept="image/*" />
       <p class="dim" style="margin-top:4px;font-size:12px">Uploaded photos will be preferred for graphic generation in this run and saved to your media library.</p>
     </fieldset>
 
@@ -5450,8 +5559,13 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
-        # Workflow filter from query param
-        _wf_filter = request.args.get('wf', '')   # '' | 'queue' | 'approved' | 'posted' 
+        # Workflow filter from query param. Validated against the known
+        # set so a malformed ``?wf=anything`` doesn't silently filter to
+        # nothing (which used to render an empty Review page with no hint
+        # that the filter was the cause).
+        _wf_filter = (request.args.get('wf', '') or '').strip().lower()
+        if _wf_filter not in ('', 'queue', 'approved', 'posted'):
+            _wf_filter = ''
 
         # --- Recognition summary band
         n_elite = rr.get('n_elite', 0)
@@ -7132,7 +7246,13 @@ function addGraphicToPack(btn, visualId) {{
                 # with individual error capture so one failure doesn't
                 # poison the others.
                 from concurrent.futures import ThreadPoolExecutor
-                n_variants = int(request.args.get("n_variants") or 1)
+                # Defend against ``?n_variants=abc`` — a bare int()
+                # would 500 the whole caption endpoint. Anything that
+                # doesn't parse as a positive integer falls back to 1.
+                try:
+                    n_variants = int(request.args.get("n_variants") or 1)
+                except (TypeError, ValueError):
+                    n_variants = 1
                 n_variants = max(1, min(n_variants, 4))
 
                 # V9: feed the AI the last few captions for this swim so
@@ -9543,12 +9663,69 @@ Relay team broke club record"></textarea>
                 '</div>'
             )
 
+        # Brand-flow strip: small visible indicator that the active
+        # organisation's brand IS being applied to whatever the user
+        # creates here. Without it, the user has no quick signal that
+        # picking one of the tiles below will honour their colours —
+        # which was the core "doesn't carry through" complaint.
+        #
+        # Note on building the HTML below: ``_h`` is ``markupsafe.escape``,
+        # which returns ``Markup``. Concatenating ``Markup + str`` causes
+        # the trailing str to be re-escaped — so we build the whole
+        # block as a single f-string with escaped values pre-strified.
+        brand_strip_html = ""
+        prof_for_strip = _active_profile()
+        if prof_for_strip is not None:
+            try:
+                from mediahub.brand.palette import effective_palette as _eff_pal
+                _bs_pal = _eff_pal(
+                    manual=prof_for_strip.brand_palette_manual or {},
+                    extracted=prof_for_strip.brand_palette_extracted or {},
+                )
+            except Exception:
+                _bs_pal = {}
+            _bs_swatches_parts: list[str] = []
+            for slot in ("primary", "secondary", "accent", "fourth"):
+                hex_v = _bs_pal.get(slot)
+                if not (isinstance(hex_v, str) and hex_v.startswith("#")):
+                    continue
+                _slot_esc = str(_h(slot))
+                _hex_esc = str(_h(hex_v))
+                _bs_swatches_parts.append(
+                    f'<span aria-hidden="true" title="{_slot_esc} {_hex_esc}" '
+                    f'style="display:inline-block;width:14px;height:14px;'
+                    f'border-radius:3px;background:{_hex_esc};'
+                    f'border:1px solid rgba(245,242,232,0.20);'
+                    f'margin-right:6px;vertical-align:middle"></span>'
+                )
+            if _bs_swatches_parts:
+                _setup_url = str(_h(url_for("organisation_setup")))
+                _name_esc = str(_h(prof_for_strip.display_name or ""))
+                _bs_swatches = "".join(_bs_swatches_parts)
+                brand_strip_html = (
+                    f'<div style="margin-bottom:var(--sp-5);padding:10px 14px;'
+                    f'border:1px solid var(--border);border-radius:8px;'
+                    f'background:var(--surface);display:flex;align-items:center;'
+                    f'gap:12px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim)">'
+                    f'<span style="font-family:var(--font-mono,monospace);'
+                    f'font-size:10.5px;text-transform:uppercase;letter-spacing:0.12em;'
+                    f'color:var(--ink-muted)">Brand in use</span>'
+                    f'{_bs_swatches}'
+                    f'<span style="color:var(--ink);font-weight:600">{_name_esc}</span>'
+                    f'<a href="{_setup_url}" '
+                    f'style="margin-left:auto;font-size:12px;'
+                    f'color:var(--ink-muted);text-decoration:underline">'
+                    f'Review brand setup &rarr;</a>'
+                    f'</div>'
+                )
+
         body = (
             '<section class="mh-hero" data-lane="03" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">'
             '<span class="mh-hero-eyebrow">Create</span>'
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             '</section>'
+            f'{brand_strip_html}'
             f'{tiles_section}'
         )
         return _layout("Create", body, active="create")
@@ -9654,10 +9831,64 @@ Relay team broke club record"></textarea>
         from mediahub.ai_core import (
             ask, ProviderNotConfigured, ProviderError,
         )
+        # Ground the spotlight caption in the active organisation's
+        # brand — name, voice keywords, confirmed palette. Without this
+        # the writer produced sport-generic captions that ignored the
+        # club's tone and never referenced their colours. Previously the
+        # only thing the system prompt knew was "MediaHub's spotlight-
+        # post writer", which left the LLM to invent stylistic choices.
+        spotlight_system = (
+            "You are MediaHub's spotlight-post writer. Output only the "
+            "caption text, no preamble or markdown."
+        )
+        try:
+            spot_prof = _active_profile()
+            spot_brand_lines = []
+            if spot_prof is not None:
+                if (spot_prof.display_name or "").strip():
+                    spot_brand_lines.append(
+                        f"Organisation: {spot_prof.display_name.strip()}"
+                    )
+                try:
+                    from mediahub.brand.palette import effective_palette as _eff
+                    _spot_pal = _eff(
+                        manual=spot_prof.brand_palette_manual or {},
+                        extracted=spot_prof.brand_palette_extracted or {},
+                    )
+                except Exception:
+                    _spot_pal = {}
+                _pal_bits = [
+                    f"{slot} {_spot_pal[slot]}"
+                    for slot in ("primary", "secondary", "accent", "fourth")
+                    if isinstance(_spot_pal.get(slot), str)
+                    and _spot_pal[slot].startswith("#")
+                ]
+                if _pal_bits:
+                    spot_brand_lines.append(
+                        "Confirmed brand palette: " + ", ".join(_pal_bits)
+                    )
+                vs = (spot_prof.brand_voice_summary or "").strip()
+                if vs:
+                    spot_brand_lines.append(f"Brand voice: {vs[:400]}")
+                kws = [k for k in (spot_prof.brand_keywords or []) if k]
+                if kws:
+                    spot_brand_lines.append(
+                        "Brand keywords: " + ", ".join(kws[:8])
+                    )
+                tn = (spot_prof.tone_notes or "").strip()
+                if tn:
+                    spot_brand_lines.append(f"Tone notes: {tn[:240]}")
+            if spot_brand_lines:
+                spotlight_system = (
+                    spotlight_system
+                    + "\n\nWrite in this organisation's voice. Brand facts:\n"
+                    + "\n".join(spot_brand_lines)
+                )
+        except Exception:
+            pass
         try:
             composed_caption = (ask(
-                "You are MediaHub's spotlight-post writer. Output only the "
-                "caption text, no preamble or markdown.",
+                spotlight_system,
                 brief,
                 max_tokens=600,
             ) or "").strip()
@@ -10018,6 +10249,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '</section>'
         )
 
+    def _llm_unavailable_banner() -> str:
+        """Render a warning banner when no LLM provider is configured.
+
+        Pre-fix, the user could submit a stub form (Sponsor Post, Event
+        Preview, Session Update) or start a chat with no LLM key and
+        only learn it had failed when the request bounced to an error
+        page after a 10-second loader. Surfacing it on the form itself
+        sets expectations: the action will fail until the operator
+        configures a key. Returns an empty string when AI IS available
+        so working deployments aren't nagged.
+        """
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_avail
+            if _llm_avail():
+                return ""
+        except Exception:
+            pass
+        return (
+            '<div role="status" style="margin-bottom:14px;padding:12px 14px;'
+            'border:1px solid rgba(255,180,84,0.45);border-radius:8px;'
+            'background:rgba(255,180,84,0.08);font-size:13px;'
+            'color:var(--ink);line-height:1.5">'
+            '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+            'No cloud LLM provider is configured on this deployment. '
+            'Submitting this form will surface an AI-unavailable error. '
+            'Ask your administrator to set '
+            '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+            'GEMINI_API_KEY</code> or '
+            '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+            'ANTHROPIC_API_KEY</code>.'
+            '</div>'
+        )
+
     def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
                      active_tab: str = "create"):
         """Shared handler for stub routes. GET renders form, POST renders cards."""
@@ -10068,6 +10332,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # are silently dropped so a tampered form can't pull another
             # org's photos into this pack.
             active_pid_for_pack = _active_profile_id() or ""
+            # Stamp the active profile id on every saved pack so the
+            # downstream renderer can resolve the BrandKit + theme
+            # JSON. Previously this only happened when the user also
+            # picked a library asset, which meant a sponsor / event
+            # preview / session-update pack rendered without any
+            # brand-driven colours when the user hadn't attached a
+            # photo from their library.
+            if active_pid_for_pack:
+                form_data["profile_id"] = active_pid_for_pack
             selected_ids = request.form.getlist("library_asset_id")
             resolved_assets: list[dict] = []
             if selected_ids and _v8_get_media_store is not None:
@@ -10113,7 +10386,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if isinstance(e, ProviderNotConfigured):
                     return _recovery_page(
                         "AI features unavailable",
-                        f"{e}. Contact your deployment operator to enable Gemini or Anthropic on this instance.",
+                        (
+                            "MediaHub needs a Gemini or Anthropic API key "
+                            "to generate captions. Ask your deployment "
+                            "operator to set GEMINI_API_KEY or "
+                            "ANTHROPIC_API_KEY, then try again."
+                        ),
                         primary_cta=("Back to Create", url_for("make_page")),
                         secondary_cta=("System status", url_for("status_page")),
                         code=503,
@@ -10121,7 +10399,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if isinstance(e, ProviderError):
                     return _recovery_page(
                         "AI provider error",
-                        f"{e}. Rate limits usually clear within seconds — try the same form again, or fall back to a simpler input.",
+                        (
+                            f"The AI provider couldn't finish your draft: "
+                            f"{str(e).rstrip('.')}. Rate limits usually clear "
+                            "within seconds — try again, or simplify the input."
+                        ),
                         primary_cta=("Try again", url_for(route_endpoint)),
                         secondary_cta=("Back to Create", url_for("make_page")),
                         code=502,
@@ -10163,7 +10445,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 )
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
-        body = _stub_hero(title) + stub.render_stub_html()
+        body = _stub_hero(title) + _llm_unavailable_banner() + stub.render_stub_html()
         # Inject the "Pick from your library" widget. The form-level photo
         # upload (stubs._PHOTO_INPUT_HTML) handles one-off uploads; this
         # picker pulls from the active organisation's library so the user
@@ -10311,6 +10593,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     </form>
   </div>
 </section>
+
+{_llm_unavailable_banner()}
 
 <div class="card">
   <h2>Past chats</h2>
@@ -10484,6 +10768,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 """
         return _layout(s.title or "Chat", body, active="create")
 
+    def _active_club_brand_for_llm() -> Optional[dict]:
+        """Build the brand context the free-text agent + spotlight writer
+        share. Returns None when there's no active org so callers can
+        fall through to the unbranded system prompt cleanly. Includes
+        the effective palette so the LLM can ground colour references
+        ("wear the navy", "lean into the gold") in the actual brand."""
+        prof = _active_profile()
+        if prof is None:
+            return None
+        try:
+            from mediahub.brand.palette import effective_palette as _eff
+            eff = _eff(
+                manual=prof.brand_palette_manual or {},
+                extracted=prof.brand_palette_extracted or {},
+            )
+        except Exception:
+            eff = {}
+        return {
+            "name":          (prof.display_name or "").strip(),
+            "short_name":    (prof.short_name or "").strip(),
+            "org_type":      (prof.org_type or "").strip(),
+            "tone":          (prof.tone or "").strip(),
+            "tone_notes":    (prof.tone_notes or "").strip(),
+            "exemplars":     list(prof.exemplar_captions or [])[:6],
+            "sponsor_name":  (prof.sponsor_name or "").strip(),
+            "sponsor_rules": (prof.sponsor_guidelines or "").strip(),
+            "voice_summary": (prof.brand_voice_summary or "")[:600],
+            "keywords":      list(prof.brand_keywords or [])[:8],
+            "phrases_to_use":   list(prof.brand_phrases_to_use or [])[:6],
+            "phrases_to_avoid": list(prof.brand_phrases_to_avoid or [])[:6],
+            "palette":       eff,
+        }
+
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
         from mediahub.free_text_chat.session import load_session, save_session
@@ -10501,7 +10818,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             s.add_user_message(msg)
             save_session(s)
             try:
-                next_assistant_turn(s)
+                next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
                 s.add_assistant_message(f"Error: {e}", meta={"error": True})
                 save_session(s)
@@ -10537,7 +10854,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             save_session(s)
             try:
-                next_assistant_turn(s)
+                next_assistant_turn(s, club_brand=_active_club_brand_for_llm())
             except Exception as e:
                 s.add_assistant_message(f"Error: {e}", meta={"error": True})
                 save_session(s)
@@ -10572,6 +10889,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Resolve library picks the same way _render_stub does — strictly
         # scoped to the active organisation; foreign ids are silently dropped.
         active_pid_for_pack = _active_profile_id() or ""
+        # Stamp the active profile id on the pack regardless of whether
+        # a library asset was picked. Without this, the renderer can't
+        # resolve the BrandKit later (no profile_id → no theme JSON →
+        # falls back to MediaHub defaults), which is exactly the
+        # "brand colours don't carry through" bug for chat briefs.
+        if active_pid_for_pack:
+            pack_form_data["profile_id"] = active_pid_for_pack
         selected_ids = request.form.getlist("library_asset_id")
         if selected_ids and _v8_get_media_store is not None:
             try:
@@ -11819,6 +12143,35 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         mandatory_rules = list(prof.brand_guidelines_mandatory_rules) if prof and prof.brand_guidelines_mandatory_rules else []
         link_state = dict(prof.link_capture_state) if prof and prof.link_capture_state else {}
 
+        # Honest LLM-availability banner. The whole capture pipeline
+        # silently degrades to deterministic heuristics when no key
+        # is configured, which leaves the user staring at a blank
+        # palette + empty keywords + raw-text voice summary with no
+        # explanation of why. Surface the state up front.
+        llm_banner_html = ""
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available
+            llm_ok = _llm_available()
+        except Exception:
+            llm_ok = False
+        if not llm_ok:
+            llm_banner_html = (
+                '<div style="margin-bottom:14px;padding:12px 14px;'
+                'border:1px solid rgba(255,180,84,0.45);border-radius:8px;'
+                'background:rgba(255,180,84,0.08);font-size:13px;'
+                'color:var(--ink);line-height:1.5">'
+                '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+                'No cloud LLM provider is configured on this deployment, so the '
+                'engine cannot infer your brand voice, palette, or operating '
+                'profile. You can still complete setup, but generated content '
+                'will fall back to a generic template until '
+                '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+                'GEMINI_API_KEY</code> or '
+                '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+                'ANTHROPIC_API_KEY</code> is set on the server.'
+                '</div>'
+            )
+
         from mediahub.web._countries import COUNTRIES
         # JSON-safe array literal for inlining into the combobox JS.
         # Each country is HTML-escaped because the same string is also
@@ -12095,26 +12448,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'vertical-align:middle;margin-right:3px"></span>'
                     for c in colours[:4]
                 )
+                # ``_h`` is ``markupsafe.escape``; mixing it into ``+``
+                # concatenation makes every trailing string literal get
+                # HTML-escaped. Built the whole card as a single f-string
+                # with the URL pre-strified so attributes like
+                # ``data-no-loader`` reach the browser unescaped.
+                _desc_html = (
+                    f'<div class="muted" style="font-size:11px;line-height:1.3" '
+                    f'title="{str(_h(desc))}">{str(_h(desc[:120]))}</div>'
+                    if desc else ""
+                )
+                _swatches_html = (
+                    f'<div>{colour_swatches}</div>' if colour_swatches else ""
+                )
+                _filename_attr = str(_h(logo.get("original_filename", "")))
+                _label_html = str(_h(label))
+                _delete_url_attr = str(_h(delete_url))
                 cards.append(
-                    '<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
-                    'border:1px solid var(--chrome,var(--border));border-radius:6px;'
+                    f'<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
+                    f'border:1px solid var(--chrome,var(--border));border-radius:6px;'
                     f'padding:10px;display:flex;flex-direction:column;gap:8px">'
                     f'{preview}'
                     f'<div style="font-size:12px;font-weight:600;color:var(--ink);'
                     f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
-                    f'title="{_h(logo.get("original_filename", ""))}">{_h(label)}</div>'
-                    + (f'<div class="muted" style="font-size:11px;line-height:1.3" '
-                       f'title="{_h(desc)}">{_h(desc[:120])}</div>' if desc else "")
-                    + (f'<div>{colour_swatches}</div>' if colour_swatches else "")
-                    + '<form method="POST" action="' + _h(delete_url) + '" data-no-loader="1" '
-                      'onsubmit="return confirm(\'Delete this logo?\')">'
-                      '<button type="submit" style="font-size:11px;padding:5px 9px;'
-                      'background:transparent;border:1px solid rgba(255,107,107,0.3);'
-                      'color:#FF6B6B;border-radius:4px;cursor:pointer;'
-                      'font-family:var(--font-mono,monospace);text-transform:uppercase;'
-                      'letter-spacing:0.10em">Delete</button>'
-                      '</form>'
-                    '</div>'
+                    f'title="{_filename_attr}">{_label_html}</div>'
+                    f'{_desc_html}'
+                    f'{_swatches_html}'
+                    f'<form method="POST" action="{_delete_url_attr}" data-no-loader="1" '
+                    f'onsubmit="return confirm(\'Delete this logo?\')">'
+                    f'<button type="submit" style="font-size:11px;padding:5px 9px;'
+                    f'background:transparent;border:1px solid rgba(255,107,107,0.3);'
+                    f'color:#FF6B6B;border-radius:4px;cursor:pointer;'
+                    f'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                    f'letter-spacing:0.10em">Delete</button>'
+                    f'</form>'
+                    f'</div>'
                 )
             _logos_grid_html = (
                 '<div style="margin-top:14px;display:grid;'
@@ -12208,6 +12576,27 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             label, bg, border, ink = _STATUS_CHIP.get(
                 status, ("Idle", "rgba(245,242,232,0.04)", "rgba(245,242,232,0.14)", "var(--ink-dim, #B6B2A6)"),
             )
+            # Per-failure inline hint. Without this, the only signal
+            # a user gets that their URL was wrong (typo, DNS error,
+            # auth wall) is a small severity-coloured pill — easy to
+            # miss. A short message right next to the chip turns it
+            # into an actionable error.
+            failure_hints = {
+                "not_found":        "URL not reachable — check the spelling.",
+                "hard_blocked":     "Site is blocking automated reads.",
+                "auth_walled":      "Profile needs login to read.",
+                "rate_limited":     "Rate-limited — try Re-read in a minute.",
+                "soft_blocked_spa": "Page renders client-side; only the shell loaded.",
+                "unknown":          "Couldn't classify the response.",
+            }
+            hint = failure_hints.get(status, "")
+            hint_html = ""
+            if hint:
+                hint_html = (
+                    f'<span class="muted" style="display:block;margin-top:4px;'
+                    f'font-size:11px;line-height:1.4;color:var(--warn,#FFB454)">'
+                    f'{_h(hint)}</span>'
+                )
             # When a link is populated, allow a per-link "re-read now"
             # button so the user can force a fresh capture without
             # resubmitting the whole form.
@@ -12230,12 +12619,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     reread = ""
             return (
                 '<span style="display:inline-flex;align-items:center;gap:8px;'
-                'margin-left:8px;vertical-align:middle">'
+                'margin-left:8px;vertical-align:middle;flex-wrap:wrap">'
                 f'<span style="display:inline-block;padding:2px 8px;border-radius:3px;'
                 f'font-size:10.5px;font-family:var(--font-mono,monospace);'
                 f'text-transform:uppercase;letter-spacing:0.10em;'
                 f'background:{bg};border:1px solid {border};color:{ink}">{_h(label)}</span>'
-                + reread +
+                + reread + hint_html +
                 '</span>'
             )
 
@@ -12245,7 +12634,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             chip = _chip_html_for(key, val)
             social_inputs += (
                 f'<div style="margin-bottom:10px">'
-                f'<label>margin-bottom:4px">{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></label>'
                 f'<label style="display:flex;align-items:center;flex-wrap:wrap;'
                 f'font-size:13px;color:var(--ink-dim);margin-bottom:4px">'
                 f'<span>{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></span>'
@@ -12289,6 +12677,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </p>
 </section>
 
+{llm_banner_html}
 {preview_html}
 
 <form method="POST" action="{capture_url}" enctype="multipart/form-data"
@@ -12788,8 +13177,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             pass
         else:
             # Any other status: still save what we have so we don't lose
-            # the identity fields the user just typed.
+            # the identity fields the user just typed. Persist
+            # link_capture_state too so per-link diagnostic chips render
+            # the actual failure mode (auth_walled, not_found, …)
+            # instead of falling back to "Idle".
             prof.brand_capture_status = status
+            lcs = result.get("link_capture_state") or {}
+            if isinstance(lcs, dict):
+                prof.link_capture_state = lcs
 
         # ---- Optional brand-guidelines document upload ----
         # Additive: the AI consumes whatever file the user provided AND

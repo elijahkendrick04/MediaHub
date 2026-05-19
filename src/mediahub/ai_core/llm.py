@@ -346,17 +346,41 @@ _DISPATCH = {
 }
 
 
+def _gemini_breaker_open() -> bool:
+    """Forwarder to ``media_ai.llm._gemini_breaker_is_open``.
+
+    Both LLM wrappers hit the same Gemini endpoint, so a 503 noticed
+    by one warrants skipping Gemini in the other for the cool-off
+    period too. Import lazily to keep ``ai_core`` independently
+    importable if ``media_ai`` is ever vendored separately.
+    """
+    try:
+        from mediahub.media_ai.llm import _gemini_breaker_is_open
+        return _gemini_breaker_is_open()
+    except Exception:
+        return False
+
+
 def _fallback_chain(primary: Optional[str]) -> list[str]:
     """Return the provider order to try, starting with `primary` (if
     configured) then the remaining configured providers. Lets a rate-
     limited Gemini call fall through to Claude instead of erroring
-    at the user."""
+    at the user.
+
+    Demotes Gemini to the tail of the chain while its overload
+    circuit breaker is tripped — Claude (if configured) gets first
+    shot so the call doesn't pay another wasted Gemini round-trip.
+    """
     chain: list[str] = []
     if primary and _key_for(primary):
         chain.append(primary)
     for p in _PROVIDERS:
         if p != primary and _key_for(p):
             chain.append(p)
+    # If Gemini is in the breaker cool-off, move it to the back of the
+    # queue so any other configured provider is tried first.
+    if _gemini_breaker_open() and "gemini" in chain and len(chain) > 1:
+        chain = [p for p in chain if p != "gemini"] + ["gemini"]
     return chain
 
 

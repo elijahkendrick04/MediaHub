@@ -63,6 +63,29 @@ _NOT_FOUND_PATTERNS = (
 )
 
 
+_SCRAPE_API_DNS_ERR_RE = re.compile(
+    r'"name"\s*:\s*"ParamValidationError"|'
+    r'"code"\s*:\s*40001|'
+    r"could not be resolved|"
+    r"ENOTFOUND|EAI_NONAME",
+    re.IGNORECASE,
+)
+
+
+_LOGIN_WALL_PATTERNS = (
+    r"log into\s+(?:instagram|facebook|twitter|tiktok|linkedin|x)\b",
+    r"sign\s+up\s+to\s+(?:see|view|continue|connect|read|access)",
+    r"\bcreate\s+(?:a\s+new\s+)?account\b",
+    r"\blogin\s+with\s+(?:facebook|google|apple|x)\b",
+    r"\blog\s+in\s+with\s+(?:facebook|google|apple|x)\b",
+    r"see\s+everyday\s+moments",
+    r"join\s+linkedin\s+today",
+    r"continue\s+with\s+(?:facebook|google|apple)",
+    r"new\s+to\s+twitter",
+    r"join\s+tiktok",
+)
+
+
 def _heuristic(status_code: int, body: str) -> str:
     body = (body or "").strip()
     if status_code == 0:
@@ -81,6 +104,15 @@ def _heuristic(status_code: int, body: str) -> str:
     if not body:
         return "soft_blocked_spa"
 
+    # Scraping-gateway error responses (r.jina.ai, etc.) come back as
+    # HTTP 200 with a JSON body like {"name":"ParamValidationError",
+    # "message":"Domain ... could not be resolved"}. If we don't catch
+    # those here the error JSON masquerades as real content, gets stored
+    # in voice_summary, and poisons every downstream caption prompt.
+    body_head = body[:600]
+    if _SCRAPE_API_DNS_ERR_RE.search(body_head):
+        return "not_found"
+
     # Strip tags for a rough visible-text estimate.
     visible = re.sub(r"<script[^>]*>.*?</script>", " ", body,
                       flags=re.IGNORECASE | re.DOTALL)
@@ -90,10 +122,28 @@ def _heuristic(status_code: int, body: str) -> str:
     visible = re.sub(r"\s+", " ", visible).strip()
 
     low = visible.lower()
+    # Platform-specific login wall fingerprints. These catch Instagram /
+    # LinkedIn / Twitter / TikTok login pages even when the cookie banner
+    # + multilingual footer inflates the body past the 1.5 KB cutoff
+    # below. Without this, "Log into Instagram" pages were being saved
+    # as voice_summary on every fresh capture.
+    if any(re.search(p, low) for p in _LOGIN_WALL_PATTERNS):
+        return "auth_walled"
     if any(re.search(p, low) for p in _HARD_BLOCK_PATTERNS):
         return "hard_blocked"
     if any(re.search(p, low) for p in _AUTH_PATTERNS) and len(visible) < 1_500:
         return "auth_walled"
+    # Auth-wall pages on big platforms (Instagram, LinkedIn, Twitter,
+    # TikTok) can run well past 1.5 KB once you include their cookie
+    # banners, navigation, language-switcher footer and legal links —
+    # but the *substance* is still just "Log in / Sign up". When we
+    # see 3+ auth markers AND the page lacks any meaningful narrative
+    # signal (no paragraph-y sentences), call it auth_walled.
+    auth_hits = sum(1 for p in _AUTH_PATTERNS if re.search(p, low))
+    if auth_hits >= 3:
+        long_sentences = sum(1 for s in re.split(r"[.!?]\s", visible) if len(s) > 80)
+        if long_sentences < 3:
+            return "auth_walled"
     if any(re.search(p, low) for p in _NOT_FOUND_PATTERNS) and len(visible) < 1_500:
         return "not_found"
 

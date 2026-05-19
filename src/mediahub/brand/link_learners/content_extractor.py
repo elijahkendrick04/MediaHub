@@ -81,6 +81,107 @@ def _build_prompt(url: str, platform_intent: str, raw_text: str) -> str:
 _HASHTAG_RE = re.compile(r"#[A-Za-z][A-Za-z0-9_]{1,40}")
 
 
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_URL_RE = re.compile(r"https?://\S+")
+_MD_HEADING_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+_BLOB_RE = re.compile(r"blob:[a-z]+://\S+", re.IGNORECASE)
+_HEX_INLINE_RE = re.compile(r"#[0-9a-fA-F]{6}\b")
+
+
+def _scan_hex_candidates(raw_text: str, limit: int = 16) -> list[str]:
+    """Pull every distinct #rrggbb colour mentioned in the raw text.
+
+    Used as a heuristic seed for the palette resolver: even when the
+    extractor LLM isn't available (or gets cute and invents a colour),
+    every hex mentioned on the page is a real candidate. The unified
+    palette resolver in ``brand/palette.py`` is responsible for ranking
+    them; this just makes sure none are silently dropped before that
+    pass runs.
+
+    Drops pure white, pure black, and near-grey (saturation ≈ 0) since
+    those are almost never the brand primary on a sports site — they
+    flood the candidate list and squeeze the actual palette out of the
+    LLM's top picks.
+    """
+    if not raw_text:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _HEX_INLINE_RE.findall(raw_text):
+        v = m.lower()
+        if v in seen:
+            continue
+        seen.add(v)
+        try:
+            r = int(v[1:3], 16)
+            g = int(v[3:5], 16)
+            b = int(v[5:7], 16)
+        except ValueError:
+            continue
+        # Skip pure white / pure black — both are universal UI tokens,
+        # not brand identifiers. Skip near-grey too (all three channels
+        # within 8 of each other AND no channel >= 240 / <= 15) because
+        # the page chrome dumps hundreds of grey CSS vars that crowd out
+        # the actual brand picks.
+        if v in ("#ffffff", "#000000"):
+            continue
+        if max(r, g, b) - min(r, g, b) < 8:
+            # Allow if extreme (very near black/white can still be
+            # decorative, but mid-greys are noise).
+            if max(r, g, b) < 240 and min(r, g, b) > 15:
+                continue
+        out.append(v)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _clean_excerpt(raw_text: str, *, cap: int = 280) -> str:
+    """Strip markdown noise so the heuristic fallback returns sentences,
+    not raw scraped junk. We previously dumped the first 300 chars of
+    whatever the fetcher returned — that meant the voice summary stored
+    on the profile looked like "# Instagram ![Image 1](blob:...)" and
+    masqueraded as a real summary in every downstream caption prompt.
+    """
+    if not raw_text:
+        return ""
+    txt = _MD_IMAGE_RE.sub(" ", raw_text)
+    txt = _MD_LINK_RE.sub(r"\1", txt)
+    txt = _BLOB_RE.sub(" ", txt)
+    txt = _URL_RE.sub(" ", txt)
+    txt = _MD_HEADING_RE.sub("", txt)
+    # Drop low-information boilerplate lines that platform handlers
+    # routinely produce ("Title: Instagram", "URL Source: ...").
+    drop_prefixes = (
+        "title:", "url source:", "markdown content:", "published time:",
+        "warning:", "see everyday moments",
+    )
+    kept_lines = []
+    for line in txt.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if any(low.startswith(p) for p in drop_prefixes):
+            continue
+        kept_lines.append(s)
+    joined = " ".join(kept_lines)
+    joined = _WHITESPACE_RE.sub(" ", joined).strip()
+    if not joined:
+        return ""
+    if len(joined) <= cap:
+        return joined
+    # Cut at the nearest sentence boundary within the cap so the excerpt
+    # doesn't break mid-word.
+    head = joined[:cap]
+    last_period = head.rfind(". ")
+    if last_period >= cap // 2:
+        return head[: last_period + 1].strip()
+    return head.rstrip() + "…"
+
+
 def _heuristic(raw_text: str) -> dict:
     text = (raw_text or "").strip()
     if not text:
@@ -95,13 +196,18 @@ def _heuristic(raw_text: str) -> dict:
             continue
         seen.add(tl)
         uniq_tags.append(t)
-    excerpt = text[:300]
+    excerpt = _clean_excerpt(text)
+    # Without an LLM we can't reason about which hex is the brand
+    # primary, but we can still surface every distinct candidate so
+    # the unified palette resolver has something to work with. Pure
+    # white / pure black / near-grey are filtered out in
+    # ``_scan_hex_candidates``.
     return {
         "voice_summary": excerpt,
         "keywords": [],
         "phrases_to_use": [],
         "phrases_to_avoid": [],
-        "palette_mentions": [],
+        "palette_mentions": _scan_hex_candidates(text),
         "typography_hint": "",
         "sponsor_mentions": [],
         "hashtag_patterns": uniq_tags[:8],
@@ -194,6 +300,15 @@ def extract_brand_dna(
         log.debug("content-extractor LLM call failed: %s", e)
         return _heuristic(raw_text)
     out = _normalise(raw)
+    # If the LLM didn't surface any palette_mentions, supplement with
+    # the regex scan over the raw body so the unified palette
+    # resolver has candidate colours to choose from. Without this the
+    # resolver gets zero signals from the website and the user lands
+    # on the setup page with an empty palette preview.
+    if not out.get("palette_mentions"):
+        scanned = _scan_hex_candidates(raw_text)
+        if scanned:
+            out["palette_mentions"] = scanned
     # Empty LLM result → fall back to heuristic so the user's data
     # isn't silently dropped.
     has_signal = bool(out["voice_summary"] or out["keywords"]

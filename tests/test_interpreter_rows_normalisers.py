@@ -1,0 +1,202 @@
+"""Tests for the field normalisers in `mediahub.interpreter.rows`.
+
+These are the pure (raw_str → typed value + confidence) helpers the
+table-row interpreter uses to coerce each column value. They have no
+external dependencies and are the deterministic, sport-agnostic core of
+the parsing layer per CLAUDE.md.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+
+import pytest
+
+from mediahub.interpreter.rows import (
+    _normalise_club,
+    _normalise_name,
+    _normalise_place,
+    _normalise_reaction,
+    _normalise_time,
+    _normalise_yob,
+)
+
+
+# ---------------------------------------------------------------------------
+# _normalise_time
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseTime:
+    @pytest.mark.parametrize(
+        "raw, canonical, conf",
+        [
+            ("59.87", "59.87", 0.85),
+            ("1:02.34", "1:02.34", 0.95),
+            ("15:25.10", "15:25.10", 0.95),
+            ("0.50", "0.50", 0.85),
+        ],
+    )
+    def test_valid_time_canonicalised(self, raw: str, canonical: str, conf: float) -> None:
+        v, c = _normalise_time(raw)
+        assert v == canonical
+        assert c == pytest.approx(conf)
+
+    def test_whitespace_stripped(self) -> None:
+        v, c = _normalise_time("  1:02.34  ")
+        assert v == "1:02.34"
+        assert c == pytest.approx(0.95)
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["", "DNF", "abc.de", "1.2", "1.234"],
+    )
+    def test_invalid_returns_none(self, raw: str) -> None:
+        v, c = _normalise_time(raw)
+        assert v is None
+        assert c == 0.0
+
+    def test_colon_form_higher_confidence_than_plain(self) -> None:
+        # MM:SS.cc is more constrained → higher confidence than SS.cc
+        _, plain = _normalise_time("59.87")
+        _, colon = _normalise_time("1:00.34")
+        assert colon > plain
+
+
+# ---------------------------------------------------------------------------
+# _normalise_place
+# ---------------------------------------------------------------------------
+
+
+class TestNormalisePlace:
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("1", 1),
+            ("12", 12),
+            ("100", 100),
+            ("=1", 1),
+            ("=12", 12),
+        ],
+    )
+    def test_digits_and_equals_prefix(self, raw: str, expected: int) -> None:
+        v, c = _normalise_place(raw)
+        assert v == expected
+        assert c == pytest.approx(0.90)
+
+    @pytest.mark.parametrize("raw", ["", "DQ", "first", "1.", "abc"])
+    def test_non_digit_returns_none(self, raw: str) -> None:
+        v, c = _normalise_place(raw)
+        assert v is None
+        assert c == 0.0
+
+    def test_strips_whitespace(self) -> None:
+        v, _ = _normalise_place("   3   ")
+        assert v == 3
+
+
+# ---------------------------------------------------------------------------
+# _normalise_yob
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseYob:
+    @pytest.mark.parametrize(
+        "raw, expected, conf",
+        [
+            ("1995", 1995, 0.90),
+            ("2008", 2008, 0.90),
+            ("1940", 1940, 0.90),
+        ],
+    )
+    def test_full_year_form(self, raw: str, expected: int, conf: float) -> None:
+        v, c = _normalise_yob(raw)
+        assert v == expected
+        assert c == pytest.approx(conf)
+
+    def test_two_digit_year_disambiguation(self) -> None:
+        # Years 00–30 → 2000s; 31–99 → 1900s.
+        v, c = _normalise_yob("05")
+        assert v == 2005
+        assert c == pytest.approx(0.70)
+        v, _ = _normalise_yob("85")
+        assert v == 1985
+        v, _ = _normalise_yob("30")
+        assert v == 2030
+        v, _ = _normalise_yob("31")
+        assert v == 1931
+
+    @pytest.mark.parametrize("raw", ["1939", "2040", "abc", "1", "12345", ""])
+    def test_out_of_range_returns_none(self, raw: str) -> None:
+        v, c = _normalise_yob(raw)
+        assert v is None
+        assert c == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _normalise_reaction
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseReaction:
+    @pytest.mark.parametrize("raw", ["0.65", "0.700", "0.81", "0.99"])
+    def test_valid_reaction_times(self, raw: str) -> None:
+        v, c = _normalise_reaction(raw)
+        assert v == raw
+        assert c == pytest.approx(0.90)
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["", "1.50", "0.5", "0.5000", "abc", "-0.65"],
+    )
+    def test_invalid_reaction_returns_none(self, raw: str) -> None:
+        v, c = _normalise_reaction(raw)
+        assert v is None
+        assert c == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _normalise_name
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseName:
+    @pytest.mark.parametrize(
+        "raw",
+        ["Jane Smith", "O'Connor", "Anne-Marie", "X Y"],  # 3+ chars w/ letters
+    )
+    def test_valid_names(self, raw: str) -> None:
+        v, c = _normalise_name(raw)
+        assert v == raw.strip()
+        assert c == pytest.approx(0.80)
+
+    def test_strips_whitespace(self) -> None:
+        v, _ = _normalise_name("  Jane Smith  ")
+        assert v == "Jane Smith"
+
+    @pytest.mark.parametrize("raw", ["", "AB", "12", "  "])
+    def test_too_short_or_no_letter_returns_none(self, raw: str) -> None:
+        v, c = _normalise_name(raw)
+        assert v is None
+        assert c == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _normalise_club
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseClub:
+    def test_returns_stripped_string(self) -> None:
+        v, c = _normalise_club("  Aquatic Sharks  ")
+        assert v == "Aquatic Sharks"
+        assert c == pytest.approx(0.75)
+
+    def test_empty_returns_none(self) -> None:
+        v, c = _normalise_club("")
+        assert v is None
+        assert c == 0.0
+
+    def test_whitespace_only_returns_none(self) -> None:
+        v, c = _normalise_club("   ")
+        assert v is None
+        assert c == 0.0

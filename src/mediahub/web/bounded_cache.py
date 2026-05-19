@@ -85,6 +85,10 @@ class BoundedCache:
         with self._lock:
             return list(self._data.items())
 
+    def values(self) -> list[Any]:
+        with self._lock:
+            return list(self._data.values())
+
     def __iter__(self) -> Iterator[str]:
         return iter(self.keys())
 
