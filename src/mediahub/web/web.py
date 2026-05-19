@@ -3252,10 +3252,20 @@ select:focus-visible {
 #
 # Final cascade order:
 #   THEME_TOKENS_CSS  →  BASE_CSS (legacy aliases re-point at --mh-*)  →
-#   RESPONSIVE_GUARDRAILS_CSS
-from mediahub.web.theme_tokens import THEME_TOKENS_CSS as _MH_TT_CSS  # noqa: E402
+#   THEME_COMPONENTS_CSS (polish layer — overrides BASE_CSS component
+#       rules: split-property transitions, scale-on-press, dropzone,
+#       custom select arrow, modal blur, mobile nav, table-stack, etc.)
+#   RESPONSIVE_GUARDRAILS_CSS (must remain LAST — see
+#       tests/test_theme_tokens.py::test_guardrails_appended_last).
+#       The guardrails are exclusively @supports / pref-media-query
+#       gated or .mh-* utilities, so they neither shadow nor conflict
+#       with the components layer.
+from mediahub.web.theme_tokens import (  # noqa: E402
+    THEME_TOKENS_CSS as _MH_TT_CSS,
+    THEME_COMPONENTS_CSS as _MH_TC_CSS,
+)
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_RG_CSS
+BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_RG_CSS
 
 
 def _render_markdown(text: str) -> str:
@@ -3993,7 +4003,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     </svg>
     MediaHub
   </a>
-  <nav>
+  <button class="mh-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="mh-primary-nav">
+    <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+    <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+  </button>
+  <nav id="mh-primary-nav">
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
@@ -4302,6 +4316,172 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   window.addEventListener('pageshow', function(e){
     if (e.persisted) MH.hideLoader();
   });
+
+  // === Mobile hamburger nav toggle ===
+  function bindNavToggle() {
+    var toggle = document.querySelector('.mh-nav-toggle');
+    var nav = document.getElementById('mh-primary-nav');
+    if (!toggle || !nav) return;
+    if (toggle.dataset.mhBound === '1') return;
+    toggle.dataset.mhBound = '1';
+    function setOpen(open) {
+      toggle.classList.toggle('is-open', open);
+      nav.classList.toggle('is-open', open);
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    }
+    toggle.addEventListener('click', function(){
+      setOpen(!toggle.classList.contains('is-open'));
+    });
+    // Close drawer when a link is tapped (so navigation feels normal on mobile)
+    nav.addEventListener('click', function(e){
+      var a = e.target && e.target.closest ? e.target.closest('a') : null;
+      if (a) setOpen(false);
+    });
+    // Close drawer on Escape
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && toggle.classList.contains('is-open')) setOpen(false);
+    });
+    // Auto-close above the mobile breakpoint
+    var mq = window.matchMedia('(min-width: 861px)');
+    var handleMq = function(){ if (mq.matches) setOpen(false); };
+    if (mq.addEventListener) mq.addEventListener('change', handleMq);
+    else if (mq.addListener) mq.addListener(handleMq);
+  }
+  if (document.readyState !== 'loading') bindNavToggle();
+  else document.addEventListener('DOMContentLoaded', bindNavToggle);
+
+  // === Drag-and-drop dropzones ===
+  // Activates .mh-dropzone elements: prevents the browser from
+  // navigating away on drop, adds .is-over highlighting during drag,
+  // sets the inner <input type=file> when a file is dropped, then
+  // surfaces a preview line ("results.hy3 · 1.2 MB").
+  function fmtBytes(n) {
+    if (!n && n !== 0) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+  function bindDropzones() {
+    document.querySelectorAll('.mh-dropzone').forEach(function(dz){
+      if (dz.dataset.mhBound === '1') return;
+      dz.dataset.mhBound = '1';
+      var input = dz.querySelector('input[type=file]');
+      var preview = dz.querySelector('.mh-dropzone-preview');
+      if (!input) return;
+      var counter = 0;
+      function over(e){ e.preventDefault(); counter++; dz.classList.add('is-over'); }
+      function leave(e){ counter = Math.max(0, counter - 1); if (counter === 0) dz.classList.remove('is-over'); }
+      function drop(e){
+        e.preventDefault();
+        counter = 0;
+        dz.classList.remove('is-over');
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+          try { input.files = e.dataTransfer.files; }
+          catch (err) { /* DataTransfer assignment unsupported (Safari < 14.1) */ }
+          input.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+      }
+      dz.addEventListener('dragenter', over);
+      dz.addEventListener('dragover', function(e){ e.preventDefault(); });
+      dz.addEventListener('dragleave', leave);
+      dz.addEventListener('drop', drop);
+      input.addEventListener('change', function(){
+        var f = input.files && input.files[0];
+        if (f) {
+          dz.classList.add('has-file');
+          if (preview) preview.textContent = f.name + ' · ' + fmtBytes(f.size);
+        } else {
+          dz.classList.remove('has-file');
+          if (preview) preview.textContent = '';
+        }
+      });
+    });
+  }
+  if (document.readyState !== 'loading') bindDropzones();
+  else document.addEventListener('DOMContentLoaded', bindDropzones);
+  MH.bindDropzones = bindDropzones;
+
+  // === Modal focus trap + Escape-to-close ===
+  // Any element with [data-mh-modal] gets: focus moves into the
+  // first focusable element on open; Tab/Shift+Tab cycle within
+  // the dialog; Escape closes it; focus returns to the trigger.
+  function focusableIn(root) {
+    return Array.prototype.slice.call(root.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+      'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(function(el){ return el.offsetParent !== null; });
+  }
+  MH.openModal = function(modalEl, opts) {
+    if (!modalEl) return;
+    opts = opts || {};
+    var prevFocus = document.activeElement;
+    modalEl.classList.add('is-open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    var nodes = focusableIn(modalEl);
+    if (nodes[0]) nodes[0].focus();
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key === 'Tab') {
+        var ns = focusableIn(modalEl);
+        if (!ns.length) return;
+        var first = ns[0], last = ns[ns.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
+    function onBackdrop(e) {
+      if (e.target === modalEl) close();
+    }
+    function close() {
+      modalEl.classList.remove('is-open');
+      modalEl.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', onKey, true);
+      modalEl.removeEventListener('click', onBackdrop);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+      if (opts.onClose) opts.onClose();
+    }
+    document.addEventListener('keydown', onKey, true);
+    modalEl.addEventListener('click', onBackdrop);
+    modalEl.querySelectorAll('[data-mh-modal-close]').forEach(function(b){
+      b.addEventListener('click', close, {once: true});
+    });
+    return close;
+  };
+
+  // === Relative time helper ===
+  // Converts <time class="mh-rel" datetime="2026-05-19T15:28:08Z">…</time>
+  // into "5 min ago" / "Tuesday 15:24" / "12 May 15:24" depending on age.
+  function relTime(iso) {
+    var t; try { t = new Date(iso); } catch (e) { return iso; }
+    if (isNaN(t.getTime())) return iso;
+    var now = new Date();
+    var diff = Math.floor((now - t) / 1000); // seconds
+    if (diff < 0) diff = 0;
+    if (diff < 45) return 'just now';
+    if (diff < 90) return '1 min ago';
+    if (diff < 3600) return Math.floor(diff / 60) + ' min ago';
+    if (diff < 5400) return '1 hr ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' hr ago';
+    if (diff < 86400 * 2) return 'yesterday ' + t.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+    if (diff < 86400 * 7) {
+      return t.toLocaleDateString(undefined, {weekday: 'short'}) + ' ' +
+             t.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+    }
+    return t.toLocaleDateString(undefined, {day: 'numeric', month: 'short'});
+  }
+  function bindRelTimes() {
+    document.querySelectorAll('time.mh-rel[datetime]').forEach(function(el){
+      var iso = el.getAttribute('datetime');
+      var pretty = relTime(iso);
+      if (!el.hasAttribute('title')) el.setAttribute('title', el.textContent.trim() || iso);
+      el.textContent = pretty;
+    });
+  }
+  if (document.readyState !== 'loading') bindRelTimes();
+  else document.addEventListener('DOMContentLoaded', bindRelTimes);
+  MH.bindRelTimes = bindRelTimes;
 })();
 </script>
 <script>
@@ -4839,13 +5019,15 @@ def create_app() -> Flask:
                      "error": "bad"}.get(r["status"], "")
             review_href = url_for('review', run_id=r['id'])
             delete_href = url_for('privacy_delete_run', run_id=r['id'])
+            started = (r["created_at"] or "")[:19]
+            started_iso = started.replace(" ", "T") + "Z" if started else ""
             rows_html += (
-                f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                f'<td>{_h(r["our_swims"] or 0)}</td>'
-                f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td>{_schedule_summary_html(r["id"])}</td>'
-                f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
+                f'<tr><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
+                f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
+                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
+                f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
                 f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                 f'<button class="btn danger" type="submit" '
@@ -4940,7 +5122,7 @@ def create_app() -> Flask:
             '</div>'
             '</section>'
             f'{failure_callout}'
-            '<div class="card"><table>'
+            '<div class="card"><table class="mh-table-stack">'
             '<thead><tr><th>Input</th><th>Status</th>'
             '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
             '<th>Started</th><th></th></tr></thead>'
@@ -5010,13 +5192,42 @@ def create_app() -> Flask:
 </section>
 {_llm_unavailable_banner()}
 <div class="card">
-  <form method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
+  <form id="mh-upload-form" method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
-    <input id="upload-file" type="file" name="file" accept=".hy3,.zip,.pdf" required />
-    <p class="dim" style="margin-top:var(--sp-2);font-size:12px">Accepted: Hytek Meet Manager .hy3 / .zip export, or a Sportsystems PDF results file.</p>
-    <div style="margin-top:var(--sp-5)"><button class="btn" type="submit">Continue &rarr;</button></div>
+    <label class="mh-dropzone" for="upload-file">
+      <svg class="mh-dropzone-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M24 32V12"/>
+        <polyline points="16 19 24 11 32 19"/>
+        <path d="M8 32v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6"/>
+      </svg>
+      <div class="mh-dropzone-headline">Drop your results file</div>
+      <div class="mh-dropzone-sub">or click to browse</div>
+      <input id="upload-file" type="file" name="file" accept=".hy3,.zip,.pdf" required />
+      <div class="mh-dropzone-fineprint">Hytek .hy3 / .zip · Sportsystems PDF</div>
+      <div class="mh-dropzone-preview" aria-live="polite"></div>
+    </label>
+    <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+      <button id="mh-upload-submit" class="btn" type="submit" disabled aria-disabled="true">Continue &rarr;</button>
+      <a class="btn ghost" href="{url_for('home')}">Cancel</a>
+    </div>
   </form>
 </div>
+<script>
+(function(){{
+  var form = document.getElementById('mh-upload-form');
+  if (!form) return;
+  var input = form.querySelector('input[type=file]');
+  var btn = document.getElementById('mh-upload-submit');
+  if (!input || !btn) return;
+  function refresh() {{
+    var has = input.files && input.files.length > 0;
+    btn.disabled = !has;
+    btn.setAttribute('aria-disabled', has ? 'false' : 'true');
+  }}
+  input.addEventListener('change', refresh);
+  refresh();
+}})();
+</script>
 """
         return _layout("Upload", body, active="create")
 
@@ -5892,10 +6103,26 @@ def create_app() -> Flask:
         if _wf_summary or ranked_achs:
             _wf_filter_opts = ""
             _review_base = url_for("review", run_id=run_id)
+            _wf_filter_buttons = ""
+            _wf_counts = {
+                "":         _wf_n_total or len(ranked_achs),
+                "queue":    _wf_n_queue if _wf_summary else len(ranked_achs),
+                "approved": _wf_n_approved,
+                "posted":   _wf_n_posted,
+                "rejected": _wf_n_rejected,
+            }
             for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("posted", "Posted"), ("rejected", "Rejected")]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
                 _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
+                _wf_btn_cls = " is-active" if _wf_filter == _wf_opt[0] else ""
+                _wf_count_for_opt = _wf_counts.get(_wf_opt[0], 0)
+                _wf_count_html = f'<span class="count">{_wf_count_for_opt}</span>' if _wf_count_for_opt else ""
+                _wf_filter_buttons += (
+                    f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
+                    f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
+                    f'{_wf_opt[1]}{_wf_count_html}</a>'
+                )
             # --- Turn-Into content pack card (top of content pack section) ---
             _ti_prior_html = ""
             if _ti_packs:
@@ -6016,11 +6243,11 @@ function turnMeetIntoPack() {{
       <a class="btn" href="{_pack_url}" style="align-self:flex-end">View content pack &rarr;</a>
     </div>
   </div>
-  <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
-    <span class="muted" style="font-size:12px">Filter:</span>
-    <select style="width:auto;font-size:13px;padding:6px 10px" onchange="location.href=this.value">
-      {_wf_filter_opts}
-    </select>
+  <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
+    <nav class="mh-segmented" role="tablist" aria-label="Filter cards by workflow status">
+      {_wf_filter_buttons}
+    </nav>
   </div>
 </div>"""
         else:
@@ -8649,13 +8876,15 @@ Relay team broke club record"></textarea>
                      "error": "bad"}.get(r["status"], "")
             review_href = url_for('review', run_id=r['id'])
             delete_href = url_for('privacy_delete_run', run_id=r['id'])
+            started = (r["created_at"] or "")[:19]
+            started_iso = started.replace(" ", "T") + "Z" if started else ""
             rows_html += (
-                f'<tr><td><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
-                f'<td><span class="tag {badge}">{_h(r["status"])}</span></td>'
-                f'<td>{_h(r["our_swims"] or 0)}</td>'
-                f'<td>{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
-                f'<td>{_schedule_summary_html(r["id"])}</td>'
-                f'<td class="muted">{_h((r["created_at"] or "")[:19])}</td>'
+                f'<tr><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
+                f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
+                f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
+                f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
                 f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                 f'<button class="btn danger" type="submit" '
@@ -8731,7 +8960,7 @@ Relay team broke club record"></textarea>
             f'{section_header}'
             f'{section_intro}'
             f'{failure_callout}'
-            '<div class="card"><table>'
+            '<div class="card"><table class="mh-table-stack">'
             '<thead><tr><th>Input</th><th>Status</th>'
             '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
             '<th>Started</th><th></th></tr></thead>'
@@ -9619,6 +9848,9 @@ Relay team broke club record"></textarea>
             REGISTRY = {}
 
         tiles_html = ""
+        # First implemented tile gets the "Start here" lane-yellow ribbon so
+        # users have a clear primary path instead of six equal-weight options.
+        primary_marked = False
         for ct, meta in REGISTRY.items():
             # Defensive: a stale endpoint name in the content-type
             # registry must NEVER 500 the whole /make page.
@@ -9637,6 +9869,9 @@ Relay team broke club record"></textarea>
                 badge = '<span class="tag live">Ready</span>'
                 action = f'href="{route_url}"'
                 disabled_cls = ""
+                if not primary_marked:
+                    disabled_cls = " mh-template-primary"
+                    primary_marked = True
             else:
                 badge = '<span class="tag">Coming soon</span>'
                 action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'

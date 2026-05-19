@@ -1,0 +1,714 @@
+/* =====================================================================
+   THEME COMPONENTS — additive polish layer
+   ---------------------------------------------------------------------
+   Sits AFTER theme-base / theme-fallback / theme-derive / theme-cascade
+   in the cascade order, so it can consume every tier-2 token and
+   override any earlier component-level default.
+
+   Three jobs:
+     1. Fill the small-gap tokens the base layer left out
+        (type scale, easing scale, container widths, focus-shadow).
+     2. Lift the component primitives that were either inline-styled in
+        web.py or rely on browser defaults — selects, drag-drop,
+        skeletons, modal scrim, mobile nav, mobile tables.
+     3. Add the micro-interaction polish (button :active scale, tactile
+        feedback, split-property transitions) Emil Kowalski's principles
+        ask for: ease-out for entrances, transform+opacity (never
+        opacity alone), explicit transition properties (never
+        transition: all).
+
+   References:
+     - Emil Kowalski — design engineering principles
+     - WCAG 2.1 — contrast, focus visibility, motion preferences
+     - CSS Color Module Level 4 — relative-colour brand-link lift
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   TOKENS — fill the small gaps the base file left out
+   --------------------------------------------------------------------- */
+:root {
+  /* Type scale. The base file declared font-faces and used clamp() for
+     hero/h1/h2, but body sizes were hardcoded 10px / 10.5px / 11px /
+     12px / 13px / 14px / 15px across the codebase. These tokens give
+     every future component a single named scale to pull from. */
+  --fs-9:  9px;
+  --fs-10: 10px;
+  --fs-xs: 10.5px;  /* mono labels / scoreboard chrome */
+  --fs-sm: 12px;    /* dim metadata, secondary copy */
+  --fs-md: 13px;    /* button labels, dense UI */
+  --fs-body: 15px;  /* canonical body copy */
+  --fs-lg: 17px;    /* small hero / lede */
+  --fs-xl: 21px;    /* section ledes */
+  --fs-2xl: 28px;   /* sub-hero */
+
+  /* Easing scale. The base file had one --transition cubic-bezier;
+     animations all over the codebase invented their own. These four
+     cover 99% of cases. */
+  --ease-out-quick: cubic-bezier(0.2, 0.7, 0.2, 1);   /* default — feel snappy on entry */
+  --ease-out:       cubic-bezier(0.16, 1, 0.3, 1);    /* dramatic exit, gentle entry */
+  --ease-in-out:    cubic-bezier(0.4, 0, 0.2, 1);     /* state-change */
+  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);/* tactile press release */
+
+  /* Duration scale */
+  --dur-fast: 120ms;
+  --dur-med:  200ms;
+  --dur-slow: 320ms;
+
+  /* Container widths */
+  --container-sm: 720px;
+  --container-md: 960px;
+  --container-lg: 1200px;
+  --container-xl: 1400px;
+
+  /* Focus-shadow ring — derived from primary so brand cascades pick it up */
+  --mh-focus-shadow: 0 0 0 3px color-mix(in oklab, var(--mh-primary) 30%, transparent);
+
+  /* Brand-link lift. When a tenant brand resolves to a deep saturated
+     red/blue/green (e.g. Swansea #a30d2d), it fails contrast against
+     #0a0b11. We don't override the brand identity — instead, body
+     copy gets a lifted variant: same hue, raised lightness. The base
+     palette's lane-yellow stays lane-yellow because it's already
+     bright. */
+  --mh-link: color-mix(in oklab, var(--mh-primary) 70%, var(--mh-on-surface) 30%);
+  --mh-link-hover: var(--mh-primary);
+}
+
+/* ---------------------------------------------------------------------
+   FOCUS VISIBILITY — universal coverage
+   ---------------------------------------------------------------------
+   The base layer wired :focus-visible to .btn and form controls but
+   left raw <a>, custom roles, and the topnav unprotected. WCAG 2.4.11
+   needs a 3:1 ring against the adjacent colour. The ring uses the
+   focus-shadow token so it inherits the live brand cascade. */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--mh-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  /* keep the existing input focus shadow but make sure the box-shadow
+     is the token, not a hardcoded rgba */
+  box-shadow: var(--mh-focus-shadow);
+}
+
+/* ---------------------------------------------------------------------
+   LINK CONTRAST FIX — applies wherever brand-coloured links sit on
+   dark surface. The base file kept links at `--lane`. For lane-yellow
+   that's fine (≥ 10:1). For a tenant-cascaded warm brand (Swansea
+   red, etc.), it falls to ~2-3:1. The .mh-link-lift utility (and
+   the global table-row override below) swaps in the lifted token. */
+.mh-link-lift,
+table a,
+.mh-table a,
+.activity-row a {
+  color: var(--mh-link);
+}
+.mh-link-lift:hover,
+table a:hover,
+.mh-table a:hover,
+.activity-row a:hover {
+  color: var(--mh-link-hover);
+}
+
+/* ---------------------------------------------------------------------
+   BUTTONS — micro-interaction polish
+   ---------------------------------------------------------------------
+   Three Emil-spec changes vs the base layer:
+     1. transition lists explicit properties, not the catch-all
+        var(--transition) which silently bundles transform + bg +
+        shadow + colour into one timing.
+     2. :active uses scale(0.97) — tactile press feedback. Pairs with
+        the existing translateY(-1px) lift so the button rises on
+        hover and presses on click.
+     3. Loading-state shimmer dims content while the spinner runs.
+*/
+.btn {
+  transition:
+    transform   var(--dur-fast) var(--ease-out-quick),
+    background  var(--dur-fast) var(--ease-out-quick),
+    box-shadow  var(--dur-fast) var(--ease-out-quick),
+    border-color var(--dur-fast) var(--ease-out-quick),
+    color       var(--dur-fast) var(--ease-out-quick);
+  will-change: transform;
+}
+.btn:active {
+  transform: translateY(0) scale(0.97);
+  background: var(--lane-deep);
+  transition-duration: 60ms;
+}
+.btn.secondary:active {
+  background: rgba(245, 242, 232, 0.08);
+  transform: translateY(0) scale(0.97);
+}
+.btn.danger:active {
+  background: var(--bad-bg);
+  transform: translateY(0) scale(0.97);
+}
+.btn.ghost:active {
+  transform: scale(0.97);
+}
+.btn.medal:active {
+  background: var(--medal-deep);
+  transform: translateY(0) scale(0.97);
+}
+.btn.loading {
+  pointer-events: none;
+  position: relative;
+  color: transparent !important;
+}
+.btn.loading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  color: var(--lane-ink);
+  animation: mh-spin 0.7s linear infinite;
+}
+.btn.secondary.loading::after,
+.btn.ghost.loading::after,
+.btn.danger.loading::after { color: var(--ink); }
+
+/* ---------------------------------------------------------------------
+   CUSTOM <SELECT> ARROW
+   ---------------------------------------------------------------------
+   The base layer set appearance:none which strips the OS arrow but
+   never paints a replacement. The arrow below is an inline SVG that
+   uses currentColor — so it follows the cascading text colour and the
+   brand seed.
+*/
+select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='%23B6B2A6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M4 6.5l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+  padding-right: 36px;
+}
+select:hover {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='%23F5F2E8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M4 6.5l4 4 4-4'/></svg>");
+}
+
+/* ---------------------------------------------------------------------
+   INPUTS — :invalid + ::placeholder + color picker hover
+   --------------------------------------------------------------------- */
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-muted);
+  opacity: 0.6;
+}
+input:not(:placeholder-shown):invalid,
+textarea:not(:placeholder-shown):invalid {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.14);
+}
+input[type=color] { height: 44px; min-width: 56px; }
+input[type=color]:hover { border-color: var(--lane); }
+
+/* ---------------------------------------------------------------------
+   DROPZONE — drag-and-drop wrapper around <input type=file>
+   ---------------------------------------------------------------------
+   The base file styles the native ::file-selector-button button but
+   leaves the surrounding row plain. The dropzone gives the file
+   picker a real visual home — dashed border in lane yellow, a labelled
+   icon, and a hover/over state. The native input lives inside but is
+   visually hidden until drag-over.
+*/
+.mh-dropzone {
+  position: relative;
+  display: block;
+  border: 2px dashed var(--chrome);
+  background:
+    radial-gradient(60% 80% at 50% 0%, rgba(212, 255, 58, 0.04), transparent 70%),
+    rgba(245, 242, 232, 0.015);
+  border-radius: var(--radius-md);
+  padding: var(--sp-7) var(--sp-6);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-med) var(--ease-out-quick),
+    background var(--dur-med) var(--ease-out-quick),
+    transform var(--dur-fast) var(--ease-out-quick);
+}
+.mh-dropzone:hover {
+  border-color: var(--lane);
+  background:
+    radial-gradient(60% 80% at 50% 0%, rgba(212, 255, 58, 0.08), transparent 70%),
+    rgba(245, 242, 232, 0.025);
+}
+.mh-dropzone.is-over {
+  border-color: var(--lane);
+  border-style: solid;
+  background:
+    radial-gradient(60% 80% at 50% 0%, rgba(212, 255, 58, 0.18), transparent 70%),
+    rgba(212, 255, 58, 0.04);
+  transform: translateY(-1px);
+}
+.mh-dropzone.has-file {
+  border-color: var(--good);
+  border-style: solid;
+}
+.mh-dropzone-icon {
+  width: 40px; height: 40px; margin: 0 auto var(--sp-3);
+  display: block;
+  color: var(--ink-muted);
+  transition: color var(--dur-med) var(--ease-out-quick), transform var(--dur-med) var(--ease-out-quick);
+}
+.mh-dropzone:hover .mh-dropzone-icon,
+.mh-dropzone.is-over .mh-dropzone-icon { color: var(--lane); transform: translateY(-2px); }
+.mh-dropzone.has-file .mh-dropzone-icon { color: var(--good); }
+.mh-dropzone-headline {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--fs-xl);
+  letter-spacing: -0.005em;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+.mh-dropzone-sub {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  color: var(--ink-dim);
+  margin-bottom: var(--sp-4);
+}
+.mh-dropzone-fineprint {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-top: var(--sp-3);
+}
+.mh-dropzone input[type=file] {
+  /* hide the native widget but keep it focusable */
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.mh-dropzone-preview {
+  display: none;
+  margin-top: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink-dim);
+  letter-spacing: 0.04em;
+}
+.mh-dropzone.has-file .mh-dropzone-preview { display: block; }
+.mh-dropzone.has-file .mh-dropzone-headline::after {
+  content: ' ✓';
+  color: var(--good);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-dropzone, .mh-dropzone-icon { transition: none; }
+}
+
+/* ---------------------------------------------------------------------
+   SKELETONS — content placeholders for async-loading panels
+   --------------------------------------------------------------------- */
+.mh-skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    rgba(245, 242, 232, 0.03) 0%,
+    rgba(245, 242, 232, 0.06) 40%,
+    rgba(245, 242, 232, 0.03) 80%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: mh-shimmer 1.6s ease-in-out infinite;
+}
+.mh-skeleton-line  { height: 14px; margin-bottom: 8px; }
+.mh-skeleton-line.w-90 { width: 90%; }
+.mh-skeleton-line.w-60 { width: 60%; }
+.mh-skeleton-line.w-40 { width: 40%; }
+.mh-skeleton-card  { height: 120px; }
+@keyframes mh-shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-skeleton { animation: none; }
+}
+
+/* ---------------------------------------------------------------------
+   MODAL — focus trap helper + backdrop blur + close-button polish
+   ---------------------------------------------------------------------
+   The schedule modal at web.py:1024+ uses inline styles. .mh-modal
+   below is a class-based replacement other modals can adopt. Both
+   variants get the blur + entrance animation via the [role=dialog]
+   selector.
+*/
+[role="dialog"] {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.mh-modal {
+  position: fixed; inset: 0;
+  z-index: 1000;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(6, 7, 12, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: mh-fade-in var(--dur-med) var(--ease-out-quick);
+}
+.mh-modal.is-open { display: flex; }
+.mh-modal-panel {
+  background: var(--surface);
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+  max-width: 480px;
+  width: calc(100% - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: var(--sp-6);
+  transform-origin: center center;
+  animation: mh-modal-in var(--dur-med) var(--ease-out-quick);
+}
+@keyframes mh-modal-in {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+.mh-modal-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  margin: 0 0 var(--sp-2);
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
+}
+.mh-modal-body {
+  font-family: var(--font-body);
+  color: var(--ink-dim);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  margin-bottom: var(--sp-5);
+}
+.mh-modal-actions {
+  display: flex; gap: var(--sp-3);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.mh-modal-close {
+  position: absolute;
+  top: var(--sp-3); right: var(--sp-3);
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--ink-muted);
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              border-color var(--dur-fast) var(--ease-out-quick),
+              transform var(--dur-fast) var(--ease-out-quick);
+}
+.mh-modal-close:hover { color: var(--ink); border-color: var(--lane); }
+.mh-modal-close:active { transform: scale(0.92); }
+@media (prefers-reduced-motion: reduce) {
+  .mh-modal, .mh-modal-panel { animation: none; }
+}
+
+/* ---------------------------------------------------------------------
+   TOAST — mobile-aware positioning
+   ---------------------------------------------------------------------
+   The base layer pins toasts top-right which goes under the desktop
+   nav fine. On mobile that position cuts the toast off the screen.
+   Override below moves toasts to bottom on small viewports.
+*/
+@media (max-width: 720px) {
+  #mh-toast-container {
+    top: auto !important;
+    bottom: 16px !important;
+    left: 16px !important;
+    right: 16px !important;
+  }
+  .mh-toast { max-width: 100% !important; }
+}
+
+/* ---------------------------------------------------------------------
+   PROGRESS STRIP — review-page approval progress
+   ---------------------------------------------------------------------
+   Used on /review to show "3 approved / 47 total" plus a thin bar.
+   Sits inside a card or above the card grid.
+*/
+.mh-progress-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-5);
+  flex-wrap: wrap;
+}
+.mh-progress-strip-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-progress-strip-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.mh-progress-strip-value .total {
+  color: var(--ink-faint);
+  font-size: 0.6em;
+  margin-left: 4px;
+}
+.mh-progress-strip-bar {
+  flex: 1; min-width: 160px;
+  height: 4px;
+  background: var(--hairline);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.mh-progress-strip-bar > span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--lane), var(--medal));
+  border-radius: inherit;
+  transition: width var(--dur-slow) var(--ease-out-quick);
+}
+
+/* ---------------------------------------------------------------------
+   SEGMENTED CONTROL — visible workflow filter
+   ---------------------------------------------------------------------
+   Replaces the hidden ?wf= URL param on /review with a real button
+   group. Active state uses lane yellow.
+*/
+.mh-segmented {
+  display: inline-flex;
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+  background: rgba(245, 242, 232, 0.02);
+}
+.mh-segmented a,
+.mh-segmented button {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: 2px;
+  background: transparent;
+  border: 0;
+  color: var(--ink-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              background var(--dur-fast) var(--ease-out-quick);
+}
+.mh-segmented a:hover,
+.mh-segmented button:hover { color: var(--ink); }
+.mh-segmented a.is-active,
+.mh-segmented button.is-active {
+  background: var(--lane);
+  color: var(--lane-ink);
+}
+.mh-segmented a .count,
+.mh-segmented button .count {
+  font-size: var(--fs-9);
+  font-weight: 500;
+  opacity: 0.7;
+  letter-spacing: 0;
+}
+
+/* ---------------------------------------------------------------------
+   MOBILE NAVIGATION — hamburger drawer
+   ---------------------------------------------------------------------
+   The desktop nav lays its 8+ links horizontally; below ~720px the
+   tail of the nav silently overflows off-screen with no replacement.
+   The button + drawer below adopt the same masthead aesthetic.
+*/
+.mh-nav-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-sm);
+  width: 40px; height: 40px;
+  align-items: center; justify-content: center;
+  color: var(--ink);
+  cursor: pointer;
+  margin-left: auto;
+  transition: border-color var(--dur-fast) var(--ease-out-quick);
+}
+.mh-nav-toggle:hover { border-color: var(--lane); }
+.mh-nav-toggle:active { transform: scale(0.94); }
+.mh-nav-toggle svg { display: block; width: 18px; height: 18px; }
+.mh-nav-toggle .icon-close { display: none; }
+.mh-nav-toggle.is-open .icon-open  { display: none; }
+.mh-nav-toggle.is-open .icon-close { display: block; }
+
+@media (max-width: 860px) {
+  header.topnav { padding: 0 var(--sp-4); }
+  header.topnav .brand::after { display: none; }
+  header.topnav .brand { margin-right: var(--sp-3); }
+  .mh-nav-toggle { display: inline-flex; }
+  header.topnav nav {
+    position: fixed;
+    top: 64px; left: 0; right: 0;
+    background: var(--surface-deep, var(--bg-deep));
+    border-bottom: 1px solid var(--chrome);
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--sp-3) var(--sp-4) var(--sp-5);
+    gap: var(--sp-1);
+    transform: translateY(-120%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform var(--dur-med) var(--ease-out-quick),
+                opacity   var(--dur-med) var(--ease-out-quick);
+    z-index: 99;
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
+  header.topnav nav.is-open {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  header.topnav nav a {
+    padding: var(--sp-3) var(--sp-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-md);
+    letter-spacing: 0.08em;
+  }
+  header.topnav nav a.active::after {
+    left: var(--sp-3); right: auto;
+    width: 3px; top: 8px; bottom: 8px; height: auto;
+  }
+  #backend-pill { margin-left: 0; margin-top: var(--sp-3); align-self: flex-start; }
+  #active-org-chip { margin-left: 0 !important; margin-top: var(--sp-3); }
+}
+
+/* ---------------------------------------------------------------------
+   RESPONSIVE TABLE — stack to cards below 720px
+   ---------------------------------------------------------------------
+   The base file's tables wrap cells onto multiple lines on narrow
+   screens, producing the letter-per-line breakage on /activity. The
+   .mh-table-stack rule below detects the breakpoint and presents
+   each row as a stacked card, with the header label inlined via
+   data-label="…" attributes on the <td>.
+*/
+@media (max-width: 720px) {
+  .mh-table-stack { border: 0; }
+  .mh-table-stack thead { display: none; }
+  .mh-table-stack tbody tr {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
+    padding: var(--sp-3) var(--sp-4);
+    margin-bottom: var(--sp-3);
+  }
+  .mh-table-stack tbody tr:nth-child(odd) { background: var(--surface); }
+  .mh-table-stack tbody td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--hairline);
+    vertical-align: middle;
+  }
+  .mh-table-stack tbody td:last-child { border-bottom: 0; }
+  .mh-table-stack tbody td::before {
+    content: attr(data-label);
+    font-family: var(--font-mono);
+    font-size: var(--fs-10);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    flex-shrink: 0;
+    margin-right: var(--sp-3);
+  }
+  .mh-table-stack tbody td:not([data-label])::before { content: ''; margin: 0; }
+}
+
+/* ---------------------------------------------------------------------
+   TEMPLATE GRID PRIORITY — give the /make hero tile a lane-yellow border
+   ---------------------------------------------------------------------
+   All-equal tiles give the user no help choosing. The .mh-template-primary
+   class lifts the recommended path; ribbon strap in the corner reinforces. */
+.mh-template { transition: transform var(--dur-med) var(--ease-out-quick),
+                            border-color var(--dur-med) var(--ease-out-quick),
+                            background var(--dur-med) var(--ease-out-quick); }
+.mh-template:hover { transform: translateY(-2px); }
+.mh-template:active { transform: translateY(0) scale(0.99); }
+.mh-template-primary {
+  border-color: var(--lane);
+  box-shadow: 0 0 0 1px var(--lane-glow), 0 14px 32px rgba(0, 0, 0, 0.40);
+  position: relative;
+}
+.mh-template-primary::before {
+  content: 'START HERE';
+  position: absolute;
+  top: 12px; left: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  padding: 3px 8px;
+  background: var(--lane);
+  color: var(--lane-ink);
+  border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------------
+   RELATIVE-TIME utility — pairs with the JS in _layout that
+   converts ISO timestamps to "5 min ago" / "Tuesday 15:24"
+*/
+time.mh-rel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
+
+/* ---------------------------------------------------------------------
+   FOCUS — improve visible scroll-into-view target for in-page anchors
+   so settings #anchors don't land out of viewport under the sticky
+   topnav. */
+:target { scroll-margin-top: 80px; }
+
+/* ---------------------------------------------------------------------
+   LINK UNDERLINE — restrained, broadsheet feel; reset for nav + tags
+   --------------------------------------------------------------------- */
+.mh-prose a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--mh-primary) 50%, transparent);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+.mh-prose a:hover {
+  text-decoration-color: var(--mh-primary);
+}
