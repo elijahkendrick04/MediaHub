@@ -211,16 +211,25 @@ class TestCascadeResolvesSeed:
 
 
 class TestNoActiveProfile:
-    """When no profile is active, the inline override block must
-    be absent — the static default seed wins."""
+    """When no profile is active, the inline override block now
+    carries the Stage J2 generic-default seed (#0E2A47 navy) so
+    even unconfigured deployments exercise the full pipeline.
 
-    def test_no_seed_override_when_no_profile(self, fresh_app):
+    The Stage E "absent when no profile" contract was superseded
+    by Stage J2 — set MEDIAHUB_ADAPTIVE_THEME=0 for the legacy
+    no-override behaviour (covered by test_adaptive_theme_flag.py)."""
+
+    def test_default_seed_override_when_no_profile(self, fresh_app):
         app, _, _ = fresh_app
         with app.test_client() as c:
             body = c.get("/status").get_data(as_text=True)
-        # The inline <style id="mh-theme-seed"> must NOT be present.
-        assert 'id="mh-theme-seed"' not in body, (
-            "seed override leaked when no active profile"
+        # Stage J2: the inline override block IS present, carrying
+        # the generic-default seed.
+        assert 'id="mh-theme-seed"' in body, (
+            "Stage J2 default-theme override missing on unconfigured page"
+        )
+        assert "#0E2A47" in body, (
+            "expected the generic-default seed (#0E2A47) in the override"
         )
 
         pw, browser = _launch_browser()
@@ -232,17 +241,14 @@ class TestNoActiveProfile:
         finally:
             browser.close()
             pw.stop()
-        # Without an override, the seed resolves to the static
-        # theme-base.css default — the existing lane-yellow.
-        # The browser may normalise the hex form; just assert it's
-        # a non-empty value that includes the lane signature.
+        # The cascade resolves the seed to the generic-default navy.
         assert seed != ""
         normalised = seed.replace(" ", "").lower()
-        # Lane yellow is #D4FF3A → R=212 G=255 B=58
-        # Accept hex, rgb, or oklch forms.
+        # Navy is #0E2A47 → R=14 G=42 B=71. Accept hex, rgb, oklch
+        # forms; just look for the signature.
         plausible = (
-            "d4ff3a" in normalised
-            or "212" in normalised      # R channel
+            "0e2a47" in normalised
+            or "rgb(14" in normalised
             or "oklch" in normalised
         )
         assert plausible, f"unexpected default seed: {seed!r}"

@@ -170,12 +170,18 @@ class TestThemeSeedStyleBlock:
         )
         assert m, "override block doesn't declare a valid --mh-brand-seed"
 
-    def test_seed_style_block_absent_when_no_org(self, app_client):
-        """When no profile is pinned, the override block must be
-        absent (empty string from _theme_seed_style_block)."""
+    def test_seed_style_block_uses_default_when_no_org(self, app_client):
+        """Phase 1.6 Stage J2 update: when no profile is pinned, the
+        override block STILL appears — it now carries the generic-
+        default theme (#0E2A47 navy) so the engine runs end-to-end
+        for unconfigured deployments too. Use MEDIAHUB_ADAPTIVE_THEME=0
+        to suppress the block entirely (see test_adaptive_theme_flag.py)."""
         client, _, _ = app_client
         body = client.get("/status").get_data(as_text=True)
-        # Should NOT contain the override block.
-        assert 'id="mh-theme-seed"' not in body, (
-            "override block leaked when no active profile"
+        # Stage J2: override block present, carrying generic-default seed.
+        assert 'id="mh-theme-seed"' in body, (
+            "Stage J2 default-theme override missing on unconfigured page"
+        )
+        assert "#0E2A47" in body, (
+            "expected the generic-default seed (#0E2A47) in the override"
         )

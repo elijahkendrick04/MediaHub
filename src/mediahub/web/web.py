@@ -24,6 +24,7 @@ State: SQLite at data.db (so publish_website snapshots it across deploys)
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -3728,51 +3729,111 @@ def _theme_repair_callout_html(theme_json: Optional[dict]) -> str:
     )
 
 
+def _adaptive_theme_enabled() -> bool:
+    """Phase 1.6 Stage J1 — the cutover safety lever.
+
+    Returns True (the default) when the adaptive theming
+    pipeline should inject its inline <style id="mh-theme-seed">
+    override into rendered pages. Returns False when the operator
+    has set ``MEDIAHUB_ADAPTIVE_THEME=0`` (also accepts
+    ``false``/``off``/``no``) — in which case every render falls
+    through to the static Stage A cascade as if Stages D-J had
+    never shipped.
+
+    The flag is purely a *visible-cascade* control: the on-disk
+    theme JSON (Stage G), the audit panel (Stage H2), and the
+    repair callout (Stage H3) all keep working regardless,
+    because they're independent of the CSS override.
+    """
+    import os as _os
+    value = _os.environ.get("MEDIAHUB_ADAPTIVE_THEME", "")
+    return value.strip().lower() not in ("0", "false", "off", "no")
+
+
+def _default_theme_json() -> Optional[dict]:
+    """Phase 1.6 Stage J2 — pre-derived default theme.
+
+    Lazily derives a DerivedTheme from BrandKit.generic_default()'s
+    seeds (#0E2A47 navy + #C9A227 gold) the first time it's called,
+    then caches the result for the life of the process.
+
+    Returns None on any derivation failure so callers can fall
+    back to the static Stage A cascade cleanly. Side-effect:
+    Stage G's hook in ensure_derived_palette() writes
+    DATA_DIR/themes/default.json on first call, making the
+    default theme available to motion / email / static
+    renderers exactly like a real profile's theme.
+
+    Cached at module level (not per-call) so the ~50ms first-
+    call cost is amortised across the life of the worker.
+    """
+    return _default_theme_json_cached()
+
+
+@functools.lru_cache(maxsize=1)
+def _default_theme_json_cached() -> Optional[dict]:
+    try:
+        from mediahub.brand.kit import BrandKit
+        kit = BrandKit.generic_default()
+        return kit.ensure_derived_palette()
+    except Exception:
+        return None
+
+
 def _theme_seed_style_block() -> str:
-    """Return the inline <style id="mh-theme-seed"> block carrying the
-    active organisation's brand-seed override.
+    """Return the inline <style id="mh-theme-seed"> block carrying
+    the active organisation's brand-seed override.
 
-    Phase 1.6 Stage E — minimum-viable Stage D wiring. Sits last in
-    the cascade (after the static theme CSS) so it wins. The
-    id="mh-theme-seed" anchor makes it greppable in devtools and
-    addressable by future Stage E client-side animations.
+    Phase 1.6 Stage E introduced the per-org override; Stage J
+    extended it with a feature-flag rollback (J1) and a generic-
+    default fallback for unconfigured deployments (J2).
 
-    Returns an empty string when:
-      - no Flask request context is active
-      - the app hasn't been initialised yet (no ``active_profile`` attr)
-      - no active organisation
-      - the organisation has no brand kit / derived palette
-      - the seed hex fails the safety regex (defence in depth)
+    Three-tier resolution:
+      1. ``MEDIAHUB_ADAPTIVE_THEME=0`` → return "" (Stage J1
+         rollback to Stage A cascade)
+      2. Active organisation pinned → use profile.brand_kit.
+         derived_palette (Stages D-G)
+      3. No active organisation → use _default_theme_json()
+         (Stage J2 — unconfigured-first-run benefits from the
+         pipeline)
+
+    Returns an empty string in case 1 or when the chosen tier
+    fails to resolve a valid seed (defence in depth).
     """
     import re as _re
+
+    # Tier 1 — rollback flag
+    if not _adaptive_theme_enabled():
+        return ""
+
+    # Tier 2 — active profile (the Stage E original behaviour)
+    palette = None
     try:
         from flask import current_app
         get_active = getattr(current_app, "active_profile", None)
-        if not get_active:
-            return ""
-        prof = get_active()
-    except RuntimeError:
-        return ""
-    except Exception:
-        return ""
-    if not prof:
-        return ""
-    try:
-        kit = prof.get_brand_kit()
-        palette = kit.ensure_derived_palette()
-    except Exception:
-        return ""
+        if get_active:
+            prof = get_active()
+            if prof:
+                try:
+                    kit = prof.get_brand_kit()
+                    palette = kit.ensure_derived_palette()
+                except Exception:
+                    palette = None
+    except (RuntimeError, Exception):
+        palette = None
+
+    # Tier 3 — generic-default fallback (Stage J2)
+    if not isinstance(palette, dict):
+        palette = _default_theme_json()
+
     if not isinstance(palette, dict):
         return ""
+
     seed_hex = palette.get("seed_hex")
     if not isinstance(seed_hex, str):
         return ""
     if not _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", seed_hex):
         return ""
-    # Inline style — sits last in the cascade so it wins. Only
-    # --mh-brand-seed for Stage E; the tertiary/neutral/status seeds
-    # stay at their static defaults (Stage B's locked-anchor rule for
-    # status, Stage D scope for tertiary).
     return (
         f'<style id="mh-theme-seed">'
         f':root {{ --mh-brand-seed: {seed_hex}; }}'
