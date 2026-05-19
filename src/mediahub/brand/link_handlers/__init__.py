@@ -246,15 +246,13 @@ def process_link(
                 break
 
     # ---- Stage 4: extract brand DNA ----
+    # ONLY extract for real_content. Earlier this branch also ran for
+    # auth_walled / soft_blocked_spa / not_found / unknown bodies on
+    # the theory that "some text is better than none" — but the bodies
+    # in those states are login walls, scraping-gateway error JSON, or
+    # captcha pages. Stuffing those into voice_summary poisoned every
+    # downstream caption prompt for orgs whose website failed to load.
     if base["status"] == "real_content" and body:
-        base["dna"] = content_extractor.extract_brand_dna(
-            body, url=primary_url, platform_intent=intent,
-        )
-    elif body:
-        # Even if the block detector wasn't confident, we still have
-        # some text — surface a minimal DNA so the org doesn't lose
-        # everything. The handler's caller can decide what weight to
-        # give it.
         base["dna"] = content_extractor.extract_brand_dna(
             body, url=primary_url, platform_intent=intent,
         )

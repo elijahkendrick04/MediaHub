@@ -91,34 +91,80 @@ _SUBMIT_CARD_TOOL = [{
 
 
 def _load_brand_context() -> dict:
-    """Best-effort load of the first ClubProfile for brand voice grounding."""
+    """Best-effort load of the ACTIVE ClubProfile for brand voice grounding.
+
+    Resolves through ``current_app.active_profile`` (set on the Flask app
+    in ``web.create_app`` so every route shares the same definition of
+    "which org am I"). Falls back to the most-recently-edited profile on
+    disk only when there is no Flask request context — e.g. background
+    jobs or unit tests. Using ``list_profiles()[0]`` used to mix up
+    different orgs' tone + sponsor rules on multi-tenant installs.
+    """
     try:
         from mediahub.web.club_profile import list_profiles, load_profile  # type: ignore
     except Exception:
         return {}
+    prof = None
     try:
-        profiles = list_profiles()
-        if not profiles:
-            return {}
-        first = profiles[0]
-        pid = first.get("profile_id") if isinstance(first, dict) else getattr(first, "profile_id", None)
-        if not pid:
-            return {}
-        prof = load_profile(pid)
-        if not prof:
-            return {}
-        return {
-            "name":          getattr(prof, "display_name", "") or "",
-            "short_name":    getattr(prof, "short_name", "") or "",
-            "org_type":      getattr(prof, "org_type", "") or "",
-            "tone":          getattr(prof, "tone", "") or "",
-            "tone_notes":    getattr(prof, "tone_notes", "") or "",
-            "exemplars":     getattr(prof, "exemplar_captions", []) or [],
-            "sponsor_name":  getattr(prof, "sponsor_name", "") or "",
-            "sponsor_rules": getattr(prof, "sponsor_guidelines", "") or "",
-        }
-    except Exception:
+        from flask import current_app
+        get_active = getattr(current_app, "active_profile", None)
+        if get_active:
+            prof = get_active()
+    except (RuntimeError, Exception):
+        prof = None
+    if prof is None:
+        try:
+            profiles = list_profiles()
+            if not profiles:
+                return {}
+            best_pid = None
+            try:
+                from mediahub.web.club_profile import _profiles_dir  # type: ignore
+                d = _profiles_dir()
+                best = max(
+                    profiles,
+                    key=lambda p: (d / f"{getattr(p, 'profile_id', '')}.json").stat().st_mtime,
+                )
+                best_pid = getattr(best, "profile_id", None)
+            except Exception:
+                first = profiles[0]
+                best_pid = (
+                    first.get("profile_id") if isinstance(first, dict)
+                    else getattr(first, "profile_id", None)
+                )
+            if not best_pid:
+                return {}
+            prof = load_profile(best_pid)
+        except Exception:
+            prof = None
+    if not prof:
         return {}
+    try:
+        # Effective palette (manual override > AI extracted). Stub
+        # captions need to know the actual brand colour so language
+        # like "wear the navy" or "lean into the gold" is grounded.
+        from mediahub.brand.palette import effective_palette
+        eff = effective_palette(
+            manual=getattr(prof, "brand_palette_manual", {}) or {},
+            extracted=getattr(prof, "brand_palette_extracted", {}) or {},
+        )
+    except Exception:
+        eff = {}
+    return {
+        "name":          getattr(prof, "display_name", "") or "",
+        "short_name":    getattr(prof, "short_name", "") or "",
+        "org_type":      getattr(prof, "org_type", "") or "",
+        "tone":          getattr(prof, "tone", "") or "",
+        "tone_notes":    getattr(prof, "tone_notes", "") or "",
+        "exemplars":     getattr(prof, "exemplar_captions", []) or [],
+        "sponsor_name":  getattr(prof, "sponsor_name", "") or "",
+        "sponsor_rules": getattr(prof, "sponsor_guidelines", "") or "",
+        "voice_summary": (getattr(prof, "brand_voice_summary", "") or "")[:600],
+        "keywords":      list(getattr(prof, "brand_keywords", []) or [])[:8],
+        "phrases_to_use":   list(getattr(prof, "brand_phrases_to_use", []) or [])[:6],
+        "phrases_to_avoid": list(getattr(prof, "brand_phrases_to_avoid", []) or [])[:6],
+        "palette":       eff,
+    }
 
 
 def _system_prompt(extra_context: str) -> str:
@@ -144,6 +190,35 @@ def _system_prompt(extra_context: str) -> str:
     )
     if brand_prose:
         base = base + "\n\nBrand voice:\n" + brand_prose
+
+    # Surface the confirmed brand palette + name so captions can
+    # reference the organisation's colours naturally ("wear the
+    # navy", "lean into the gold") and use the organisation's
+    # actual name instead of generic "the club".
+    name = (brand.get("name") or "").strip()
+    palette = brand.get("palette") or {}
+    palette_bits = []
+    for slot in ("primary", "secondary", "accent", "fourth"):
+        v = palette.get(slot)
+        if isinstance(v, str) and v.startswith("#"):
+            palette_bits.append(f"{slot} {v}")
+    keywords = [k for k in (brand.get("keywords") or []) if k]
+    use_phrases = [p for p in (brand.get("phrases_to_use") or []) if p]
+    avoid_phrases = [p for p in (brand.get("phrases_to_avoid") or []) if p]
+    brand_facts_lines = []
+    if name:
+        brand_facts_lines.append(f"Organisation name: {name}")
+    if palette_bits:
+        brand_facts_lines.append("Confirmed brand palette: " + ", ".join(palette_bits))
+    if keywords:
+        brand_facts_lines.append("Brand keywords: " + ", ".join(keywords))
+    if use_phrases:
+        brand_facts_lines.append("Phrases to use: " + "; ".join(use_phrases))
+    if avoid_phrases:
+        brand_facts_lines.append("Phrases to avoid: " + "; ".join(avoid_phrases))
+    if brand_facts_lines:
+        base = base + "\n\nBrand facts:\n" + "\n".join(brand_facts_lines)
+
     if extra_context:
         base = base + "\n\nThis brief is:\n" + extra_context
     return base

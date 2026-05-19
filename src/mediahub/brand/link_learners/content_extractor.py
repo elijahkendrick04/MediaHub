@@ -81,6 +81,58 @@ def _build_prompt(url: str, platform_intent: str, raw_text: str) -> str:
 _HASHTAG_RE = re.compile(r"#[A-Za-z][A-Za-z0-9_]{1,40}")
 
 
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_URL_RE = re.compile(r"https?://\S+")
+_MD_HEADING_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+_BLOB_RE = re.compile(r"blob:[a-z]+://\S+", re.IGNORECASE)
+
+
+def _clean_excerpt(raw_text: str, *, cap: int = 280) -> str:
+    """Strip markdown noise so the heuristic fallback returns sentences,
+    not raw scraped junk. We previously dumped the first 300 chars of
+    whatever the fetcher returned — that meant the voice summary stored
+    on the profile looked like "# Instagram ![Image 1](blob:...)" and
+    masqueraded as a real summary in every downstream caption prompt.
+    """
+    if not raw_text:
+        return ""
+    txt = _MD_IMAGE_RE.sub(" ", raw_text)
+    txt = _MD_LINK_RE.sub(r"\1", txt)
+    txt = _BLOB_RE.sub(" ", txt)
+    txt = _URL_RE.sub(" ", txt)
+    txt = _MD_HEADING_RE.sub("", txt)
+    # Drop low-information boilerplate lines that platform handlers
+    # routinely produce ("Title: Instagram", "URL Source: ...").
+    drop_prefixes = (
+        "title:", "url source:", "markdown content:", "published time:",
+        "warning:", "see everyday moments",
+    )
+    kept_lines = []
+    for line in txt.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if any(low.startswith(p) for p in drop_prefixes):
+            continue
+        kept_lines.append(s)
+    joined = " ".join(kept_lines)
+    joined = _WHITESPACE_RE.sub(" ", joined).strip()
+    if not joined:
+        return ""
+    if len(joined) <= cap:
+        return joined
+    # Cut at the nearest sentence boundary within the cap so the excerpt
+    # doesn't break mid-word.
+    head = joined[:cap]
+    last_period = head.rfind(". ")
+    if last_period >= cap // 2:
+        return head[: last_period + 1].strip()
+    return head.rstrip() + "…"
+
+
 def _heuristic(raw_text: str) -> dict:
     text = (raw_text or "").strip()
     if not text:
@@ -95,7 +147,7 @@ def _heuristic(raw_text: str) -> dict:
             continue
         seen.add(tl)
         uniq_tags.append(t)
-    excerpt = text[:300]
+    excerpt = _clean_excerpt(text)
     return {
         "voice_summary": excerpt,
         "keywords": [],
