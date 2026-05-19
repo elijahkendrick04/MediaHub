@@ -8541,6 +8541,46 @@ Relay team broke club record"></textarea>
     #   4. Most recent LLM error message (so the operator can diagnose
     #      a quietly-failing provider without grepping logs).
     #   5. 7-day posting-log roll-up.
+    @app.route("/healthz/breaker")
+    def healthz_breaker():
+        """Expose the Gemini circuit-breaker state for one worker.
+
+        Added 2026-05-19 after the user-facing symptom "regenerate
+        keeps returning ai_directed=false even though Gemini usage
+        shows mostly-OK calls" turned out to be (most likely) a
+        tripped per-worker breaker on the worker handling this
+        request. Gunicorn workers have independent in-process breaker
+        state, so the operator may need to refresh this endpoint a
+        few times to land on each worker. Anything in the snapshot
+        with ``open: true`` means that worker is currently skipping
+        Gemini for the listed cooldown period.
+        """
+        try:
+            from mediahub.media_ai.llm import gemini_breaker_snapshot
+            snap = gemini_breaker_snapshot()
+        except Exception as e:
+            return jsonify({"error": f"breaker_unavailable: {e}"}), 500
+        try:
+            from mediahub.ai_core.llm import _key_for as _key
+            providers_configured = {
+                "gemini": bool(_key("gemini")),
+                "claude": bool(_key("claude")),
+            }
+        except Exception:
+            providers_configured = {}
+        return jsonify({
+            "ok": True,
+            "gemini_breaker": snap,
+            "providers_configured": providers_configured,
+            "fallback_available": providers_configured.get("claude", False),
+            "note": (
+                "Per-worker state. If your deployment runs multiple "
+                "gunicorn workers, refresh this endpoint to sample each "
+                "worker. A high 'consecutive_failures' on a worker with "
+                "'open': false means a few errors but no trip yet."
+            ),
+        })
+
     @app.route("/healthz/usage")
     def healthz_usage():
         from mediahub.observability import llm_usage as _u

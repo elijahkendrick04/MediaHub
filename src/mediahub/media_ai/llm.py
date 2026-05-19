@@ -299,6 +299,29 @@ def _gemini_breaker_record_success() -> None:
         _gemini_breaker_state["tripped_until"] = 0.0
 
 
+def gemini_breaker_snapshot() -> dict:
+    """Return the current breaker state in a JSON-serialisable shape.
+
+    Exposed for observability (the ``/healthz/breaker`` route reads
+    this) so operators can tell whether silent "ai_directed=false"
+    responses are caused by a tripped breaker. The values are
+    per-process — multi-worker deployments will see one snapshot per
+    gunicorn worker.
+    """
+    with _gemini_breaker_lock:
+        now = time.monotonic()
+        tripped_until = _gemini_breaker_state["tripped_until"]
+        return {
+            "open": now < tripped_until,
+            "consecutive_failures": int(
+                _gemini_breaker_state["consecutive_failures"]
+            ),
+            "seconds_until_reset": max(0.0, round(tripped_until - now, 1)),
+            "threshold": _GEMINI_BREAKER_THRESHOLD,
+            "cooldown_seconds": _GEMINI_BREAKER_COOLDOWN_S,
+        }
+
+
 def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
     """Call Google Gemini generateContent. Returns text or None.
 
