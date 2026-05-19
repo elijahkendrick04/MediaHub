@@ -886,7 +886,15 @@ def _load_run(run_id: str) -> Optional[dict]:
     p = RUNS_DIR / f"{run_id}.json"
     if not p.exists():
         return None
-    return json.loads(p.read_text())
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        # A corrupted run JSON would otherwise 500 every route that
+        # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
+        # "run not found" instead so the recovery_page renders cleanly;
+        # the operator can find the offending file in the log.
+        log.warning("run %s on disk but unreadable: %s", run_id, e)
+        return None
 
 
 def _run_state(run_id: str) -> str:
@@ -5551,8 +5559,13 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
-        # Workflow filter from query param
-        _wf_filter = request.args.get('wf', '')   # '' | 'queue' | 'approved' | 'posted' 
+        # Workflow filter from query param. Validated against the known
+        # set so a malformed ``?wf=anything`` doesn't silently filter to
+        # nothing (which used to render an empty Review page with no hint
+        # that the filter was the cause).
+        _wf_filter = (request.args.get('wf', '') or '').strip().lower()
+        if _wf_filter not in ('', 'queue', 'approved', 'posted'):
+            _wf_filter = ''
 
         # --- Recognition summary band
         n_elite = rr.get('n_elite', 0)
@@ -7233,7 +7246,13 @@ function addGraphicToPack(btn, visualId) {{
                 # with individual error capture so one failure doesn't
                 # poison the others.
                 from concurrent.futures import ThreadPoolExecutor
-                n_variants = int(request.args.get("n_variants") or 1)
+                # Defend against ``?n_variants=abc`` — a bare int()
+                # would 500 the whole caption endpoint. Anything that
+                # doesn't parse as a positive integer falls back to 1.
+                try:
+                    n_variants = int(request.args.get("n_variants") or 1)
+                except (TypeError, ValueError):
+                    n_variants = 1
                 n_variants = max(1, min(n_variants, 4))
 
                 # V9: feed the AI the last few captions for this swim so
@@ -12429,26 +12448,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'vertical-align:middle;margin-right:3px"></span>'
                     for c in colours[:4]
                 )
+                # ``_h`` is ``markupsafe.escape``; mixing it into ``+``
+                # concatenation makes every trailing string literal get
+                # HTML-escaped. Built the whole card as a single f-string
+                # with the URL pre-strified so attributes like
+                # ``data-no-loader`` reach the browser unescaped.
+                _desc_html = (
+                    f'<div class="muted" style="font-size:11px;line-height:1.3" '
+                    f'title="{str(_h(desc))}">{str(_h(desc[:120]))}</div>'
+                    if desc else ""
+                )
+                _swatches_html = (
+                    f'<div>{colour_swatches}</div>' if colour_swatches else ""
+                )
+                _filename_attr = str(_h(logo.get("original_filename", "")))
+                _label_html = str(_h(label))
+                _delete_url_attr = str(_h(delete_url))
                 cards.append(
-                    '<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
-                    'border:1px solid var(--chrome,var(--border));border-radius:6px;'
+                    f'<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
+                    f'border:1px solid var(--chrome,var(--border));border-radius:6px;'
                     f'padding:10px;display:flex;flex-direction:column;gap:8px">'
                     f'{preview}'
                     f'<div style="font-size:12px;font-weight:600;color:var(--ink);'
                     f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
-                    f'title="{_h(logo.get("original_filename", ""))}">{_h(label)}</div>'
-                    + (f'<div class="muted" style="font-size:11px;line-height:1.3" '
-                       f'title="{_h(desc)}">{_h(desc[:120])}</div>' if desc else "")
-                    + (f'<div>{colour_swatches}</div>' if colour_swatches else "")
-                    + '<form method="POST" action="' + _h(delete_url) + '" data-no-loader="1" '
-                      'onsubmit="return confirm(\'Delete this logo?\')">'
-                      '<button type="submit" style="font-size:11px;padding:5px 9px;'
-                      'background:transparent;border:1px solid rgba(255,107,107,0.3);'
-                      'color:#FF6B6B;border-radius:4px;cursor:pointer;'
-                      'font-family:var(--font-mono,monospace);text-transform:uppercase;'
-                      'letter-spacing:0.10em">Delete</button>'
-                      '</form>'
-                    '</div>'
+                    f'title="{_filename_attr}">{_label_html}</div>'
+                    f'{_desc_html}'
+                    f'{_swatches_html}'
+                    f'<form method="POST" action="{_delete_url_attr}" data-no-loader="1" '
+                    f'onsubmit="return confirm(\'Delete this logo?\')">'
+                    f'<button type="submit" style="font-size:11px;padding:5px 9px;'
+                    f'background:transparent;border:1px solid rgba(255,107,107,0.3);'
+                    f'color:#FF6B6B;border-radius:4px;cursor:pointer;'
+                    f'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                    f'letter-spacing:0.10em">Delete</button>'
+                    f'</form>'
+                    f'</div>'
                 )
             _logos_grid_html = (
                 '<div style="margin-top:14px;display:grid;'
