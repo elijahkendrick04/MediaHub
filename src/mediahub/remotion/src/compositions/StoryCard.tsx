@@ -18,6 +18,16 @@ const cardSchema = z.object({
   meetName: z.string().default(""),
   place: z.string().default(""),
   variationSeed: z.number().default(0),
+  // Path A/B variation axes — every field is optional. Empty strings
+  // fall back to the variationSeed-driven behaviour, so legacy callers
+  // that haven't been updated keep producing the same output they did
+  // before this composition learned about the wider variation vocabulary.
+  backgroundStyle: z.string().default(""),
+  composition: z.string().default(""),
+  typographyPair: z.string().default(""),
+  accentStyle: z.string().default(""),
+  mood: z.string().default(""),
+  photoTreatment: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -35,22 +45,277 @@ export const storyCardSchema = z.object({
 });
 
 type Props = z.infer<typeof storyCardSchema>;
+type CardProps = Props["card"];
+type BrandProps = Props["brand"];
+type Roles = { ground: string; surface: string; accent: string };
 
-// Variation-seed driven palette role swap. Mirrors the seed=1 behaviour in
-// src/mediahub/creative_brief/generator.py:_apply_palette_seed so motion
-// renders stay visually consistent with the static graphic for the same card.
-function rolesForSeed(
-  brand: Props["brand"],
-  seed: number,
-): { ground: string; surface: string; accent: string } {
+// Six palette role permutations — mirror creative_brief/generator.py
+// _apply_palette_seed so the static graphic and motion render agree on
+// which colour plays which role for a given variationSeed.
+function rolesForSeed(brand: BrandProps, seed: number): Roles {
   const p = brand.primary || "#0A2540";
   const s = brand.secondary || "#000000";
   const a = brand.accent || "#FFFFFF";
-  const mode = ((seed | 0) % 4 + 4) % 4;
+  const mode = ((seed | 0) % 6 + 6) % 6;
   if (mode === 1) return { ground: s, surface: p, accent: a };
   if (mode === 2) return { ground: a, surface: p, accent: s };
   if (mode === 3) return { ground: p, surface: a, accent: s };
+  if (mode === 4) return { ground: s, surface: a, accent: p };
+  if (mode === 5) return { ground: a, surface: s, accent: p };
   return { ground: p, surface: s, accent: a };
+}
+
+// Map brief.background_style → an SVG data URI we layer over the ground
+// colour at low opacity. Each generator is deliberately monochrome
+// (uses the accent role) so the pattern reads as texture, not a
+// competing illustration.
+function bgPatternFor(style: string, roles: Roles): string {
+  const accent = roles.accent || "#FFFFFF";
+  const encode = (svg: string) =>
+    `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`;
+  const stroke = (op: number) =>
+    `${accent}${Math.round(op * 255).toString(16).padStart(2, "0")}`;
+  switch (style) {
+    case "dots":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'>` +
+        `<circle cx='12' cy='12' r='3' fill='${stroke(0.18)}'/></svg>`,
+      );
+    case "diagonal":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'>` +
+        `<path d='M0,40 L40,0' stroke='${stroke(0.16)}' stroke-width='2'/></svg>`,
+      );
+    case "stripes":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='40' height='8'>` +
+        `<rect width='40' height='4' fill='${stroke(0.18)}'/></svg>`,
+      );
+    case "geometric":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>` +
+        `<polygon points='60,10 110,90 10,90' fill='none' stroke='${stroke(0.18)}' stroke-width='2'/></svg>`,
+      );
+    case "halftone":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='30' height='30'>` +
+        `<circle cx='15' cy='15' r='5' fill='${stroke(0.22)}'/></svg>`,
+      );
+    case "grain":
+      // SVG <feTurbulence> rendered server-side is heavy; approximate
+      // with sparse noise dots.
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'>` +
+        `<circle cx='6' cy='12' r='1' fill='${stroke(0.18)}'/>` +
+        `<circle cx='42' cy='28' r='1' fill='${stroke(0.18)}'/>` +
+        `<circle cx='22' cy='48' r='1' fill='${stroke(0.18)}'/></svg>`,
+      );
+    case "water":
+      return encode(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='120' height='60'>` +
+        `<path d='M0,30 Q30,10 60,30 T120,30' fill='none' stroke='${stroke(0.18)}' stroke-width='2'/></svg>`,
+      );
+    case "radial":
+    case "duotone":
+    case "clean":
+    default:
+      return "";
+  }
+}
+
+// Map brief.typography_pair → a CSS font-family stack. The static
+// graphic uses real @font-face declarations; in motion we approximate
+// with the closest system-available stack to avoid the bundling cost
+// of loading webfonts into the headless Chromium.
+function fontStackFor(pair: string): string {
+  switch (pair) {
+    case "anton-inter":
+    case "bebas-grotesk":
+    case "druk-inter":
+    case "oswald-inter":
+      // Condensed display stack — fall through to Impact-like.
+      return "'Oswald', 'Bebas Neue', 'Impact', 'Helvetica Neue Condensed', 'Arial Narrow', sans-serif";
+    case "bowlby-inter":
+      return "'Bowlby One', 'Archivo Black', 'Impact', sans-serif";
+    case "archivo-inter":
+      return "'Archivo', 'Inter', 'Helvetica Neue', Arial, sans-serif";
+    default:
+      return "-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif";
+  }
+}
+
+// Map mood → spring config. The mood field is set by the AI director
+// (e.g. "electric, precise", "calm, weighty", "celebratory") so the
+// motion render's energy actually matches the static graphic's vibe.
+function springConfigFor(mood: string): { damping: number; stiffness: number; mass: number } {
+  const m = (mood || "").toLowerCase();
+  if (m.includes("calm") || m.includes("weighty") || m.includes("composed")) {
+    return { damping: 30, stiffness: 60, mass: 1.1 };
+  }
+  if (m.includes("electric") || m.includes("snappy") || m.includes("kinetic")) {
+    return { damping: 12, stiffness: 140, mass: 0.6 };
+  }
+  if (m.includes("celebratory") || m.includes("bold") || m.includes("triumph")) {
+    return { damping: 15, stiffness: 110, mass: 0.7 };
+  }
+  return { damping: 18, stiffness: 90, mass: 0.7 };
+}
+
+// Map brief.composition → where the surname/result block lives. The
+// values match the four positions the static renderer supports
+// (graphic_renderer/render.py:_composition_overrides_css).
+function compositionLayoutFor(
+  composition: string,
+  width: number,
+): { textLeft: number; textAlign: "left" | "right" | "center"; surnameRight: number } {
+  switch (composition) {
+    case "left":
+      return { textLeft: 80, textAlign: "left", surnameRight: -width * 0.06 };
+    case "right":
+      return { textLeft: width * 0.45, textAlign: "left", surnameRight: width * 0.42 };
+    case "center":
+      return { textLeft: width * 0.08, textAlign: "center", surnameRight: width * 0.5 };
+    case "off-center":
+      return { textLeft: width * 0.18, textAlign: "left", surnameRight: -width * 0.02 };
+    default:
+      return { textLeft: 80, textAlign: "left", surnameRight: -width * 0.06 };
+  }
+}
+
+// Map brief.accent_style → a small decorative element. Returns null
+// when "minimal" or unknown so the composition stays clean.
+function accentDecoration(
+  style: string,
+  roles: Roles,
+  opacity: number,
+  width: number,
+  height: number,
+): React.ReactNode {
+  const accent = roles.accent;
+  switch (style) {
+    case "stripe":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            left: 80,
+            top: height * 0.42,
+            width: 120,
+            height: 6,
+            background: accent,
+            opacity,
+          }}
+        />
+      );
+    case "brackets":
+      return (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              left: 60,
+              top: height * 0.43,
+              width: 40,
+              height: 40,
+              borderLeft: `4px solid ${accent}`,
+              borderTop: `4px solid ${accent}`,
+              opacity,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: width - 100,
+              bottom: height * 0.2,
+              width: 40,
+              height: 40,
+              borderRight: `4px solid ${accent}`,
+              borderBottom: `4px solid ${accent}`,
+              opacity,
+            }}
+          />
+        </>
+      );
+    case "underline":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            left: 80,
+            top: height * 0.82,
+            width: 240,
+            height: 4,
+            background: accent,
+            opacity,
+          }}
+        />
+      );
+    case "arrow":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            left: width - 160,
+            top: height * 0.5,
+            width: 0,
+            height: 0,
+            borderTop: "20px solid transparent",
+            borderBottom: "20px solid transparent",
+            borderLeft: `30px solid ${accent}`,
+            opacity,
+          }}
+        />
+      );
+    case "ribbon":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: height * 0.36,
+            width: 320,
+            height: 48,
+            background: accent,
+            opacity,
+            transform: "skewX(-12deg)",
+            transformOrigin: "left center",
+          }}
+        />
+      );
+    case "frame":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            left: 40,
+            top: 40,
+            right: 40,
+            bottom: 40,
+            border: `3px solid ${accent}`,
+            opacity: opacity * 0.4,
+            pointerEvents: "none",
+          }}
+        />
+      );
+    case "badge":
+      return (
+        <div
+          style={{
+            position: "absolute",
+            right: 80,
+            bottom: height * 0.22,
+            width: 90,
+            height: 90,
+            borderRadius: "50%",
+            border: `4px solid ${accent}`,
+            opacity,
+          }}
+        />
+      );
+    case "minimal":
+    default:
+      return null;
+  }
 }
 
 export const StoryCard: React.FC<Props> = ({ card, brand }) => {
@@ -58,12 +323,18 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   const { fps, durationInFrames, width, height } = useVideoConfig();
 
   const roles = rolesForSeed(brand, card.variationSeed || 0);
+  const fontStack = fontStackFor(card.typographyPair || "");
+  const springCfg = springConfigFor(card.mood || "");
+  const layout = compositionLayoutFor(card.composition || "left", width);
+  const bgPattern = bgPatternFor(card.backgroundStyle || "", roles);
 
-  // Intro: spring-eased big surname swoop + result fade
+  // Intro: spring-eased big surname swoop + result fade. The spring
+  // config is mood-driven so an "electric" card snaps in quickly while
+  // a "composed" one settles slowly.
   const introSpring = spring({
     frame,
     fps,
-    config: { damping: 18, stiffness: 90, mass: 0.7 },
+    config: springCfg,
   });
   const surnameY = interpolate(introSpring, [0, 1], [120, 0]);
   const surnameOpacity = interpolate(frame, [0, fps * 0.4], [0, 1], {
@@ -101,11 +372,24 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     <AbsoluteFill
       style={{
         backgroundColor: roles.ground,
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif",
+        fontFamily: fontStack,
         opacity: outroFade,
       }}
     >
+      {/* Background pattern overlay (driven by brief.background_style). */}
+      {bgPattern ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: bgPattern,
+            backgroundRepeat: "repeat",
+            opacity: 0.85,
+            pointerEvents: "none",
+          }}
+        />
+      ) : null}
+
       {/* Surface band — slim diagonal accent for energy */}
       <div
         style={{
@@ -120,12 +404,15 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         }}
       />
 
+      {/* Accent decoration — driven by brief.accent_style */}
+      {accentDecoration(card.accentStyle || "", roles, chipOpacity, width, height)}
+
       {/* Mega watermark surname behind everything */}
       <div
         style={{
           position: "absolute",
           top: height * 0.18,
-          right: -width * 0.06,
+          right: layout.surnameRight,
           fontSize: Math.min(width, height) * 0.32,
           fontWeight: 900,
           letterSpacing: "-0.02em",
@@ -179,13 +466,14 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       <div
         style={{
           position: "absolute",
-          left: 80,
+          left: layout.textLeft,
           top: height * 0.45,
           fontSize: 96,
           fontWeight: 700,
           color: roles.accent,
           letterSpacing: "-0.01em",
           opacity: surnameOpacity,
+          textAlign: layout.textAlign,
           transform: `translateY(${surnameY * 0.3}px)`,
         }}
       >
@@ -196,7 +484,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       <div
         style={{
           position: "absolute",
-          left: 80,
+          left: layout.textLeft,
           top: height * 0.51,
           fontSize: 168,
           fontWeight: 900,
@@ -204,6 +492,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
           letterSpacing: "-0.02em",
           lineHeight: 1,
           opacity: surnameOpacity,
+          textAlign: layout.textAlign,
           transform: `translateY(${surnameY}px)`,
           maxWidth: width - 160,
         }}
@@ -215,12 +504,13 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       <div
         style={{
           position: "absolute",
-          left: 80,
+          left: layout.textLeft,
           top: height * 0.65,
           fontSize: 36,
           color: roles.accent,
           opacity: surnameOpacity * 0.85,
           letterSpacing: "0.04em",
+          textAlign: layout.textAlign,
         }}
       >
         {event}
@@ -230,7 +520,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       <div
         style={{
           position: "absolute",
-          left: 80,
+          left: layout.textLeft,
           top: height * 0.70,
           fontSize: 132,
           fontWeight: 800,
@@ -240,6 +530,7 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
           transform: `scale(${resultScale})`,
           transformOrigin: "left center",
           fontVariantNumeric: "tabular-nums",
+          textAlign: layout.textAlign,
         }}
       >
         {result || "—"}

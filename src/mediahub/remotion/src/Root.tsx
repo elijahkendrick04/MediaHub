@@ -29,6 +29,12 @@ const defaultCard = {
   meetName: "MediaHub Open",
   place: "1",
   variationSeed: 1,
+  backgroundStyle: "",
+  composition: "",
+  typographyPair: "",
+  accentStyle: "",
+  mood: "",
+  photoTreatment: "",
 };
 
 export const RemotionRoot: React.FC = () => {

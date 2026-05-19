@@ -20,6 +20,16 @@ const cardSchema = z.object({
   meetName: z.string().default(""),
   place: z.string().default(""),
   variationSeed: z.number().default(0),
+  // Variation axes flow through to the inner StoryCard renders so every
+  // beat of the reel can carry its own direction (different layout,
+  // background pattern, accent, etc.). Empty strings keep the
+  // pre-Gemini-director behaviour for cards built by older callers.
+  backgroundStyle: z.string().default(""),
+  composition: z.string().default(""),
+  typographyPair: z.string().default(""),
+  accentStyle: z.string().default(""),
+  mood: z.string().default(""),
+  photoTreatment: z.string().default(""),
 });
 
 const brandSchema = z.object({

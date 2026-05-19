@@ -128,6 +128,41 @@ def test_card_to_props_prefers_text_layers_when_present():
     assert props["achievementLabel"] == "LIKELY PB"
 
 
+def test_card_to_props_forwards_brief_variation_axes():
+    """When a CreativeBrief dict is passed, the AI-directed variation
+    axes (background_style, typography_pair, composition, accent_style,
+    mood, photo_treatment) must flow through to the Remotion props so
+    the TSX composition can vary fonts, layout, animation spring, and
+    background pattern per card."""
+    card = {"achievement": {"swimmer_name": "Sample Person", "event_name": "200m IM"}}
+    brief = {
+        "background_style": "dots",
+        "typography_pair": "anton-inter",
+        "composition": "right",
+        "accent_style": "brackets",
+        "mood": "electric, precise",
+        "photo_treatment": "cutout",
+    }
+    props = motion._card_to_props(card, variation_seed=2, brief=brief)
+    assert props["backgroundStyle"] == "dots"
+    assert props["typographyPair"] == "anton-inter"
+    assert props["composition"] == "right"
+    assert props["accentStyle"] == "brackets"
+    assert props["mood"] == "electric, precise"
+    assert props["photoTreatment"] == "cutout"
+    assert props["variationSeed"] == 2
+
+
+def test_card_to_props_without_brief_keeps_axes_empty():
+    """Legacy callers that don't supply a brief get empty axis strings
+    so the TSX composition falls back to its variationSeed-only path."""
+    card = {"achievement": {"swimmer_name": "Sample Person"}}
+    props = motion._card_to_props(card, variation_seed=1)
+    for k in ("backgroundStyle", "typographyPair", "composition",
+              "accentStyle", "mood", "photoTreatment"):
+        assert props[k] == ""
+
+
 def test_content_hash_is_stable_and_kind_sensitive():
     payload = {"a": 1, "b": [1, 2, 3], "c": {"x": "y"}}
     h1 = motion._content_hash(payload, kind="story")

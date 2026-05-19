@@ -15254,6 +15254,47 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     # ------------------------------------------------------------------
     # Motion-graphic + short-form video output (Remotion)
     # ------------------------------------------------------------------
+    def _latest_brief_for_card(run_id: str, card_id: str) -> Optional[dict]:
+        """Return the most recently written CreativeBrief JSON for a card.
+
+        Briefs are persisted by ``content_pack_visual.integration`` at
+        ``RUNS_DIR/<run_id>/briefs/<brief.id>.json``. Each brief carries
+        a ``content_item_id`` field that matches the swim_id of the
+        achievement it was generated for. The static graphic regenerate
+        flow can stamp out multiple briefs for the same card (one per
+        regenerate click) so the most-recently-modified file is the one
+        the user is currently looking at, and the one motion should
+        mirror.
+
+        Returns ``None`` when no brief exists for this card or when the
+        briefs directory hasn't been created yet.
+        """
+        try:
+            bdir = RUNS_DIR / run_id / "briefs"
+            if not bdir.exists() or not card_id:
+                return None
+            candidates: list[tuple[float, Path]] = []
+            for p in bdir.glob("cb_*.json"):
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if str(data.get("content_item_id") or "") != str(card_id):
+                    continue
+                try:
+                    mtime = p.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                candidates.append((mtime, p))
+            if not candidates:
+                return None
+            candidates.sort(key=lambda kv: kv[0], reverse=True)
+            return json.loads(candidates[0][1].read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
     def _motion_error_payload(e: Exception) -> dict:
         """Translate a raw motion render exception into a user-friendly JSON
         payload. The frontend JS reads `user_message` for display and uses
@@ -15380,12 +15421,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{card_id}.mp4"
 
+        # Load the most recent Gemini-directed brief for this card so the
+        # motion render picks up the layout / typography / background /
+        # accent / mood axes the AI director chose for the static card.
+        # Falls back silently to variationSeed-only variation when no
+        # brief exists (e.g. legacy runs from before the director landed).
+        brief_dict = _latest_brief_for_card(run_id, card_id)
+
         try:
             mp4 = _motion.render_story_card(
                 card_payload,
                 brand_kit,
                 out_path,
                 variation_seed=variation_seed,
+                brief=brief_dict,
             )
         except RuntimeError as e:
             _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
@@ -15473,12 +15522,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"reel_{n}.mp4"
 
+        # Look up the latest brief per card so every beat of the reel
+        # carries its own AI-directed variation. Cards without a brief
+        # produce a None entry — render_meet_reel handles that.
+        brief_list: list = []
+        for c in cards:
+            cid = c.get("id") or c.get("swim_id") or ""
+            brief_list.append(_latest_brief_for_card(run_id, cid) if cid else None)
+
         try:
             mp4 = _motion.render_meet_reel(
                 cards,
                 brand_kit,
                 out_path,
                 meet_name=meet_name,
+                briefs=brief_list,
             )
         except RuntimeError as e:
             _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500

@@ -156,11 +156,26 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     }
 
 
-def _card_to_props(card: dict, *, variation_seed: int = 0) -> dict[str, Any]:
+def _card_to_props(
+    card: dict,
+    *,
+    variation_seed: int = 0,
+    brief: Optional[dict] = None,
+) -> dict[str, Any]:
     """Coerce one content-pack card payload into the StoryCard props shape.
 
     Accepts either a flat dict ({"swimmer_name": ..., "event": ...}) or the
     nested {"achievement": {...}} variant emitted by the recognition layer.
+
+    When ``brief`` is supplied (the AI-directed CreativeBrief for this
+    card, as a dict via ``brief.to_dict()``), the variation axes the
+    director picked — layout family, typography pair, composition,
+    background style, accent style, mood, photo treatment — are
+    forwarded to Remotion. The TypeScript StoryCard composition uses
+    those axes to vary fonts, layout, animation spring, background
+    pattern, and accent decoration, so a Gemini-directed run produces
+    visually distinct motion for every card instead of just rotating
+    palette roles.
     """
     ach = card.get("achievement") if isinstance(card, dict) else None
     if not isinstance(ach, dict):
@@ -226,6 +241,10 @@ def _card_to_props(card: dict, *, variation_seed: int = 0) -> dict[str, Any]:
         or ""
     )
 
+    # Pull variation axes from the brief (when supplied). Every field
+    # is optional — empty strings tell the TSX composition to fall
+    # back to its variationSeed-driven defaults.
+    b = brief if isinstance(brief, dict) else {}
     return {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
@@ -236,6 +255,12 @@ def _card_to_props(card: dict, *, variation_seed: int = 0) -> dict[str, Any]:
         "meetName": str(meet_name),
         "place": str(place),
         "variationSeed": int(variation_seed or 0),
+        "backgroundStyle": str(b.get("background_style") or ""),
+        "composition": str(b.get("composition") or ""),
+        "typographyPair": str(b.get("typography_pair") or ""),
+        "accentStyle": str(b.get("accent_style") or ""),
+        "mood": str(b.get("mood") or ""),
+        "photoTreatment": str(b.get("photo_treatment") or ""),
     }
 
 
@@ -321,15 +346,24 @@ def render_story_card(
     *,
     variation_seed: int = 0,
     duration_sec: float = 6.0,
+    brief: Optional[dict] = None,
 ) -> Path:
     """Render a single content-pack card to a 1080x1920 MP4 story.
 
-    Returns the path to the rendered MP4. Cached by content hash so repeated
-    calls with the same card + brand + seed reuse the existing file.
+    Returns the path to the rendered MP4. Cached by content hash so
+    repeated calls with the same card + brand + seed + brief reuse
+    the existing file.
+
+    Pass ``brief`` (as ``CreativeBrief.to_dict()``) to forward the
+    Gemini-directed variation axes (layout/typography/background/
+    accent/mood) to the TSX composition. Without a brief the render
+    falls back to variationSeed-only behaviour for backwards compat.
     """
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
-    card_dict = _card_to_props(card_payload, variation_seed=variation_seed)
+    card_dict = _card_to_props(
+        card_payload, variation_seed=variation_seed, brief=brief,
+    )
 
     cache_key = _content_hash(
         {"card": card_dict, "brand": brand_dict, "duration": duration_sec},
@@ -366,6 +400,7 @@ def render_meet_reel(
     *,
     meet_name: str = "",
     duration_sec: float = 15.0,
+    briefs: Optional[list[Optional[dict]]] = None,
 ) -> Path:
     """Render a multi-card reel (default 15s) from the top cards for a meet.
 
@@ -383,7 +418,8 @@ def render_meet_reel(
     brand_dict = _brand_to_dict(brand_kit)
 
     cards_props: list[dict] = []
-    for c in top_cards or []:
+    briefs_list = list(briefs or [])
+    for idx, c in enumerate(top_cards or []):
         # variation seed per card — caller may pass via {"variation_seed": N}
         seed = 0
         if isinstance(c, dict):
@@ -406,7 +442,10 @@ def render_meet_reel(
                         seed = auto_variation_seed_for(str(cid))
                     except Exception:
                         seed = 1
-        cards_props.append(_card_to_props(c, variation_seed=seed))
+        brief = briefs_list[idx] if idx < len(briefs_list) else None
+        cards_props.append(
+            _card_to_props(c, variation_seed=seed, brief=brief),
+        )
 
     if not meet_name:
         for cp in cards_props:
