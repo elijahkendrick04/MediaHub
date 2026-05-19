@@ -10881,7 +10881,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     except Exception as e:
                         result = {"brand_capture_status": f"error: {e}"}
                     status = (result or {}).get("brand_capture_status", "")
-                    if status in ("ok", "ok_heuristic"):
+                    if status in ("ok", "no_provider", "ok_heuristic"):
                         # Merge captured fields into the in-memory profile so
                         # the preview shows them, but DON'T save until the user
                         # clicks "Save organisation".
@@ -10909,8 +10909,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "Captured from website &mdash; review below and click "
                             "Save organisation to persist."
                             if status == "ok"
-                            else "Captured from website (no LLM available, "
-                                 "heuristic fallback). Edit and save."
+                            else "Captured from website (palette and logo only; "
+                                 "AI provider not configured, so the voice "
+                                 "summary and keywords are empty). Edit and save."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">'
@@ -10976,7 +10977,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "Re-analysed from website + socials &mdash; review below "
                             "and click Save organisation to persist."
                             if status == "ok"
-                            else "Re-analysed (no LLM available, heuristic fallback). Edit and save."
+                            else "Re-analysed (no live signal from the sources we tried). "
+                                 "Edit and save."
                         )
                         capture_preview = (
                             f'<p class="tag info" style="margin-bottom:20px">'
@@ -12795,7 +12797,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             file_bytes = upload.read() or b""
             # Phase 1.5 — reject obvious binary uploads (PNG/JPG
             # screenshots, MP4, etc.) at the boundary so the binary
-            # bytes never reach _heuristic_interpret. The downstream
+            # bytes never reach interpret_guidelines. The downstream
             # guideline parser already has a magic-byte check but
             # surfacing it as a clean user-visible status here is
             # honest: we tell them "that file type isn't supported"

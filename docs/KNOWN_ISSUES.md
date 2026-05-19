@@ -44,8 +44,10 @@ Live issues that we accept for now. Each has a workaround and is tracked in
 
 - **Voice fidelity decays for very short exemplar sets** (< 10 captions).
   Provide ≥ 25 for stable induction.
-- **The deterministic fallback (no API key)** is intentionally generic. Users
-  often expect more flair than the templates provide.
+- **AI providers are required.** When no LLM key is configured, AI-driven
+  surfaces (captioning, brand interpretation, creative direction) surface
+  an "AI unavailable" error rather than fabricating heuristic output.
+  Configure `GEMINI_API_KEY` (free tier) or `ANTHROPIC_API_KEY`.
 
 ## Brand kit
 

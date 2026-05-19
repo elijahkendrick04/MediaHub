@@ -1,4 +1,10 @@
-"""Local rembg-based background remover. Free, decent quality.
+"""Server-side rembg-based background remover. Free, decent quality.
+
+Runs in the same Python process as Flask on the deployed server — not on
+the customer's machine. "Local" here means "in-process with the web app",
+which the cloud-hosted SaaS treats as the default cutout backend because
+it has no per-image API spend. Customers never run this themselves; the
+processing always happens on the deployment side of the network.
 
 Lazy-imports rembg so the module loads even if rembg/onnxruntime are absent.
 First run downloads the u2net model (~170MB) into ~/.u2net/.

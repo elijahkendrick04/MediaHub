@@ -13,7 +13,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN:-}
       - PHOTOROOM_API_KEY=${PHOTOROOM_API_KEY:-}
-      - MEDIAHUB_CUTOUT_PROVIDER=${MEDIAHUB_CUTOUT_PROVIDER:-rembg}
+      - MEDIAHUB_CUTOUT_PROVIDER=${MEDIAHUB_CUTOUT_PROVIDER:-server}
     volumes:
       # Persist user-supplied data and runtime artefacts across restarts.
       - ./data:/app/data

@@ -13,9 +13,10 @@ This module:
 
 No hardcoded interpretation. The text extraction is mechanical; every
 semantic decision ("is this a do or a don't?", "is this a tone
-descriptor or a content rule?") is the LLM's job. When no LLM is
-available the module falls back to storing a trimmed raw-text excerpt
-so the user's input is never silently discarded.
+descriptor or a content rule?") is the LLM's job. When no LLM provider
+is configured the module records the raw text excerpt and reports a
+``no_provider`` status so the UI can surface "configure an AI provider"
+rather than silently inventing regex-extracted stand-ins.
 
 Public surface:
     extract_text(filename: str, file_bytes: bytes) -> dict
@@ -409,70 +410,31 @@ def _normalise_mandatory_rules(raw: object) -> list[str]:
     return out
 
 
-_MANDATORY_REGEX_HINTS = (
-    r"\bMUST\b", r"\bNEVER\b", r"\bALWAYS\b", r"\bREQUIRED\b",
-    r"\bSHALL\b", r"\bMANDATORY\b", r"\bFORBIDDEN\b", r"\bPROHIBITED\b",
-    r"\bdo not\b", r"\bnever\b", r"\bonly\b",
-)
-
-
-def _heuristic_mandatory_rules(text: str) -> list[str]:
-    """Fallback when no LLM is available: pull every sentence containing
-    a mandatory-force keyword. Better than nothing — the user's literal
-    'MUST always include the hashtag #X' will still reach the system
-    prompt verbatim even on offline deployments.
-    """
-    if not text:
-        return []
-    pattern = re.compile("|".join(_MANDATORY_REGEX_HINTS), re.IGNORECASE)
-    # Split on sentence boundaries (rough — we want to keep the verbatim
-    # wording so heavy NLP would hurt fidelity).
-    sentences = re.split(r"(?<=[.!?])\s+|\n+", text)
-    out: list[str] = []
-    seen: set[str] = set()
-    for s in sentences:
-        s = s.strip()
-        if not s or len(s) < 8 or len(s) > 600:
-            continue
-        if not pattern.search(s):
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(s)
-        if len(out) >= 25:
-            break
-    return out
-
-
 def extract_mandatory_rules(text: str) -> list[str]:
     """Pull verbatim non-negotiable rules out of a brand-guidelines
-    text. LLM path preferred; falls back to a keyword-scanning
-    heuristic when no LLM is available. Never raises.
+    text using the configured cloud LLM. Returns ``[]`` when no
+    provider is configured (the UI will surface "AI unavailable" via
+    the parent payload's status field), when the LLM call fails, or
+    when the document contained no mandatory rules.
+
+    Never raises — this is a best-effort enrichment surface.
     """
     if not text or not text.strip():
         return []
     try:
         from mediahub.media_ai.llm import generate_json, is_available
     except Exception:
-        return _heuristic_mandatory_rules(text)
+        return []
     if not is_available():
-        return _heuristic_mandatory_rules(text)
+        return []
     prompt = _build_mandatory_rules_prompt(text)
     try:
         raw = generate_json(prompt, system=_MANDATORY_RULES_LLM_SYSTEM,
                              max_tokens=1_800, fallback={})
     except Exception as e:
         log.debug("mandatory-rules LLM call failed: %s", e)
-        return _heuristic_mandatory_rules(text)
-    rules = _normalise_mandatory_rules(raw)
-    if not rules:
-        # Fall back so a quiet LLM doesn't silently drop the user's
-        # hard rules. The heuristic is conservative; if it also finds
-        # nothing the document genuinely had no hard rules.
-        return _heuristic_mandatory_rules(text)
-    return rules
+        return []
+    return _normalise_mandatory_rules(raw)
 
 
 def _build_prompt(text: str) -> str:
@@ -514,20 +476,14 @@ def _is_hex(c: str) -> bool:
     return isinstance(c, str) and bool(re.match(r"^#[0-9a-fA-F]{6}$", c))
 
 
-def _heuristic_interpret(text: str) -> dict:
-    """Used when no LLM is available. Stores a trimmed excerpt and
-    declares unknown for every structured field — so a downstream
-    content tool can still see "there ARE guidelines, here they are
-    verbatim" even if the AI hasn't summarised them yet."""
-    excerpt = (text or "").strip()
-    if len(excerpt) > 2_000:
-        excerpt = excerpt[:2_000] + " ..."
-    summary = (
-        "Brand guidelines loaded but not yet AI-summarised "
-        "(no LLM provider available). Verbatim excerpt: "
-    ) + excerpt
+def _empty_interpretation(status: str) -> dict:
+    """Return the canonical empty-result shape for interpret_guidelines
+    when no AI output was produced. ``status`` distinguishes the
+    failure mode (``no_provider`` / ``provider_error`` / ``empty``) so
+    the UI can show an honest message instead of inventing fake fields.
+    """
     return {
-        "summary": summary[:1500],
+        "summary": "",
         "voice_attributes": [],
         "tone_dos": [],
         "tone_donts": [],
@@ -538,7 +494,7 @@ def _heuristic_interpret(text: str) -> dict:
         "audience": "",
         "key_messages": [],
         "palette_mentions": [],
-        "status": "ok_heuristic",
+        "status": status,
     }
 
 
@@ -616,28 +572,30 @@ def _normalise_interpretation(raw: dict) -> dict:
 
 
 def interpret_guidelines(text: str) -> dict:
-    """Send the extracted text to the LLM. Always returns a dict; on
-    LLM failure returns the heuristic fallback (raw excerpt + empty
-    structured fields).
+    """Send the extracted text to the configured cloud LLM. Always
+    returns a dict; on LLM unavailability or failure returns the
+    canonical empty shape with a ``status`` field that tells callers
+    why (``no_provider`` / ``provider_error`` / ``empty``). Never
+    fabricates structured fields — the only honest output without an
+    LLM is "AI couldn't be reached".
     """
     if not text or not text.strip():
         return {"summary": "", "status": "empty"}
     try:
         from mediahub.media_ai.llm import generate_json, is_available
     except Exception:
-        return _heuristic_interpret(text)
+        return _empty_interpretation("no_provider")
     if not is_available():
-        return _heuristic_interpret(text)
+        return _empty_interpretation("no_provider")
     prompt = _build_prompt(text)
     try:
         raw = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=2_400, fallback={})
     except Exception as e:
         log.debug("guidelines LLM call failed: %s", e)
-        return _heuristic_interpret(text)
+        return _empty_interpretation("provider_error")
     if not isinstance(raw, dict) or not raw:
-        return _heuristic_interpret(text)
+        return _empty_interpretation("provider_error")
     out = _normalise_interpretation(raw)
-    # Empty LLM response → fall back so we don't silently drop the user's upload.
     has_signal = bool(
         out["summary"]
         or out["voice_attributes"]
@@ -646,7 +604,7 @@ def interpret_guidelines(text: str) -> dict:
         or out["key_messages"]
     )
     if not has_signal:
-        return _heuristic_interpret(text)
+        return _empty_interpretation("provider_error")
     return out
 
 
@@ -663,7 +621,7 @@ def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
           "brand_guidelines_raw_excerpt": str,            # first ~6 KB of text
           "brand_guidelines_filename": str,
           "brand_guidelines_uploaded_at": str,            # ISO timestamp
-          "brand_guidelines_status": str,                 # "ok"|"ok_heuristic"|"empty"|"too_large"|"unsupported"
+          "brand_guidelines_status": str,                 # "ok"|"no_provider"|"provider_error"|"empty"|"too_large"|"unsupported"
           "brand_guidelines_extractor": str,
           "brand_guidelines_byte_size": int,
           "brand_guidelines_mandatory_rules": list[str],  # MUST/NEVER/ALWAYS rules, verbatim

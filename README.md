@@ -7,34 +7,22 @@
 [![Tests](https://img.shields.io/badge/tests-287%20passing-brightgreen.svg)](docs/AUDIT_REPORTS.md)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
-MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It runs as a single Flask service that you can self-host on Render, Fly, Docker, or a plain VPS.
+MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs.
 
 ---
 
-## Quick start (local)
+## Getting started
 
-```bash
-git clone <this-repo>
-cd mediahub-export
-python -m venv .venv && source .venv/bin/activate
-make install           # python deps + editable install
-make media-deps        # Playwright Chromium + Remotion node_modules
-cp .env.example .env   # add your API keys (all optional)
-make run               # starts http://localhost:5000
-```
+MediaHub is delivered as a hosted web application. Customers sign in to the deployed URL provided by their operator and use it through any modern browser — no install, no local setup.
 
-Open `http://localhost:5000`, click **Upload**, drop in a results PDF, and watch the pipeline run.
+1. Open the deployment URL in a browser.
+2. Click **Upload**, drop in a results file (PDF, HY3, SDIF, ZIP, or HTML).
+3. The cloud pipeline interprets, recognises, ranks, renders, and captions in the background.
+4. Review the generated cards on the run's review page, edit captions, approve, and download the content pack.
 
-> `make media-deps` downloads ~500 MB the first time (Chromium + Remotion).
-> Skip it only if you don't need rendered graphics or motion video — the
-> caption pipeline still works without them, and `/healthz/deps` will report
-> which renderers are missing.
+The hosted service performs all AI calls (captioning, brand interpretation, creative direction) through cloud LLM providers (Gemini / Anthropic). Image background removal runs on the deployed server or through cloud cutout APIs (Photoroom / Replicate) depending on operator configuration.
 
-## Quick start (Docker)
-
-```bash
-docker compose up --build
-```
+> Working on the codebase? See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for contributor setup.
 
 ## What it does
 
@@ -43,7 +31,7 @@ docker compose up --build
 3. **Recognise** — the [detector bus](docs/DETECTOR_BUS.md) flags PBs, qualifying times, medal finals, and other achievements.
 4. **Verify** — the [PB engine](docs/PB_VERIFICATION.md) cross-checks against swimmingresults.org with a trust ledger.
 5. **Render** — [graphic_renderer](docs/UPLOAD_TO_CARDS.md) generates Instagram-ready PNGs from HTML/CSS templates.
-6. **Caption** — Claude (or a deterministic fallback) writes a club-voice caption for each card.
+6. **Caption** — the configured cloud LLM (Gemini or Claude) writes a club-voice caption for each card.
 7. **Pack** — every card lands on the `/review/<run_id>` page; download a ZIP of the whole weekend's content.
 
 ## Architecture overview
@@ -97,10 +85,7 @@ scripts/             build + maintenance scripts
 
 ## Tests
 
-```bash
-make test            # full suite, 287 tests
-make test-collect    # collection only
-```
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the contributor test workflow.
 
 ## Licence
 

@@ -44,10 +44,13 @@ discover them by surprise.
 
 ## LLM
 
-- **Without `ANTHROPIC_API_KEY`, the deterministic fallback is acceptable.**
-  This is enforced by `tests/test_settings_and_caption_no_key.py`.
-- **Claude 3.5 Sonnet is the production model.** Override via
-  `MEDIAHUB_LLM_MODEL`.
+- **At least one cloud LLM provider key is required.** The operator must
+  configure `GEMINI_API_KEY` and/or `ANTHROPIC_API_KEY` on the deployment.
+  Without a configured provider, AI-driven surfaces (captioning, brand
+  interpretation, creative direction) raise a clear "AI unavailable" error
+  rather than silently degrading to local heuristic output.
+- **Claude Sonnet 4.6 is the production-preferred Anthropic model.** Override
+  via `MEDIAHUB_LLM_MODEL`. Gemini 2.5 Flash is the default free-tier model.
 
 ## Concurrency
 

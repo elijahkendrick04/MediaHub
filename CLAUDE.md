@@ -25,7 +25,7 @@ The system should not become a manual agency or a Canva template shop. The defen
 src/mediahub/          — Main Python package
   web/web.py           — Flask monolith (~5000 lines), all routes
   web/club_profile.py  — ClubProfile dataclass + persistence
-  media_ai/llm.py      — Claude wrapper (multi-tier fallback)
+  media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
   club_platform/       — Content types, stubs, athlete spotlight
   brand/               — BrandKit, tone system
   workflow/            — CardStatus, WorkflowStore, content pack
@@ -36,10 +36,12 @@ data/                  — Runtime data (DB, runs, cache)
 
 ## Key Architecture Conventions
 
+- **Cloud-hosted SaaS** — MediaHub runs on the operator's managed deployment (Render is the reference target). Customers access via browser; there is no customer-facing local install path.
 - **Flask monolith** — all routes in `web.py` via f-string Jinja2 templates
 - **DATA_DIR env var** — all storage paths derived from `DATA_DIR`; never hardcode `Path("data/...")`
 - **url_for() always** — never hardcode URL paths; use `url_for()` for all internal links
-- **Graceful degradation** — all LLM calls have heuristic fallbacks; never crash on missing API key
+- **AI is required, never heuristic-substituted** — every AI-driven surface (captioning, brand interpretation, creative direction, operating-profile derivation) calls the configured cloud LLM via `media_ai.llm` / `ai_core.llm`. When no provider is configured, surface `ClaudeUnavailableError` / `ProviderNotConfigured` so the operator sees an honest error. Do NOT reintroduce regex/template heuristic fallbacks — a fake caption or stub profile is worse than a clear error.
+- **Provider failover is online, not local** — `ai_core/llm.py` walks Gemini → Anthropic on transient errors. This is multi-provider redundancy, not a local fallback.
 - **Feature flags** — `_club_platform_ok`, `_v73_ok`, `_v8_ok` guard optional features
 - **Additive changes** — do not remove existing routes or data structures; extend safely
 
@@ -87,7 +89,7 @@ MediaHub UI expectations:
 
 ### Browser QA
 
-**Use `browser-use` for testing deployed or local UI flows when visual/interactive verification is needed.**
+**Use `browser-use` for testing the deployed UI when visual/interactive verification is needed.**
 
 Apply to:
 - Upload flow (file → configure → pipeline → review)
@@ -208,13 +210,13 @@ Future data model should handle:
 
 ### Security validation
 
-**Use `shannon` ONLY on authorised local or staging systems. Never against production. Never against systems you do not own.**
+**Use `shannon` ONLY on authorised staging systems or isolated containers under operator control. Never against production. Never against systems you do not own.**
 
 Shannon triggers: mention of "shannon", "pentest", "security audit", "vuln scan".
 
 **Safety rules (non-negotiable):**
 - Require explicit user confirmation before running any live security test
-- Default target: `localhost` or a local Docker container
+- Default target: an isolated staging container under operator control (never the live production deployment, never customer environments)
 - Never test the production Render deployment (mediahub-gzwc.onrender.com) without explicit written permission
 - Keep scope narrow and time-limited
 - Document findings; do not exploit beyond proof-of-concept
@@ -274,42 +276,23 @@ Previously-fixed files (now part of the passing suite):
 - `tests/test_pb_discovery.py` — all mock.patch targets updated to canonical `mediahub.*` paths; real ledger pollution cleared
 - `tests/test_corpus_recovery.py` — swim-count gate now scales with corpus size (`min(30_000, max(1_000, captured * 600))`) instead of a flat 30k
 
-## Development Server
+## Contributor / engineering setup
 
-```bash
-pip install -e ".[dev]"
-flask --app src.mediahub.web.web:create_app run --debug
-# or
-python -m mediahub.web.web
-```
+Engineering iteration and the Node + Remotion motion stack are documented in
+`docs/DEVELOPMENT.md`. That file is contributor-only — it is not part of the
+customer-facing product surface and must not be referenced as a "how to run
+MediaHub" path.
 
 ## Motion-graphic / video output (Remotion)
 
-MediaHub generates branded MP4 outputs via Remotion 4.x:
+MediaHub generates branded MP4 outputs via Remotion 4.x on the deployed
+server:
 - **Story cards** — 1080×1920, 6 seconds, one card per swimmer/achievement
 - **Meet reels** — 1080×1920, 15 seconds, top-3 cards stitched with crossfades
 
 The Node + Remotion stack lives at `src/mediahub/remotion/`. It is invoked
 from Python via `src/mediahub/visual/motion.py`, which shells out to
 `render.js` and caches outputs under `DATA_DIR/motion_cache/<hash>.mp4`.
-
-### One-time setup
-
-```bash
-# 1. Install Node 18+ (Remotion 4 requirement)
-node --version    # must be >= 18
-
-# 2. Install Remotion deps inside the project
-cd src/mediahub/remotion
-npm install
-
-# 3. (Optional) Smoke-test the integration tests
-cd ../../..
-MEDIAHUB_RUN_MOTION_TESTS=1 pytest tests/test_motion.py -v
-```
-
-If Node is missing, the motion routes return HTTP 500 with a clear
-"Node is not installed" error; static graphic generation is unaffected.
 
 ### Routes
 
@@ -319,7 +302,7 @@ If Node is missing, the motion routes return HTTP 500 with a clear
 
 Both endpoints serve the rendered MP4 directly with `Content-Type: video/mp4`.
 Cache hits return the existing file (< 30s wall-clock); cold renders take
-30–90s depending on the host's CPU.
+30–90s on the deployment's worker.
 
 ### Brand consistency
 
@@ -332,6 +315,8 @@ the motion render of a given card visually aligns with its still graphic.
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.
 Branch model: feature branches from `dev`; never merge to `main` without approval.
+The product is delivered to customers as a hosted web application — there is
+no customer-facing self-host or local-install path.
 
 ---
 
@@ -412,9 +397,8 @@ npx -y install-mcp@latest https://mcp.supermemory.ai/mcp --client claude --oauth
 This requires OAuth (Supermemory account). Do not run without explicit approval.
 Rules: do not store private athlete/club/user data without consent.
 
-### agent-browser Chrome (Skill 4 — local dev)
-The `agent-browser` binary is installed (v0.27.0). To enable browser automation, Chrome must be
-downloaded separately. In a network-accessible environment:
+### agent-browser Chrome (Skill 4 — contributor tooling)
+The `agent-browser` binary is installed (v0.27.0). To enable browser automation against the deployed app, Chrome must be downloaded separately. In a network-accessible engineering environment:
 ```bash
 agent-browser install
 # If that fails on Linux:
@@ -494,7 +478,7 @@ After coding UI, run a design review:
 
 ### 4. Browser Automation (agent-browser / browser-use)
 Use for:
-- Opening local app and verifying it loads
+- Opening the deployed app and verifying it loads
 - Testing upload flows end-to-end
 - Navigating through dashboard, recognition, and content pack screens
 - Checking edit/approve/reject/export interactions
@@ -581,7 +565,7 @@ Available marketing skills include: `co-marketing`, `community-marketing`, `cold
 
 ### 8. agent-sandbox-skill
 Use only when E2B_API_KEY is configured. Apply for:
-- Safe isolated experiments that should not touch production or local data
+- Safe isolated experiments that should not touch production or real customer data
 - Testing a new upload parser against sample files
 - Prototyping a new content pack UI in isolation
 - Validating a deployment config safely

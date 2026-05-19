@@ -2,8 +2,9 @@
 
 Uses 851-labs/background-remover by default — a high-quality production
 model that handles edge-cases (translucent fabric, fly-away hair) better
-than the local rembg `u2net`. Optional upgrade when a token is present;
-falls back to local rembg on any failure.
+than the server-side rembg `u2net`. Optional upgrade when a token is
+present; falls through to the server-side rembg backend on any failure
+so cutouts keep working on the deployment.
 
 Credential resolution order:
   1. ``REPLICATE_API_TOKEN`` env var

@@ -1,19 +1,29 @@
 """Background-removal providers.
 
-V8.1 Issue 7 \u00a74 introduced an explicit provider selector and a Photoroom
-provider alongside the pre-existing local rembg + Replicate options.
+MediaHub supports three cutout backends, all running on the deployed server
+side of the SaaS \u2014 the customer never installs or runs anything:
+
+  * ``server`` (default) \u2014 in-process rembg model running on the deployment's
+    CPU. Free, no per-image API spend, ~300 ms per image. Historically called
+    ``local`` because it runs in the same Python process as Flask; the value
+    ``local`` is still accepted for backward compatibility but the
+    ``server`` label is preferred since "local" implied "on the customer's
+    machine", which is never the case for the hosted product.
+  * ``replicate`` \u2014 cloud API (Replicate). Requires ``REPLICATE_API_TOKEN``.
+  * ``photoroom`` \u2014 cloud API (Photoroom). Requires ``PHOTOROOM_API_KEY``.
 
 Resolution order (first match wins):
 
-1. ``MEDIAHUB_CUTOUT_PROVIDER`` env var, in ``{local, replicate, photoroom}``
-   (also accepts ``rembg`` as an alias for ``local``).
+1. ``MEDIAHUB_CUTOUT_PROVIDER`` env var, in ``{server, local, rembg, replicate, photoroom}``
+   (``local`` and ``rembg`` are accepted aliases for ``server``).
 2. Legacy ``MEDIAHUB_BG_PROVIDER`` env var (``rembg`` / ``replicate``).
 3. ``data/secrets.json`` ``mediahub_cutout_provider`` field.
-4. Default: ``local``.
+4. Default: ``server`` (in-process rembg).
 
-If the chosen provider is an API-backed one but the relevant token is not
-present, we silently downgrade to ``local`` so the no-API-key path keeps
-working. This is required by the spec ("Do not break the no-API-key path").
+If the chosen cloud provider is missing its API token, the resolver falls
+through to the in-process server-side rembg backend so cutouts continue to
+work on the deployment even when an operator has selected a cloud provider
+without yet wiring up its credentials.
 """
 from __future__ import annotations
 
@@ -25,11 +35,14 @@ from .base import BackgroundRemover
 
 log = logging.getLogger(__name__)
 
-_VALID = {"local", "rembg", "replicate", "photoroom"}
+_VALID = {"server", "local", "rembg", "replicate", "photoroom"}
 
 
 def _resolve_provider_choice() -> str:
-    """Return one of {'local', 'replicate', 'photoroom'}."""
+    """Return one of {'server', 'replicate', 'photoroom'}. The legacy
+    ``local`` / ``rembg`` config values are accepted and normalised to
+    ``server`` (the in-process rembg backend running on the deployed
+    server)."""
     raw = os.environ.get("MEDIAHUB_CUTOUT_PROVIDER")
     if not raw:
         raw = os.environ.get("MEDIAHUB_BG_PROVIDER")
@@ -40,21 +53,23 @@ def _resolve_provider_choice() -> str:
         except Exception:
             raw = None
     if not raw:
-        return "local"
+        return "server"
     raw = raw.strip().lower()
-    if raw == "rembg":
-        return "local"
+    if raw in ("local", "rembg"):
+        return "server"
     if raw not in _VALID:
-        log.warning("Unknown MEDIAHUB_CUTOUT_PROVIDER=%r; defaulting to local", raw)
-        return "local"
+        log.warning("Unknown MEDIAHUB_CUTOUT_PROVIDER=%r; defaulting to server", raw)
+        return "server"
     return raw
 
 
 def get_bg_remover() -> Optional[BackgroundRemover]:
-    """Return the best available background remover for the current config.
+    """Return the configured background remover for the deployment.
 
-    Falls back to the local rembg remover whenever the requested API-backed
-    provider has no credentials, so callers can rely on a non-None object.
+    When a cloud provider (Photoroom / Replicate) is selected but its
+    credential isn't present, falls through to the in-process server-side
+    rembg backend so cutouts keep working on the live deployment. Callers
+    can rely on a non-None object.
     """
     choice = _resolve_provider_choice()
 
@@ -63,14 +78,14 @@ def get_bg_remover() -> Optional[BackgroundRemover]:
         prov = PhotoroomBgRemover()
         if prov.is_available():
             return prov
-        log.info("Photoroom selected but PHOTOROOM_API_KEY missing \u2014 using local rembg")
+        log.info("Photoroom selected but PHOTOROOM_API_KEY missing \u2014 using server-side rembg")
 
     if choice == "replicate":
         from .replicate_provider import ReplicateBgRemover
         prov = ReplicateBgRemover()
         if prov.is_available():
             return prov
-        log.info("Replicate selected but REPLICATE_API_TOKEN missing \u2014 using local rembg")
+        log.info("Replicate selected but REPLICATE_API_TOKEN missing \u2014 using server-side rembg")
 
     from .rembg_local import RembgLocalRemover
     return RembgLocalRemover()

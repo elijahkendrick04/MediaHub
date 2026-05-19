@@ -1,25 +1,38 @@
 # Deployment
 
-MediaHub is a single Flask service. Anywhere you can run a Python web app, you
-can run MediaHub.
+MediaHub is a cloud-hosted SaaS. The operator runs the Flask service on a
+managed platform; customers access it through their browser at the deployment
+URL. This document is the operator's deployment playbook.
 
-## Local development
+For contributor / engineering setup, see [`DEVELOPMENT.md`](DEVELOPMENT.md).
+
+## Render (recommended)
+
+Push to a Git remote that Render is connected to. `render.yaml` is the
+blueprint:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-make install           # pip install -r requirements.txt && pip install -e .
-make media-deps        # Playwright Chromium + Remotion node_modules
-cp .env.example .env
-make run
+# In a fresh Render workspace:
+render blueprint apply
 ```
 
-Default port is 5000. Browse to http://localhost:5000.
+Set the secrets in Render's dashboard, in roughly this order of importance:
 
-`make media-deps` is required for the HTML→PNG (graphic_renderer) and
-MP4 (motion) pipelines. Skip it only if you're running the caption-only
-pipeline; `/healthz/deps` reports which renderers are available at runtime.
+- `GEMINI_API_KEY` — default LLM provider; required for caption generation
+  and brand-guideline interpretation. Without an LLM provider, AI-driven
+  surfaces (captions, brand operating profile, creative direction) return
+  a clear "AI unavailable" error instead of silently producing low-quality
+  output.
+- `BUFFER_ACCESS_TOKEN` — required for the `/activity` scheduling surface.
+- `ANTHROPIC_API_KEY` — optional Anthropic alternative (set
+  `MEDIAHUB_LLM_PROVIDER=anthropic` to prefer it).
+- `REPLICATE_API_TOKEN` — optional cloud image / cutout provider.
+- `PHOTOROOM_API_KEY` — optional cloud cutout provider.
 
-## Docker
+The blueprint mounts a 1 GB persistent disk at `/var/mediahub` for runtime
+state (PB cache, brand kits, voice presets, run state, uploads).
+
+## Docker (operator self-managed)
 
 ```bash
 docker build -t mediahub:latest .
@@ -38,37 +51,15 @@ The compose file mounts:
 - `./uploads_v4` for original blobs
 - `./.cache` for the PB lookup runtime cache
 
-The image installs Playwright + Chromium for the HTML→PNG rendering step. If
-you only need the WeasyPrint fallback, comment out the `playwright install`
-line in `Dockerfile` to halve the image size.
-
-## Render
-
-Push to a Git remote that Render is connected to. `render.yaml` is the
-blueprint:
-
-```bash
-# In a fresh Render workspace:
-render blueprint apply
-```
-
-Set the secrets in Render's dashboard, in roughly this order of importance:
-
-- `GEMINI_API_KEY` — default LLM provider; required for caption generation.
-- `BUFFER_ACCESS_TOKEN` — required for the `/activity` scheduling surface.
-- `ANTHROPIC_API_KEY` — optional Anthropic fallback (set
-  `MEDIAHUB_LLM_PROVIDER=anthropic` to prefer it).
-- `REPLICATE_API_TOKEN` — image generation provider.
-- `PHOTOROOM_API_KEY` — cutout provider.
-
-The blueprint mounts a 1 GB persistent disk at
-`/opt/render/project/src/data`.
+The image installs Playwright + Chromium for the HTML→PNG rendering step. The
+deployed container handles all rendering server-side; customers never run
+anything on their own machine.
 
 ## Fly.io
 
 ```bash
 fly launch --copy-config --no-deploy
-fly secrets set ANTHROPIC_API_KEY=... REPLICATE_API_TOKEN=... PHOTOROOM_API_KEY=...
+fly secrets set GEMINI_API_KEY=... ANTHROPIC_API_KEY=... REPLICATE_API_TOKEN=... PHOTOROOM_API_KEY=...
 fly deploy
 ```
 
@@ -78,51 +69,6 @@ fly deploy
 ```bash
 fly volumes create mediahub_data --size 1
 ```
-
-## VPS (bare metal / cloud Linux)
-
-1. Install Python 3.12, Node 20+, Poppler (`apt install poppler-utils`), and
-   the Chromium runtime libs that Playwright needs. On Debian/Ubuntu:
-
-   ```bash
-   sudo apt install -y poppler-utils libnss3 libxss1 libgbm1 libasound2 \
-       libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 libxcomposite1 \
-       libxdamage1 libxfixes3 libxrandr2 libxshmfence1 libxkbcommon0 \
-       libpango-1.0-0 libpangocairo-1.0-0 libcairo2 fonts-liberation
-   ```
-
-2. `git clone` the repo.
-3. `pip install -r requirements.txt && pip install -e . && pip install gunicorn`.
-4. **Install browser + motion renderers**:
-
-   ```bash
-   python -m playwright install chromium     # graphic_renderer
-   (cd src/mediahub/remotion && npm install)  # motion/reel routes
-   ```
-
-   Without these two commands the app starts, but `/api/.../create-graphic`
-   and `/api/.../motion` return 500s. Verify with
-   `curl http://localhost:5000/healthz/deps`.
-5. Add a `systemd` unit:
-
-   ```ini
-   [Unit]
-   Description=MediaHub
-   After=network.target
-
-   [Service]
-   WorkingDirectory=/srv/mediahub
-   Environment="PYTHONPATH=/srv/mediahub/src"
-   EnvironmentFile=/srv/mediahub/.env
-   ExecStart=/srv/mediahub/.venv/bin/gunicorn mediahub.web:app \
-       --bind 0.0.0.0:5000 --workers 1 --threads 4 --timeout 300
-   Restart=always
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-6. Front it with nginx for TLS termination.
 
 ## Vercel
 
@@ -140,7 +86,7 @@ These directories must persist across deploys for the app to retain state:
 | `data/discovered/` | PB cache + meet/club identity ledgers |
 | `data/brand_kits/` | User-uploaded brand kits |
 | `data/voices/seed/` | Hand-tuned voice presets |
-| `data/secrets.json` | Optional user-supplied API keys |
+| `data/secrets.json` | Optional operator-supplied API keys |
 | `runs_v4/` | Pipeline run state + rendered PNGs |
 | `uploads_v4/` | Original uploaded files |
 

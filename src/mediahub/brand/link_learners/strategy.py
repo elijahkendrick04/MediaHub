@@ -30,9 +30,12 @@ Output schema (the only contract any caller relies on):
                 /embed/ variant returns og: meta consistently."
     }
 
-If the LLM is unavailable the function returns a generic strategy
-(plain HTML fetch, no special headers) so the system still functions
-end-to-end on offline deployments.
+If the cloud LLM is unreachable the function returns a generic
+strategy (plain HTML fetch, no special headers) so the scraper still
+makes a best-effort attempt — this is a mechanical fallback for the
+scraper layer, not a stand-in for AI-derived brand voice. AI-driven
+surfaces elsewhere in the codebase surface ``ClaudeUnavailableError``
+when the LLM is missing rather than inventing output.
 """
 from __future__ import annotations
 
@@ -156,8 +159,11 @@ def _normalise(raw: object, fallback_url: str) -> dict:
 
 
 def default_strategy(url: str) -> dict:
-    """The conservative fallback used when no LLM is available or every
-    LLM attempt fails. Plain GET with a sensible UA, parse as HTML."""
+    """The mechanical fallback strategy used when the cloud LLM is
+    unreachable or every LLM attempt fails. Plain GET with a sensible
+    UA, parse as HTML. This is a scraper-layer default — not an AI
+    substitute. It just keeps the scraping machinery moving so the
+    caller can still pull deterministic meta tags."""
     return {
         "url_template": url or "",
         "headers": dict(_DEFAULT_HEADERS),
@@ -170,7 +176,7 @@ def default_strategy(url: str) -> dict:
             "script[type='application/ld+json']",
         ],
         "alt_endpoints": [],
-        "notes": "Fallback strategy: no LLM, plain HTML scrape.",
+        "notes": "Default scraper strategy: plain HTML fetch (no LLM-tailored hints).",
     }
 
 

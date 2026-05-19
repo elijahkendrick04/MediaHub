@@ -7,8 +7,10 @@ content hash so repeats are free.
 Activation
 ----------
 Requires ``REPLICATE_API_TOKEN`` env var or secret. When unset, this module
-is a no-op and the renderer falls back to the built-in water-pattern + noise
-overlay. No crash, no warning.
+is a no-op and the renderer uses the built-in procedural water-pattern +
+noise overlay — that overlay is a primary first-class visual element, not
+a heuristic stand-in for the AI background. Operators who want generated
+backgrounds must configure the Replicate token.
 
 Cost
 ----

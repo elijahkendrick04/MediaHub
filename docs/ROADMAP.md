@@ -105,7 +105,7 @@ implemented and tested (472 tests passing).
 |---|---|
 | Buffer channel listing | ✅ `/api/buffer/channels` — resolves token per-profile first |
 | Per-card scheduling | ✅ `/api/runs/<id>/card/<id>/schedule` calls real Buffer, persists per-channel results, marks workflow store as SCHEDULED/FAILED |
-| **Per-profile access-token storage** (multi-tenant safe) | ✅ Each `ClubProfile` carries its own `buffer_access_token`. Connection is inline inside the schedule modal via `/api/organisation/connect-buffer` — never via a settings page. Validates against Buffer before persisting. Single-tenant self-hosted deployments may set `BUFFER_ACCESS_TOKEN` env var as a fallback (operator IS the user in that model). |
+| **Per-profile access-token storage** (multi-tenant safe) | ✅ Each `ClubProfile` carries its own `buffer_access_token`. Connection is inline inside the schedule modal via `/api/organisation/connect-buffer` — never via a settings page. Validates against Buffer before persisting. Operator-managed deployments may set `BUFFER_ACCESS_TOKEN` as a deployment-wide default for single-org configurations. |
 | **Buffer-free download path** | ✅ `/api/runs/<run>/card/<card>/download` ships a ZIP with the caption text + visual PNG for clubs that don't use Buffer at all. The "Copy + Download" affordance is always available inside the schedule modal, even for clubs that haven't connected Buffer. Zero TOS surface for non-Buffer users. |
 | Scheduled-post status surface in `/activity` | ✅ Per-run schedule summary column ("3 scheduled · 1 failed") pulled from workflow store; "Recent posting activity" panel listing the last 20 attempts with status badges + error messages |
 | Failure observability | ✅ `publishing/posting_log.py` SQLite log of every attempt (success + failure) with profile/run/card/channel/status/error_kind/error_message/update_id/caption_excerpt fields; bounded retention (5000-row sweep to 4500); `/api/posting/log` endpoint for SPA/JS consumers, gated by active org |
@@ -317,20 +317,17 @@ marketable product surfaces. Win one geography + one governing body.
 
 The deployment model has shifted: MediaHub is now a turnkey
 single-org-per-deployment product. That changes how this work-stream
-looks. Two viable commercial paths:
+looks. Commercial path:
 
-**Path A (preferred, self-serve hosted SaaS):** stand up a managed
+**Managed hosted SaaS:** stand up a managed
 "club.mediahub.example" service. Each club gets their own subdomain
-+ isolated instance. Operator (us) pays for hosting + Buffer +
-optional Anthropic; charges the club £30–50/mo. Single-org per
-instance means no multi-tenant gymnastics in the app code.
++ isolated instance. The operator pays for hosting + Buffer +
+LLM provider costs; charges the club £30–50/mo. Single-org per
+instance means no multi-tenant gymnastics in the app code, and
+customers access the product through their browser — they never
+install or run anything locally.
 
-**Path B (open-source distribution):** keep the codebase MIT-
-licensed; provide a one-click Render deploy template. Operators
-self-host and pay their own costs. We earn from support contracts
-+ optional hosted SaaS for those who don't want to self-host.
-
-In either path, the commercial layer needs to ship near launch:
+The commercial layer needs to ship near launch:
 
 | Sub-item | Status | Next step |
 |---|---|---|

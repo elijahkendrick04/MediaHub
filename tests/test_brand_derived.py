@@ -92,22 +92,27 @@ class TestDerivation:
         assert "meet_recap" in out["artefact_voice"]
         assert "not_an_artefact" not in out["artefact_voice"]
 
-    def test_no_llm_returns_heuristic_status(self, monkeypatch):
-        """When the LLM is unavailable, the operating profile is empty
-        and statused — consumers fall back to hardcoded defaults."""
+    def test_no_llm_raises_unavailable(self, monkeypatch):
+        """When the cloud LLM is unreachable, derive_operating_profile
+        raises ClaudeUnavailableError. Callers (the org-save handler in
+        web.py) catch it and persist a status="error" stub; consumer
+        lookups then fall back to the canonical product defaults."""
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+        import pytest
         monkeypatch.setattr(bd, "_call_llm", lambda ctx: None)
         p = ClubProfile(
             profile_id="x", display_name="City",
             brand_voice_summary="Warm club.",
         )
-        out = bd.derive_operating_profile(p)
-        assert out["status"] == "ok_heuristic"
-        assert out["tone_prose"] == {}
-        assert out["achievement_priorities"] == {}
+        with pytest.raises(ClaudeUnavailableError):
+            bd.derive_operating_profile(p)
 
-    def test_llm_returns_garbage_marked_heuristic(self, monkeypatch):
+    def test_llm_returns_garbage_raises_unavailable(self, monkeypatch):
         """If the LLM responds but nothing usable survives normalisation,
-        we mark the profile as heuristic so consumers fall back."""
+        we raise ClaudeUnavailableError instead of returning a stub
+        labelled as derived output."""
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+        import pytest
         monkeypatch.setattr(bd, "_call_llm", lambda ctx: {
             "tone_prose": "not a dict",
             "achievement_priorities": [],
@@ -118,8 +123,8 @@ class TestDerivation:
             profile_id="x", display_name="X",
             brand_voice_summary="something",
         )
-        out = bd.derive_operating_profile(p)
-        assert out["status"] == "ok_heuristic"
+        with pytest.raises(ClaudeUnavailableError):
+            bd.derive_operating_profile(p)
 
 
 # ---------------------------------------------------------------------------

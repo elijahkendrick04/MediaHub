@@ -150,35 +150,38 @@ class TestGracefulFailure:
 
 
 # ---------------------------------------------------------------------------
-# 3. capture_brand_dna — heuristic fallback (no LLM)
+# 3. capture_brand_dna — no cloud LLM configured
 # ---------------------------------------------------------------------------
 
-class TestHeuristicFallback:
-    def test_heuristic_used_when_no_llm(self, isolated_data_dir, no_llm_env, monkeypatch):
+class TestNoProvider:
+    def test_no_provider_keeps_deterministic_signals_only(self, isolated_data_dir, no_llm_env, monkeypatch):
+        """When no cloud LLM is configured, capture_brand_dna preserves
+        the deterministic signals extracted from HTML (logo URL, palette
+        from CSS / meta theme-color) but does NOT fabricate voice
+        summaries or keywords. Status is ``no_provider`` so the UI can
+        surface "AI unavailable" honestly."""
         from mediahub.brand import dna_capture
         monkeypatch.setattr(dna_capture, "_fetch", lambda url: _SAMPLE_HTML)
         out = dna_capture.capture_brand_dna("https://lakeside.example/")
-        assert out["brand_capture_status"] == "ok_heuristic"
-        # Heuristic still fills the most important fields
+        assert out["brand_capture_status"] == "no_provider"
+        # Deterministic signals survive — they're CSS / HTML extraction,
+        # not AI-fabricated.
         assert out["brand_logo_url"].endswith("/static/logo.png")
         assert out["brand_palette_extracted"]
-        # Primary colour should be the theme-color or top extracted hex
         assert out["brand_palette_extracted"]["primary"] in ("#0d4d92", "#e94e1b")
-        # Heuristic summary contains the title
-        assert "Lakeside" in out["brand_voice_summary"]
-        # Keywords are extracted from the page text
-        assert any(k.lower() in ("lakeside", "swimming", "club") for k in out["brand_keywords"])
-        # Source URL is recorded
         assert out["brand_source_url"].startswith("https://lakeside.example")
+        # AI-only fields are empty (we declined to invent without an LLM)
+        assert out["brand_voice_summary"] == ""
+        assert out["brand_keywords"] == []
 
     def test_palette_filled_from_extracted_colours(self, isolated_data_dir, no_llm_env, monkeypatch):
         from mediahub.brand import dna_capture
         monkeypatch.setattr(dna_capture, "_fetch", lambda url: _SAMPLE_HTML)
         out = dna_capture.capture_brand_dna("https://lakeside.example/")
         pal = out["brand_palette_extracted"]
-        # All three palette slots should be filled
+        # Palette slots are filled from deterministic CSS / theme-color
+        # extraction even without an LLM.
         assert pal.get("primary")
-        assert pal.get("secondary")
         # Each slot is a valid hex
         for k, v in pal.items():
             assert v.startswith("#") and len(v) == 7, f"{k}={v} not a 6-digit hex"
@@ -188,13 +191,13 @@ class TestHeuristicFallback:
         url = "https://cache-test.example/"
         monkeypatch.setattr(dna_capture, "_fetch", lambda u: _SAMPLE_HTML)
         first = dna_capture.capture_brand_dna(url)
-        assert first["brand_capture_status"] in ("ok", "ok_heuristic")
+        assert first["brand_capture_status"] in ("ok", "no_provider")
         cache_file = dna_capture._cache_path(url)
         assert cache_file.exists()
 
-        # Now block fetch — the cached entry must still satisfy the call
-        # only when the cached status is "ok" (not "ok_heuristic", which is
-        # deliberately re-fetched so an LLM result can replace it later).
+        # Only fully-captured ("ok") results short-circuit the fetch on
+        # the next call; "no_provider" results get re-fetched so that an
+        # LLM result can replace them later.
         monkeypatch.setattr(dna_capture, "_fetch", lambda u: None)
         if first["brand_capture_status"] == "ok":
             second = dna_capture.capture_brand_dna(url)
@@ -409,7 +412,7 @@ class TestOrganisationRoute:
         assert saved["brand_logo_url"].endswith("/static/logo.png")
         assert saved["brand_palette_extracted"]
         assert saved["brand_source_url"].startswith("https://lakeside.example")
-        assert saved["brand_capture_status"] in ("ok", "ok_heuristic")
+        assert saved["brand_capture_status"] in ("ok", "no_provider")
 
 
 # ---------------------------------------------------------------------------

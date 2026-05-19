@@ -70,9 +70,10 @@ The club needs to know three things:
 
 3. **Pilot scope and exit.** The pilot runs for one full month. At
    the end the club either:
-   - Continues self-hosted (we hand over the Render instance), or
+   - Continues on the managed hosted service (we keep operating their
+     dedicated instance), or
    - Drops the pilot and we delete their data on request via
-     `/privacy/cache/clear` + dropping the Render instance.
+     `/privacy/cache/clear` + tearing down their instance.
 
 Capture a one-line agreement on each of these before any data is
 loaded. A Signal message is sufficient.
@@ -152,9 +153,9 @@ Send a written follow-up:
 |---|---|---|
 | `/healthz` returns 5xx | Render service down, disk unmounted | Check Render dashboard; redeploy with disk |
 | `/status` shows long gap | Render scaled to zero, or app crash loop | Check Render logs; if crash, revert deploy |
-| All cards have heuristic captions | LLM key missing/invalid | Check `/healthz/usage` "Last LLM error"; rotate key |
+| Cards show "AI unavailable" error | LLM key missing/invalid | Check `/healthz/usage` "Last LLM error"; rotate key |
 | Buffer posts all failing | Token expired or channel disconnected | Pilot club re-pastes Buffer token via schedule modal |
-| Pipeline error on every upload | Format change in result file | Capture file → reproduce locally → fix parser → redeploy |
+| Pipeline error on every upload | Format change in result file | Capture file → reproduce in a staging deploy → fix parser → redeploy |
 | One run failed mysteriously | Could be transient (parse, LLM timeout) | Show the club "Why did this run fail?" on /activity; re-upload |
 | Uptime dropping | Render free tier sleeps after 15 min | Move to Render Starter (paid) |
 | Anthropic spend rising | Pilot is heavier than free-tier Gemini covers | Either accept the cost or set `MEDIAHUB_LLM_PROVIDER=gemini` to force free path |
@@ -180,13 +181,13 @@ Anything less means iterate, don't ship.
 
 At the end of the pilot:
 
-- **Keep going self-hosted:** transfer Render service ownership
-  to the club. They take over `GEMINI_API_KEY` billing (still free at
-  small-club volume) and Buffer access token rotation. Operator
-  remains available for two weeks of post-handover support.
+- **Continue on the managed hosted service:** keep the club's dedicated
+  instance running under the operator's account. The operator covers
+  hosting, LLM provider billing, and Buffer access-token rotation. The
+  club is billed monthly under the standard hosted-SaaS plan.
 
-- **Stop:** delete the Render service and the disk. Confirm to the
-  club in writing that `DATA_DIR` is gone. Any local data the
+- **Stop:** delete the club's instance and the disk. Confirm to the
+  club in writing that `DATA_DIR` is gone. Any cached data the
   operator captured for debugging gets deleted too.
 
 In both cases, ask the club: "What would have made you tell other

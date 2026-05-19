@@ -295,50 +295,6 @@ def _is_valid_hex(c: str) -> bool:
     return isinstance(c, str) and bool(re.match(r"^#[0-9a-fA-F]{6}$", c))
 
 
-def _heuristic_profile(signals: dict, url: str) -> dict:
-    """Deterministic fallback when no LLM is reachable.
-
-    Builds a usable (if generic) profile from the deterministic signals.
-    """
-    title = signals.get("title", "")
-    desc = signals.get("meta_description", "")
-    summary_bits: list[str] = []
-    if title:
-        summary_bits.append(title)
-    if desc:
-        summary_bits.append(desc)
-    if not summary_bits:
-        summary_bits.append("Organisation captured from website signals; voice details not available without an LLM provider.")
-    summary = " ".join(summary_bits)[:400]
-
-    # Keywords from the title + headings — first 10 unique alpha words ≥4 chars
-    text_blob = " ".join([title, desc] + (signals.get("headings") or []))
-    words = re.findall(r"\b[A-Za-z][A-Za-z'-]{3,}\b", text_blob)
-    seen: set[str] = set()
-    keywords: list[str] = []
-    for w in words:
-        wl = w.lower()
-        if wl in seen:
-            continue
-        seen.add(wl)
-        keywords.append(wl)
-        if len(keywords) >= 12:
-            break
-
-    colours = signals.get("colours") or []
-    theme = signals.get("theme_color") or ""
-    primary = theme or (colours[0] if colours else "#0A2540")
-    secondary = next((c for c in colours if c != primary), "#000000") if colours else "#000000"
-    accent = next((c for c in colours if c not in (primary, secondary)), "#ffffff") if colours else "#ffffff"
-
-    return {
-        "voice_summary": summary,
-        "keywords": keywords[:12],
-        "phrases_to_use": [],
-        "phrases_to_avoid": [],
-        "palette": {"primary": primary, "secondary": secondary, "accent": accent},
-        "typography_hint": "sans",
-    }
 
 
 def _call_llm(signals: dict, url: str) -> Optional[dict]:
@@ -484,10 +440,13 @@ def capture_brand_dna(website_url: str, *, force: bool = False) -> dict:
         out = _merge_llm_into_result(base, llm_out, signals)
         out["brand_capture_status"] = "ok"
     else:
-        out = _merge_llm_into_result(base, _heuristic_profile(signals, url), signals)
-        out["brand_capture_status"] = "ok_heuristic"
+        # No cloud LLM available — preserve the deterministic palette /
+        # logo signals we extracted from the HTML, but do NOT invent
+        # voice / keywords / phrases. Status "no_provider" tells the UI
+        # to surface an honest "configure an AI provider" message.
+        out = dict(base)
+        out["brand_capture_status"] = "no_provider"
 
-    # Update timestamp at the end
     out["brand_captured_at"] = _now_iso()
 
     _save_cache(url, out)

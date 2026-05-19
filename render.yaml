@@ -39,11 +39,13 @@ services:
         sync: false
       - key: MEDIAHUB_LLM_PROVIDER
         value: auto
-      # Image cutout providers. Default `local` uses rembg on the host
-      # CPU (free); override with replicate or photoroom + key for
-      # paid better-quality cutouts.
+      # Image cutout providers. Default `server` runs rembg in-process
+      # on the deployment's CPU (free, no per-image API spend); override
+      # with `replicate` or `photoroom` + the matching token for paid
+      # higher-quality cutouts. The legacy values `local` and `rembg`
+      # are accepted aliases for `server` for backward compatibility.
       - key: MEDIAHUB_CUTOUT_PROVIDER
-        value: local
+        value: server
       - key: REPLICATE_API_TOKEN
         sync: false
       - key: PHOTOROOM_API_KEY

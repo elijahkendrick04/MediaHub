@@ -13,7 +13,7 @@ primary_region = "lhr"
   PORT = "5000"
   FLASK_ENV = "production"
   PYTHONPATH = "/app/src"
-  MEDIAHUB_CUTOUT_PROVIDER = "rembg"
+  MEDIAHUB_CUTOUT_PROVIDER = "server"
 
 [http_service]
   internal_port = 5000

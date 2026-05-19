@@ -16,9 +16,13 @@ The handler uses this to decide whether to (a) trust the result and
 hand it to the content extractor, (b) try an alternative endpoint, or
 (c) ask the strategy proposer for a new approach.
 
-LLM-driven so the classifier improves as Claude itself sharpens — but
-with a deterministic heuristic fallback so the system works on offline
-deployments and in CI.
+LLM-driven so the classifier improves as Claude itself sharpens. When
+the cloud LLM is unreachable, a deterministic structural classifier
+runs against the response (response code + body shape) so the scraper
+can still make a binary "loaded vs blocked" call — this is a
+mechanical detector, not an AI stand-in. AI-driven surfaces elsewhere
+in the codebase surface ``ClaudeUnavailableError`` when the LLM is
+missing rather than inventing output.
 """
 from __future__ import annotations
 

@@ -86,8 +86,9 @@ Both are invoked by `pipeline_v4`. New detectors should be added under
    the brief's `template_id` (e.g. `individual_hero`, `medal_card`,
    `weekend_numbers`).
 2. Renders the Jinja template with the brief's payload.
-3. Rasterises HTML → PNG via Playwright if installed; else falls back to
-   WeasyPrint.
+3. Rasterises HTML → PNG via Playwright (Chromium installed in the deployed
+   container); WeasyPrint is the secondary in-process rasteriser for layouts
+   that don't need a full browser.
 4. Generates each format size in `FORMAT_SIZES` (1080×1080, 1080×1350, 1080×1920).
 
 `creative_brief.generator.generate(card, club_profile)` decides:
@@ -96,18 +97,20 @@ Both are invoked by `pipeline_v4`. New detectors should be added under
 - Which hero photo to fetch (via `media_library.selector`)
 - What headline to write
 
-If `ANTHROPIC_API_KEY` is set, `creative_brief` calls Claude for vision-aware
-direction; otherwise it uses a deterministic rule-based fallback.
+`creative_brief` calls the configured cloud LLM (Gemini or Claude) for
+vision-aware direction. Without a configured provider it surfaces
+`ClaudeUnavailableError` so the operator knows an LLM key is missing.
 
 ## 7. Caption generation
 
 For each card `mediahub.web.ai_caption.generate_caption_for_card(card)`:
 
-- If `ANTHROPIC_API_KEY` is set: builds the system prompt + user message and
-  calls `media_ai.llm.generate`. The voice style is selected from the active
+- Builds the system prompt + user message and calls the cloud LLM via
+  `media_ai.llm.generate`. The voice style is selected from the active
   brand kit's `voice_id`.
-- Else: falls back to `mediahub.web.humanise.humanise(card)` which generates
-  a templated caption.
+- Raises `ClaudeUnavailableError` when no provider is configured — the UI
+  surfaces an "AI unavailable; contact your administrator" message rather
+  than fabricating a templated caption.
 
 See [`PROMPT_INVENTORY.md`](PROMPT_INVENTORY.md) for the actual prompts.
 

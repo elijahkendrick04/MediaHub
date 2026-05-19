@@ -68,7 +68,7 @@ FILES TO MODIFY:
   panel the user can accept or edit before save.
 - src/mediahub/data/runs cache: store the raw HTML + extracted JSON
   under DATA_DIR / "brand_dna_cache" / "<domain>.json" keyed by
-  domain, so re-capturing is fast and offline-replayable.
+  domain, so re-capturing is fast and replayable without re-fetching.
 
 ACCEPTANCE CRITERIA:
 - /organisation has a new section "Capture from website" with a URL
@@ -91,9 +91,9 @@ DON'T BREAK:
 
 TESTS:
 - Add tests/test_brand_dna_capture.py covering: HTML colour extraction,
-  graceful failure on unreachable URL, deterministic-output mode when
-  the LLM is unavailable (heuristic fallback), and a smoke test that
-  /organisation accepts and persists captured fields.
+  graceful failure on unreachable URL, honest error surface when the
+  LLM provider is unavailable (no silent heuristic substitution), and a
+  smoke test that /organisation accepts and persists captured fields.
 - Full pytest run must still be 253+ passed.
 
 Reference: dissertation §4.1 (Holo), §6 Workstream 1.1.
@@ -678,8 +678,8 @@ Verify Step 6 (Buffer publishing) end-to-end.
      a "Connect Buffer in Settings" hint instead of opening a modal.
 
 3. Mocked happy path (no real Buffer account needed):
-   - Set BUFFER_API_BASE_URL env to a local mock server (or use the
-     test stub).
+   - Set BUFFER_API_BASE_URL env to a mock server hosted in a staging
+     deploy (or use the test stub in-process).
    - Save a fake token via /settings POST.
    - GET /api/buffer/channels returns mocked channels.
    - POST /api/runs/<id>/card/<id>/schedule returns 200, and the
@@ -724,8 +724,8 @@ Add a commercial layer: signup, Stripe billing, three tiers.
 
 GOAL: a new user can land on /, click "Get started", create an account
 with email + password, choose a plan (Free / Club £30/mo / Federation
-£250/mo), pay via Stripe Checkout, and start using MediaHub. Existing
-self-hosted deployments continue to work without billing.
+£250/mo), pay via Stripe Checkout, and start using MediaHub on the
+hosted service.
 
 FILES TO MODIFY:
 - NEW src/mediahub/web/auth.py: minimal email+password auth (use

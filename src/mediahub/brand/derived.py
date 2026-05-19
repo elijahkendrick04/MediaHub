@@ -17,18 +17,22 @@ is called. That dict is persisted on `ClubProfile.brand_operating_profile`.
 At request time, callers consult the cache via thin helpers in this
 module (`tone_descriptor_for`, `priority_for`, `type_phrase_for`,
 `artefact_intent_for`). When the cache is empty (a profile that hasn't
-been re-saved since this feature shipped) or no LLM is configured, the
-helpers transparently fall back to the original hardcoded constants —
-which keep living in their original modules as defaults.
+been re-saved since this feature shipped, or one whose derivation
+failed because the LLM provider was unreachable), the helpers fall
+back to the canonical product defaults that live in their original
+modules. These defaults are baseline product values, not local AI
+heuristics.
 
 This satisfies the cross-cutting risks identified in the audit:
   • Determinism — same profile always produces the same operating data
     until the user edits the profile.
   • Latency — exactly one LLM call per profile edit, zero per render.
   • Cost — bounded by user edits, not by traffic.
-  • Graceful degradation — every helper falls back to a working default.
+  • Honest failure — when the LLM is unreachable, raise
+    ``ClaudeUnavailableError`` so the operator sees a clear "AI
+    unavailable" status rather than a silently fabricated profile.
   • Test stability — existing tests that don't touch a profile still
-    see the same hardcoded behaviour they always saw.
+    see the same baseline behaviour they always saw.
 
 The schema returned by `derive_operating_profile()`:
 
@@ -57,7 +61,7 @@ The schema returned by `derive_operating_profile()`:
         ...
       },
       "derived_at":  "ISO8601",
-      "status":      "ok" | "ok_heuristic" | "no_context" | "error"
+      "status":      "ok" | "no_context" | "error"
     }
 """
 from __future__ import annotations
@@ -354,11 +358,17 @@ def derive_operating_profile(profile) -> dict:
         profile: a ClubProfile (or dict).
 
     Returns:
-        A dict in the shape documented at the top of this module. Always
-        returns; never raises. When the brand context is empty or no
-        LLM is available, returns a stub with status "no_context" /
-        "ok_heuristic" so callers can detect that and fall back to the
-        hardcoded constants without crashing.
+        A dict in the shape documented at the top of this module.
+        Returns a ``no_context`` stub (no LLM call) when the profile
+        has no brand context yet — that's a routine state, not an
+        error.
+
+    Raises:
+        ClaudeUnavailableError: when a brand context exists but the
+        configured cloud LLM provider is unreachable or returns nothing
+        usable. Callers must catch this and surface an honest "AI
+        unavailable" status to the operator rather than silently
+        proceeding with a fabricated profile.
     """
     empty = {
         "tone_prose": {},
@@ -377,9 +387,11 @@ def derive_operating_profile(profile) -> dict:
         return empty
     raw = _call_llm(ctx)
     if not raw:
-        # No LLM available — return an empty operating profile so
-        # callers fall back to the hardcoded constants.
-        return {**empty, "status": "ok_heuristic"}
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+        raise ClaudeUnavailableError(
+            "No cloud LLM provider is reachable; cannot derive operating "
+            "profile. Configure GEMINI_API_KEY or ANTHROPIC_API_KEY."
+        )
     out = {
         "tone_prose": _norm_tone_prose(raw.get("tone_prose")),
         "achievement_priorities": _norm_priorities(raw.get("achievement_priorities")),
@@ -388,12 +400,12 @@ def derive_operating_profile(profile) -> dict:
         "derived_at": _now_iso(),
         "status": "ok",
     }
-    # If the LLM returned nothing usable across all four sections, mark
-    # as heuristic so callers fall back rather than emitting empty
-    # strings.
     if not any((out["tone_prose"], out["achievement_priorities"],
                 out["type_phrases"], out["artefact_voice"])):
-        out["status"] = "ok_heuristic"
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+        raise ClaudeUnavailableError(
+            "The LLM returned no usable signal for the operating profile."
+        )
     return out
 
 

@@ -55,7 +55,7 @@ publishes JSON status to `/api/runs/<id>/status`).
 5. `pb_bridge.build_pb_snapshots` calls `pb_discovery.discover_swimmer_pbs` for each swimmer.
 6. `pipeline_v4` calls into the legacy `swim_content.detector_v3` + `swim_content_v5.recommender` (preserved verbatim) plus the new `recognition_swim.achievements.official_pb` detector.
 7. Achievements feed `swim_content_v5.ranker` for scoring; the top N become cards.
-8. For each card, `graphic_renderer.render_brief` produces PNGs at multiple sizes; `creative_brief.generator.generate` decides the layout/colour/copy direction; `ai_caption` writes a caption (LLM if `ANTHROPIC_API_KEY` is set, else a deterministic fallback in `humanise.py`).
+8. For each card, `graphic_renderer.render_brief` produces PNGs at multiple sizes; `creative_brief.generator.generate` decides the layout/colour/copy direction; `ai_caption` writes a caption via the configured cloud LLM (Gemini or Anthropic). Without a configured provider the caption pipeline raises `ClaudeUnavailableError` so the UI surfaces an honest "AI unavailable" message rather than fabricating a templated stand-in.
 9. The user lands on `/review/<run_id>` with the cards laid out + a "Download pack" button.
 
 ## Why two recognition packages?
