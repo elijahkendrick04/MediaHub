@@ -21,6 +21,14 @@ class BrandKit:
     governing_body: Optional[str] = None
     short_name: Optional[str] = None
 
+    # Phase 1.6 Stage B — Adaptive Theming Engine.
+    # DTCG-format theme JSON cached at brand-kit save time. Shape is
+    # documented as ``mediahub.theming.ThemeJSON``. Optional + None
+    # default so old serialised profiles load cleanly through
+    # ``from_dict`` (which already ignores unknown keys, but the
+    # field is added here so ``to_dict`` round-trips it).
+    derived_palette: Optional[dict] = None
+
     # ---- factory ----
 
     @classmethod
@@ -64,3 +72,32 @@ class BrandKit:
         if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", self.secondary_colour or ""):
             return self.secondary_colour
         return "#000000"
+
+    # ---- Adaptive Theming Engine ----
+
+    def ensure_derived_palette(self, *, force: bool = False,
+                                source: Optional[str] = None) -> dict:
+        """Compute (or re-compute) the Adaptive Theming Engine palette.
+
+        Cached on ``self.derived_palette`` as a DTCG-format dict. Safe
+        to call repeatedly; idempotent unless ``force=True``. Seed
+        defaults to ``self.logo_svg`` if present, otherwise
+        ``self.safe_primary()``.
+
+        Computation pipeline (see docs/stage_b_colour_science_plan.md):
+          seed → HCT → 5 tonal palettes × 13 tones → MD3 role mapping
+          (light + dark) → APCA + WCAG2 + ΔE + CVD gates → repair loop.
+
+        Returns the cached dict. Never raises — the fallback palette
+        is always available.
+        """
+        if self.derived_palette is not None and not force:
+            return self.derived_palette
+        # Local import to avoid circular dep (theming → kit would loop).
+        from mediahub.theming import derive_theme
+        seed_source = source if source is not None else (
+            self.logo_svg if self.logo_svg else self.safe_primary()
+        )
+        theme = derive_theme(seed_source)
+        self.derived_palette = theme.to_json()
+        return self.derived_palette

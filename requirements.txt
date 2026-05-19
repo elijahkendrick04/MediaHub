@@ -16,3 +16,14 @@ rembg>=2.0
 onnxruntime>=1.16
 anthropic>=0.30
 replicate>=0.25
+
+# Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
+# materialyoucolor is the maintained Python port of Google's
+# material-color-utilities; it ships HCT, the MD3 TonalSpot scheme
+# builder, the Material You quantizer (Wu + WSMeans → Score) used by
+# Android 12 Monet, and the 50+ dynamic-color role tokens.
+# coloraide is the pure-Python W3C CSS Color 4/5 reference impl
+# (OKLCH conversions, gamut mapping, CIEDE2000).
+# See docs/stage_b_colour_science_plan.md for the architecture.
+materialyoucolor>=3.0
+coloraide>=4.0

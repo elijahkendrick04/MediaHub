@@ -31,6 +31,10 @@ dependencies = [
   "beautifulsoup4>=4.12",
   "lxml>=5.0",
   "Pillow>=10.0",
+  # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
+  # See requirements.txt and docs/stage_b_colour_science_plan.md.
+  "materialyoucolor>=3.0",
+  "coloraide>=4.0",
 ]
 
 [project.optional-dependencies]
