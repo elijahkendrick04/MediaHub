@@ -7,8 +7,12 @@ Three concerns:
   2. The LLM is what interprets the extracted text — there is no
      regex pattern matching for "do's" vs "don'ts". When the LLM is
      mocked, its structured output flows through to the saved profile.
-  3. When no LLM is available, the heuristic fallback preserves the
-     raw excerpt so the user's upload is never silently dropped.
+  3. When no cloud LLM provider is configured, interpret_guidelines
+     returns the canonical empty shape with a clear ``no_provider``
+     status — it never fabricates structured fields. Production
+     deployments configure an LLM key, so this path only affects
+     misconfigured / dev environments where the honest signal is
+     better than fake interpreted output.
 """
 from __future__ import annotations
 

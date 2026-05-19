@@ -159,13 +159,17 @@ def test_replicate_model_override_via_env(monkeypatch):
 # Provider selector
 # ---------------------------------------------------------------------------
 
-def test_resolve_provider_choice_default_local(monkeypatch):
+def test_resolve_provider_choice_default_is_server(monkeypatch):
+    """With no env / secret config the resolver returns ``server`` —
+    the canonical name for the in-process rembg backend that runs on
+    the deployed server. ``local`` / ``rembg`` are still accepted as
+    legacy aliases (see test_resolve_provider_choice_legacy_aliases)."""
     monkeypatch.delenv("MEDIAHUB_CUTOUT_PROVIDER", raising=False)
     monkeypatch.delenv("MEDIAHUB_BG_PROVIDER", raising=False)
     with mock.patch(
         "swim_content_v4.secrets_store.get_secret", return_value=None,
     ):
-        assert _resolve_provider_choice() == "local"
+        assert _resolve_provider_choice() == "server"
 
 
 def test_resolve_provider_choice_env_wins(monkeypatch):
@@ -175,15 +179,18 @@ def test_resolve_provider_choice_env_wins(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_CUTOUT_PROVIDER", "replicate")
     assert _resolve_provider_choice() == "replicate"
 
-    # rembg aliases to local
+    # Legacy aliases — ``rembg`` and ``local`` both normalise to ``server``.
     monkeypatch.setenv("MEDIAHUB_CUTOUT_PROVIDER", "rembg")
-    assert _resolve_provider_choice() == "local"
+    assert _resolve_provider_choice() == "server"
+
+    monkeypatch.setenv("MEDIAHUB_CUTOUT_PROVIDER", "local")
+    assert _resolve_provider_choice() == "server"
 
 
-def test_resolve_provider_choice_unknown_falls_back_to_local(monkeypatch):
+def test_resolve_provider_choice_unknown_falls_back_to_server(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_CUTOUT_PROVIDER", "magic-ai")
     monkeypatch.delenv("MEDIAHUB_BG_PROVIDER", raising=False)
-    assert _resolve_provider_choice() == "local"
+    assert _resolve_provider_choice() == "server"
 
 
 def test_resolve_provider_choice_legacy_env(monkeypatch):
