@@ -3317,6 +3317,58 @@ def _render_markdown(text: str) -> str:
     return "\n".join(out)
 
 
+def _theme_seed_style_block() -> str:
+    """Return the inline <style id="mh-theme-seed"> block carrying the
+    active organisation's brand-seed override.
+
+    Phase 1.6 Stage E — minimum-viable Stage D wiring. Sits last in
+    the cascade (after the static theme CSS) so it wins. The
+    id="mh-theme-seed" anchor makes it greppable in devtools and
+    addressable by future Stage E client-side animations.
+
+    Returns an empty string when:
+      - no Flask request context is active
+      - the app hasn't been initialised yet (no ``active_profile`` attr)
+      - no active organisation
+      - the organisation has no brand kit / derived palette
+      - the seed hex fails the safety regex (defence in depth)
+    """
+    import re as _re
+    try:
+        from flask import current_app
+        get_active = getattr(current_app, "active_profile", None)
+        if not get_active:
+            return ""
+        prof = get_active()
+    except RuntimeError:
+        return ""
+    except Exception:
+        return ""
+    if not prof:
+        return ""
+    try:
+        kit = prof.get_brand_kit()
+        palette = kit.ensure_derived_palette()
+    except Exception:
+        return ""
+    if not isinstance(palette, dict):
+        return ""
+    seed_hex = palette.get("seed_hex")
+    if not isinstance(seed_hex, str):
+        return ""
+    if not _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", seed_hex):
+        return ""
+    # Inline style — sits last in the cascade so it wins. Only
+    # --mh-brand-seed for Stage E; the tertiary/neutral/status seeds
+    # stay at their static defaults (Stage B's locked-anchor rule for
+    # status, Stage D scope for tertiary).
+    return (
+        f'<style id="mh-theme-seed">'
+        f':root {{ --mh-brand-seed: {seed_hex}; }}'
+        f'</style>'
+    )
+
+
 def _layout(title: str, body: str, active: str = "home") -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
@@ -3349,6 +3401,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       media="print" onload="this.media='all'" />
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&amp;family=Hanken+Grotesk:wght@400;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" /></noscript>
 <style>{{ css | safe }}</style>
+{{ theme_seed_style | safe }}
 <script>
   // Detect deployed prefix (e.g. "/port/5000") so XHRs from inline JS use the right base.
   (function(){
@@ -3666,12 +3719,54 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   });
 })();
 </script>
+<script>
+/* === Phase 1.6 Stage E: "Looks right" cascade handler ===
+   Any <a> tagged with data-mh-cascade intercepts the click, POSTs to
+   /api/organisation/finalise so the active profile's derived palette is
+   persisted, then navigates. Browsers with cross-document View
+   Transitions support (Chrome 126+, Safari 18.2+) pick up the
+   crossfade automatically via the @view-transition rule in
+   theme-cascade.css. Older browsers navigate instantly — graceful
+   degradation. The link's real href is the fallback (no JS → just
+   works; modifier keys / middle-click open the link normally). */
+(function(){
+  function onClick(e){
+    var link = e.target && e.target.closest ? e.target.closest('a[data-mh-cascade]') : null;
+    if (!link) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0) return;
+    var href = link.getAttribute('href');
+    if (!href || href === '#') return;
+    e.preventDefault();
+    var base = window._API_BASE || '';
+    var go = function(){ window.location.assign(href); };
+    try {
+      var ctrl = new AbortController();
+      // 3s safety: never block navigation longer than the user's patience.
+      setTimeout(function(){ ctrl.abort(); }, 3000);
+      fetch(base + '/api/organisation/finalise', {
+        method: 'POST',
+        credentials: 'same-origin',
+        signal: ctrl.signal,
+        headers: {'Accept': 'application/json'},
+      }).catch(function(){
+        // Network error or timeout — still navigate. The next page
+        // will lazily ensure the palette via BrandKit's cache.
+      }).then(go);
+    } catch (err) {
+      go();
+    }
+  }
+  document.addEventListener('click', onClick);
+})();
+</script>
 </body>
 </html>
 """, title=title, css=BASE_CSS, body=body, active=active,
                health_url=url_for("healthz"),
                signed_in=bool(signed_in_pid),
-               signed_in_name=signed_in_name)
+               signed_in_name=signed_in_name,
+               theme_seed_style=_theme_seed_style_block())
 
 
 def _recovery_page(
@@ -11431,7 +11526,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
   {confirm_form_html}
   <div style="margin-top:14px">
-    <a class="btn" href="{url_for("make_page")}">Looks right &mdash; start creating &rarr;</a>
+    <a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">Looks right &mdash; start creating &rarr;</a>
     <span class="muted" style="margin-left:12px;font-size:12px">Or refine the inputs below and re-analyse.</span>
   </div>
 </div>
@@ -12433,6 +12528,50 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         save_profile(prof)
         return redirect(url_for("organisation_setup"))
+
+    @app.route("/api/organisation/finalise", methods=["POST"])
+    def organisation_finalise():
+        """Phase 1.6 Stage E — the "Looks right" finalise endpoint.
+
+        Called by the cascade JS handler when the user clicks
+        "Looks right — start creating" on /organisation/setup.
+        Steps:
+          1. Resolve the active profile (400 if none).
+          2. Build the BrandKit from the profile.
+          3. Ensure the derived palette is computed (Stage B's
+             colour-science pipeline) — idempotent, no-op if already
+             cached.
+          4. Persist the (possibly new) palette back to the profile.
+          5. Return the resolved seed hex + repair flag.
+
+        The client doesn't actually need the response body — it
+        navigates regardless. The JSON is returned for future Stage
+        H ("Why does my theme look like this?") UI and for tests
+        verifying persistence end-to-end.
+        """
+        prof = _active_profile()
+        if not prof:
+            return jsonify({"error": "no active organisation"}), 400
+        try:
+            kit = prof.get_brand_kit()
+            palette = kit.ensure_derived_palette()
+        except Exception as e:
+            log.warning("organisation_finalise: ensure_derived_palette failed: %s", e)
+            return jsonify({"error": "palette derivation failed", "detail": str(e)}), 500
+        # Write the (possibly newly-cached) palette back to the profile
+        # so subsequent requests see it. ensure_derived_palette mutated
+        # kit in-place; we serialise that mutation through the profile
+        # dict + save_profile.
+        try:
+            prof.brand_kit = kit.to_dict()
+            save_profile(prof)
+        except Exception as e:
+            log.warning("organisation_finalise: save_profile failed: %s", e)
+            return jsonify({"error": "profile save failed", "detail": str(e)}), 500
+        return jsonify({
+            "seed_hex": (palette or {}).get("seed_hex", ""),
+            "was_repaired": bool((palette or {}).get("was_repaired", False)),
+        })
 
     @app.route("/organisation/setup/logo/<logo_id>", methods=["GET"])
     def organisation_setup_logo_serve(logo_id):

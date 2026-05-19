@@ -87,8 +87,21 @@ class TestLoader:
 
     def test_assembled_css_is_concatenation(self, assembled_css,
                                             base_css, fallback_css, derive_css):
-        # Assembled = base + "\n" + fallback + "\n" + derive (documented order).
-        expected = base_css + "\n" + fallback_css + "\n" + derive_css
+        # Assembled = base + "\n" + fallback + "\n" + derive + "\n" + cascade
+        # (documented order; Stage E added the cascade-animation layer
+        # at the end). Cascade is optional — if Stage E hasn't shipped
+        # yet the assembled string is the original 3-way concat.
+        try:
+            from mediahub.web.theme_tokens import THEME_CASCADE_CSS
+        except ImportError:
+            THEME_CASCADE_CSS = None
+        if THEME_CASCADE_CSS is None:
+            expected = base_css + "\n" + fallback_css + "\n" + derive_css
+        else:
+            expected = (
+                base_css + "\n" + fallback_css + "\n"
+                + derive_css + "\n" + THEME_CASCADE_CSS
+            )
         assert assembled_css == expected
 
     def test_re_import_is_stable(self):
