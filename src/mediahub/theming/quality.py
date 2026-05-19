@@ -154,6 +154,10 @@ class PaletteQualityReport:
     cvd: list[CVDCheck] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Phase 1.6 Stage H — Cohen-Or harmonic-template fit. Optional
+    # because old serialisations don't have it; new audits populate
+    # it via audit_palette() below.
+    harmonic_fit: Optional[dict] = None
 
     @property
     def passed(self) -> bool:
@@ -161,9 +165,11 @@ class PaletteQualityReport:
 
     def to_summary(self) -> dict:
         """A trimmed dict for JSON serialisation on BrandKit.
-        We don't dump every per-check row to keep the cached payload
-        small; the full detail can be re-derived from the palette
-        when the explainability panel asks for it.
+        Cheap counts-only payload — Stage G consumers use this to
+        avoid loading the full per-check detail.
+
+        The richer ``to_detail()`` form (Stage H) is the source of
+        truth for the explainability panel.
         """
         return {
             "passed": self.passed,
@@ -177,6 +183,29 @@ class PaletteQualityReport:
             ),
             "n_cvd_checks": len(self.cvd),
             "n_cvd_failures": sum(1 for c in self.cvd if not c.distinguishable),
+            "warnings": list(self.warnings),
+            "errors": list(self.errors),
+        }
+
+    def to_detail(self) -> dict:
+        """Full per-check detail for the Stage H audit panel.
+
+        Returns every contrast / adjacency / status_distance / CVD
+        row as a dict, plus the harmonic fit and the standard
+        warnings/errors lists. Larger payload (~10–25KB depending
+        on palette size) than ``to_summary()`` but still cheap to
+        cache. Stored in the on-disk theme JSON under the new
+        ``quality_detail`` key so the explainability panel can
+        render without re-running the QA pipeline.
+        """
+        from dataclasses import asdict
+        return {
+            "passed": self.passed,
+            "harmonic_fit": self.harmonic_fit,
+            "contrast": [asdict(c) for c in self.contrast],
+            "adjacency": [asdict(a) for a in self.adjacency],
+            "status_distance": [asdict(s) for s in self.status_distance],
+            "cvd": [asdict(c) for c in self.cvd],
             "warnings": list(self.warnings),
             "errors": list(self.errors),
         }
@@ -386,5 +415,22 @@ def audit_palette(palette: DerivedPalette, roles: ThemeRoles) -> PaletteQualityR
                 f"(< {CVD_DELTA_E_FLOOR}); pair status messages with icon + text "
                 f"so colour is not the sole signal (WCAG 1.4.1)"
             )
+
+    # 6: harmonic fit (Phase 1.6 Stage H — Cohen-Or 2006). Lower
+    # energy = better hue harmony. Scored across the seven brand-
+    # role hues; results inform the audit panel but never produce
+    # errors (harmony is aesthetic, not accessibility).
+    try:
+        from .harmony import fit_harmonic_template
+        hues: list[float] = []
+        for ramp in palette.all_ramps():
+            if ramp.hue is not None:
+                hues.append(float(ramp.hue))
+        if hues:
+            fit = fit_harmonic_template(hues)
+            report.harmonic_fit = fit.to_dict()
+    except Exception:
+        # Harmonic fit is opportunistic; failures don't block.
+        report.harmonic_fit = None
 
     return report

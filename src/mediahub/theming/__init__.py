@@ -97,7 +97,16 @@ class DerivedTheme:
     generated_at: str
 
     def to_json(self) -> ThemeJSON:
-        """Serialise to the DTCG-format dict cached on BrandKit."""
+        """Serialise to the DTCG-format dict cached on BrandKit.
+
+        Stage H additions (additive — schema_version unchanged):
+          - ``quality_detail`` carries the full per-check rows for
+            the explainability panel.
+          - ``harmonic_fit`` carries the Cohen-Or template-fit
+            result (also nested inside ``quality_detail``).
+        Existing ``quality`` (summary counts) remains for Stage G
+        consumers that only need the counts.
+        """
         return {
             "schema_version": "1",
             "seed_hex": self.palette.seed_hex,
@@ -120,6 +129,9 @@ class DerivedTheme:
                 "dark": asdict(self.roles.dark),
             },
             "quality": self.quality_report.to_summary(),
+            # Phase 1.6 Stage H — full per-check audit detail + harmony.
+            "quality_detail": self.quality_report.to_detail(),
+            "harmonic_fit": self.quality_report.harmonic_fit,
             "decision_trace": self.decision_trace,
             "was_repaired": self.was_repaired,
             "generated_at": self.generated_at,

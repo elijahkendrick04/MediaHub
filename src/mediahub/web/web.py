@@ -3424,6 +3424,310 @@ def _active_surface_hex() -> str:
     return surface if isinstance(surface, str) and surface.startswith("#") else "#0A0B11"
 
 
+def _repair_summary_text(theme_json: Optional[dict]) -> Optional[str]:
+    """Phase 1.6 Stage H3 — plain-English summary of any repair-loop
+    adjustments.
+
+    Returns:
+        None when ``was_repaired`` is False or the theme JSON is
+        missing the data we need.
+        A one-sentence string when the repair loop ran AND at least
+        one status anchor moved from its canonical hue.
+    """
+    if not isinstance(theme_json, dict) or not theme_json.get("was_repaired"):
+        return None
+    palettes = theme_json.get("palettes") or {}
+    try:
+        from mediahub.theming.palette import STATUS_ANCHORS
+    except Exception:
+        return None
+    deltas = []
+    for name, (canonical_hue, _) in STATUS_ANCHORS.items():
+        ramp = palettes.get(name) or {}
+        actual_hue = ramp.get("hue")
+        if isinstance(actual_hue, (int, float)):
+            offset = ((float(actual_hue) - canonical_hue + 180.0) % 360.0) - 180.0
+            if abs(offset) >= 1.0:
+                deltas.append((name, canonical_hue, float(actual_hue), offset))
+    if not deltas:
+        return (
+            "MediaHub ran additional accessibility checks during palette "
+            "derivation; no status anchors needed to move. See decision "
+            "trace below for full details."
+        )
+    parts = []
+    for name, _canon, _actual, offset in deltas:
+        sign = "+" if offset > 0 else ""
+        parts.append(f"{name} (rotated {sign}{offset:.0f}°)")
+    listing = ", ".join(parts)
+    return (
+        f"Your brand seed was close enough to our standard status anchors "
+        f"that we adjusted {listing} to keep them distinguishable for "
+        f"colour-blind viewers and to satisfy our contrast gates. "
+        f"See the decision trace below for the precise gate that fired."
+    )
+
+
+def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
+    """Phase 1.6 Stage H2 — render the "Why does my theme look like
+    this?" expandable panel.
+
+    Returns an empty string when ``theme_json`` is None or missing
+    the keys required to render. The block is server-side HTML; no
+    JS required — uses the native ``<details>`` element so the
+    panel works in print, in keyboard-only navigation, and in
+    every browser.
+    """
+    if not isinstance(theme_json, dict):
+        return ""
+
+    seed_hex = theme_json.get("seed_hex") or ""
+    seed_source = theme_json.get("seed_source") or "unknown"
+    seed_hct = theme_json.get("seed_hct") or []
+    palettes = theme_json.get("palettes") or {}
+    detail = theme_json.get("quality_detail") or {}
+    harmonic = theme_json.get("harmonic_fit") or detail.get("harmonic_fit") or {}
+    decision_trace = theme_json.get("decision_trace") or []
+    was_repaired = bool(theme_json.get("was_repaired"))
+
+    # markupsafe.escape returns Markup objects whose `+` operator
+    # HTML-escapes adjacent str operands. Force plain str everywhere
+    # so the structural HTML (the literal angle brackets) survives.
+    def esc(s) -> str:
+        return str(_h(s))
+
+    # Swatch row
+    def _swatch(name: str, hex_value: str) -> str:
+        return (
+            f'<span title="{esc(name)}: {esc(hex_value)}" '
+            f'style="display:inline-flex;align-items:center;gap:6px;'
+            f'margin-right:14px;margin-bottom:6px;font-size:11px;'
+            f'color:var(--mh-on-surface-variant)">'
+            f'<span style="display:inline-block;width:22px;height:22px;'
+            f'border-radius:4px;background:{esc(hex_value)};'
+            f'border:1px solid var(--mh-outline-variant)"></span>'
+            f'{esc(name)}</span>'
+        )
+
+    swatches_html = ""
+    swatch_order = (
+        ("primary", "primary"),
+        ("secondary", "secondary"),
+        ("tertiary", "tertiary"),
+        ("neutral", "neutral"),
+        ("error", "error"),
+        ("success", "success"),
+        ("warning", "warning"),
+        ("info", "info"),
+    )
+    for label, palette_name in swatch_order:
+        ramp = palettes.get(palette_name) or {}
+        tones = ramp.get("tones") or {}
+        hex_value = tones.get("400") or tones.get("500") or tones.get("50") or ""
+        if hex_value:
+            swatches_html += _swatch(label, hex_value)
+
+    # Contrast pairs (top 8 most-relevant text role pairs).
+    contrast_rows: list[str] = []
+    for c in (detail.get("contrast") or [])[:12]:
+        passed = c.get("passes_apca", False)
+        symbol = "✓" if passed else "✗"
+        colour_var = "--mh-success" if passed else "--mh-error"
+        contrast_rows.append(
+            f'<tr><td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px">{esc(c.get("scheme",""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("role_pair",""))}</td>'
+            f'<td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px;text-align:right">{c.get("apca_lc", 0):.1f}</td>'
+            f'<td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px;text-align:right">{c.get("wcag2_ratio", 0):.2f}</td>'
+            f'<td style="padding:4px 8px;text-align:center;'
+            f'color:var({colour_var});font-weight:600">{symbol}</td></tr>'
+        )
+
+    # Brand vs status ΔE
+    status_rows: list[str] = []
+    for s in detail.get("status_distance") or []:
+        passed = s.get("passes_hard", False)
+        symbol = "✓" if passed else "✗"
+        colour_var = "--mh-success" if passed else "--mh-error"
+        status_rows.append(
+            f'<tr><td style="padding:4px 8px;font-size:12px">'
+            f'{esc(s.get("status_name",""))}</td>'
+            f'<td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px">{esc(s.get("status_hex",""))}</td>'
+            f'<td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px;text-align:right">{s.get("delta_e_2000", 0):.1f}</td>'
+            f'<td style="padding:4px 8px;text-align:center;'
+            f'color:var({colour_var});font-weight:600">{symbol}</td></tr>'
+        )
+
+    # CVD checks
+    cvd_rows: list[str] = []
+    for c in detail.get("cvd") or []:
+        passed = c.get("distinguishable", False)
+        symbol = "✓" if passed else "✗"
+        colour_var = "--mh-success" if passed else "--mh-warning"
+        cvd_rows.append(
+            f'<tr><td style="padding:4px 8px;font-size:12px">{esc(c.get("cvd",""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("pair",""))}</td>'
+            f'<td style="padding:4px 8px;font-family:var(--font-mono);'
+            f'font-size:11px;text-align:right">{c.get("delta_e_2000", 0):.1f}</td>'
+            f'<td style="padding:4px 8px;text-align:center;'
+            f'color:var({colour_var});font-weight:600">{symbol}</td></tr>'
+        )
+
+    # Harmonic fit
+    if harmonic and harmonic.get("template"):
+        harmonic_html = (
+            f'<p style="margin:0;font-size:12px;color:var(--mh-on-surface)">'
+            f'Best template: <b>{esc(harmonic["template"])}</b> @ '
+            f'<code>{harmonic.get("rotation", 0):.1f}°</code>, '
+            f'energy = <code>{harmonic.get("energy", 0):.1f}</code> '
+            f'across <code>{harmonic.get("hue_count", 0)}</code> hues '
+            f'(Cohen-Or 2006; lower energy = more harmonic).'
+            f'</p>'
+        )
+    else:
+        harmonic_html = (
+            '<p class="dim" style="margin:0;font-size:12px">'
+            'No harmonic fit recorded (older derivation).</p>'
+        )
+
+    # Decision trace as <pre>
+    trace_text = "\n".join(decision_trace) if decision_trace else "(no trace recorded)"
+    trace_html = (
+        '<pre style="margin:0;padding:10px 12px;background:var(--mh-surface);'
+        'border:1px solid var(--mh-outline-variant);border-radius:6px;'
+        'font-family:var(--font-mono);font-size:11px;line-height:1.45;'
+        'color:var(--mh-on-surface-variant);max-height:240px;overflow:auto;'
+        'white-space:pre-wrap;word-break:break-word">'
+        + esc(trace_text) + '</pre>'
+    )
+
+    seed_hct_str = ""
+    if isinstance(seed_hct, (list, tuple)) and len(seed_hct) >= 3:
+        seed_hct_str = (
+            f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, "
+            f"T={seed_hct[2]:.1f})"
+        )
+
+    repaired_note = ""
+    if was_repaired:
+        repaired_note = (
+            '<p class="dim" style="margin:6px 0 0;font-size:11px">'
+            '⚙ This palette went through the repair loop — see the '
+            'callout above for the plain-English summary, or the '
+            'decision trace below for the full sequence.</p>'
+        )
+
+    return (
+        '<details class="mh-theme-audit" style="margin:18px 0 0;'
+        'border:1px solid var(--mh-outline-variant);border-radius:8px;'
+        'background:var(--mh-surface-variant);overflow:hidden">'
+        '<summary style="cursor:pointer;padding:12px 16px;font-size:13px;'
+        'font-weight:600;color:var(--mh-on-surface);user-select:none">'
+        'Why does my theme look like this?'
+        '<span class="muted" style="font-weight:400;font-size:12px;'
+        'margin-left:8px">Engine decisions, contrast checks, '
+        'accessibility audit</span>'
+        '</summary>'
+        '<div style="padding:0 16px 16px 16px;'
+        'border-top:1px solid var(--mh-outline-variant)">'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Captured seed</h4>'
+        f'<p style="margin:0;font-size:13px;color:var(--mh-on-surface)">'
+        f'Seed <code>{esc(seed_hex)}</code> from '
+        f'<code>{esc(seed_source)}</code>; {seed_hct_str}.</p>'
+        f'{repaired_note}'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Derived palette</h4>'
+        f'<div style="margin-top:4px">{swatches_html}</div>'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
+        'Contrast checks (APCA Lc · WCAG 2.x)</h4>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
+        'font-size:11.5px">'
+        '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
+        '<th style="padding:4px 8px;text-align:left">scheme</th>'
+        '<th style="padding:4px 8px;text-align:left">role pair</th>'
+        '<th style="padding:4px 8px;text-align:right">Lc</th>'
+        '<th style="padding:4px 8px;text-align:right">ratio</th>'
+        '<th style="padding:4px 8px;text-align:center">ok</th>'
+        '</tr></thead><tbody>'
+        + "".join(contrast_rows) +
+        '</tbody></table></div>'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
+        'Brand seed vs status anchors (CIEDE2000)</h4>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
+        'font-size:11.5px">'
+        '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
+        '<th style="padding:4px 8px;text-align:left">anchor</th>'
+        '<th style="padding:4px 8px;text-align:left">hex</th>'
+        '<th style="padding:4px 8px;text-align:right">ΔE2000</th>'
+        '<th style="padding:4px 8px;text-align:center">ok</th>'
+        '</tr></thead><tbody>'
+        + "".join(status_rows) +
+        '</tbody></table></div>'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
+        'Colour-vision-deficiency simulation (Machado 2009)</h4>'
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
+        'font-size:11.5px">'
+        '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
+        '<th style="padding:4px 8px;text-align:left">cvd</th>'
+        '<th style="padding:4px 8px;text-align:left">pair</th>'
+        '<th style="padding:4px 8px;text-align:right">sim ΔE2000</th>'
+        '<th style="padding:4px 8px;text-align:center">ok</th>'
+        '</tr></thead><tbody>'
+        + "".join(cvd_rows) +
+        '</tbody></table></div>'
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
+        'Harmonic fit (Cohen-Or 2006)</h4>'
+        + harmonic_html +
+
+        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Decision trace</h4>'
+        + trace_html +
+
+        '</div></details>'
+    )
+
+
+def _theme_repair_callout_html(theme_json: Optional[dict]) -> str:
+    """Phase 1.6 Stage H3 — render the non-blocking warning callout
+    when the repair loop fired.
+
+    Returns an empty string when no callout is warranted (palette
+    didn't need repair, or theme JSON is missing).
+    """
+    text = _repair_summary_text(theme_json)
+    if not text:
+        return ""
+    safe_text = str(_h(text))
+    return (
+        f'<div class="mh-theme-warning" role="status" '
+        f'style="margin:14px 0 0;padding:12px 16px;'
+        f'border-radius:6px;border:1px solid var(--mh-warning);'
+        f'background:rgba(255,180,84,0.10);font-size:13px;'
+        f'color:var(--mh-on-surface)">'
+        f'<strong style="display:block;margin-bottom:4px;'
+        f'color:var(--mh-warning)">'
+        f'Theme adjusted for accessibility'
+        f'</strong>'
+        f'{safe_text}'
+        f'</div>'
+    )
+
+
 def _theme_seed_style_block() -> str:
     """Return the inline <style id="mh-theme-seed"> block carrying the
     active organisation's brand-seed override.
@@ -11633,6 +11937,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <script>{_PALETTE_PICKER_JS}</script>
 """
 
+            # Phase 1.6 Stage H — resolve the cached theme JSON for
+            # this profile so the H3 callout and H2 audit panel can
+            # render the engine's decisions in plain English.
+            _theme_json_for_audit = None
+            try:
+                _kit_for_audit = prof.get_brand_kit()
+                _theme_json_for_audit = _kit_for_audit.ensure_derived_palette()
+            except Exception:
+                _theme_json_for_audit = None
+            _repair_callout_html = _theme_repair_callout_html(_theme_json_for_audit)
+            _audit_panel_html = _theme_audit_panel_html(_theme_json_for_audit)
+
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
      background:rgba(212,255,58,0.04)">
@@ -11649,6 +11965,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {sources_html}
   <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
   {confirm_form_html}
+  {_repair_callout_html}
+  {_audit_panel_html}
   <div style="margin-top:14px">
     <a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">Looks right &mdash; start creating &rarr;</a>
     <span class="muted" style="margin-left:12px;font-size:12px">Or refine the inputs below and re-analyse.</span>
