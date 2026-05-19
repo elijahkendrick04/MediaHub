@@ -76,6 +76,7 @@ def _dna_prose(profile) -> str:
     keywords = list(_get(profile, "brand_keywords") or [])[:10]
     use = list(_get(profile, "brand_phrases_to_use") or [])[:6]
     avoid = list(_get(profile, "brand_phrases_to_avoid") or [])[:6]
+    tone_notes = (_get(profile, "tone_notes") or "").strip()
     bits: list[str] = []
     if summary:
         bits.append("About the organisation (from their website / social presence): "
@@ -89,6 +90,8 @@ def _dna_prose(profile) -> str:
     if avoid:
         bits.append("Phrases that would feel off-brand — never use: "
                     + "; ".join(f'"{p}"' for p in avoid) + ".")
+    if tone_notes:
+        bits.append("Voice notes the organisation typed for us: " + tone_notes)
     return " ".join(bits)
 
 

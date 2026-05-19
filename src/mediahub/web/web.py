@@ -10067,58 +10067,28 @@ Relay team broke club record"></textarea>
             ask, ProviderNotConfigured, ProviderError,
         )
         # Ground the spotlight caption in the active organisation's
-        # brand — name, voice keywords, confirmed palette. Without this
-        # the writer produced sport-generic captions that ignored the
-        # club's tone and never referenced their colours. Previously the
-        # only thing the system prompt knew was "MediaHub's spotlight-
-        # post writer", which left the LLM to invent stylistic choices.
-        spotlight_system = (
+        # full brand context: mandatory rules from uploaded guidelines,
+        # identity (org type, country, sponsor), captured DNA (voice
+        # summary, keywords, phrases to use, phrases to avoid), and the
+        # learned voice profile (sentence length, emoji rate, preferred
+        # swimmer address, openers/closers).
+        #
+        # We delegate to brand.context.brand_context_for_llm — the same
+        # canonical helper that single-card captions use via
+        # web.ai_caption._brand_dna_prose — so the spotlight composite
+        # speaks in the exact voice the rest of the product already
+        # generates in.
+        tool_system = (
             "You are MediaHub's spotlight-post writer. Output only the "
             "caption text, no preamble or markdown."
         )
+        spotlight_system = tool_system
         try:
             spot_prof = _active_profile()
-            spot_brand_lines = []
-            if spot_prof is not None:
-                if (spot_prof.display_name or "").strip():
-                    spot_brand_lines.append(
-                        f"Organisation: {spot_prof.display_name.strip()}"
-                    )
-                try:
-                    from mediahub.brand.palette import effective_palette as _eff
-                    _spot_pal = _eff(
-                        manual=spot_prof.brand_palette_manual or {},
-                        extracted=spot_prof.brand_palette_extracted or {},
-                    )
-                except Exception:
-                    _spot_pal = {}
-                _pal_bits = [
-                    f"{slot} {_spot_pal[slot]}"
-                    for slot in ("primary", "secondary", "accent", "fourth")
-                    if isinstance(_spot_pal.get(slot), str)
-                    and _spot_pal[slot].startswith("#")
-                ]
-                if _pal_bits:
-                    spot_brand_lines.append(
-                        "Confirmed brand palette: " + ", ".join(_pal_bits)
-                    )
-                vs = (spot_prof.brand_voice_summary or "").strip()
-                if vs:
-                    spot_brand_lines.append(f"Brand voice: {vs[:400]}")
-                kws = [k for k in (spot_prof.brand_keywords or []) if k]
-                if kws:
-                    spot_brand_lines.append(
-                        "Brand keywords: " + ", ".join(kws[:8])
-                    )
-                tn = (spot_prof.tone_notes or "").strip()
-                if tn:
-                    spot_brand_lines.append(f"Tone notes: {tn[:240]}")
-            if spot_brand_lines:
-                spotlight_system = (
-                    spotlight_system
-                    + "\n\nWrite in this organisation's voice. Brand facts:\n"
-                    + "\n".join(spot_brand_lines)
-                )
+            from mediahub.brand.context import brand_context_for_llm
+            brand_block = brand_context_for_llm(spot_prof) if spot_prof else ""
+            if brand_block:
+                spotlight_system = brand_block + "\n\n" + tool_system
         except Exception:
             pass
         try:
