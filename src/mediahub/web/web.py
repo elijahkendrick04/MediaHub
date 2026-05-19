@@ -8262,20 +8262,37 @@ Relay team broke club record"></textarea>
         import shutil
         import subprocess
         deps: dict[str, dict] = {}
-        # Playwright + chromium browser
+        # Playwright + chromium browser.
+        #
+        # We deliberately avoid sync_playwright() here: just to read
+        # p.chromium.executable_path it spawns the Playwright Node
+        # driver subprocess and tears it down via the asyncio loop,
+        # which is ~350ms of pure overhead on every probe. Operators
+        # poll this endpoint, so that adds up. Probe the installed
+        # browser by checking the cache directory directly instead.
         try:
-            from playwright.sync_api import sync_playwright  # noqa: F401
+            import playwright  # noqa: F401
+            browser_path = ""
+            chromium_ok = False
+            pw_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(
+                Path.home() / ".cache" / "ms-playwright"
+            )
             try:
-                with sync_playwright() as p:
-                    browser_path = p.chromium.executable_path
-                    chromium_ok = bool(browser_path and Path(browser_path).exists())
-            except Exception as e:
-                chromium_ok = False
-                deps["playwright"] = {"available": True, "chromium": False,
-                                      "error": str(e)[:200]}
-            else:
-                deps["playwright"] = {"available": True, "chromium": chromium_ok,
-                                      "executable": browser_path or ""}
+                root = Path(pw_root)
+                # Each Playwright version installs Chromium into
+                # ``chromium-<build>/chrome-linux/chrome`` (or chrome.exe
+                # on Windows). Take the newest matching build so a
+                # stale older install doesn't shadow the current one.
+                candidates = sorted(root.glob("chromium*/chrome-linux/chrome"))
+                if not candidates:
+                    candidates = sorted(root.glob("chromium*/chrome-*/chrome*"))
+                if candidates:
+                    browser_path = str(candidates[-1])
+                    chromium_ok = Path(browser_path).exists()
+            except Exception:
+                pass
+            deps["playwright"] = {"available": True, "chromium": chromium_ok,
+                                  "executable": browser_path}
         except Exception as e:
             deps["playwright"] = {"available": False, "error": str(e)[:200]}
         # Node binary

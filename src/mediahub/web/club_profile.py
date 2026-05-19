@@ -308,6 +308,12 @@ class ClubProfile:
             "logo_svg": bk_data.get("logo_svg"),
             "governing_body": bk_data.get("governing_body") or (self.governing_body or None),
             "short_name": bk_data.get("short_name") or (self.short_name or None),
+            # Carry the cached Adaptive Theming Engine palette through so
+            # ensure_derived_palette() returns it directly instead of
+            # re-running the ~300ms HCT/MD3/repair pipeline on every
+            # _layout() call. Without this, every HTML page paid the
+            # full theming cost — see scripts/perf/baseline.md.
+            "derived_palette": bk_data.get("derived_palette"),
         }
         return BrandKit.from_dict(merged)
 
