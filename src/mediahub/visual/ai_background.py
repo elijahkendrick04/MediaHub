@@ -1,27 +1,35 @@
-"""AI-generated brand-aware backgrounds via Replicate SDXL.
+"""AI-generated brand-aware backgrounds via Google Imagen 4.
 
 Adds a Holo/Predis-style "original imagery" layer to MediaHub renders.
-Generates a brand-coloured abstract background image per card, cached by
-content hash so repeats are free.
+Generates a brand-coloured abstract background image per card, cached
+by content hash so repeats are free.
 
 Activation
 ----------
-Requires ``REPLICATE_API_TOKEN`` env var or secret. When unset, this module
-is a no-op and the renderer uses the built-in procedural water-pattern +
-noise overlay — that overlay is a primary first-class visual element, not
-a heuristic stand-in for the AI background. Operators who want generated
-backgrounds must configure the Replicate token.
+Requires a Gemini API key (``GEMINI_API_KEY`` or ``GOOGLE_API_KEY``).
+This is the SAME key MediaHub already uses for caption/brand AI — no
+separate Replicate token needed. When unset, the module is a no-op and
+the renderer uses the built-in procedural water-pattern + noise overlay
+(itself a primary first-class visual element, not a heuristic stand-in
+for the AI background).
+
+Note: Imagen image generation is a billed feature of the Gemini API.
+A bare AI Studio free-tier key may return 403 on Imagen requests even
+when text generation works. Operators who want generated backgrounds
+need a key on a Google Cloud project with billing enabled.
 
 Cost
 ----
-SDXL on Replicate is ~$0.012 per image at 1024x1024. With caching, the
-amortised cost across a content pack is well under $0.10.
+Imagen 4 generation is roughly $0.03–0.04 per 1024×1024 image at
+list price. With per-prompt caching, the amortised cost across a
+content pack is well below $0.10. Fast and Ultra tiers are
+overridable via ``MEDIAHUB_IMAGEN_MODEL``.
 
 Public API
 ----------
 - ``is_available() -> bool``
 - ``background_data_uri_for(brief, *, format_name="feed_portrait") -> Optional[str]``
-  Returns a ``data:image/jpeg;base64,...`` URI or None if generation fails.
+  Returns a ``data:image/png;base64,...`` URI or None if generation fails.
 """
 from __future__ import annotations
 
@@ -36,13 +44,15 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-_REPLICATE_MODEL = os.environ.get(
-    "MEDIAHUB_SDXL_MODEL",
-    # SDXL 1.0 — the default Replicate version. Override via env if a newer
-    # model proves cheaper / faster.
-    "stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
+# Imagen model published through the Gemini ``generativelanguage`` API.
+# Default to the production Imagen 4 model. Operators can override to a
+# fast/ultra tier or pin a specific snapshot via env.
+_IMAGEN_MODEL = os.environ.get(
+    "MEDIAHUB_IMAGEN_MODEL",
+    "imagen-4.0-generate-001",
 )
-_REPLICATE_TIMEOUT = int(os.environ.get("MEDIAHUB_SDXL_TIMEOUT", "60"))
+_IMAGEN_TIMEOUT = int(os.environ.get("MEDIAHUB_IMAGEN_TIMEOUT", "60"))
+_GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
 def _data_dir() -> Path:
@@ -58,20 +68,24 @@ def _cache_dir() -> Path:
     return p
 
 
-def _resolve_token() -> Optional[str]:
-    env = os.environ.get("REPLICATE_API_TOKEN")
-    if env:
-        return env
+def _resolve_key() -> Optional[str]:
+    """Reuse the same Gemini key the rest of MediaHub uses."""
     try:
-        from mediahub.web.secrets_store import get_secret  # type: ignore
-        return get_secret("replicate_api_token") or None
+        from mediahub.media_ai.llm import _resolve_gemini_key
+        return _resolve_gemini_key()
     except Exception:
+        # Fall back to env-only resolution if the import isn't available
+        # (early-bootstrap paths, isolated tests).
+        for env_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+            v = os.environ.get(env_name)
+            if v:
+                return v
         return None
 
 
 def is_available() -> bool:
-    """True when an SDXL run can plausibly succeed (token configured)."""
-    return bool(_resolve_token())
+    """True when an Imagen run can plausibly succeed (key configured)."""
+    return bool(_resolve_key())
 
 
 # ---------------------------------------------------------------------------
@@ -79,11 +93,11 @@ def is_available() -> bool:
 # ---------------------------------------------------------------------------
 
 def _palette_words(palette: dict) -> str:
-    """Describe the palette so SDXL outputs colour-matched imagery."""
+    """Describe the palette so Imagen outputs colour-matched imagery."""
     primary = palette.get("primary") or "navy"
     secondary = palette.get("secondary") or "black"
     accent = palette.get("accent") or "gold"
-    return f"hex {primary}, {secondary} and {accent}"
+    return f"hex {primary}, {secondary}, and {accent}"
 
 
 def _build_prompt(brief, palette: dict, format_name: str) -> str:
@@ -91,17 +105,21 @@ def _build_prompt(brief, palette: dict, format_name: str) -> str:
 
     We deliberately keep the prompt abstract and non-figurative — we want
     a brand-coloured backdrop the renderer can overlay text on, NOT a
-    photo that competes with the typography.
+    photo that competes with the typography. Imagen 4 follows
+    instructional language closely, so we lean into explicit
+    constraints (no people, no text, central negative space).
     """
     layers = (brief.text_layers or {}) if brief is not None else {}
     sport_hint = layers.get("event_name") or "swimming"
     palette_str = _palette_words(palette)
     return (
-        f"Abstract editorial sports background, {sport_hint} themed, "
-        f"dynamic geometric forms, gradient lighting, subtle motion blur, "
-        f"colour palette {palette_str}, no people, no text, no logos, "
-        f"clean negative space in the centre for typography overlay, "
-        f"premium magazine aesthetic, depth, atmospheric"
+        f"Abstract editorial sports background, {sport_hint} themed. "
+        f"Dynamic geometric forms with gradient lighting and subtle "
+        f"motion blur. Colour palette {palette_str}. "
+        f"No people, no faces, no text, no logos, no watermarks. "
+        f"Clean negative space in the centre for typography overlay. "
+        f"Premium magazine aesthetic with depth and atmosphere. "
+        f"Cinematic, high contrast, editorial photography style."
     )
 
 
@@ -110,15 +128,27 @@ def _build_prompt(brief, palette: dict, format_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _hash_key(prompt: str, format_name: str) -> str:
-    h = hashlib.sha256(f"{prompt}|{format_name}".encode("utf-8")).hexdigest()
+    # Include the model so switching tiers (fast / ultra) invalidates
+    # cached results from the previous tier.
+    h = hashlib.sha256(
+        f"{_IMAGEN_MODEL}|{prompt}|{format_name}".encode("utf-8")
+    ).hexdigest()
     return h[:16]
 
 
 def _cached(key: str) -> Optional[bytes]:
-    p = _cache_dir() / f"{key}.jpg"
+    p = _cache_dir() / f"{key}.png"
     if p.exists():
         try:
             return p.read_bytes()
+        except Exception:
+            return None
+    # Backwards compatibility: jpeg cached from the previous SDXL provider
+    # is still a valid image source; serve it if present.
+    p_jpg = _cache_dir() / f"{key}.jpg"
+    if p_jpg.exists():
+        try:
+            return p_jpg.read_bytes()
         except Exception:
             return None
     return None
@@ -126,118 +156,107 @@ def _cached(key: str) -> Optional[bytes]:
 
 def _cache_put(key: str, data: bytes) -> None:
     try:
-        (_cache_dir() / f"{key}.jpg").write_bytes(data)
+        (_cache_dir() / f"{key}.png").write_bytes(data)
     except Exception:
         pass
 
 
 # ---------------------------------------------------------------------------
-# Replicate call
+# Imagen call
 # ---------------------------------------------------------------------------
 
-def _call_replicate(prompt: str, width: int, height: int) -> Optional[bytes]:
-    """POST to Replicate, poll until done, return raw JPEG bytes."""
-    token = _resolve_token()
-    if not token:
+# Map MediaHub format names to Imagen's supported aspectRatio enum.
+# Imagen 4 supports: "1:1", "9:16", "16:9", "3:4", "4:3".
+_FORMAT_ASPECT = {
+    "feed_square":   "1:1",
+    "feed_portrait": "3:4",
+    "story":         "9:16",
+    "reel_cover":    "9:16",
+}
+
+
+def _call_imagen(prompt: str, aspect_ratio: str) -> Optional[bytes]:
+    """POST to Imagen via the Gemini ``:predict`` endpoint.
+
+    Returns raw PNG bytes on success, None on any failure. The Gemini
+    API key controls billing — if Imagen isn't enabled on the
+    operator's project, the call returns 403 and we degrade silently.
+    """
+    key = _resolve_key()
+    if not key:
         return None
     try:
         import requests  # type: ignore
     except Exception:
         return None
 
-    # Replicate sizes must be multiples of 8 and divisible by 64 for best
-    # results. Clamp to model's safe range (1024 max each side for SDXL).
-    def _clamp(n: int) -> int:
-        n = min(max(int(n), 512), 1024)
-        return (n // 64) * 64
-
+    url = (
+        f"{_GEMINI_API_BASE}/models/{_IMAGEN_MODEL}:predict"
+        f"?key={key}"
+    )
     payload = {
-        "version": _REPLICATE_MODEL.split(":", 1)[1] if ":" in _REPLICATE_MODEL else _REPLICATE_MODEL,
-        "input": {
-            "prompt": prompt,
-            "negative_prompt": "text, watermark, signature, faces, people, logos, blurry, low-quality",
-            "width": _clamp(width),
-            "height": _clamp(height),
-            "num_inference_steps": 25,
-            "guidance_scale": 7.0,
-            "scheduler": "K_EULER",
+        "instances": [{"prompt": prompt}],
+        "parameters": {
+            "sampleCount": 1,
+            "aspectRatio": aspect_ratio,
+            # Imagen 4 supports a personGeneration safety setting. We
+            # ask for none because the prompt is non-figurative anyway,
+            # and this avoids overly cautious refusals.
+            "personGeneration": "dont_allow",
+            "safetySetting": "block_only_high",
         },
-    }
-    headers = {
-        "Authorization": f"Token {token}",
-        "Content-Type": "application/json",
     }
     try:
         r = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers=headers,
+            url,
+            headers={"Content-Type": "application/json"},
             data=json.dumps(payload),
-            timeout=10,
+            timeout=_IMAGEN_TIMEOUT,
         )
     except Exception as e:
-        log.debug("ai_background: replicate POST failed: %s", e)
+        log.debug("ai_background: imagen POST failed: %s", e)
         return None
-    if r.status_code not in (200, 201):
-        log.debug("ai_background: replicate non-2xx: %s %s", r.status_code, r.text[:200])
-        return None
-
-    data = r.json()
-    pred_url = (data.get("urls") or {}).get("get")
-    if not pred_url:
-        return None
-
-    # Poll for completion (max 60s).
-    import time as _time
-    deadline = _time.time() + _REPLICATE_TIMEOUT
-    output_url = None
-    while _time.time() < deadline:
-        try:
-            poll = requests.get(pred_url, headers=headers, timeout=10).json()
-        except Exception:
-            return None
-        status = poll.get("status")
-        if status == "succeeded":
-            out = poll.get("output")
-            if isinstance(out, list) and out:
-                output_url = out[0]
-            elif isinstance(out, str):
-                output_url = out
-            break
-        if status in ("failed", "canceled"):
-            return None
-        _time.sleep(1.5)
-
-    if not output_url:
+    if r.status_code != 200:
+        log.debug(
+            "ai_background: imagen non-200: %s %s",
+            r.status_code, (r.text or "")[:300],
+        )
         return None
 
     try:
-        img = requests.get(output_url, timeout=20)
-    except Exception:
+        body = r.json()
+    except Exception as e:
+        log.debug("ai_background: imagen response not JSON: %s", e)
         return None
-    if img.status_code != 200 or not img.content:
+
+    preds = body.get("predictions") or []
+    if not preds or not isinstance(preds, list):
+        log.debug("ai_background: imagen returned no predictions: %s", body)
         return None
-    return img.content
+    first = preds[0] or {}
+    b64 = first.get("bytesBase64Encoded")
+    if not b64:
+        log.debug("ai_background: imagen prediction missing bytes: %s", first)
+        return None
+    try:
+        return base64.b64decode(b64)
+    except Exception as e:
+        log.debug("ai_background: imagen base64 decode failed: %s", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Public entry-point
 # ---------------------------------------------------------------------------
 
-_FORMAT_SIZES = {
-    "feed_square":   (1024, 1024),
-    "feed_portrait": (832, 1024),
-    "story":         (576, 1024),
-    "reel_cover":    (576, 1024),
-}
-
-
 def background_data_uri_for(brief, *, format_name: str = "feed_portrait") -> Optional[str]:
-    """Return an SDXL-generated background as a data URI, or None.
+    """Return an Imagen-generated background as a data URI, or None.
 
-    Cached by (prompt, format) hash so repeated renders are free.
-    Returns None when the API token isn't configured, when Replicate fails,
-    or when any network/parsing error happens — the renderer's standard
-    water-pattern + noise fallback handles the None case gracefully.
+    Cached by (model, prompt, format) hash so repeated renders are
+    free. Returns None when the Gemini key isn't configured, when the
+    Imagen endpoint errors out, or when any network/parsing error
+    happens — the renderer's standard water-pattern + noise overlay
+    handles the None case gracefully.
     """
     if not is_available():
         return None
@@ -248,15 +267,18 @@ def background_data_uri_for(brief, *, format_name: str = "feed_portrait") -> Opt
     cached = _cached(key)
     if cached:
         b64 = base64.b64encode(cached).decode("ascii")
-        return f"data:image/jpeg;base64,{b64}"
+        # Cache may hold legacy .jpg from the previous SDXL provider;
+        # we still return image/png because most browsers handle the
+        # mismatch fine and downstream HTML doesn't introspect mime.
+        return f"data:image/png;base64,{b64}"
 
-    w, h = _FORMAT_SIZES.get(format_name, (832, 1024))
-    data = _call_replicate(prompt, w, h)
+    aspect = _FORMAT_ASPECT.get(format_name, "3:4")
+    data = _call_imagen(prompt, aspect)
     if not data:
         return None
     _cache_put(key, data)
     b64 = base64.b64encode(data).decode("ascii")
-    return f"data:image/jpeg;base64,{b64}"
+    return f"data:image/png;base64,{b64}"
 
 
 __all__ = ["is_available", "background_data_uri_for"]

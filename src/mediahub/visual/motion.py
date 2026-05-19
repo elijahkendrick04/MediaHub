@@ -119,7 +119,15 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             theme_json = read_theme(pid)
             if theme_json:
                 theme_palette = palette_for_motion(theme_json)
-        except Exception:
+        except Exception as e:
+            # Don't fail the render — fall through to the BrandKit
+            # palette — but surface the cause in logs so a broken
+            # theme_store integration is visible.
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "motion: theme_store lookup failed for profile_id=%r: %s",
+                pid, e,
+            )
             theme_palette = None
 
     primary = (
