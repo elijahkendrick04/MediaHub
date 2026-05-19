@@ -15,7 +15,12 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: starter
+    # Standard tier ($25/mo, 2 GB RAM, 1 CPU). Required because
+    # Remotion's Chromium render peaks above the 512 MB Starter cap and
+    # persistent disks need at least this tier in the current Render
+    # pricing. Keep this in sync with the dashboard Instance Type so a
+    # future Blueprint sync can't silently downgrade the service.
+    plan: standard
     # Startup behaviour (persistent-disk setup + gunicorn) lives in
     # scripts/docker-entrypoint.sh, which the Dockerfile CMD invokes.
     # Don't set dockerCommand here — Render passes its value as a
