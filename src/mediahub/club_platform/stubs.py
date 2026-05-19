@@ -110,7 +110,7 @@ def _load_brand_context() -> dict:
         get_active = getattr(current_app, "active_profile", None)
         if get_active:
             prof = get_active()
-    except (RuntimeError, Exception):
+    except Exception:
         prof = None
     if prof is None:
         try:

@@ -888,11 +888,12 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
     try:
         return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         # A corrupted run JSON would otherwise 500 every route that
         # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
         # "run not found" instead so the recovery_page renders cleanly;
         # the operator can find the offending file in the log.
+        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
         log.warning("run %s on disk but unreadable: %s", run_id, e)
         return None
 
@@ -5770,12 +5771,12 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
-        # Workflow filter from query param. Validated against the known
-        # set so a malformed ``?wf=anything`` doesn't silently filter to
-        # nothing (which used to render an empty Review page with no hint
-        # that the filter was the cause).
+        # Workflow filter from query param. Allowlist mirrors every
+        # ``CardStatus`` value so the Review UI's "Rejected" tab and
+        # any future "Edited" surface actually filter; a malformed
+        # ``?wf=anything`` still falls back to "show all".
         _wf_filter = (request.args.get('wf', '') or '').strip().lower()
-        if _wf_filter not in ('', 'queue', 'approved', 'posted'):
+        if _wf_filter not in ('', 'queue', 'approved', 'posted', 'rejected', 'edited'):
             _wf_filter = ''
 
         # --- Recognition summary band
@@ -12649,7 +12650,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if brand_logos:
             cards = []
             for logo in brand_logos:
-                lid = _h(logo.get("logo_id", ""))
                 label = logo.get("label") or logo.get("original_filename") or "logo"
                 desc = (logo.get("ai_description") or "").strip()
                 mime = logo.get("mime") or ""
