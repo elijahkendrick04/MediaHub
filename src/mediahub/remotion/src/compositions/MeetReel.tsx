@@ -112,8 +112,12 @@ const CoverScreen: React.FC<{
           style={{
             fontSize: 38,
             letterSpacing: "0.2em",
-            color: brand.accent || "#FFFFFF",
-            opacity: 0.75,
+            // Eyebrow uses the SECONDARY brand colour. Previously
+            // every line on this cover screen used accent, so the
+            // secondary the user confirmed never appeared in the
+            // reel intro.
+            color: brand.secondary || brand.accent || "#FFFFFF",
+            opacity: 0.85,
             marginBottom: 36,
             textTransform: "uppercase",
           }}
@@ -132,9 +136,22 @@ const CoverScreen: React.FC<{
         >
           {meetName || "WEEKEND HIGHLIGHTS"}
         </div>
+        {/* Brand-secondary rule sits between the meet name and the
+            club name, mirroring the way print mastheads use a thin
+            colour bar to separate title from subtitle. Without this
+            the secondary brand colour was absent from the reel cover. */}
         <div
           style={{
-            marginTop: 64,
+            marginTop: 36,
+            width: 220,
+            height: 4,
+            background: brand.secondary || brand.accent || "#FFFFFF",
+            opacity: 0.9,
+          }}
+        />
+        <div
+          style={{
+            marginTop: 28,
             fontSize: 40,
             color: brand.accent || "#FFFFFF",
             letterSpacing: "0.16em",

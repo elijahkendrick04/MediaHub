@@ -4994,6 +4994,7 @@ def create_app() -> Flask:
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
+{_llm_unavailable_banner()}
 <div class="card">
   <form method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
@@ -5122,8 +5123,8 @@ def create_app() -> Flask:
   <form method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
     <input type="hidden" name="run_id" value="{_h(run_id)}" />
 
-    <label>Club to feature</label>
-    <select name="club_filter" required>{opts}</select>
+    <label for="run-config-club">Club to feature</label>
+    <select name="club_filter" id="run-config-club" required>{opts}</select>
     <p class="dim" style="margin-top:4px;font-size:12px">Only clubs that actually appear in this meet are listed.</p>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
@@ -5135,16 +5136,16 @@ def create_app() -> Flask:
       {prof_logo_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
-        <div><label>Primary</label><input type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
-        <div><label>Secondary</label><input type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
-        <div><label>Accent</label><input type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
+        <div><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
+        <div><label for="run-config-secondary">Secondary</label><input id="run-config-secondary" type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
+        <div><label for="run-config-accent">Accent</label><input id="run-config-accent" type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
     </fieldset>
 
     <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
       <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Photos (optional)</legend>
-      <label>Athlete portraits, action shots, venue images (multi-select)</label>
-      <input type="file" name="club_photos" multiple accept="image/*" />
+      <label for="run-config-photos">Athlete portraits, action shots, venue images (multi-select)</label>
+      <input id="run-config-photos" type="file" name="club_photos" multiple accept="image/*" />
       <p class="dim" style="margin-top:4px;font-size:12px">Uploaded photos will be preferred for graphic generation in this run and saved to your media library.</p>
     </fieldset>
 
@@ -10166,6 +10167,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '</section>'
         )
 
+    def _llm_unavailable_banner() -> str:
+        """Render a warning banner when no LLM provider is configured.
+
+        Pre-fix, the user could submit a stub form (Sponsor Post, Event
+        Preview, Session Update) or start a chat with no LLM key and
+        only learn it had failed when the request bounced to an error
+        page after a 10-second loader. Surfacing it on the form itself
+        sets expectations: the action will fail until the operator
+        configures a key. Returns an empty string when AI IS available
+        so working deployments aren't nagged.
+        """
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_avail
+            if _llm_avail():
+                return ""
+        except Exception:
+            pass
+        return (
+            '<div role="status" style="margin-bottom:14px;padding:12px 14px;'
+            'border:1px solid rgba(255,180,84,0.45);border-radius:8px;'
+            'background:rgba(255,180,84,0.08);font-size:13px;'
+            'color:var(--ink);line-height:1.5">'
+            '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
+            'No cloud LLM provider is configured on this deployment. '
+            'Submitting this form will surface an AI-unavailable error. '
+            'Ask your administrator to set '
+            '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+            'GEMINI_API_KEY</code> or '
+            '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
+            'ANTHROPIC_API_KEY</code>.'
+            '</div>'
+        )
+
     def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
                      active_tab: str = "create"):
         """Shared handler for stub routes. GET renders form, POST renders cards."""
@@ -10320,7 +10354,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 )
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
-        body = _stub_hero(title) + stub.render_stub_html()
+        body = _stub_hero(title) + _llm_unavailable_banner() + stub.render_stub_html()
         # Inject the "Pick from your library" widget. The form-level photo
         # upload (stubs._PHOTO_INPUT_HTML) handles one-off uploads; this
         # picker pulls from the active organisation's library so the user
@@ -10468,6 +10502,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     </form>
   </div>
 </section>
+
+{_llm_unavailable_banner()}
 
 <div class="card">
   <h2>Past chats</h2>
