@@ -235,8 +235,16 @@ def generate(content_item: dict, evaluation, brand_kit, *,
     pattern = best_pattern_for(angle, format_hint=fmt_hint, prefer_family=family_hint)
 
     # ---- AI creative direction (optional, preferred when configured) ----
+    # When ``use_ai_director`` is True we always try the AI first, even
+    # if the caller pre-populated ``variation_profile`` with a random
+    # fallback (web.py does this so we still have variety when Gemini
+    # is unavailable). The AI direction WINS when it returns a result;
+    # the pre-populated profile only kicks in when the AI call returns
+    # nothing — a configured Gemini key would never have been honoured
+    # otherwise, which silently downgraded production to random-only
+    # variation.
     ai_direction: Optional[dict] = None
-    if use_ai_director and variation_profile is None:
+    if use_ai_director:
         try:
             from mediahub.creative_brief.ai_director import ai_creative_direction
             ai_direction = ai_creative_direction(
