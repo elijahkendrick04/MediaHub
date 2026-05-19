@@ -1065,6 +1065,8 @@ def _schedule_modal_html() -> str:
       <input id="mh-sched-when" type="datetime-local"
              style="padding:8px;border:1px solid var(--border,#252a36);border-radius:8px;
                     background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>
+      <div id="mh-sched-when-hint" class="muted"
+           style="font-size:11px;margin-top:4px;line-height:1.4"></div>
     </div>
     <input type="hidden" id="mh-sched-media-url"/>
     <input type="hidden" id="mh-sched-run-id"/>
@@ -1094,6 +1096,12 @@ def _schedule_modal_js() -> str:
 (function(){
   var API_BASE = window._API_BASE || '';
 
+  // Monotonic counter so a slow channel-list fetch can't clobber a
+  // newer one when the modal is re-opened on a different card before
+  // the first request settles. We compare on resolution and bail out
+  // if this isn't the most recent open call.
+  var _openSeq = 0;
+
   function fmtDt(d) {
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
     return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
@@ -1104,6 +1112,21 @@ def _schedule_modal_js() -> str:
     var d = new Date(local);
     if (isNaN(d.getTime())) return '';
     return d.toISOString();
+  }
+
+  // Resolve the user-visible label for the local timezone. Falls back
+  // to a UTC-offset string when Intl isn't available so the hint stays
+  // useful in older browsers.
+  function localTzLabel() {
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) return tz;
+    } catch (e) {}
+    var off = -new Date().getTimezoneOffset();
+    var sign = off >= 0 ? '+' : '-';
+    var abs = Math.abs(off);
+    var h = Math.floor(abs / 60), m = abs % 60;
+    return 'UTC' + sign + (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
   }
 
   function pickActiveCaption(cardEl) {
@@ -1130,15 +1153,62 @@ def _schedule_modal_js() -> str:
     return '';
   }
 
+  // Refresh the live hint under the datetime-local input. Reads the
+  // current value, parses it as local time (matching localToIso's
+  // semantics), and shows a UTC echo + a past-time warning when
+  // appropriate. Called on input and after the modal opens. We use
+  // textContent throughout to keep it XSS-safe (a Buffer error message
+  // never reaches this code path, but the tz string in pathological
+  // locales could).
+  function refreshWhenHint() {
+    var hint = document.getElementById('mh-sched-when-hint');
+    if (!hint) return;
+    var raw = (document.getElementById('mh-sched-when') || {}).value || '';
+    var tz = localTzLabel();
+    if (!raw) {
+      hint.style.color = '';
+      hint.textContent = 'Times use your local timezone (' + tz + '). '
+        + 'Leave blank to use the next available Buffer queue slot.';
+      return;
+    }
+    var d = new Date(raw);
+    if (isNaN(d.getTime())) {
+      hint.style.color = 'var(--bad)';
+      hint.textContent = 'Could not read that date/time.';
+      return;
+    }
+    var now = new Date();
+    // 1 minute grace for clock skew so picking "now" doesn't false-positive.
+    if (d.getTime() < now.getTime() - 60000) {
+      hint.style.color = 'var(--bad)';
+      hint.textContent = 'That time is in the past (' + tz
+        + '). Buffer will reject it — pick a future time or clear the field.';
+      return;
+    }
+    hint.style.color = '';
+    hint.textContent = tz + ' → sends to Buffer as '
+      + d.toISOString() + ' (UTC).';
+  }
+
   window.mhScheduleOpen = function(runId, cardId, cardElId) {
     var modal = document.getElementById('mh-sched-modal');
     if (!modal) return;
+    var seq = ++_openSeq;
     var cardEl = document.getElementById(cardElId);
     document.getElementById('mh-sched-run-id').value = runId || '';
     document.getElementById('mh-sched-card-id').value = cardId || '';
     document.getElementById('mh-sched-pill-id').value = cardElId || '';
     document.getElementById('mh-sched-caption').value = pickActiveCaption(cardEl);
-    document.getElementById('mh-sched-when').value = '';
+    var whenEl = document.getElementById('mh-sched-when');
+    whenEl.value = '';
+    // Bind the live hint refresher once. Marker attribute keeps us
+    // idempotent across multiple modal opens on the same page.
+    if (!whenEl.dataset.mhHintBound) {
+      whenEl.addEventListener('input', refreshWhenHint);
+      whenEl.addEventListener('change', refreshWhenHint);
+      whenEl.dataset.mhHintBound = '1';
+    }
+    refreshWhenHint();
     document.getElementById('mh-sched-media-url').value = pickMediaUrl(cardEl);
     var err = document.getElementById('mh-sched-error');
     err.style.display = 'none'; err.textContent = '';
@@ -1147,14 +1217,22 @@ def _schedule_modal_js() -> str:
     chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
 
     fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; });
+      return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){
+        // Non-JSON response (e.g. a proxy returned HTML). Return a synthetic
+        // body so the downstream branches can still surface a clear error.
+        return {status:r.status, body:{message:'Server returned an unreadable response.'}};
+      });
     }).then(function(o){
-      if (o.status === 401 || !o.body.connected) {
-        // Per-profile Buffer: show the inline "Connect your Buffer
-        // account" form right inside the modal — paste a personal
-        // access token and we save it on this org's profile. Also
-        // offer the no-Buffer download alternative so clubs without
-        // Buffer aren't blocked from getting their content out.
+      // Stale-response guard: a newer mhScheduleOpen has fired while
+      // this fetch was in flight, so discard our result rather than
+      // overwriting the channel list / error UI for the new card.
+      if (seq !== _openSeq) return;
+      // 401 = no token configured OR token rejected by Buffer. Both
+      // cases want the inline Connect-Buffer form so the user can paste
+      // a (fresh) personal token without leaving the modal. The download
+      // fallback is always offered so a club with no Buffer at all
+      // isn't blocked from getting their content out.
+      if (o.status === 401) {
         var runIdForDl = document.getElementById('mh-sched-run-id').value;
         var cardIdForDl = document.getElementById('mh-sched-card-id').value;
         var capForDl = encodeURIComponent(
@@ -1219,6 +1297,7 @@ def _schedule_modal_js() -> str:
       }
       modal.style.display = 'flex';
     }).catch(function(e){
+      if (seq !== _openSeq) return;
       chWrap.innerHTML = '<p style="color:var(--bad);margin:0">Network error: ' + (e && e.message || e) + '</p>';
       modal.style.display = 'flex';
     });
@@ -1323,6 +1402,23 @@ def _schedule_modal_js() -> str:
     if (!ids.length) { err.style.display = 'block'; err.textContent = 'Pick at least one channel.'; return; }
     if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
 
+    // Past-date guard: a `datetime-local` input has no min and the
+    // server / Buffer would surface a cryptic 4xx if we sent yesterday.
+    // 1-minute grace so picking "now" doesn't false-positive on clock skew.
+    if (whenLocal) {
+      var pickedTs = new Date(whenLocal).getTime();
+      if (isNaN(pickedTs)) {
+        err.style.display = 'block';
+        err.textContent = 'Could not read the scheduled time.';
+        return;
+      }
+      if (pickedTs < Date.now() - 60000) {
+        err.style.display = 'block';
+        err.textContent = 'Scheduled time is in the past. Pick a future time or clear the field to use the next queue slot.';
+        return;
+      }
+    }
+
     var btn = document.getElementById('mh-sched-send');
     var orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'Sending&hellip;';
@@ -1354,8 +1450,11 @@ def _schedule_modal_js() -> str:
         var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
         if (window.MH && typeof window.MH.toast === 'function') {
           window.MH.toast('Scheduled to Buffer.' + warn, warn ? 'info' : 'success');
-        } else {
-          alert('Scheduled to Buffer.' + warn);
+        } else if (window.console && console.log) {
+          // Quiet fallback for pathological host pages that lack
+          // MH.toast — log to console so a successful schedule never
+          // blocks the user with a synchronous browser dialog.
+          console.log('Scheduled to Buffer.' + warn);
         }
         mhScheduleClose();
       } else {
@@ -4200,9 +4299,28 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var input = document.getElementById('mh-buf-token');
     var btn = document.getElementById('mh-buf-connect');
     if (!input || !btn) return;
+    // Helper to surface an error inline. Falls back to MH.toast when the
+    // modal's dedicated error div has been ripped out (e.g. the user
+    // closed the modal mid-request and we still resolved). We deliberately
+    // avoid alert() here — it's jarring relative to the rest of the
+    // modal's UX and steals focus from the connect form.
+    function showError(msg) {
+      var err = document.getElementById('mh-sched-error');
+      if (err) {
+        err.style.display = 'block';
+        err.textContent = msg;
+      } else if (window.MH && typeof window.MH.toast === 'function') {
+        window.MH.toast(msg, 'error');
+      }
+    }
+    // Clear any prior error so the user can tell a retry produced a
+    // fresh outcome rather than staring at a stale message.
+    var errEl = document.getElementById('mh-sched-error');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
     var token = (input.value || '').trim();
     if (!token) {
       input.focus();
+      showError('Paste your Buffer access token to connect.');
       return;
     }
     var origLabel = btn.textContent;
@@ -4213,7 +4331,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({buffer_access_token: token}),
     }).then(function(r){
-      return r.json().then(function(j){ return {status: r.status, body: j}; });
+      return r.json().then(function(j){ return {status: r.status, body: j}; }, function(){
+        return {status: r.status, body: {message: 'Server returned an unreadable response.'}};
+      });
     }).then(function(o){
       btn.disabled = false;
       btn.textContent = origLabel;
@@ -4228,19 +4348,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         return;
       }
       var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-      var err = document.getElementById('mh-sched-error');
-      if (err) {
-        err.style.display = 'block';
-        err.textContent = msg;
-      } else if (window.MH && typeof window.MH.toast === 'function') {
-        window.MH.toast(msg, 'error');
-      } else {
-        alert(msg);
-      }
+      showError(msg);
     }).catch(function(e){
       btn.disabled = false;
       btn.textContent = origLabel;
-      alert('Network error: ' + (e && e.message || e));
+      showError('Network error: ' + (e && e.message || e));
     });
   };
 
