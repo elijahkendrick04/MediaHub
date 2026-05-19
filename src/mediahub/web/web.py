@@ -678,23 +678,15 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 
 # Both dicts are in-memory progress trackers — the source of truth for
 # runs is the SQLite `runs` table + `runs_v4/<id>.json`; for Turn-Into
-# jobs it's the pack file on disk. The dicts keep transient state (live
-# log lines, in-flight status) and must NOT grow unbounded — Render
-# Standard is 2 GB across two workers, so an unchecked leak here is
-# still one of the things that causes the ~6-minute container restarts
-# the user reported in the gunicorn logs (and was even worse on the
-# 512 MB Starter the bounds were originally sized for). Bound both
-# with FIFO eviction.
-_active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
-_turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
-_active_lock = threading.Lock()
-# In-process registry of running pipeline uploads. Bounded LRU so a
-# leaking worker can't accumulate run dicts under Render's 2 GB
-# Standard ceiling (originally sized for the 512 MB Starter). The
-# /api/runs/<id>/status endpoint falls back to the SQLite row when an
-# entry has been evicted, so the user only loses in-memory
+# jobs it's the pack file on disk. The in-process registries below keep
+# transient state (live log lines, in-flight status) and must NOT grow
+# unbounded — Render Standard is 2 GB across two workers, so an
+# unchecked leak here is one of the things that causes the ~6-minute
+# container restarts the user reported in the gunicorn logs (and was
+# even worse on the 512 MB Starter the bounds were originally sized
+# for). The /api/runs/<id>/status endpoint falls back to the SQLite
+# row when an entry has been evicted, so the user only loses in-memory
 # progress-log streaming, never run completion.
-_MAX_LOG_LINES = 200
 _active_runs: BoundedCache = BoundedCache(max_size=64)
 # Turn-Into job tracker. The "pack" payload is stripped at completion
 # time (the pack is already persisted to disk by save_pack), so each
@@ -1394,11 +1386,12 @@ def _start_run(file_bytes: bytes, file_name: str,
                profile_id: Optional[str], use_pb_cache: bool,
                fetch_pbs: bool, club_filter: Optional[str] = None) -> str:
     run_id = uuid.uuid4().hex[:12]
+    started_at = datetime.now(timezone.utc).isoformat()
     with _active_lock:
         _active_runs[run_id] = {
             "status": "queued",
             "log": ["Run queued"],
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": started_at,
             "file_name": file_name,
         }
         # Evict completed older runs to keep the dict bounded.
@@ -1407,39 +1400,50 @@ def _start_run(file_bytes: bytes, file_name: str,
     conn.execute(
         """INSERT INTO runs (id, created_at, status, file_name, profile_id)
            VALUES (?,?,?,?,?)""",
-        (run_id, _active_runs[run_id]["started_at"], "queued",
-         file_name, profile_id or ""),
+        (run_id, started_at, "queued", file_name, profile_id or ""),
     )
     conn.commit()
     conn.close()
 
     def _worker():
         with _active_lock:
-            _active_runs[run_id]["status"] = "running"
+            entry = _active_runs.get(run_id)
+            if entry is not None:
+                entry["status"] = "running"
 
         def cb(msg: str):
             with _active_lock:
-                log_list = _active_runs[run_id]["log"]
-                log_list.append(msg)
-                # Cap each run's progress log so a buggy progress
-                # callback can't grow the in-memory list to thousands
-                # of entries × hundreds of bytes.
-                if len(log_list) > _RUN_LOG_LIMIT:
-                    # Keep the first 5 (queue/start markers — useful
-                    # for diagnosis) and the most recent N-5.
-                    keep_tail = _RUN_LOG_LIMIT - 5
-                    _active_runs[run_id]["log"] = (
-                        log_list[:5] + log_list[-keep_tail:]
-                    )
                 entry = _active_runs.get(run_id)
                 if entry is None:
+                    # Run was evicted from the bounded cache while in
+                    # flight — silently drop the progress line.
                     return
                 log_list = entry.setdefault("log", [])
                 log_list.append(msg)
-                if len(log_list) > _MAX_LOG_LINES:
-                    drop = len(log_list) - _MAX_LOG_LINES
-                    del log_list[:drop]
-                    log_list[0] = f"[truncated earlier {drop} log lines]"
+                # Cap each run's progress log so a buggy progress
+                # callback can't grow the in-memory list to thousands
+                # of entries × hundreds of bytes. Keep the first 5
+                # entries (queue/start markers — useful for diagnosis)
+                # and the most recent N-5 of the tail.
+                if len(log_list) > _RUN_LOG_LIMIT:
+                    keep_tail = _RUN_LOG_LIMIT - 5
+                    entry["log"] = (
+                        log_list[:5] + log_list[-keep_tail:]
+                    )
+
+        def _record_terminal(status: str, error: Optional[str] = None) -> None:
+            """Stamp the in-memory entry with a terminal status. The
+            entry may have been evicted from the bounded cache (a
+            long-running pipeline outliving the LRU window), in
+            which case the on-disk DB row remains the source of
+            truth and the polling endpoint falls back to it."""
+            with _active_lock:
+                entry = _active_runs.get(run_id)
+                if entry is None:
+                    return
+                entry["status"] = status
+                if error is not None:
+                    entry["error"] = error
 
         try:
             run = run_pipeline_v4(
@@ -1449,16 +1453,14 @@ def _start_run(file_bytes: bytes, file_name: str,
                 club_filter=club_filter,
             )
             _persist_run(run, file_name)
-            with _active_lock:
-                _active_runs[run_id]["status"] = "error" if run.error else "done"
-                if run.error:
-                    _active_runs[run_id]["error"] = run.error
+            _record_terminal(
+                "error" if run.error else "done",
+                run.error if run.error else None,
+            )
         except Exception as e:
             import traceback
             traceback.print_exc()
-            with _active_lock:
-                _active_runs[run_id]["status"] = "error"
-                _active_runs[run_id]["error"] = str(e)
+            _record_terminal("error", str(e))
             conn = _db()
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?",
                          (str(e), run_id))
