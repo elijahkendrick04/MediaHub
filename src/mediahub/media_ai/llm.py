@@ -238,6 +238,41 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
 _GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 _GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
 
+
+def _gemini_thinking_budget() -> int:
+    """Tokens the model is allowed to spend on internal "thinking".
+
+    Gemini 2.5 Flash ships with thinking enabled by default. Those
+    tokens count against ``maxOutputTokens`` but don't appear in
+    ``content.parts`` — so a caller that sized the budget for the
+    visible JSON it expected will see the response truncated mid-key
+    once thinking has eaten its share. Every JSON-output call in
+    MediaHub (palette resolver, block detector, content extractor, …)
+    sized their budgets for the response only and silently broke when
+    the default model gained thinking.
+
+    Default 0 (off) because every existing caller passes a max_tokens
+    sized for the visible output, not thinking. Operators can opt back
+    in per process via ``MEDIAHUB_GEMINI_THINKING_BUDGET`` if a new
+    caller wants the reasoning headroom.
+    """
+    raw = os.environ.get("MEDIAHUB_GEMINI_THINKING_BUDGET", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _gemini_generation_config(max_tokens: int) -> dict:
+    cfg: dict = {"maxOutputTokens": int(max_tokens)}
+    budget = _gemini_thinking_budget()
+    # thinkingConfig is only honoured by 2.5+ models; sending it to an
+    # older model is rejected as an unknown field. Gate on the model
+    # name so a downgrade via MEDIAHUB_GEMINI_MODEL still works.
+    if "2.5" in _GEMINI_MODEL or "3." in _GEMINI_MODEL:
+        cfg["thinkingConfig"] = {"thinkingBudget": budget}
+    return cfg
+
 # ---------------------------------------------------------------------------
 # Gemini overload circuit breaker
 # ---------------------------------------------------------------------------
@@ -335,7 +370,7 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         })
     payload: dict[str, Any] = {
         "contents": contents,
-        "generationConfig": {"maxOutputTokens": max_tokens},
+        "generationConfig": _gemini_generation_config(max_tokens),
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
@@ -453,7 +488,7 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
     parts.append({"text": prompt})
     payload: dict[str, Any] = {
         "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"maxOutputTokens": max_tokens},
+        "generationConfig": _gemini_generation_config(max_tokens),
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
