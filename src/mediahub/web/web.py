@@ -680,16 +680,19 @@ def _get_wf_store() -> Optional['WorkflowStore']:
 # runs is the SQLite `runs` table + `runs_v4/<id>.json`; for Turn-Into
 # jobs it's the pack file on disk. The dicts keep transient state (live
 # log lines, in-flight status) and must NOT grow unbounded — Render
-# free-tier is 512 MB and a slow leak here is one of the things that
-# causes the ~6-minute container restarts the user reported in the
-# gunicorn logs. Bound both with FIFO eviction.
+# Standard is 2 GB across two workers, so an unchecked leak here is
+# still one of the things that causes the ~6-minute container restarts
+# the user reported in the gunicorn logs (and was even worse on the
+# 512 MB Starter the bounds were originally sized for). Bound both
+# with FIFO eviction.
 _active_runs: dict[str, dict] = {}     # run_id -> {status, log[], profile, error}
 _turn_into_jobs: dict[str, dict] = {}  # job_id -> {status, pack, error}
 _active_lock = threading.Lock()
 # In-process registry of running pipeline uploads. Bounded LRU so a
-# leaking worker can't accumulate run dicts on Render's 512MB starter
-# plan. The /api/runs/<id>/status endpoint falls back to the SQLite row
-# when an entry has been evicted, so the user only loses in-memory
+# leaking worker can't accumulate run dicts under Render's 2 GB
+# Standard ceiling (originally sized for the 512 MB Starter). The
+# /api/runs/<id>/status endpoint falls back to the SQLite row when an
+# entry has been evicted, so the user only loses in-memory
 # progress-log streaming, never run completion.
 _MAX_LOG_LINES = 200
 _active_runs: BoundedCache = BoundedCache(max_size=64)
@@ -7870,8 +7873,9 @@ Relay team broke club record"></textarea>
 
         Added Phase 1.5 as a diagnostic for the "gunicorn restarts
         every 6 minutes" pattern. If `rss_mb` climbs steadily across
-        repeated polls, the process is leaking and Render's 512 MB
-        ceiling will OOM-kill it. If `rss_mb` is stable and restarts
+        repeated polls, the process is leaking and Render's 2 GB
+        Standard ceiling (shared across two gunicorn workers) will
+        eventually OOM-kill it. If `rss_mb` is stable and restarts
         still happen, the cause is somewhere else (auto-redeploy,
         platform action, etc.) and the user can stop blaming the app.
         """
@@ -7889,7 +7893,7 @@ Relay team broke club record"></textarea>
         return jsonify({
             "ok": True,
             "rss_mb": round(rss_mb, 1),
-            "rss_pct_of_512": round((rss_mb / 512.0) * 100.0, 1),
+            "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
             "active_runs": active_n,
             "active_runs_running": active_running,
             "active_runs_limit": _ACTIVE_RUNS_LIMIT,

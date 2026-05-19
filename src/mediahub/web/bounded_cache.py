@@ -1,5 +1,6 @@
 """LRU-bounded, lock-guarded mapping used by web.py to cap in-process
-caches under Render's 512MB starter plan.
+caches well below the Render Standard tier's 2 GB ceiling (and the
+old 512 MB Starter ceiling it was originally sized for).
 
 Why a tiny custom class instead of functools.lru_cache or cachetools:
   - functools.lru_cache wraps a callable; we need a plain mapping you

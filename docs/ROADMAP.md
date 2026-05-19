@@ -50,9 +50,11 @@ MediaHub is now a **single-org-per-deployment** turnkey product:
 - The end users (the club's social-media volunteers, coaches,
   parents) reach the deployment URL, set up their organisation,
   and use the product. They never see a configuration screen.
-- Cost to the operator at default config: ~$10–25/month total
-  (Render Starter + Buffer Essentials + Gemini free tier). The
-  free-tier LLM covers the small-club business model end-to-end.
+- Cost to the operator at default config: ~$25–35/month total
+  (Render Standard + Buffer Essentials + Gemini free tier). Standard
+  is the floor because Remotion's Chromium render needs more than
+  the 512 MB Starter tier offers; the free-tier LLM covers the
+  small-club business model end-to-end.
 
 Multi-tenant SaaS (multiple clubs sharing one MediaHub instance) is
 Phase 3 work — both architecturally and commercially.

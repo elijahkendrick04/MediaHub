@@ -157,7 +157,7 @@ Send a written follow-up:
 | Buffer posts all failing | Token expired or channel disconnected | Pilot club re-pastes Buffer token via schedule modal |
 | Pipeline error on every upload | Format change in result file | Capture file → reproduce in a staging deploy → fix parser → redeploy |
 | One run failed mysteriously | Could be transient (parse, LLM timeout) | Show the club "Why did this run fail?" on /activity; re-upload |
-| Uptime dropping | Render free tier sleeps after 15 min | Move to Render Starter (paid) |
+| Uptime dropping | Crash loop, OOM kills, or a Blueprint sync downgraded the plan | Confirm dashboard Instance Type is Standard (2 GB) and `render.yaml` has `plan: standard`; check `/healthz/memory` for RSS climbing past ~80% |
 | Anthropic spend rising | Pilot is heavier than free-tier Gemini covers | Either accept the cost or set `MEDIAHUB_LLM_PROVIDER=gemini` to force free path |
 
 ---
