@@ -34,6 +34,7 @@ data/discovered/pbs/*.json
 data/discovered/search_cache/
 !data/discovered/**/.gitkeep
 data/cache/
+data/verify_variation/
 .cache/
 
 # Runtime artefacts

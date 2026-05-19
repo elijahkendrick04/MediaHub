@@ -131,6 +131,10 @@ def create_visual_for_item(
     media_assets: Optional[list[dict]] = None,
     sponsor_name: str = "",
     variation_seed: int = 0,
+    variation_profile=None,
+    use_ai_director: bool = False,
+    recent_signatures: Optional[list[str]] = None,
+    recent_hooks: Optional[list[str]] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
@@ -180,6 +184,10 @@ def create_visual_for_item(
             venue_name=item.get("venue_name") or "",
             sponsor={"name": sponsor_name} if sponsor_name else None,
             variation_seed=variation_seed,
+            variation_profile=variation_profile,
+            use_ai_director=use_ai_director,
+            recent_signatures=recent_signatures,
+            recent_hooks=recent_hooks,
         )
         out["brief"] = brief.to_dict()
     except Exception as e:
@@ -238,8 +246,13 @@ def create_visual_for_item(
         per_brief_dir.mkdir(parents=True, exist_ok=True)
 
         # Honour the seed-3 "text-led / no photo" treatment by skipping the
-        # athlete cutout entirely.
-        skip_cutout_for_render = (variation_seed == 3)
+        # athlete cutout entirely. Same treatment for any brief whose
+        # photo_treatment is "no-photo" (set by the AI director or a
+        # random variation profile).
+        skip_cutout_for_render = (
+            variation_seed == 3
+            or (getattr(brief, "photo_treatment", "") == "no-photo")
+        )
         athlete_for_render = None if skip_cutout_for_render else athlete_path
 
         results = render_all_formats(
