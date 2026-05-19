@@ -123,6 +123,10 @@ def _empty_result(primary_url: str, status: str) -> dict:
         "social_links_status": {},
         "captions_captured": 0,
         "link_capture_state": {},
+        # Per-source palette_mentions so the unified resolver
+        # (brand.palette) can combine link signals with guidelines doc
+        # palette mentions and logo dominant colours.
+        "brand_palette_signals": {},
     }
 
 
@@ -173,6 +177,17 @@ def _map_handlers_output(
     out["captions_captured"] = sum(
         1 for s in state.values() if s.get("voice_digest")
     )
+    # Per-link palette_mentions (added by link_handlers.process_links).
+    # The unified palette resolver merges these with the brand-guidelines
+    # palette_mentions and the logos' dominant colours so the final
+    # primary/secondary/accent pick is informed by every input source,
+    # not just the richest one.
+    signals: dict[str, list[str]] = {}
+    for platform, entry in state.items():
+        mentions = entry.get("palette_mentions") if isinstance(entry, dict) else None
+        if isinstance(mentions, list) and mentions:
+            signals[platform] = list(mentions)
+    out["brand_palette_signals"] = signals
     out["brand_capture_status"] = "ok" if handler_out.get("any_real") else "ok_heuristic"
     return out
 

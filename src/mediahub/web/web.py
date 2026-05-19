@@ -3717,6 +3717,39 @@ def _recovery_page(
     return _layout(headline, "".join(sects)), code
 
 
+# Module-level JS for the palette confirmation form (rendered inside an
+# f-string). Lifted out so we don't have to double every `{` for f-string
+# escaping every time the form is rendered.
+_PALETTE_PICKER_JS = """
+(function() {
+  var checkbox = document.getElementById('palette-use-fourth');
+  var row = document.getElementById('palette-fourth-row');
+  var colour = document.getElementById('palette-fourth-color');
+  var hex = document.getElementById('palette-fourth-hex');
+  if (!checkbox || !row || !colour || !hex) return;
+  function sync() {
+    row.style.display = checkbox.checked ? '' : 'none';
+    colour.disabled = !checkbox.checked;
+    hex.disabled = !checkbox.checked;
+  }
+  checkbox.addEventListener('change', sync);
+  sync();
+  document.querySelectorAll('[data-palette-mirror]').forEach(function(text) {
+    var name = text.getAttribute('data-palette-mirror');
+    var colourInput = document.querySelector('input[type=color][name="' + name + '"]');
+    if (!colourInput) return;
+    text.addEventListener('input', function() {
+      var v = text.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) colourInput.value = v.toLowerCase();
+    });
+    colourInput.addEventListener('input', function() {
+      text.value = colourInput.value;
+    });
+  });
+})();
+"""
+
+
 # ---------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------
@@ -10996,14 +11029,172 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'{_h(k)}</span>'
                 for k in (prof.brand_keywords or [])[:10]
             )
-            pal = prof.brand_palette_extracted or {}
-            sw = "".join(
-                f'<span title="{_h(pal[k])}" style="display:inline-block;'
-                f'width:22px;height:22px;border-radius:4px;margin-right:6px;'
-                f'background:{_h(pal[k])};border:1px solid rgba(255,255,255,0.15);'
-                f'vertical-align:middle"></span>'
-                for k in ("primary", "secondary", "accent") if pal.get(k)
+            # Effective palette = manual override slots > AI-detected.
+            # Show that as the "Confirmed" row of swatches, with the AI's
+            # raw pick rendered separately so the user can see what the
+            # engine actually inferred.
+            from mediahub.brand import palette as _palette_mod
+            extracted_pal = prof.brand_palette_extracted or {}
+            manual_pal = prof.brand_palette_manual or {}
+            effective_pal = _palette_mod.effective_palette(
+                manual=manual_pal, extracted=extracted_pal,
             )
+            use_fourth = bool(prof.brand_palette_use_fourth)
+
+            slot_labels = _palette_mod.SLOTS
+            if (use_fourth
+                    or extracted_pal.get(_palette_mod.FOURTH_SLOT)
+                    or manual_pal.get(_palette_mod.FOURTH_SLOT)):
+                slot_labels = slot_labels + (_palette_mod.FOURTH_SLOT,)
+
+            def _swatch_row(palette: dict) -> str:
+                rendered = ""
+                for k in slot_labels:
+                    hexv = palette.get(k)
+                    if not hexv:
+                        continue
+                    rendered += (
+                        f'<span title="{_h(k)}: {_h(hexv)}" style="display:inline-flex;'
+                        f'align-items:center;gap:6px;padding:3px 8px;margin-right:6px;'
+                        f'margin-bottom:4px;border:1px solid var(--border);'
+                        f'border-radius:6px;background:var(--panel)">'
+                        f'<span style="display:inline-block;width:18px;height:18px;'
+                        f'border-radius:4px;background:{_h(hexv)};'
+                        f'border:1px solid rgba(255,255,255,0.15)"></span>'
+                        f'<code style="font-size:11px;color:var(--ink)">{_h(hexv)}</code></span>'
+                    )
+                return rendered or '<span class="dim" style="font-size:12px">(none)</span>'
+
+            ai_row = _swatch_row(extracted_pal)
+            effective_row = _swatch_row(effective_pal)
+
+            # Per-source colour breakdown — surface every signal that
+            # informed the AI's pick so the user can see "this was
+            # mentioned in your style guide, that came off Instagram".
+            sources_dict = prof.brand_palette_sources or {}
+            sources_html = ""
+            if sources_dict:
+                rows = []
+                for label, hexes in sources_dict.items():
+                    if not hexes:
+                        continue
+                    chips = "".join(
+                        f'<span style="display:inline-flex;align-items:center;'
+                        f'gap:4px;padding:2px 6px;margin:2px 4px 2px 0;'
+                        f'border:1px solid var(--border);border-radius:4px;'
+                        f'font-size:10.5px;font-family:var(--font-mono,monospace);'
+                        f'color:var(--ink-dim)">'
+                        f'<span style="display:inline-block;width:10px;height:10px;'
+                        f'border-radius:2px;background:{_h(h)};'
+                        f'border:1px solid rgba(255,255,255,0.12)"></span>'
+                        f'{_h(h)}</span>'
+                        for h in hexes[:8]
+                    )
+                    rows.append(
+                        f'<div style="margin-bottom:6px"><span style="font-size:11px;'
+                        f'color:var(--ink-dim);margin-right:6px">{_h(label)}</span>{chips}</div>'
+                    )
+                if rows:
+                    sources_html = (
+                        '<details style="margin-top:10px">'
+                        '<summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);'
+                        'user-select:none">Where these colours came from '
+                        f'({len(sources_dict)} source{"s" if len(sources_dict) != 1 else ""})</summary>'
+                        f'<div style="margin-top:8px;padding:10px;background:rgba(255,255,255,0.02);'
+                        f'border-radius:6px">{"".join(rows)}</div>'
+                        '</details>'
+                    )
+
+            reasoning_html = ""
+            if prof.brand_palette_reasoning:
+                reasoning_html = (
+                    f'<p class="muted" style="font-size:11.5px;margin:6px 0 0 0;'
+                    f'line-height:1.4;font-style:italic">'
+                    f'Engine reasoning: {_h(prof.brand_palette_reasoning)}</p>'
+                )
+
+            confirm_url = url_for("organisation_setup_palette")
+
+            def _slot_default(slot: str, fallback: str) -> str:
+                # Prefer the user's previous manual entry; else fall
+                # back to the AI's pick; else a neutral placeholder so
+                # the colour picker has something to show.
+                v = manual_pal.get(slot) or extracted_pal.get(slot) or fallback
+                return v if isinstance(v, str) and v.startswith("#") else fallback
+
+            def _picker_block(slot: str, label: str, default_hex: str,
+                              *, disabled: bool = False, max_width: str = "") -> str:
+                attr = "disabled" if disabled else ""
+                wrap_style = f"max-width:{max_width};" if max_width else ""
+                return (
+                    f'<label style="display:flex;flex-direction:column;gap:4px;'
+                    f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
+                    f'<span>{_h(label)}</span>'
+                    f'<span style="display:flex;gap:6px;align-items:center">'
+                    f'<input type="color" name="palette_{slot}" '
+                    f'id="palette-{slot}-color" value="{_h(default_hex)}" {attr} '
+                    f'style="width:42px;height:34px;padding:0;'
+                    f'border:1px solid var(--border);border-radius:4px;'
+                    f'background:var(--panel);cursor:pointer"/>'
+                    f'<input type="text" name="palette_{slot}_hex" '
+                    f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
+                    f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
+                    f'data-palette-mirror="palette_{slot}" {attr} '
+                    f'style="flex:1;padding:6px 8px;border:1px solid var(--border);'
+                    f'border-radius:4px;background:var(--bg);color:var(--ink);'
+                    f'font-family:var(--font-mono,monospace);font-size:12px"/>'
+                    f'</span></label>'
+                )
+
+            pickers_html = "".join(
+                _picker_block(slot, label, _slot_default(slot, fallback))
+                for slot, label, fallback in (
+                    ("primary",   "Primary",   "#0a2540"),
+                    ("secondary", "Secondary", "#1a1a1a"),
+                    ("accent",    "Accent",    "#d4ff3a"),
+                )
+            )
+            fourth_picker_html = _picker_block(
+                "fourth", "Fourth colour",
+                _slot_default("fourth", "#ffffff"),
+                disabled=not use_fourth, max_width="33%",
+            )
+            fourth_checked_attr = "checked" if use_fourth else ""
+            fourth_visible_style = "" if use_fourth else "display:none"
+
+            confirm_form_html = f"""
+<form method="POST" action="{confirm_url}" data-no-loader="1"
+      style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:6px;
+              text-transform:uppercase;letter-spacing:0.04em">
+    Override the AI's pick
+  </div>
+  <p class="muted" style="font-size:11.5px;margin:0 0 10px 0;line-height:1.45">
+    The engine reads every link and document you supplied and decides a palette.
+    Use the pickers below only if it got it wrong &mdash; otherwise leave them
+    as-is and the AI's values keep flowing through to every generated card.
+  </p>
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+              margin-bottom:10px">{pickers_html}</div>
+  <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;
+                color:var(--ink);cursor:pointer;margin-bottom:8px">
+    <input type="checkbox" name="palette_use_fourth" id="palette-use-fourth"
+           value="on" {fourth_checked_attr}/>
+    <span>Add a fourth brand colour (some clubs use four)</span>
+  </label>
+  <div id="palette-fourth-row" style="margin-bottom:10px;{fourth_visible_style}">
+    {fourth_picker_html}
+  </div>
+  <button type="submit" class="btn" style="font-size:12px;padding:8px 14px">
+    Save brand colours
+  </button>
+  <span class="muted" style="margin-left:10px;font-size:11.5px">
+    Leave any field blank to fall back to the AI's pick for that slot.
+  </span>
+</form>
+<script>{_PALETTE_PICKER_JS}</script>
+"""
+
             preview_html = f"""
 <div class="card" style="margin-bottom:24px;border:1px solid var(--accent);
      background:rgba(212,255,58,0.04)">
@@ -11012,9 +11203,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     {_h(prof.brand_voice_summary or '(no voice summary yet — capture again from a richer source)')}</p>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Keywords</div>
   <div style="margin-bottom:10px">{kw_chips or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
-  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Palette</div>
-  <div style="margin-bottom:10px">{sw or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
-  <p class="muted" style="font-size:12px;margin:8px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Palette in use</div>
+  <div style="margin-bottom:6px">{effective_row}</div>
+  <div style="font-size:11px;color:var(--ink-dim);margin-bottom:4px">AI's pick from all sources</div>
+  <div style="margin-bottom:6px">{ai_row}</div>
+  {reasoning_html}
+  {sources_html}
+  <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  {confirm_form_html}
   <div style="margin-top:14px">
     <a class="btn" href="{url_for("make_page")}">Looks right &mdash; start creating &rarr;</a>
     <span class="muted" style="margin-left:12px;font-size:12px">Or refine the inputs below and re-analyse.</span>
@@ -11722,6 +11918,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             result = {"brand_capture_status": f"error: {e}"}
 
         status = (result or {}).get("brand_capture_status", "")
+        # Per-source palette signals from every captured link. Kept in a
+        # local so the unified palette resolver below can combine these
+        # with the (yet-to-be-ingested) guidelines doc + logos. Survives
+        # the "no_sources" branch as an empty dict so resolution still
+        # runs when only guidelines / logos were supplied.
+        link_palette_signals: dict[str, list[str]] = {}
         if status in ("ok", "ok_heuristic"):
             for k in (
                 "brand_voice_summary", "brand_keywords",
@@ -11747,6 +11949,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             lcs = result.get("link_capture_state") or {}
             if isinstance(lcs, dict):
                 prof.link_capture_state = lcs
+            sigs = result.get("brand_palette_signals") or {}
+            if isinstance(sigs, dict):
+                link_palette_signals = {
+                    str(k): list(v) for k, v in sigs.items()
+                    if isinstance(v, list)
+                }
         elif status == "no_sources":
             # User submitted no links at all — keep the identity fields
             # and let them try again. The gate will keep them here until
@@ -11850,6 +12058,43 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 current_logos.append(meta)
             prof.brand_logos = current_logos
 
+        # ---- Unified palette resolution across ALL sources ------------
+        # Previously the palette displayed on the confirmation page came
+        # only from the website link (richest single source). The user
+        # now expects the AI to reason over every signal the org
+        # supplied: website + each social link + the brand-guidelines
+        # document + every uploaded logo. ``brand.palette.resolve_palette``
+        # does that AI pass; we re-run it here every save so adding a
+        # new logo or replacing the guidelines doc updates the pick.
+        try:
+            from mediahub.brand import palette as _palette
+            sources = _palette.gather_colour_sources(
+                link_palette_signals=link_palette_signals,
+                brand_guidelines=prof.brand_guidelines or {},
+                brand_logos=prof.brand_logos or [],
+            )
+            if sources:
+                resolved = _palette.resolve_palette(
+                    org_name=prof.display_name,
+                    voice_summary=prof.brand_voice_summary or "",
+                    sources=sources,
+                    allow_fourth=bool(prof.brand_palette_use_fourth),
+                )
+                # Preserve any existing primary/secondary/accent that the
+                # resolver didn't fill (e.g. when the user hadn't uploaded
+                # anything new and the resolver returned an empty pick).
+                if resolved:
+                    merged = dict(prof.brand_palette_extracted or {})
+                    for k in _palette.ALL_SLOTS:
+                        if resolved.get(k):
+                            merged[k] = resolved[k]
+                    prof.brand_palette_extracted = merged
+                    prof.brand_palette_reasoning = resolved.get("reasoning", "")
+            prof.brand_palette_sources = sources
+        except Exception as e:
+            # Never block save on palette resolution; fall back silently.
+            log.info("unified palette resolve failed: %s", e)
+
         # ---- AI-derive operating profile from the assembled context ----
         # One LLM call here means zero LLM calls per page render. The
         # derived dict carries the org-specific tone prose, ranking
@@ -11869,6 +12114,105 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         save_profile(prof)
         session["active_profile_id"] = prof.profile_id
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/organisation/setup/palette", methods=["POST"])
+    def organisation_setup_palette():
+        """Persist a user-confirmed brand palette override.
+
+        The AI-driven resolver runs in ``organisation_setup_capture`` over
+        every signal the org supplied (links + guidelines doc + logos).
+        That pick is shown back to the user on the setup preview card so
+        they can confirm or correct. This endpoint accepts:
+
+          - palette_primary / palette_secondary / palette_accent  (hex)
+          - palette_use_fourth ("on" when the tickbox is enabled)
+          - palette_fourth                                         (hex, optional)
+
+        A blank field clears that slot so the AI's value can resurface on
+        the next render. The route never raises; bad inputs are filtered
+        out by ``palette.sanitise_manual_palette``.
+        """
+        prof = _active_profile()
+        if not prof:
+            return redirect(url_for("organisation_setup"))
+
+        use_fourth = (request.form.get("palette_use_fourth") or "").strip().lower() in (
+            "on", "true", "1", "yes",
+        )
+        from mediahub.brand import palette as _palette
+        manual = _palette.sanitise_manual_palette(
+            primary=(request.form.get("palette_primary") or "").strip(),
+            secondary=(request.form.get("palette_secondary") or "").strip(),
+            accent=(request.form.get("palette_accent") or "").strip(),
+            fourth=(request.form.get("palette_fourth") or "").strip(),
+            include_fourth=use_fourth,
+        )
+        prof.brand_palette_manual = manual
+        prof.brand_palette_use_fourth = use_fourth
+
+        # Unticking the 4th-colour box must always drop the stale 4th
+        # slot from the AI's pick — otherwise the next render still
+        # surfaces a fourth swatch the user just opted out of. Done
+        # outside the re-resolve branch below so the tickbox-only path
+        # also clears it.
+        if not use_fourth and prof.brand_palette_extracted:
+            extracted = dict(prof.brand_palette_extracted)
+            if extracted.pop(_palette.FOURTH_SLOT, None) is not None:
+                prof.brand_palette_extracted = extracted
+
+        # Re-run the AI resolver only when the user gave us nothing to
+        # honour (all slots blank → defer fully to AI) OR explicitly
+        # asked for a 4th colour the manual override doesn't supply
+        # (we need the AI to surface a candidate). When all three
+        # manual slots are set, the visible palette is fully overridden
+        # via ``effective_palette`` and an LLM round-trip is pure waste.
+        all_slots_blank = not manual
+        wants_ai_fourth = use_fourth and not manual.get(_palette.FOURTH_SLOT)
+        if all_slots_blank or wants_ai_fourth:
+            try:
+                signals = {}
+                lcs = prof.link_capture_state or {}
+                for plat, entry in lcs.items():
+                    if isinstance(entry, dict) and entry.get("palette_mentions"):
+                        signals[plat] = list(entry["palette_mentions"])
+                sources = _palette.gather_colour_sources(
+                    link_palette_signals=signals,
+                    brand_guidelines=prof.brand_guidelines or {},
+                    brand_logos=prof.brand_logos or [],
+                )
+                if sources:
+                    resolved = _palette.resolve_palette(
+                        org_name=prof.display_name,
+                        voice_summary=prof.brand_voice_summary or "",
+                        sources=sources,
+                        allow_fourth=use_fourth,
+                    )
+                    if resolved:
+                        merged = dict(prof.brand_palette_extracted or {})
+                        for k in _palette.ALL_SLOTS:
+                            if resolved.get(k):
+                                merged[k] = resolved[k]
+                        if not use_fourth:
+                            merged.pop(_palette.FOURTH_SLOT, None)
+                        prof.brand_palette_extracted = merged
+                        prof.brand_palette_reasoning = resolved.get("reasoning", "")
+                    prof.brand_palette_sources = sources
+            except Exception as e:
+                log.info("manual palette re-resolve failed: %s", e)
+
+        # Keep the legacy brand_primary / brand_secondary in step so the
+        # BrandKit fallback path renders the same colours as the form.
+        eff = _palette.effective_palette(
+            manual=prof.brand_palette_manual,
+            extracted=prof.brand_palette_extracted,
+        )
+        if eff.get("primary"):
+            prof.brand_primary = eff["primary"]
+        if eff.get("secondary"):
+            prof.brand_secondary = eff["secondary"]
+
+        save_profile(prof)
         return redirect(url_for("organisation_setup"))
 
     @app.route("/organisation/setup/logo/<logo_id>", methods=["GET"])

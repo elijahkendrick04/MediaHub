@@ -106,6 +106,21 @@ class ClubProfile:
     brand_captured_at: str = ""
     brand_capture_status: str = ""
 
+    # ---- Unified palette resolution (palette selector fix) -----------------
+    # ``brand_palette_extracted`` is now AI-decided across EVERY source the
+    # org provided (website + socials + brand guidelines doc + uploaded
+    # logos), not just the website. ``brand_palette_manual`` carries the
+    # user's confirmation override from /organisation/setup — when present
+    # it wins per-slot over the AI's pick. ``brand_palette_sources`` keeps
+    # the raw per-source colour lists so the UI can show the user where
+    # each candidate came from. ``brand_palette_use_fourth`` mirrors the
+    # confirmation tickbox: it gates whether the optional 4th brand colour
+    # is rendered downstream.
+    brand_palette_manual: dict = field(default_factory=dict)
+    brand_palette_use_fourth: bool = False
+    brand_palette_sources: dict = field(default_factory=dict)
+    brand_palette_reasoning: str = ""
+
     # ---- Social links (used by brand.social_dna for first-run setup) ----
     # Keys: instagram | facebook | twitter | tiktok | linkedin.
     # Values are full URLs. Empty/missing keys are simply not used.
@@ -263,19 +278,38 @@ class ClubProfile:
         return 1.0
 
     def get_brand_kit(self):
-        """Return a BrandKit instance synthesised from this profile's data."""
+        """Return a BrandKit instance synthesised from this profile's data.
+
+        Colour resolution order (manual override always wins so the user's
+        confirmation on /organisation/setup can correct the AI):
+          1. ``brand_palette_manual`` slot (primary/secondary/accent)
+          2. ``brand_palette_extracted`` slot (AI's unified pick)
+          3. legacy ``brand_primary`` / ``brand_secondary`` strings
+          4. BrandKit defaults
+        """
         from mediahub.brand.kit import BrandKit
-        bk_data = self.brand_kit or {}
-        if not bk_data:
-            bk_data = {
-                "profile_id": self.profile_id,
-                "display_name": self.display_name,
-                "primary_colour": self.brand_primary,
-                "secondary_colour": self.brand_secondary,
-                "governing_body": self.governing_body or None,
-                "short_name": self.short_name or None,
-            }
-        return BrandKit.from_dict({"profile_id": self.profile_id, **bk_data})
+        from mediahub.brand.palette import effective_palette
+
+        bk_data = dict(self.brand_kit or {})
+        palette = effective_palette(
+            manual=self.brand_palette_manual,
+            extracted=self.brand_palette_extracted,
+        )
+        primary = palette.get("primary") or bk_data.get("primary_colour") or self.brand_primary
+        secondary = palette.get("secondary") or bk_data.get("secondary_colour") or self.brand_secondary
+        accent = palette.get("accent") or bk_data.get("accent_colour")
+
+        merged = {
+            "profile_id": self.profile_id,
+            "display_name": bk_data.get("display_name") or self.display_name,
+            "primary_colour": primary,
+            "secondary_colour": secondary,
+            "accent_colour": accent,
+            "logo_svg": bk_data.get("logo_svg"),
+            "governing_body": bk_data.get("governing_body") or (self.governing_body or None),
+            "short_name": bk_data.get("short_name") or (self.short_name or None),
+        }
+        return BrandKit.from_dict(merged)
 
     def get_tone(self):
         """Return the active Tone enum for this profile."""

@@ -329,12 +329,19 @@ def process_links(
         per_link.append(mod.process(url))
 
     for entry in per_link:
+        dna = entry.get("dna") or {}
         result["state"][entry["platform"]] = {
             "url": entry["url"],
             "status": entry["status"],
             "playbook_age": entry["playbook_age"],
             "regenerated": entry["regenerated"],
-            "voice_digest": (entry.get("dna") or {}).get("voice_summary", "")[:240],
+            "voice_digest": dna.get("voice_summary", "")[:240],
+            # Per-link palette_mentions surface here so the unified
+            # palette resolver (brand.palette) can weight every source
+            # independently. The merged_dna below only keeps the
+            # richest single source, which would otherwise drop colours
+            # mentioned only on, say, the Instagram bio.
+            "palette_mentions": list(dna.get("palette_mentions") or []),
         }
         if entry["status"] == "real_content":
             result["any_real"] = True
