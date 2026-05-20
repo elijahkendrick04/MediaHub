@@ -10657,12 +10657,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             back = url_for(route_endpoint)
             actions_url = url_for("stub_pack_view", pack_id=saved["pack_id"]) if saved else None
             # Wire the per-card approval pill when we have a saved pack_id.
+            # The status route is /api/drafts/<pid>/card/<idx>/status, so
+            # we strip the trailing "/<idx>/status" (two segments) to give
+            # render_cards_html a base it can append "/<idx>/status" to.
             _pack_id = saved["pack_id"] if saved else None
             _status_api_base = None
             if _pack_id:
                 _full = url_for("api_stub_pack_card_status",
-                                pack_id=_pack_id, card_idx=999999)
-                _status_api_base = _full.rsplit("/", 1)[0]
+                                pack_id=_pack_id, card_idx=0)
+                _status_api_base = _full.rsplit("/", 2)[0]
             body = _stubs_mod.render_cards_html(
                 cards_payload, back, f"{title} — drafts",
                 pack_id=_pack_id, status_api_base=_status_api_base,
@@ -10670,10 +10673,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if saved:
                 _packs_url = url_for("stub_packs_list")
                 body = body.replace(
-                    f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>',
+                    f'<a class="btn secondary" href="{_h(back)}">← Start over</a>',
                     (
-                        f'<a class="btn" href="{_h(actions_url)}">View & export this pack &rarr;</a>'
-                        f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>'
+                        f'<a class="btn" href="{_h(actions_url)}">View &amp; export this pack →</a>'
+                        f'<a class="btn secondary" href="{_h(back)}">← Start over</a>'
                         f'<a class="btn secondary" href="{_h(_packs_url)}">All saved drafts</a>'
                     ),
                     1,
@@ -11229,10 +11232,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
         # We pass back = saved-list so "Start over" goes somewhere sensible.
         back_url = url_for("stub_packs_list")
+        # /api/drafts/<pid>/card/<idx>/status → strip "/<idx>/status" so
+        # render_cards_html can append the correct per-card suffix itself.
         _full_status_url = url_for(
-            "api_stub_pack_card_status", pack_id=pack_id, card_idx=999999
+            "api_stub_pack_card_status", pack_id=pack_id, card_idx=0
         )
-        _status_api_base = _full_status_url.rsplit("/", 1)[0]
+        _status_api_base = _full_status_url.rsplit("/", 2)[0]
         cards_html = render_cards_html(
             {"cards": rec.get("cards") or []},
             back_url,
@@ -11268,10 +11273,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the active org are surfaced; foreign or deleted ids are silently
         # skipped so the panel can't leak photos across orgs.
         attached_html = _render_pack_attached_media(rec)
-        # Replace the renderer's default action row
+        # Replace the renderer's default action row. ``render_cards_html``
+        # emits the arrow as the unicode character ``←``, not the
+        # ``&larr;`` entity — match on the same form or the replace
+        # silently no-ops and the export/regenerate footer never appears.
         cards_html = cards_html.replace(
             f'<div style="margin-top:24px;display:flex;gap:10px">'
-            f'<a class="btn secondary" href="{_h(back_url)}">&larr; Start over</a>'
+            f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
             f'</div>',
             footer,
             1,
