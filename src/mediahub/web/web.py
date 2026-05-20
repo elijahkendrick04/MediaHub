@@ -4375,12 +4375,17 @@ _VISUAL_PANEL_JS = """<script>
 (function(){
   if (window.mhCreateGraphic) return;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function jsq(s){ return String(s==null?'':s).replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'"); }
   function panelFor(cardId){
     var sel = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
     return document.querySelector('.visual-panel[data-card="' + sel + '"]');
   }
-  function render(panel, data, cardId, url, fmt){
+  function chipStyle(active){
+    return 'font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid '
+      + (active?'var(--lane)':'var(--border)') + ';background:' + (active?'rgba(212,255,58,0.12)':'transparent')
+      + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0';
+  }
+  function render(panel, data){
+    var st = panel._mh || {};
     var visuals = data.visuals || [];
     if (!visuals.length){
       panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visual generated.' + ((data.errors && data.errors.length) ? ' (' + esc(data.errors.join('; ')) + ')' : '') + '</div>';
@@ -4388,15 +4393,35 @@ _VISUAL_PANEL_JS = """<script>
     }
     var v = visuals[0];
     var apiBase = (window._API_BASE || '');
-    var cur = v.format_name || fmt || 'feed_portrait';
+    var cur = v.format_name || st.fmt || 'feed_portrait';
+    st.fmt = cur;
+    if (data.chosen_asset_id != null) st.assetId = data.chosen_asset_id || '';
+    if (data.no_photo != null) st.noPhoto = !!data.no_photo;
     var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(cur);
     var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
     var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
     var formats = [['feed_portrait','Portrait'],['feed_square','Square']];
     var tabs = formats.map(function(f){
       var on = (f[0] === cur);
-      return '<button type="button" onclick="mhCreateGraphic(this,\\'' + jsq(url) + '\\',\\'' + jsq(cardId) + '\\',\\'' + f[0] + '\\')" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'rgba(212,255,58,0.15)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
+      return '<button type="button" class="mh-vbtn" data-fmt="' + f[0] + '" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'rgba(212,255,58,0.15)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
     }).join('');
+    var photos = data.available_photos || [];
+    var picker = '';
+    if (photos.length){
+      var autoOn = (!st.assetId && !st.noPhoto);
+      var pbtns =
+        '<button type="button" class="mh-vbtn" data-act="photo" data-asset="" data-nophoto="0" style="' + chipStyle(autoOn) + '">Auto</button>' +
+        '<button type="button" class="mh-vbtn" data-act="photo" data-asset="" data-nophoto="1" style="' + chipStyle(!!st.noPhoto) + '">No photo</button>';
+      var thumbs = photos.map(function(ph){
+        var on = (ph.id === st.assetId);
+        return '<button type="button" class="mh-vbtn" data-act="photo" data-asset="' + esc(ph.id) + '" data-nophoto="0" title="' + esc(ph.label) + '" style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on?'var(--lane)':'var(--border)') + ';background:var(--bg);margin:0 4px 4px 0;line-height:0"><img src="' + esc(ph.url) + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+      }).join('');
+      picker =
+        '<div style="margin-bottom:8px">' +
+          '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
+          pbtns + thumbs +
+        '</div>';
+    }
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
         '<div style="flex:0 0 200px;max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
@@ -4404,35 +4429,55 @@ _VISUAL_PANEL_JS = """<script>
           '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + esc(layout || 'auto') + '</div>' +
           (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + esc(why) + '</div>' : '') +
           '<div style="margin-bottom:8px">' + tabs + '</div>' +
+          picker +
           '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
             '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
-            '<button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="mhCreateGraphic(this,\\'' + jsq(url) + '\\',\\'' + jsq(cardId) + '\\',\\'' + cur + '\\')">&#x21BA; Regenerate</button>' +
+            '<button type="button" class="btn secondary mh-vbtn" data-act="regen" style="font-size:11px;padding:4px 10px">&#x21BA; Regenerate</button>' +
           '</div>' +
         '</div>' +
       '</div>';
   }
-  window.mhCreateGraphic = function(btn, url, cardId, fmt){
-    fmt = fmt || 'feed_portrait';
-    var panel = panelFor(cardId);
-    if (!panel) return;
+  function mhGen(panel){
+    var st = panel._mh; if (!st || !st.url) return;
     panel.style.display = '';
-    var orig = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Generating\\u2026';
     panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px"><div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>Generating graphic\\u2026 this may take 5-15 seconds</div>';
-    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({format: fmt})})
+    var body = {format: st.fmt || 'feed_portrait'};
+    if (st.assetId) body.asset_id = st.assetId;
+    if (st.noPhoto) body.no_photo = true;
+    fetch(st.url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), credentials:'same-origin'})
       .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
       .then(function(res){
-        btn.disabled = false; btn.textContent = orig;
         if (!res.ok || res.body.error){
           panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
           return;
         }
-        render(panel, res.body, cardId, url, fmt);
+        render(panel, res.body);
       })
       .catch(function(err){
-        btn.disabled = false; btn.textContent = orig;
         panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
       });
+  }
+  // One delegated listener handles every in-panel control (format tabs, photo
+  // picker, regenerate) via data attributes — no per-button inline handlers.
+  document.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('.mh-vbtn') : null;
+    if (!b) return;
+    var panel = b.closest('.visual-panel');
+    if (!panel || !panel._mh) return;
+    e.preventDefault();
+    if (b.dataset.fmt) panel._mh.fmt = b.dataset.fmt;
+    if (b.dataset.act === 'photo'){
+      panel._mh.assetId = b.dataset.asset || '';
+      panel._mh.noPhoto = (b.dataset.nophoto === '1');
+    }
+    mhGen(panel);
+  });
+  // Initial entry — the server-rendered "Create graphic" button calls this.
+  window.mhCreateGraphic = function(btn, url, cardId, fmt){
+    var panel = panelFor(cardId);
+    if (!panel) return;
+    panel._mh = {url: url, cardId: cardId, fmt: fmt || 'feed_portrait', assetId: '', noPhoto: false};
+    mhGen(panel);
   };
 })();
 </script>"""
@@ -8749,8 +8794,9 @@ function saveCaption(btn, runId, cardId) {{
 
 // V8: Lazy visual generation. Cached per (card, format) within session.
 var _visualCache = {{}};
-function createGraphic(btn, createUrl, cardId, fmt) {{
+function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {{
   fmt = fmt || 'feed_portrait';
+  assetId = assetId || '';
   var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
   if (!panel) return;
   panel.style.display = '';
@@ -8760,13 +8806,16 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Generating graphic&hellip; this may take 5-15 seconds</div>';
-  var cacheKey = cardId + '|' + fmt;
+  var cacheKey = cardId + '|' + fmt + '|' + assetId + '|' + (noPhoto ? '1' : '0');
   if (_visualCache[cacheKey]) {{
     _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
     btn.disabled = false; btn.textContent = origLabel;
     return;
   }}
-  fetch(createUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{format: fmt}})}})
+  var reqBody = {{format: fmt}};
+  if (assetId) reqBody.asset_id = assetId;
+  if (noPhoto) reqBody.no_photo = true;
+  fetch(createUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(reqBody)}})
     .then(function(r) {{ return r.json().then(function(j){{ return {{ok: r.ok, body: j}}; }}); }})
     .then(function(res) {{
       btn.disabled = false; btn.textContent = origLabel;
@@ -8800,27 +8849,51 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {{
   var v = visuals[0];
   // Use absolute path that respects the deployed /port/5000 prefix; the backend prepends location.pathname's base via window._API_BASE.
   var apiBase = (window._API_BASE || '');
-  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
+  var cur = v.format_name || 'feed_portrait';
+  var chosen = data.chosen_asset_id || '';
+  var noP = !!data.no_photo;
+  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(cur);
   var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
   var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
   var formats = ['feed_portrait', 'feed_square', 'story_vertical'];
   var formatLabels = {{'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'}};
   var tabsHtml = formats.map(function(f) {{
-    var active = (f === (v.format_name || 'feed_portrait'));
-    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
+    var active = (f === cur);
+    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
   }}).join('');
+  // Per-graphic photo picker — the user decides which uploaded photo lands here.
+  var photos = data.available_photos || [];
+  var pickerHtml = '';
+  if (photos.length) {{
+    function _pchip(label, active, oc) {{
+      return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'rgba(212,255,58,0.12)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
+    }}
+    var autoOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", false)';
+    var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
+    var thumbs = photos.map(function(ph) {{
+      var on = (ph.id === chosen);
+      var oc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ', false)';
+      return '<button type="button" title="' + (ph.label || '') + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : 'var(--border)') + ';background:var(--bg);margin:0 4px 4px 0;line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+    }}).join('');
+    pickerHtml =
+      '<div style="margin-bottom:8px">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
+        _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs +
+      '</div>';
+  }}
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="flex:0 0 220px;max-width:240px">' +
-        '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#0a0a0a" />' +
+        '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)" />' +
       '</div>' +
       '<div style="flex:1;min-width:200px">' +
         '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
         (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
         '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
+        pickerHtml +
         '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
-          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ')') + '>&#x21BA; Regenerate (3 variants)</button>' +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + '>&#x21BA; Regenerate (3 variants)</button>' +
           '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('addGraphicToPack(this, ' + JSON.stringify(v.id) + ')') + '>+ Add to pack</button>' +
         '</div>' +
       '</div>' +
@@ -8926,20 +8999,24 @@ function generateReel(btn, reelUrl) {{
     }});
 }}
 
-function regenerateGraphic(btn, createUrl, cardId) {{
+function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {{
   // V8.1 issue 4: replace single-output regenerate with a 3-variant picker.
   var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
   if (!panel) return;
   panel.style.display = '';
   // Derive the variants endpoint from the create-graphic URL.
   var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
+  // Carry the user's photo choice so the 3 variants keep that photo.
+  var regenBody = {{}};
+  if (assetId) regenBody.asset_id = assetId;
+  if (noPhoto) regenBody.no_photo = true;
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options&hellip;';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
-  fetch(variantsUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
+  fetch(variantsUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(regenBody)}})
     .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, body:j}}; }}); }})
     .then(function(res){{
       btn.disabled = false; btn.textContent = origLabel;
@@ -18206,6 +18283,52 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             req_fmt = _req.args.get("format")
         formats_kw = [req_fmt] if req_fmt else None
 
+        # User photo choice for THIS graphic — overrides the automatic scorer
+        # so the user decides exactly which uploaded photo lands on which card.
+        #   asset_id=<id>  → force that library photo as the hero (photo-led layout)
+        #   no_photo=1     → force a text-led, photo-free treatment
+        chosen_asset_id = None
+        force_no_photo = False
+        try:
+            if _req.is_json and _req.json:
+                chosen_asset_id = (_req.json.get("asset_id") or "").strip() or None
+                force_no_photo = bool(_req.json.get("no_photo"))
+        except Exception:
+            pass
+        if chosen_asset_id is None:
+            chosen_asset_id = (_req.args.get("asset_id") or "").strip() or None
+        if not force_no_photo:
+            force_no_photo = (_req.args.get("no_photo") or "").lower() in ("1", "true", "yes")
+        forced_hero_asset_id = None
+        choice_allowed_families = None
+        if force_no_photo:
+            chosen_asset_id = None
+            choice_allowed_families = ["text_led_recap", "weekend_numbers"]
+        elif chosen_asset_id:
+            forced_hero_asset_id = chosen_asset_id
+            # Constrain to photo-capable families so the chosen photo actually
+            # appears (a text-led family would ignore it).
+            choice_allowed_families = [
+                "individual_hero", "big_number_hero", "story_card",
+                "athlete_spotlight", "medal_card",
+            ]
+
+        # The photos the user can pick from for this card (their org's library
+        # images), surfaced in the panel as a per-graphic picker.
+        _photo_types = {"athlete_action", "athlete_headshot", "team_photo",
+                        "venue_photo", "other"}
+        available_photos = []
+        for _ad in media_assets:
+            _d = _ad if isinstance(_ad, dict) else {}
+            if _d.get("id") and _d.get("type") in _photo_types:
+                _names = _d.get("linked_athlete_names") or []
+                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace("_", " ")
+                available_photos.append({
+                    "id": _d["id"],
+                    "url": url_for("api_media_library_file", asset_id=_d["id"]),
+                    "label": _label,
+                })
+
         # V9 variation overhaul: every regenerate produces a fresh random
         # creative direction (different layout family + background style +
         # accent decoration + typography pair + composition + headline
@@ -18265,6 +18388,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 use_ai_director=ai_directed,
                 recent_signatures=recent_sigs,
                 recent_hooks=recent_hooks,
+                allowed_families=choice_allowed_families,
+                forced_hero_asset_id=forced_hero_asset_id,
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
@@ -18285,6 +18410,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "variation_signature": new_sig,
             "ai_directed": bool(brief_d.get("ai_directed")),
             "explanation": explanation,
+            # Per-graphic photo picker state.
+            "available_photos": available_photos,
+            "chosen_asset_id": chosen_asset_id,
+            "no_photo": force_no_photo,
             **res,
         })
 
@@ -18572,7 +18701,27 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except Exception:
             pass
 
+        # Honour the per-graphic photo choice so the three variants keep the
+        # photo the user picked (just varying the rest of the treatment).
+        _chosen = None
+        _nop = False
+        try:
+            if request.is_json and request.json:
+                _chosen = (request.json.get("asset_id") or "").strip() or None
+                _nop = bool(request.json.get("no_photo"))
+        except Exception:
+            pass
+        _forced_asset = None
+        _choice_families = None
+        if _nop:
+            _choice_families = ["text_led_recap", "weekend_numbers"]
+        elif _chosen:
+            _forced_asset = _chosen
+            _choice_families = ["individual_hero", "big_number_hero", "story_card",
+                                "athlete_spotlight", "medal_card"]
+
         from concurrent.futures import ThreadPoolExecutor
+        import dataclasses as _dc
         # V9: build three distinct random variation profiles so the
         # variant picker actually shows three different visual directions
         # (not the legacy palette-only seeds 1/2/3).
@@ -18588,6 +18737,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 angle=item.get("post_angle") or "",
                 avoid_signatures=sigs_so_far,
             )
+            # Pin the random fallback to the chosen-photo constraint so a
+            # no-AI render still respects the user's photo decision.
+            if _choice_families and getattr(prof, "layout_family", None) not in _choice_families:
+                try:
+                    prof = _dc.replace(prof, layout_family=_choice_families[0])
+                except Exception:
+                    pass
             profiles.append(prof)
             sigs_so_far.append(prof.signature())
 
@@ -18600,6 +18756,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     variation_profile=profile,
                     use_ai_director=True,
                     recent_signatures=sigs_so_far,
+                    allowed_families=_choice_families,
+                    forced_hero_asset_id=_forced_asset,
                 )
                 visuals = res.get("visuals") or []
                 # Pick the feed_portrait by default if present, else first.

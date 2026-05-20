@@ -281,6 +281,30 @@ def generate(content_item: dict, evaluation, brand_kit, *,
     elif variation_seed and variation_seed != 0:
         pattern = _rotate_pattern_for_seed(pattern, angle, variation_seed)
 
+    # ---- Hard layout constraint (caption-only / forced-photo graphics) ----
+    # Applied AFTER every variation path so even the no-AI random fallback
+    # can't land on a family outside the allowed set — otherwise a no_photo
+    # request could pick a photo family, or a forced-photo request a text-led
+    # one. Keeps the profile + pattern in lock-step.
+    if allowed_families:
+        if pattern.get("family") not in allowed_families:
+            _target = next((p for p in PATTERNS if p["family"] == allowed_families[0]), None)
+            if _target is not None:
+                pattern = _target
+        if variation_profile is not None and getattr(variation_profile, "layout_family", None) not in allowed_families:
+            import dataclasses as _dc
+            _is_text = pattern["family"] in {"text_led_recap", "weekend_numbers"}
+            try:
+                variation_profile = _dc.replace(
+                    variation_profile,
+                    layout_family=pattern["family"],
+                    photo_treatment=("no-photo" if _is_text else (
+                        "cutout" if variation_profile.photo_treatment == "no-photo"
+                        else variation_profile.photo_treatment)),
+                )
+            except Exception:
+                pass
+
     # Athlete + result vocabulary (sport-agnostic — we read whatever the
     # detectors put in the achievement dict)
     athlete = (

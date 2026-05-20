@@ -136,6 +136,7 @@ def create_visual_for_item(
     recent_signatures: Optional[list[str]] = None,
     recent_hooks: Optional[list[str]] = None,
     allowed_families: Optional[list[str]] = None,
+    forced_hero_asset_id: Optional[str] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
@@ -226,6 +227,18 @@ def create_visual_for_item(
             elif role == "logo" and not logo_path and asset.get("id") != "_brand_logo_":
                 logo_path = fp
 
+    # User-chosen hero photo: when the caller forces a specific asset id, it
+    # wins over the automatic scorer so the user controls exactly which photo
+    # lands on this graphic.
+    if forced_hero_asset_id:
+        for a in (media_assets or []):
+            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
+            if str(ad.get("id")) == str(forced_hero_asset_id):
+                fp = ad.get("path") or ad.get("file_path")
+                if fp:
+                    athlete_path = fp
+                break
+
     # Fallback: pull the logo straight from the brand kit if the media-library
     # match didn't supply one. This is the path saved by the upload flow at
     # /upload/configure (brand_kit_upload.save_logo_bytes).
@@ -255,6 +268,10 @@ def create_visual_for_item(
             variation_seed == 3
             or (getattr(brief, "photo_treatment", "") == "no-photo")
         )
+        # A user-chosen photo always renders — never let a no-photo treatment
+        # silently drop the photo they explicitly picked for this graphic.
+        if forced_hero_asset_id and athlete_path:
+            skip_cutout_for_render = False
         athlete_for_render = None if skip_cutout_for_render else athlete_path
 
         results = render_all_formats(
