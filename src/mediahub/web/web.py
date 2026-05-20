@@ -5371,13 +5371,77 @@ def create_app() -> Flask:
             )
             return redirect(url_for("upload_configure", run_id=temp_run_id))
 
+        # Recent files for this profile — lets the user re-run an already-
+        # uploaded meet without re-uploading. Pulls the last 5 runs we
+        # still have on disk (RUNS_DIR/<id>/input.bin must exist).
+        recent_html = ""
+        try:
+            prof_for_recent = _active_profile()
+            if prof_for_recent is not None:
+                conn = _db()
+                rows = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at, our_swims "
+                    "FROM runs WHERE profile_id = ? AND status = 'done' "
+                    "ORDER BY created_at DESC LIMIT 5",
+                    (prof_for_recent.profile_id,),
+                ).fetchall()
+                conn.close()
+                # Filter to runs whose input.bin still exists on disk.
+                recent_rows = []
+                for r in rows:
+                    if (RUNS_DIR / r["id"] / "input.bin").exists():
+                        recent_rows.append(r)
+                if recent_rows:
+                    items_html = ""
+                    for r in recent_rows[:3]:
+                        name = r["meet_name"] or r["file_name"] or r["id"]
+                        when = (r["created_at"] or "")[:19]
+                        when_iso = when.replace(" ", "T") + "Z" if when else ""
+                        configure_href = url_for("upload_configure", run_id=r["id"])
+                        n_swims = r["our_swims"] or 0
+                        items_html += (
+                            '<li>'
+                            '<span class="ico">'
+                            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+                            '</span>'
+                            f'<div class="body"><span class="name">{_h(name)}</span>'
+                            f'<span class="meta">{n_swims} swim{"" if n_swims == 1 else "s"} · '
+                            f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
+                            '</div>'
+                            f'<a class="go" href="{configure_href}">Re-configure &rarr;</a>'
+                            '</li>'
+                        )
+                    recent_html = (
+                        '<div class="card mh-recent-card">'
+                        '<h3 style="margin-top:0;font-family:var(--font-mono);'
+                        'font-size:var(--fs-10);letter-spacing:0.18em;'
+                        'text-transform:uppercase;color:var(--ink-muted);'
+                        'margin-bottom:var(--sp-3)">Re-run a recent meet</h3>'
+                        f'<ul class="mh-recent-list">{items_html}</ul>'
+                        '</div>'
+                    )
+        except Exception:
+            recent_html = ""
+
         body = f"""
-<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
+<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
   <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
+
+<nav class="mh-stepper" aria-label="Upload progress">
+  <span class="mh-stepper-item is-active"><span class="num">1</span>Upload</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item"><span class="num">2</span>Configure</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item"><span class="num">3</span>Run</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item"><span class="num">4</span>Review</span>
+</nav>
+
 {_llm_unavailable_banner()}
+{recent_html}
 <div class="card">
   <form id="mh-upload-form" method="post" enctype="multipart/form-data" data-loader-text="Reading your meet file">
     <label class="req" for="upload-file">Meet results file</label>
@@ -5393,23 +5457,56 @@ def create_app() -> Flask:
       <div class="mh-dropzone-fineprint">Hytek .hy3 / .zip · Sportsystems PDF</div>
       <div class="mh-dropzone-preview" aria-live="polite"></div>
     </label>
+    <div id="mh-parse-preview" class="mh-parse-preview" role="status" aria-live="polite">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+      <div class="label"><b>—</b><span></span></div>
+    </div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn" type="submit" disabled aria-disabled="true">Continue &rarr;</button>
       <a class="btn ghost" href="{url_for('home')}">Cancel</a>
     </div>
   </form>
 </div>
+
+<div class="mh-next-strip" aria-label="What happens next">
+  <div class="cell"><span class="num">2</span><span class="text"><b>Configure</b><br>Pick your club from the parsed list, upload your logo, choose tone, and drop in photos.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Pipeline runs</b><br>The engine spots PBs, medals, first-times and comebacks. About 30 to 60 seconds.</span></div>
+  <div class="cell"><span class="num">4</span><span class="text"><b>Review &amp; approve</b><br>Approve, edit, or reject each card. Nothing leaves the deployment without you.</span></div>
+</div>
+
 <script>
 (function(){{
   var form = document.getElementById('mh-upload-form');
   if (!form) return;
   var input = form.querySelector('input[type=file]');
   var btn = document.getElementById('mh-upload-submit');
+  var preview = document.getElementById('mh-parse-preview');
   if (!input || !btn) return;
+  function fmtBytes(n) {{
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }}
+  function inferFormat(name) {{
+    var n = (name || '').toLowerCase();
+    if (n.endsWith('.hy3')) return {{kind: 'good', label: 'Hytek Meet Manager (.hy3)', note: 'looks good'}};
+    if (n.endsWith('.zip')) return {{kind: 'good', label: 'Hytek .zip export',          note: 'we\\u2019ll unpack and read it'}};
+    if (n.endsWith('.pdf')) return {{kind: 'good', label: 'PDF results file',           note: 'we\\u2019ll run the OCR / table extractor'}};
+    return {{kind: 'warn', label: 'Unknown extension', note: 'we\\u2019ll try every adapter; results may be partial'}};
+  }}
   function refresh() {{
-    var has = input.files && input.files.length > 0;
+    var f = input.files && input.files[0];
+    var has = !!f;
     btn.disabled = !has;
     btn.setAttribute('aria-disabled', has ? 'false' : 'true');
+    if (!has) {{ if (preview) preview.removeAttribute('data-shown'); return; }}
+    if (!preview) return;
+    var info = inferFormat(f.name);
+    preview.className = 'mh-parse-preview' + (info.kind === 'warn' ? ' warn' : '');
+    var labelEl = preview.querySelector('.label');
+    labelEl.querySelector('b').textContent = info.label + ' \\u00b7 ' + fmtBytes(f.size);
+    labelEl.querySelector('span').textContent = info.note;
   }}
   input.addEventListener('change', refresh);
   refresh();
