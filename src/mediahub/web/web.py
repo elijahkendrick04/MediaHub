@@ -13908,25 +13908,62 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             brand_kit = _v8_brand_kit_for(run_id)
         profile_id = rec.get("profile_id") or run_id
 
-        # Format from JSON body / query string (default portrait).
+        # Format + photo choice from JSON body / query string. A chosen photo
+        # fills the caption graphic's background (the layout stays text-led —
+        # the photo sits behind the headline + bullets under a legibility scrim).
         req_fmt = None
+        chosen_asset_id = None
+        force_no_photo = False
         try:
             if _req.is_json and _req.json:
                 req_fmt = _req.json.get("format")
+                chosen_asset_id = (_req.json.get("asset_id") or "").strip() or None
+                force_no_photo = bool(_req.json.get("no_photo"))
         except Exception:
-            req_fmt = None
+            pass
         if not req_fmt:
             req_fmt = _req.args.get("format")
+        if chosen_asset_id is None:
+            chosen_asset_id = (_req.args.get("asset_id") or "").strip() or None
+        if not force_no_photo:
+            force_no_photo = (_req.args.get("no_photo") or "").lower() in ("1", "true", "yes")
+        if force_no_photo:
+            chosen_asset_id = None
         formats_kw = [req_fmt] if req_fmt else None
+
+        # The org's library photos, surfaced as a per-graphic picker. A chosen
+        # one becomes this caption graphic's background.
+        media_assets = []
+        try:
+            store = _v8_get_media_store()
+            _pid_for_photos = _active_profile_id() or rec.get("profile_id")
+            if _pid_for_photos:
+                assets = store.list(profile_id=_pid_for_photos)
+                media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
+        except Exception:
+            media_assets = []
+        _photo_types = {"athlete_action", "athlete_headshot", "team_photo",
+                        "venue_photo", "other"}
+        available_photos = []
+        for _ad in media_assets:
+            _d = _ad if isinstance(_ad, dict) else {}
+            if _d.get("id") and _d.get("type") in _photo_types:
+                _names = _d.get("linked_athlete_names") or []
+                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace("_", " ")
+                available_photos.append({
+                    "id": _d["id"],
+                    "url": url_for("api_media_library_file", asset_id=_d["id"]),
+                    "label": _label,
+                })
 
         # The AI Director chooses the full visual treatment (palette role,
         # background, accent, typography, composition, hook, mood) — same as
         # meet-recap graphics — but is HARD-CONSTRAINED to the text-led layout
-        # because a caption-only card has no athlete photo for a photo-led
-        # family to use. The random text-led profile below is only the
-        # fallback for when no AI provider is configured; palette roles are
-        # restricted to the dark-primary-safe set so white headline text never
-        # disappears.
+        # (a caption card has no swim achievement for a photo-led family). A
+        # chosen photo rides as the background, so the layout stays text-led.
+        # The random text-led profile below is only the no-provider fallback;
+        # palette roles are restricted to the dark-primary-safe set so white
+        # headline text never disappears.
         variation_profile = None
         try:
             import dataclasses as _dc
@@ -13945,15 +13982,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             res = create_visual_for_item(
                 item, brand_kit,
                 profile_id=profile_id, run_id=run_id,
-                media_assets=[],
+                media_assets=media_assets,
                 formats=formats_kw,
                 variation_profile=variation_profile,
                 use_ai_director=True,
                 allowed_families=["text_led_recap"],
+                forced_bg_asset_id=chosen_asset_id,
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
-        return jsonify({"ok": True, **res})
+        return jsonify({"ok": True, "available_photos": available_photos,
+                        "chosen_asset_id": chosen_asset_id,
+                        "no_photo": force_no_photo, **res})
 
     @app.route("/api/drafts/<pack_id>/regenerate", methods=["POST"])
     def api_stub_pack_regenerate(pack_id):

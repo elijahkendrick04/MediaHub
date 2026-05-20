@@ -68,6 +68,24 @@ body {
   z-index: 2;
 }
 
+/* User-chosen background photo for caption-led graphics (full-bleed cover)
+   plus a dark scrim so white headline + bullet text stays legible. Rendered
+   only when {{BG_PHOTO_BLOCK}} is non-empty (a photo was picked). */
+.bg-photo {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+  z-index: 1;
+}
+.bg-photo-scrim {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    linear-gradient(180deg, rgba(8,10,14,0.62) 0%, rgba(8,10,14,0.34) 36%, rgba(8,10,14,0.42) 60%, rgba(8,10,14,0.82) 100%);
+}
+
 .bg-vignette {
   position: absolute; inset: 0;
   background: radial-gradient(ellipse 70% 60% at 50% 55%, transparent 0%, rgba(0,0,0,0.55) 95%);

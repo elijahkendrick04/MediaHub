@@ -137,6 +137,7 @@ def create_visual_for_item(
     recent_hooks: Optional[list[str]] = None,
     allowed_families: Optional[list[str]] = None,
     forced_hero_asset_id: Optional[str] = None,
+    forced_bg_asset_id: Optional[str] = None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
@@ -239,6 +240,16 @@ def create_visual_for_item(
                     athlete_path = fp
                 break
 
+    # User-chosen BACKGROUND photo (caption-led graphics): the photo fills the
+    # canvas behind the text rather than being cut out as a hero.
+    bg_photo_path = None
+    if forced_bg_asset_id:
+        for a in (media_assets or []):
+            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
+            if str(ad.get("id")) == str(forced_bg_asset_id):
+                bg_photo_path = ad.get("path") or ad.get("file_path")
+                break
+
     # Fallback: pull the logo straight from the brand kit if the media-library
     # match didn't supply one. This is the path saved by the upload flow at
     # /upload/configure (brand_kit_upload.save_logo_bytes).
@@ -281,6 +292,7 @@ def create_visual_for_item(
             athlete_path=athlete_for_render,
             venue_path=venue_path,
             logo_path=logo_path,
+            bg_photo_path=bg_photo_path,
             brand_kit=brand_kit,
             sponsor_name=sponsor_name,
         )

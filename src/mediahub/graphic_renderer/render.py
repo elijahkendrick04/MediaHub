@@ -1002,6 +1002,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
                          result_chip: str,
                          sponsor_block: str,
                          logo_mark_mod: str = "",
+                         bg_photo_uri: str = "",
                          theme_json: Optional[dict] = None) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
@@ -1205,6 +1206,12 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "TEXT_ONLY_CLOSE": " text-only-->" if has_photo else "",
         "LOGO_BLOCK": logo_block,
         "LOGO_MARK_MOD": logo_mark_mod,
+        # User-chosen background photo for caption-led graphics: a full-bleed
+        # cover image + a dark scrim so the headline/bullets stay legible.
+        "BG_PHOTO_BLOCK": (
+            f'<div class="bg-photo" style="background-image:url(\'{bg_photo_uri}\')"></div>'
+            '<div class="bg-photo-scrim"></div>'
+        ) if bg_photo_uri else "",
         "RESULT_CHIP_BLOCK": result_chip,
         "SPONSOR_BLOCK": sponsor_block,
         "MEDAL_BADGE_BLOCK": medal_badge_html,
@@ -1777,6 +1784,7 @@ def render_brief(
     athlete_path: Optional[str | Path] = None,
     venue_path: Optional[str | Path] = None,
     logo_path: Optional[str | Path] = None,
+    bg_photo_path: Optional[str | Path] = None,
     brand_kit=None,
     sponsor_name: str = "",
     venue_attribution: str = "",
@@ -1811,6 +1819,15 @@ def render_brief(
         except Exception:
             venue_uri = None
 
+    # User-chosen background photo (caption-led graphics). Embedded as-is —
+    # the scrim layer handles legibility, no cutout needed.
+    bg_photo_uri = ""
+    if bg_photo_path:
+        try:
+            bg_photo_uri = _img_to_data_uri(bg_photo_path)
+        except Exception:
+            bg_photo_uri = ""
+
     # Build common replacements. The logo surface proxy is the brand primary
     # (the dark ground the bottom-left logo usually sits over) — used only to
     # pick chip vs. bare, never to recolour the logo.
@@ -1825,6 +1842,7 @@ def render_brief(
         athlete_data_uri=athlete_uri,
         logo_block=_logo_inner,
         logo_mark_mod=_logo_mod,
+        bg_photo_uri=bg_photo_uri,
         result_chip=_build_result_chip(
             "Time" if (brief.text_layers or {}).get("event_name") else "Result",
             (brief.text_layers or {}).get("result_value", ""),
