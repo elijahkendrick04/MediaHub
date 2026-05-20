@@ -5561,6 +5561,28 @@ def create_app() -> Flask:
         "/api/organisation",
     )
 
+    # Logins must not linger across visits. Flask's session cookie is
+    # already non-persistent, but Chrome/Edge "continue where you left
+    # off" and most mobile browsers RESTORE session cookies on relaunch,
+    # so a non-persistent cookie alone never signs the user out — they
+    # reopen the link and silently resume the last org. We enforce an
+    # idle window server-side instead: a pin that has not been used within
+    # _LOGIN_IDLE_SECONDS (or that predates this mechanism and so carries
+    # no activity stamp) is dropped, so opening the app after a break lands
+    # on the signed-out home. Active navigation rolls the window forward,
+    # so a working session never logs itself out mid-task. Tunable via
+    # MEDIAHUB_LOGIN_IDLE_MINUTES (clamped to a 1-minute minimum).
+    try:
+        _login_idle_minutes = int(os.environ.get("MEDIAHUB_LOGIN_IDLE_MINUTES", "30"))
+    except (TypeError, ValueError):
+        _login_idle_minutes = 30
+    _LOGIN_IDLE_SECONDS = max(60, _login_idle_minutes * 60)
+
+    def _pin_active_profile(pid: str) -> None:
+        """Pin an organisation into the session and start its idle clock."""
+        session["active_profile_id"] = pid
+        session["login_seen_at"] = int(time.time())
+
     def _active_profile_id() -> Optional[str]:
         """Return the signed-in organisation id, or ``None``.
 
@@ -5568,20 +5590,46 @@ def create_app() -> Flask:
         session — by signing in (``/sign-in``), saving organisation
         setup, or the set-active API. A fresh session is deliberately
         signed OUT: we do NOT auto-adopt the most-recent profile on disk.
-        Opening the site therefore shows the signed-out home page (Sign
-        in / Set up my organisation) instead of silently resuming
-        whichever organisation was used last on this deployment.
+
+        A pin also only counts while the session is actively used: once
+        it has been idle longer than _LOGIN_IDLE_SECONDS — or it predates
+        the idle-timeout mechanism and so has no activity stamp — it is
+        dropped and the visitor reported signed-out. Opening the site
+        therefore shows the signed-out home page (Sign in / Set up my
+        organisation) instead of silently resuming whichever organisation
+        was used last, even when the browser restored a stale cookie.
+
+        The idle check follows the same convention as the org-setup gate:
+        it is bypassed under TESTING unless ``ENFORCE_LOGIN_IDLE`` is set,
+        so the large body of tests that pin a profile straight into the
+        session don't all have to stamp an activity time.
         """
         pid = session.get("active_profile_id")
         if not pid:
             return None
+        enforce_idle = (not app.config.get("TESTING")) or app.config.get("ENFORCE_LOGIN_IDLE")
+        now = int(time.time())
+        if enforce_idle:
+            seen = session.get("login_seen_at")
+            if not isinstance(seen, int) or (now - seen) > _LOGIN_IDLE_SECONDS:
+                # Idle too long, or a pre-timeout pin with no stamp.
+                session.pop("active_profile_id", None)
+                session.pop("login_seen_at", None)
+                return None
         prof = load_profile(pid)
-        if prof:
-            return prof.profile_id
-        # Stale pin (the profile was deleted) — drop it and report
-        # signed-out rather than guessing another org.
-        session.pop("active_profile_id", None)
-        return None
+        if not prof:
+            # Stale pin (the profile was deleted) — drop it and report
+            # signed-out rather than guessing another org.
+            session.pop("active_profile_id", None)
+            session.pop("login_seen_at", None)
+            return None
+        if enforce_idle:
+            seen = session.get("login_seen_at")
+            # Roll the window forward on real activity, coalescing writes
+            # so we aren't re-signing the cookie on every request.
+            if isinstance(seen, int) and now - seen >= 30:
+                session["login_seen_at"] = now
+        return prof.profile_id
 
     def _active_profile() -> Optional[ClubProfile]:
         pid = _active_profile_id()
@@ -13921,7 +13969,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 save_profile(existing)
                 # Pin into session so the routing gate unlocks and so
                 # the next session lands on the same org.
-                session["active_profile_id"] = existing.profile_id
+                _pin_active_profile(existing.profile_id)
                 profile = existing
         else:
             # GET: prefer the session-pinned profile; fall back to the
@@ -14566,7 +14614,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "It may have been deleted."
             )
             return redirect(url_for("sign_in_page"))
-        session["active_profile_id"] = prof.profile_id
+        _pin_active_profile(prof.profile_id)
         session.pop("sign_in_error", None)
         return redirect(url_for("home"))
 
@@ -15923,7 +15971,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             }
 
         save_profile(prof)
-        session["active_profile_id"] = prof.profile_id
+        _pin_active_profile(prof.profile_id)
         return redirect(url_for("organisation_setup"))
 
     @app.route("/organisation/setup/palette", methods=["POST"])
@@ -16232,7 +16280,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 pid = str(body.get("profile_id") or "").strip()
             if not pid or not load_profile(pid):
                 return jsonify({"ok": False, "error": "unknown_profile"}), 404
-            session["active_profile_id"] = pid
+            _pin_active_profile(pid)
             return jsonify({"ok": True, "profile_id": pid})
         pid = _active_profile_id()
         prof = _active_profile()
