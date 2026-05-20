@@ -553,7 +553,10 @@ input[type=color]:hover { border-color: var(--lane); }
   background: transparent;
   border: 1px solid var(--chrome);
   border-radius: var(--radius-sm);
-  width: 40px; height: 40px;
+  /* 44px square clears the WCAG / Apple HIG tap-target floor; matches
+     the rest of the form-control sizing introduced in the responsive
+     audit. */
+  width: 44px; height: 44px;
   align-items: center; justify-content: center;
   color: var(--ink);
   cursor: pointer;

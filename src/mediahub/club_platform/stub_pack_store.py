@@ -7,6 +7,7 @@ Files are written under ``DATA_DIR/stub_packs/<pack_id>.json``.
 
 Each pack has:
   pack_id:    short hex id, also the filename stem
+  profile_id: organisation that owns the pack (None for legacy/anonymous)
   created_at: ISO-8601 UTC timestamp
   stub_type:  free_text | weekend_preview | sponsor_post | session_update
   title:      human-friendly title (taken from form input where possible)
@@ -60,11 +61,19 @@ def _derive_title(stub_type: str, form_data: dict) -> str:
     return "Content draft"
 
 
-def save_pack(stub_type: str, form_data: dict, cards: list[dict]) -> dict:
-    """Persist a generated pack to disk; return the saved record (with pack_id)."""
+def save_pack(stub_type: str, form_data: dict, cards: list[dict],
+              profile_id: Optional[str] = None) -> dict:
+    """Persist a generated pack to disk; return the saved record (with pack_id).
+
+    ``profile_id`` is the organisation that owns the pack; it's used by
+    the draft routes to enforce tenant isolation. Pre-existing packs on
+    disk that have no ``profile_id`` stamped are still readable (lenient
+    legacy fallback), but every pack saved going forward names its owner.
+    """
     pack_id = uuid.uuid4().hex[:10]
     record = {
         "pack_id":    pack_id,
+        "profile_id": (profile_id or "").strip() or None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "stub_type":  stub_type,
         "title":      _derive_title(stub_type, form_data),

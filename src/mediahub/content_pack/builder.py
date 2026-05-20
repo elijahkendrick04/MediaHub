@@ -8,6 +8,7 @@ build_grouped_pack(run_data, profile_id) -> dict with 8 buckets:
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from mediahub.recognition.copy_text import build_caption_text
@@ -101,7 +102,11 @@ def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
     return item
 
 
-def build_grouped_pack(run_data: dict, profile_id: str = "") -> dict:
+def build_grouped_pack(
+    run_data: dict,
+    profile_id: str = "",
+    runs_dir: Optional[Path] = None,
+) -> dict:
     """
     Build a grouped content pack from run data.
 
@@ -116,12 +121,30 @@ def build_grouped_pack(run_data: dict, profile_id: str = "") -> dict:
       "needs_review": [...],          # safe_to_post.level == needs_review
       "rejected": [...],              # NOT_WORTHY or workflow REJECTED
     }
+
+    Workflow state (status + schedule_status + buffer_update_id) is read
+    from the sidecar JSON in ``runs_dir`` so the pill the pack template
+    paints on reload reflects what the schedule endpoint actually wrote.
+    ``runs_dir`` falls back to the web layer's RUNS_DIR (DATA_DIR-derived)
+    so single-tenant deployments and test fixtures with a custom DATA_DIR
+    both resolve to the right sidecar location.
     """
-    # Load workflow states if available
+    # Load workflow states if available. WorkflowStore requires runs_dir;
+    # honour an explicit override, otherwise resolve it the same way the
+    # rest of the web layer does (DATA_DIR-derived) so a sidecar written
+    # by the schedule endpoint is found by this reload path.
     wf_states = {}
     try:
         from mediahub.workflow.store import WorkflowStore
-        ws = WorkflowStore()
+        if runs_dir is None:
+            try:
+                from mediahub.web.web import RUNS_DIR as _RUNS_DIR
+                resolved_runs_dir = Path(_RUNS_DIR)
+            except Exception:
+                resolved_runs_dir = Path(__file__).resolve().parents[2] / "runs_v4"
+        else:
+            resolved_runs_dir = Path(runs_dir)
+        ws = WorkflowStore(resolved_runs_dir)
         run_id = run_data.get("run_id", "")
         if run_id:
             wf_states = ws.load(run_id)

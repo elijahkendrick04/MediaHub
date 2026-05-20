@@ -112,11 +112,10 @@ const CoverScreen: React.FC<{
           style={{
             fontSize: 38,
             letterSpacing: "0.2em",
-            // Eyebrow uses the SECONDARY brand colour. Previously
-            // every line on this cover screen used accent, so the
-            // secondary the user confirmed never appeared in the
-            // reel intro.
-            color: brand.secondary || brand.accent || "#FFFFFF",
+            // Eyebrow stays on accent for contrast against the
+            // primary background; the secondary brand colour
+            // carries through on the rule below the meet name.
+            color: brand.accent || "#FFFFFF",
             opacity: 0.85,
             marginBottom: 36,
             textTransform: "uppercase",

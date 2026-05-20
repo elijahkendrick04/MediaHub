@@ -220,6 +220,30 @@ def _gemini_model() -> str:
     return os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 
 
+def _gemini_thinking_budget() -> int:
+    """See ``media_ai.llm._gemini_thinking_budget`` for context.
+
+    Gemini 2.5+ ships thinking on by default; thinking tokens count
+    against ``maxOutputTokens`` but never appear in the response text,
+    so callers sized for the visible output get truncated mid-JSON.
+    Default off here too. Operators can opt back in via
+    ``MEDIAHUB_GEMINI_THINKING_BUDGET``.
+    """
+    raw = os.environ.get("MEDIAHUB_GEMINI_THINKING_BUDGET", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _gemini_generation_config(max_tokens: int, *, temperature: float = 0.7) -> dict:
+    cfg: dict = {"maxOutputTokens": int(max_tokens), "temperature": temperature}
+    model = _gemini_model()
+    if "2.5" in model or "3." in model:
+        cfg["thinkingConfig"] = {"thinkingBudget": _gemini_thinking_budget()}
+    return cfg
+
+
 def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
     key = _key_for("gemini")
     if not key:
@@ -231,8 +255,7 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"maxOutputTokens": int(max_tokens),
-                              "temperature": 0.7},
+        "generationConfig": _gemini_generation_config(max_tokens),
     }
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -287,8 +310,7 @@ def _ask_gemini_with_tools(system: str, user: str, tools: list[dict],
             "systemInstruction": {"parts": [{"text": system}]},
             "contents":          contents,
             "tools":             [{"functionDeclarations": fn_decls}],
-            "generationConfig":  {"maxOutputTokens": int(max_tokens),
-                                   "temperature": 0.7},
+            "generationConfig":  _gemini_generation_config(max_tokens),
         }
         try:
             r = requests.post(url, params={"key": key}, json=payload,

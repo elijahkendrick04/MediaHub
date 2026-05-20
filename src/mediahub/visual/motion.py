@@ -110,7 +110,18 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             "logo_svg": getattr(brand_kit, "logo_svg", ""),
         }
 
-    # Stage G: try the theme store first.
+    # Stage G's theme_store integration mapped motion to MD3's
+    # dark.primary / dark.secondary_container / dark.tertiary roles.
+    # In practice those are tonal-palette tokens designed for UI
+    # surfaces (buttons, containers), not full-bleed brand colour
+    # ground/surface fills — they produced washed-out low-contrast
+    # output in production (live verification 2026-05-19 showed
+    # pink-on-pink renders for a #FFD86E/#A30D2D/#000000 BrandKit).
+    # We now prefer the BrandKit's flat primary/secondary/accent
+    # fields (the same ones the static renderer's brief.palette
+    # carries) and only fall back to the theme store when the
+    # BrandKit is incomplete. This keeps motion and static visually
+    # aligned and restores the punch the brand was designed for.
     theme_palette: Optional[dict[str, str]] = None
     pid = src.get("profile_id") or src.get("profileId")
     if pid:
@@ -130,30 +141,24 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             )
             theme_palette = None
 
-    # CONFIRMED brand colours win over the theme store. CLAUDE.md
-    # requires motion to "read the same BrandKit palette as the static
-    # graphic renderer" so a card's reel aligns with its still. The MD3
-    # theme store is a single-seed dark-scheme projection that
-    # tone-shifts the brand (a navy #003C71 becomes a pale #AAC8F7) and
-    # can't represent a second brand colour — so it only fills a role the
-    # BrandKit left unset, never overriding a confirmed brand hex.
-    theme = theme_palette or {}
+    brand_primary = src.get("primary_colour") or src.get("primary")
+    brand_secondary = src.get("secondary_colour") or src.get("secondary")
+    brand_accent = src.get("accent_colour") or src.get("accent")
+    used_brand_kit = bool(brand_primary or brand_secondary or brand_accent)
+
     primary = (
-        src.get("primary_colour") or src.get("primary")
-        or theme.get("primary") or "#0A2540"
+        brand_primary
+        or (theme_palette or {}).get("primary") or "#0A2540"
     )
     secondary = (
-        src.get("secondary_colour") or src.get("secondary")
-        or theme.get("secondary") or "#000000"
+        brand_secondary
+        or (theme_palette or {}).get("secondary") or "#000000"
     )
     accent = (
-        src.get("accent_colour") or src.get("accent")
-        or theme.get("accent") or "#FFFFFF"
+        brand_accent
+        or (theme_palette or {}).get("accent") or "#FFFFFF"
     )
 
-    # Diagnostic flag: announce theme-store only when it actually
-    # supplied the primary (i.e. the BrandKit had no confirmed primary).
-    primary_from_brand = bool(src.get("primary_colour") or src.get("primary"))
     return {
         "primary": primary,
         "secondary": secondary,
@@ -163,7 +168,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "logoDataUri": _logo_to_data_uri(
             src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
         ),
-        "themeSource": "theme-store" if (theme_palette and not primary_from_brand) else "brand-kit",
+        "themeSource": "brand-kit" if used_brand_kit else ("theme-store" if theme_palette else "brand-kit"),
     }
 
 
