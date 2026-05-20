@@ -299,6 +299,139 @@ class TestPaletteOverrideRoute:
 
 
 # ---------------------------------------------------------------------------
+# 4b. POST /organisation/setup/palette/reorder — swap colours between roles
+# ---------------------------------------------------------------------------
+
+class TestPaletteReorderRoute:
+    def _seed_confirmed_palette(self, c, monkeypatch):
+        """Capture, then pin a known three-colour manual palette."""
+        _seed_profile_via_capture(c, monkeypatch)
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        c.post(
+            "/organisation/setup/palette",
+            data={
+                "palette_primary": "#111111",
+                "palette_secondary": "#222222",
+                "palette_accent": "#333333",
+            },
+        )
+
+    def test_explicit_order_swaps_primary_and_secondary(self, client, monkeypatch):
+        c, _ = client
+        self._seed_confirmed_palette(c, monkeypatch)
+
+        resp = c.post(
+            "/organisation/setup/palette/reorder",
+            data={"order": "secondary,primary,accent"},
+            follow_redirects=False,
+        )
+        assert resp.status_code in (301, 302, 303, 307, 308)
+        assert "/organisation/setup" in resp.headers.get("Location", "")
+
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        manual = prof.brand_palette_manual
+        assert manual.get("primary") == "#222222"
+        assert manual.get("secondary") == "#111111"
+        assert manual.get("accent") == "#333333"
+        # Legacy mirrors track the swap so the BrandKit fallback agrees.
+        assert prof.brand_primary == "#222222"
+        assert prof.brand_secondary == "#111111"
+
+    def test_no_order_cycles_forward(self, client, monkeypatch):
+        c, _ = client
+        self._seed_confirmed_palette(c, monkeypatch)
+
+        c.post("/organisation/setup/palette/reorder", data={})
+
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        manual = prof.brand_palette_manual
+        # Forward cycle: primary's colour walks to secondary, last wraps round.
+        assert manual.get("secondary") == "#111111"
+        assert manual.get("accent") == "#222222"
+        assert manual.get("primary") == "#333333"
+
+    def test_reorder_recomputes_derived_palette(self, client, monkeypatch):
+        c, _ = client
+        self._seed_confirmed_palette(c, monkeypatch)
+
+        # Prime a stale derived palette seeded off the OLD primary.
+        from mediahub.web.club_profile import load_profile, save_profile
+        prof = load_profile("demo-club")
+        kit = prof.get_brand_kit()
+        kit.ensure_derived_palette(force=True)
+        prof.brand_kit = kit.to_dict()
+        save_profile(prof)
+        old_seed = (prof.brand_kit.get("derived_palette") or {}).get("seed_hex")
+        assert old_seed  # sanity
+
+        # Swap primary -> #222222; derived palette must re-seed.
+        c.post(
+            "/organisation/setup/palette/reorder",
+            data={"order": "secondary,primary,accent"},
+        )
+        prof = load_profile("demo-club")
+        new_seed = (prof.brand_kit.get("derived_palette") or {}).get("seed_hex")
+        assert new_seed == "#222222"
+        assert new_seed != old_seed
+
+    def test_fourth_not_fabricated_when_opted_out(self, client, monkeypatch):
+        """A reorder must never introduce a 4th colour the org didn't pick."""
+        c, _ = client
+        self._seed_confirmed_palette(c, monkeypatch)
+
+        # Stale order naming a 4th slot is a no-op on a 3-colour palette.
+        c.post(
+            "/organisation/setup/palette/reorder",
+            data={"order": "fourth,primary,secondary,accent"},
+        )
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        assert prof.brand_palette_use_fourth is False
+        assert "fourth" not in prof.brand_palette_manual
+        # Untouched, since the bad order is rejected.
+        assert prof.brand_palette_manual.get("primary") == "#111111"
+
+    def test_no_active_profile_redirects(self, client, monkeypatch):
+        c, _ = client
+        # No capture → no profile. Should redirect, not 500.
+        resp = c.post(
+            "/organisation/setup/palette/reorder",
+            data={"order": "secondary,primary,accent"},
+            follow_redirects=False,
+        )
+        assert resp.status_code in (301, 302, 303, 307, 308)
+
+    def test_fourth_colour_participates_when_opted_in(self, client, monkeypatch):
+        c, _ = client
+        _seed_profile_via_capture(c, monkeypatch)
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: False)
+        # Opt into a fourth colour and pin all four.
+        c.post(
+            "/organisation/setup/palette",
+            data={
+                "palette_primary": "#111111",
+                "palette_secondary": "#222222",
+                "palette_accent": "#333333",
+                "palette_use_fourth": "on",
+                "palette_fourth": "#444444",
+            },
+        )
+        # Cycle all four forward one role.
+        c.post("/organisation/setup/palette/reorder", data={})
+
+        from mediahub.web.club_profile import load_profile
+        prof = load_profile("demo-club")
+        manual = prof.brand_palette_manual
+        assert prof.brand_palette_use_fourth is True
+        assert manual.get("primary") == "#444444"
+        assert manual.get("secondary") == "#111111"
+        assert manual.get("accent") == "#222222"
+        assert manual.get("fourth") == "#333333"
+
+
+# ---------------------------------------------------------------------------
 # 5. Setup-page GET renders the confirmation form
 # ---------------------------------------------------------------------------
 
@@ -319,3 +452,36 @@ class TestSetupPageRendersForm:
         assert 'name="palette_fourth"' in body
         # The form POSTs to the confirmation endpoint
         assert "/organisation/setup/palette" in body
+
+    def test_reorder_control_appears_with_multiple_colours(
+        self, client, monkeypatch,
+    ):
+        c, _ = client
+        # >=2 colours so the "Arrange brand colours" control renders.
+        _seed_profile_via_capture(
+            c, monkeypatch,
+            palette_extracted={
+                "primary": "#0066cc", "secondary": "#ff8800",
+                "accent": "#222222",
+            },
+        )
+
+        resp = c.get("/organisation/setup")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Arrange brand colours" in body
+        assert "/organisation/setup/palette/reorder" in body
+        # The cycle button submits an `order` permutation.
+        assert 'name="order"' in body
+
+    def test_reorder_control_hidden_with_single_colour(
+        self, client, monkeypatch,
+    ):
+        c, _ = client
+        # Only one colour → nothing to rearrange → control omitted.
+        _seed_profile_via_capture(
+            c, monkeypatch, palette_extracted={"primary": "#0066cc"},
+        )
+        resp = c.get("/organisation/setup")
+        body = resp.get_data(as_text=True)
+        assert "/organisation/setup/palette/reorder" not in body

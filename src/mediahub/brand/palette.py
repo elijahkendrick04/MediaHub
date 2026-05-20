@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from typing import Optional, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -387,6 +387,72 @@ def effective_palette(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Slot reordering — let the user swap colours between roles
+# ---------------------------------------------------------------------------
+
+def present_slots(palette: Optional[dict]) -> list[str]:
+    """Return the slots that carry a valid hex, in canonical order.
+
+    Canonical order is ``ALL_SLOTS`` (primary, secondary, accent, fourth)
+    so a reorder always works against a stable, predictable sequence
+    regardless of dict insertion order. Slots whose value isn't a valid
+    ``#rrggbb`` hex are omitted — there's nothing to move.
+    """
+    palette = palette or {}
+    return [s for s in ALL_SLOTS if _normalise_hex(palette.get(s))]
+
+
+def reorder_palette(palette: Optional[dict], order: Sequence[str]) -> dict:
+    """Reassign colour values to slots according to a new ordering.
+
+    ``palette`` is keyed by slot names (a subset of ``ALL_SLOTS``).
+    ``order`` is a permutation of the slots actually present in
+    ``palette``: the colour currently sitting in ``order[i]`` moves into
+    the i-th present slot (present slots taken in ``ALL_SLOTS`` order).
+
+    The result always carries exactly the same set of slot keys it
+    started with — only the hex values are shuffled between them, so no
+    downstream consumer ever sees a slot vanish or a brand-new colour
+    appear. Every value is normalised to ``#rrggbb`` so the output is
+    render-safe.
+
+    If ``order`` is not a permutation of the present slots (a stale or
+    hand-crafted POST), the palette is returned unchanged (slots only,
+    normalised) rather than corrupted.
+    """
+    present = present_slots(palette)
+    palette = palette or {}
+    clean_order = [s for s in (order or []) if isinstance(s, str)]
+    identity = {s: _normalise_hex(palette[s]) for s in present}
+    if sorted(clean_order) != sorted(present):
+        return identity
+    return {present[i]: _normalise_hex(palette[clean_order[i]])
+            for i in range(len(present))}
+
+
+def rotate_palette(palette: Optional[dict], steps: int = 1) -> dict:
+    """Rotate the colours across the present slots by ``steps``.
+
+    A positive step moves each colour *forward* one role — the primary
+    colour becomes the secondary, the secondary becomes the third, and
+    the last wraps back to primary. This is the "swap the colours
+    around" cycle: repeatedly rotating walks through every arrangement
+    and returns to the start. Negative steps rotate the other way.
+
+    Slots with fewer than two colours are returned unchanged.
+    """
+    present = present_slots(palette)
+    n = len(present)
+    if n < 2:
+        return {s: _normalise_hex((palette or {})[s]) for s in present}
+    steps %= n
+    # Slot i receives the colour that was `steps` positions earlier, so
+    # the colour in slot i ends up `steps` positions later (forward).
+    order = [present[(i - steps) % n] for i in range(n)]
+    return reorder_palette(palette, order)
+
+
 __all__ = [
     "SLOTS",
     "FOURTH_SLOT",
@@ -395,4 +461,7 @@ __all__ = [
     "resolve_palette",
     "sanitise_manual_palette",
     "effective_palette",
+    "present_slots",
+    "reorder_palette",
+    "rotate_palette",
 ]

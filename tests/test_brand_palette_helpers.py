@@ -21,6 +21,9 @@ from mediahub.brand.palette import (
     _validate_picks,
     effective_palette,
     gather_colour_sources,
+    present_slots,
+    reorder_palette,
+    rotate_palette,
     sanitise_manual_palette,
 )
 
@@ -264,6 +267,129 @@ class TestEffectivePalette:
 
     def test_both_none_returns_empty(self) -> None:
         assert effective_palette(manual=None, extracted=None) == {}
+
+
+# ---------------------------------------------------------------------------
+# present_slots / reorder_palette / rotate_palette — swap colours between roles
+# ---------------------------------------------------------------------------
+
+
+class TestPresentSlots:
+    def test_canonical_order_regardless_of_dict_order(self) -> None:
+        # Dict built secondary-first; present_slots must still return
+        # canonical (primary, secondary, accent) order.
+        pal = {"secondary": "#222222", "primary": "#111111", "accent": "#333333"}
+        assert present_slots(pal) == ["primary", "secondary", "accent"]
+
+    def test_fourth_included_when_present(self) -> None:
+        pal = {"primary": "#111111", "fourth": "#444444"}
+        assert present_slots(pal) == ["primary", "fourth"]
+
+    def test_invalid_and_missing_slots_dropped(self) -> None:
+        pal = {"primary": "#111111", "secondary": "not-hex", "accent": ""}
+        assert present_slots(pal) == ["primary"]
+
+    def test_none_returns_empty(self) -> None:
+        assert present_slots(None) == []
+
+
+class TestReorderPalette:
+    def test_swap_primary_secondary(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        out = reorder_palette(pal, ["secondary", "primary", "accent"])
+        assert out == {
+            "primary": "#222222",
+            "secondary": "#111111",
+            "accent": "#333333",
+        }
+
+    def test_full_rotation_via_explicit_order(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        # primary slot takes accent's colour, etc.
+        out = reorder_palette(pal, ["accent", "primary", "secondary"])
+        assert out == {
+            "primary": "#333333",
+            "secondary": "#111111",
+            "accent": "#222222",
+        }
+
+    def test_keys_are_preserved_only_values_move(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        out = reorder_palette(pal, ["accent", "secondary", "primary"])
+        # Same slot keys, same set of colours — nothing invented or dropped.
+        assert set(out) == set(pal)
+        assert sorted(out.values()) == sorted(pal.values())
+
+    def test_values_normalised_to_lower_hex(self) -> None:
+        pal = {"primary": "#AABBCC", "secondary": "#DDEEFF"}
+        out = reorder_palette(pal, ["secondary", "primary"])
+        assert out == {"primary": "#ddeeff", "secondary": "#aabbcc"}
+
+    def test_bad_order_is_noop_not_corruption(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        # Too-short order → identity (slots only, normalised).
+        assert reorder_palette(pal, ["secondary", "primary"]) == pal
+        # Order referencing an absent slot → identity.
+        assert reorder_palette(pal, ["secondary", "primary", "fourth"]) == pal
+        # Empty order → identity.
+        assert reorder_palette(pal, []) == pal
+
+    def test_none_palette_returns_empty(self) -> None:
+        assert reorder_palette(None, ["primary"]) == {}
+
+    def test_fourth_slot_participates_when_present(self) -> None:
+        pal = {
+            "primary": "#111111", "secondary": "#222222",
+            "accent": "#333333", "fourth": "#444444",
+        }
+        out = reorder_palette(
+            pal, ["fourth", "primary", "secondary", "accent"]
+        )
+        assert out == {
+            "primary": "#444444",
+            "secondary": "#111111",
+            "accent": "#222222",
+            "fourth": "#333333",
+        }
+
+
+class TestRotatePalette:
+    def test_forward_moves_primary_to_secondary(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        out = rotate_palette(pal, 1)
+        # primary's colour walks forward into secondary; last wraps to primary.
+        assert out["secondary"] == "#111111"
+        assert out["accent"] == "#222222"
+        assert out["primary"] == "#333333"
+
+    def test_full_cycle_returns_to_start(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        assert rotate_palette(pal, 3) == pal
+        assert rotate_palette(pal, 0) == pal
+
+    def test_negative_rotation_is_inverse(self) -> None:
+        pal = {"primary": "#111111", "secondary": "#222222", "accent": "#333333"}
+        assert rotate_palette(rotate_palette(pal, 1), -1) == pal
+
+    def test_single_colour_is_noop(self) -> None:
+        assert rotate_palette({"primary": "#111111"}, 1) == {"primary": "#111111"}
+
+    def test_empty_is_noop(self) -> None:
+        assert rotate_palette({}, 1) == {}
+        assert rotate_palette(None, 1) == {}
+
+    def test_four_slots_rotate_together(self) -> None:
+        pal = {
+            "primary": "#111111", "secondary": "#222222",
+            "accent": "#333333", "fourth": "#444444",
+        }
+        out = rotate_palette(pal, 1)
+        assert out == {
+            "primary": "#444444",
+            "secondary": "#111111",
+            "accent": "#222222",
+            "fourth": "#333333",
+        }
 
 
 # ---------------------------------------------------------------------------

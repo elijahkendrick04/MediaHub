@@ -14307,6 +14307,113 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <script>{_PALETTE_PICKER_JS}</script>
 """
 
+            # --- "Arrange brand colours" — swap colours between roles ---
+            # One form, several submit buttons, each carrying a pre-computed
+            # `order` permutation. No JS: every control is a plain POST, so
+            # it works for keyboard / no-script users and can't drift out of
+            # sync with the server. Only renders when there are >=2 colours
+            # to rearrange.
+            reorder_url = url_for("organisation_setup_palette_reorder")
+            # Mirror the route's notion of "active slots": every effective
+            # slot, minus the 4th unless the org opted into a fourth colour.
+            # Keeping these in lock-step means every chip's move button
+            # submits an `order` the route will actually honour.
+            present_for_reorder = [
+                s for s in _palette_mod.ALL_SLOTS if effective_pal.get(s)
+            ]
+            if not use_fourth:
+                present_for_reorder = [
+                    s for s in present_for_reorder
+                    if s != _palette_mod.FOURTH_SLOT
+                ]
+            reorder_block_html = ""
+            if len(present_for_reorder) >= 2:
+                _n = len(present_for_reorder)
+                _role_label = {
+                    "primary": "Primary", "secondary": "Secondary",
+                    "accent": "Accent", "fourth": "Fourth",
+                }
+
+                def _swap_order(i: int, j: int) -> str:
+                    seq = list(present_for_reorder)
+                    seq[i], seq[j] = seq[j], seq[i]
+                    return ",".join(seq)
+
+                # Cycle = rotate forward one role: slot k takes the colour
+                # from slot k-1, so the primary colour walks to secondary.
+                _cycle_order = ",".join(
+                    present_for_reorder[(k - 1) % _n] for k in range(_n)
+                )
+
+                _arrow_base = (
+                    "width:30px;height:30px;display:inline-flex;align-items:center;"
+                    "justify-content:center;border:1px solid var(--border);"
+                    "border-radius:4px;background:var(--bg);color:var(--ink);"
+                    "font-size:12px;line-height:1;padding:0"
+                )
+
+                def _arrow(i: int, j: int, glyph: str, where: str,
+                           role: str, disabled: bool) -> str:
+                    if disabled:
+                        return (
+                            f'<button type="button" disabled aria-hidden="true" '
+                            f'style="{_arrow_base};opacity:0.22;'
+                            f'cursor:not-allowed">{glyph}</button>'
+                        )
+                    return (
+                        f'<button type="submit" name="order" '
+                        f'value="{_h(_swap_order(i, j))}" '
+                        f'title="Move {role} {where}" '
+                        f'aria-label="Move {_h(role)} colour {where}" '
+                        f'style="{_arrow_base};cursor:pointer">{glyph}</button>'
+                    )
+
+                _chips = []
+                for _i, _slot in enumerate(present_for_reorder):
+                    _hexv = effective_pal.get(_slot)
+                    _role = _role_label.get(_slot, _slot)
+                    _left = _arrow(_i, _i - 1, "&#9664;", "left", _role, _i == 0)
+                    _right = _arrow(_i, _i + 1, "&#9654;", "right", _role,
+                                    _i == _n - 1)
+                    _chips.append(
+                        f'<div style="display:flex;align-items:center;gap:8px;'
+                        f'padding:8px 10px;border:1px solid var(--border);'
+                        f'border-radius:8px;background:var(--panel)">'
+                        f'<span style="display:inline-block;width:22px;height:22px;'
+                        f'border-radius:5px;background:{_h(_hexv)};'
+                        f'border:1px solid rgba(255,255,255,0.15);flex-shrink:0"></span>'
+                        f'<span style="display:flex;flex-direction:column;line-height:1.2">'
+                        f'<span style="font-size:12px;font-weight:600;color:var(--ink)">'
+                        f'{_i + 1} &middot; {_h(_role)}</span>'
+                        f'<code style="font-size:10.5px;color:var(--ink-dim)">'
+                        f'{_h(_hexv)}</code></span>'
+                        f'<span style="display:flex;gap:3px;margin-left:2px">'
+                        f'{_left}{_right}</span>'
+                        f'</div>'
+                    )
+
+                reorder_block_html = f"""
+<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:6px;
+              text-transform:uppercase;letter-spacing:0.04em">Arrange brand colours</div>
+  <p class="muted" style="font-size:11.5px;margin:0 0 10px 0;line-height:1.45">
+    Swap your colours between roles &mdash; primary, secondary, third and (when used)
+    fourth. Whichever colour is primary drives everything downstream: site chrome,
+    result cards, reels and parent emails all follow it.
+  </p>
+  <form method="POST" action="{reorder_url}" data-no-loader="1">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin-bottom:10px">
+      {"".join(_chips)}
+    </div>
+    <button type="submit" name="order" value="{_h(_cycle_order)}" class="btn"
+            style="font-size:12px;padding:9px 14px">&#8635; Cycle colours</button>
+    <span class="muted" style="margin-left:10px;font-size:11.5px">
+      Rotates every colour forward one role.
+    </span>
+  </form>
+</div>
+"""
+
             # Phase 1.6 Stage H — resolve the cached theme JSON for
             # this profile so the H3 callout and H2 audit panel can
             # render the engine's decisions in plain English.
@@ -14334,6 +14441,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {reasoning_html}
   {sources_html}
   <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  {reorder_block_html}
   {confirm_form_html}
   {_repair_callout_html}
   {_audit_panel_html}
@@ -15381,6 +15489,80 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             prof.brand_primary = eff["primary"]
         if eff.get("secondary"):
             prof.brand_secondary = eff["secondary"]
+
+        save_profile(prof)
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/organisation/setup/palette/reorder", methods=["POST"])
+    def organisation_setup_palette_reorder():
+        """Swap the brand colours around between roles.
+
+        Lets the user rearrange which colour is primary / secondary /
+        accent (third) / optional fourth without re-typing any hex. The
+        new arrangement is pinned into ``brand_palette_manual`` (which
+        wins per-slot over the AI's pick and survives reloads), the
+        legacy ``brand_primary`` / ``brand_secondary`` mirrors are kept
+        in step, and the Adaptive Theming Engine palette is force-
+        recomputed so the chrome, the on-disk theme store, and the
+        static / motion / email renderers all follow the new primary.
+
+        Accepts one form field, ``order`` — a comma-separated permutation
+        of the currently-present slot names (e.g. ``secondary,primary,
+        accent``). When ``order`` is absent the colours are rotated
+        forward one role (the "cycle" shortcut). Only colours that
+        already exist are moved; the 4th slot only participates when the
+        org has opted into a fourth colour, so a reorder never fabricates
+        a colour the user didn't choose.
+        """
+        prof = _active_profile()
+        if not prof:
+            return redirect(url_for("organisation_setup"))
+
+        from mediahub.brand import palette as _palette
+        eff = _palette.effective_palette(
+            manual=prof.brand_palette_manual or {},
+            extracted=prof.brand_palette_extracted or {},
+        )
+        # The 4th colour is only a real slot when the org opted in.
+        if not prof.brand_palette_use_fourth:
+            eff.pop(_palette.FOURTH_SLOT, None)
+
+        order_raw = (request.form.get("order") or "").strip()
+        if order_raw:
+            order = [s.strip() for s in order_raw.split(",") if s.strip()]
+            reordered = _palette.reorder_palette(eff, order)
+        else:
+            # No explicit order → cycle the colours forward one role.
+            reordered = _palette.rotate_palette(eff, 1)
+
+        # Pin the new arrangement as a manual override so it wins and
+        # persists. Only touch the slots we actually rearranged; never
+        # introduce a 4th when the org hasn't opted in.
+        manual = dict(prof.brand_palette_manual or {})
+        for slot in _palette.ALL_SLOTS:
+            if reordered.get(slot):
+                manual[slot] = reordered[slot]
+        if not prof.brand_palette_use_fourth:
+            manual.pop(_palette.FOURTH_SLOT, None)
+        prof.brand_palette_manual = manual
+
+        # Keep the legacy mirrors in step so the BrandKit fallback path
+        # renders the same colours the form now shows.
+        if reordered.get("primary"):
+            prof.brand_primary = reordered["primary"]
+        if reordered.get("secondary"):
+            prof.brand_secondary = reordered["secondary"]
+
+        # Force-recompute the derived theme: the primary may have moved,
+        # and that seeds the whole MD3 palette + theme store that the
+        # chrome and the static graphic renderer read from. force=True
+        # bypasses the cache so nothing downstream goes stale.
+        try:
+            kit = prof.get_brand_kit()
+            kit.ensure_derived_palette(force=True)
+            prof.brand_kit = kit.to_dict()
+        except Exception as e:
+            log.warning("palette reorder: derived palette recompute failed: %s", e)
 
         save_profile(prof)
         return redirect(url_for("organisation_setup"))
