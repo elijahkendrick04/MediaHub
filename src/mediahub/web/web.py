@@ -3959,6 +3959,12 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <style>{{ css | safe }}</style>
 {{ theme_seed_style | safe }}
 <script>
+  // Mark the document as JS-capable so progressive-enhancement styles
+  // (e.g. .mh-reveal initial-hidden state) only apply when JS can undo
+  // them. No-JS users never get permanently-hidden content.
+  document.documentElement.classList.add('mh-js');
+</script>
+<script>
   // Detect deployed prefix (e.g. "/port/5000") so XHRs from inline JS use the right base.
   (function(){
     var path = window.location.pathname || '/';
@@ -4548,6 +4554,76 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   if (document.readyState !== 'loading') bindPopovers();
   else document.addEventListener('DOMContentLoaded', bindPopovers);
   MH.bindPopovers = bindPopovers;
+
+  // === Scroll reveals + number counters (Phase 10) ===
+  var prefersReduced = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function animateCount(el) {
+    var target = parseFloat(el.getAttribute('data-mh-count'));
+    if (isNaN(target)) return;
+    var dur = parseInt(el.getAttribute('data-mh-count-dur') || '900', 10);
+    var dp = parseInt(el.getAttribute('data-mh-count-dp') || '0', 10);
+    var prefix = el.getAttribute('data-mh-count-prefix') || '';
+    var suffix = el.getAttribute('data-mh-count-suffix') || '';
+    if (prefersReduced) {
+      el.textContent = prefix + target.toFixed(dp) + suffix;
+      return;
+    }
+    var start = null;
+    function tick(ts) {
+      if (start === null) start = ts;
+      var p = Math.min(1, (ts - start) / dur);
+      // ease-out cubic
+      var eased = 1 - Math.pow(1 - p, 3);
+      var val = target * eased;
+      el.textContent = prefix + val.toFixed(dp) + suffix;
+      if (p < 1) requestAnimationFrame(tick);
+      else el.textContent = prefix + target.toFixed(dp) + suffix;
+    }
+    requestAnimationFrame(tick);
+  }
+  function bindReveals() {
+    var reveals = document.querySelectorAll('.mh-reveal, .mh-reveal-group');
+    var counters = document.querySelectorAll('[data-mh-count]');
+    function revealEl(el) {
+      el.classList.add('is-in');
+      if (el.querySelectorAll) el.querySelectorAll('[data-mh-count]').forEach(animateCount);
+      if (el.hasAttribute && el.hasAttribute('data-mh-count')) animateCount(el);
+    }
+    if (prefersReduced || !('IntersectionObserver' in window)) {
+      reveals.forEach(revealEl);
+      counters.forEach(animateCount);
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (!en.isIntersecting) return;
+        revealEl(en.target);
+        io.unobserve(en.target);
+      });
+    }, {rootMargin: '0px 0px -8% 0px', threshold: 0.08});
+    reveals.forEach(function(el){
+      // Anything already in or above the viewport on load reveals
+      // immediately — never wait for a scroll that may not come.
+      var r = el.getBoundingClientRect();
+      if (r.top < (window.innerHeight || 0) * 0.95) { revealEl(el); return; }
+      io.observe(el);
+    });
+    counters.forEach(function(el){
+      if (!el.closest('.mh-reveal, .mh-reveal-group')) {
+        var r = el.getBoundingClientRect();
+        if (r.top < (window.innerHeight || 0) * 0.95) animateCount(el);
+        else io.observe(el);
+      }
+    });
+    // Safety net: whatever the observer hasn't caught within 1.5s gets
+    // revealed unconditionally so content can never be stuck hidden,
+    // even if a scroll never happens or the observer misfires.
+    setTimeout(function(){ reveals.forEach(revealEl); }, 1500);
+  }
+  if (document.readyState !== 'loading') bindReveals();
+  else document.addEventListener('DOMContentLoaded', bindReveals);
+  MH.bindReveals = bindReveals;
 })();
 </script>
 <script>
@@ -5030,7 +5106,7 @@ def create_app() -> Flask:
             '<section class="mh-section">'
             '<div class="mh-section-eyebrow-strip"><span class="label">The workflow</span></div>'
             '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
-            '<div class="mh-steps">'
+            '<div class="mh-steps mh-reveal-group">'
             + ''.join(
                 f'<div class="mh-step">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
@@ -5048,7 +5124,7 @@ def create_app() -> Flask:
             '<section class="mh-section">'
             '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
             '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
-            '<div class="mh-sample-row">'
+            '<div class="mh-sample-row mh-reveal-group">'
             '<div class="mh-sample story">'
             '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
             '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
@@ -5081,7 +5157,7 @@ def create_app() -> Flask:
             '<section class="mh-section">'
             '<div class="mh-section-eyebrow-strip"><span class="label">Made for</span></div>'
             '<h2 class="mh-section-title">Built for the people who already <em class="editorial">post the results</em>.</h2>'
-            '<div class="mh-audience-row">'
+            '<div class="mh-audience-row mh-reveal-group">'
             '<div class="mh-audience">'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>'
             '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
@@ -5108,7 +5184,7 @@ def create_app() -> Flask:
         # panel. Particularly important because the AI is doing the
         # generation; the panel makes it explicit that you keep approval.
         promise_html = (
-            '<section class="mh-section">'
+            '<section class="mh-section mh-reveal">'
             '<div class="mh-promise">'
             '<h2 class="mh-promise-title">Human in the loop, <em>by design</em>.</h2>'
             '<p class="mh-promise-lede">'
@@ -5460,15 +5536,16 @@ def create_app() -> Flask:
 
         # Top stat strip — always shows the UNFILTERED picture so it's a
         # stable org-level summary regardless of the active ?status= chip.
+        # Values count up on scroll-in via the Phase 10 motion system.
         summary_html = (
-            '<div class="mh-activity-summary">'
-            f'<div class="stat live"><div class="l">Total runs</div><div class="v">{total_unfiltered:02d}</div></div>'
-            f'<div class="stat medal"><div class="l">Cards generated</div><div class="v">{cards_unfiltered:,}</div></div>'
-            f'<div class="stat good"><div class="l">Completed</div><div class="v">{unfiltered_counts.get("done", 0):02d}</div></div>'
+            '<div class="mh-activity-summary mh-reveal">'
+            f'<div class="stat live"><div class="l">Total runs</div><div class="v" data-mh-count="{total_unfiltered}">{total_unfiltered:02d}</div></div>'
+            f'<div class="stat medal"><div class="l">Cards generated</div><div class="v" data-mh-count="{cards_unfiltered}">{cards_unfiltered:,}</div></div>'
+            f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):02d}</div></div>'
         )
         if unfiltered_counts.get("error", 0):
             summary_html += (
-                f'<div class="stat bad"><div class="l">Failed</div><div class="v">{unfiltered_counts.get("error", 0):02d}</div></div>'
+                f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):02d}</div></div>'
             )
         summary_html += '</div>'
 
