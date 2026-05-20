@@ -5625,42 +5625,136 @@ def create_app() -> Flask:
                 )
 
         body = f"""
-<h1>Configure this run</h1>
-<div class="card">
-  <p class="dim">{_h(meet_name) or 'Meet uploaded.'} \u2014 {len(clubs)} clubs detected in this file.</p>
-  {err_html}
-  <form method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
+<section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Configure this run</span>
+  <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
+  <p class="lede">{_h(meet_name) or 'Meet uploaded.'} &mdash; {len(clubs)} club{'s' if len(clubs) != 1 else ''} detected. Pick yours, tune the palette for this one-off, and drop in any photos you want graphics to prefer.</p>
+</section>
+
+<nav class="mh-stepper" aria-label="Upload progress">
+  <span class="mh-stepper-item is-done"><span class="num">1</span>Upload</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item is-active"><span class="num">2</span>Configure</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item"><span class="num">3</span>Run</span>
+  <span class="mh-stepper-arrow"></span>
+  <span class="mh-stepper-item"><span class="num">4</span>Review</span>
+</nav>
+
+<div class="mh-form-grid">
+<div>
+{err_html}
+<div class="card" style="margin-bottom:0">
+  <form id="mh-cfg-form" method="post" enctype="multipart/form-data" data-loader-text="Setting up your run" data-loader-sub="Saving config and starting the pipeline\u2026">
     <input type="hidden" name="run_id" value="{_h(run_id)}" />
 
     <label for="run-config-club">Club to feature</label>
     <select name="club_filter" id="run-config-club" required>{opts}</select>
-    <p class="dim" style="margin-top:4px;font-size:12px">Only clubs that actually appear in this meet are listed.</p>
+    <p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">Only clubs that actually appear in this meet are listed.</p>
 
-    <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
-      <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Brand &mdash; loaded from your organisation</legend>
-      <p class="dim" style="margin:0 0 10px;font-size:12px">
-        These come from your <a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a>.
-        Change colours below for a one-off override, or update them once on your profile to apply everywhere.
+    <fieldset class="mh-fieldset">
+      <legend>Brand &mdash; loaded from your organisation</legend>
+      <p class="mh-fieldset-lede">
+        Defaults come from your <a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a>.
+        Tweak below for a one-off override; the preview on the right updates as you move the picker.
       </p>
       {prof_logo_html}
 
       <div style="display:flex;gap:14px;align-items:flex-end;margin-top:12px;flex-wrap:wrap">
-        <div><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
-        <div><label for="run-config-secondary">Secondary</label><input id="run-config-secondary" type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
-        <div><label for="run-config-accent">Accent</label><input id="run-config-accent" type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
+        <div style="flex:1;min-width:120px"><label for="run-config-primary">Primary</label><input id="run-config-primary" type="color" name="primary_colour" value="{_h(prof_primary)}" /></div>
+        <div style="flex:1;min-width:120px"><label for="run-config-secondary">Secondary</label><input id="run-config-secondary" type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
+        <div style="flex:1;min-width:120px"><label for="run-config-accent">Accent</label><input id="run-config-accent" type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
     </fieldset>
 
-    <fieldset style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:14px 18px">
-      <legend style="padding:0 8px;font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px">Photos (optional)</legend>
-      <label for="run-config-photos">Athlete portraits, action shots, venue images (multi-select)</label>
+    <fieldset class="mh-fieldset">
+      <legend>Photos (optional)</legend>
+      <p class="mh-fieldset-lede">Athlete portraits, action shots, venue images. The selector will show thumbnails the moment you pick.</p>
       <input id="run-config-photos" type="file" name="club_photos" multiple accept="image/*" />
-      <p class="dim" style="margin-top:4px;font-size:12px">Uploaded photos will be preferred for graphic generation in this run and saved to your media library.</p>
+      <div id="mh-photo-grid" class="mh-photo-grid" aria-live="polite"></div>
+      <p class="dim" style="margin-top:8px;font-size:var(--fs-sm)">Uploaded photos will be preferred for graphic generation in this run and saved to your media library.</p>
     </fieldset>
 
-    <div style="margin-top:18px"><button class="btn" type="submit">Run pipeline \u2192</button></div>
+    <div style="margin-top:var(--sp-5)"><button class="btn large" type="submit">Run pipeline \u2192</button></div>
   </form>
 </div>
+</div>
+
+<aside class="mh-form-side">
+  <div class="mh-kit-preview">
+    <h4>Live preview</h4>
+    <div id="mh-kit-mock" class="mh-kit-mock" aria-hidden="true">
+      <span class="mh-kit-mock-eyebrow">Story \u00b7 1080\u00d71920</span>
+      <h3 class="mh-kit-mock-headline">Tom Davies<br><em>PB</em> 100m free</h3>
+      <div>
+        <div class="mh-kit-mock-time">52.41</div>
+        <div class="mh-kit-mock-meta"><b>&minus;0.74s</b> &middot; LANE 4 &middot; HEAT 2</div>
+      </div>
+    </div>
+    <div class="mh-kit-swatches" aria-hidden="true">
+      <div id="mh-kit-sw-pri" title="Primary"></div>
+      <div id="mh-kit-sw-sec" title="Secondary"></div>
+      <div id="mh-kit-sw-acc" title="Accent"></div>
+    </div>
+    <p class="dim" style="margin-top:var(--sp-3);font-size:var(--fs-sm)">
+      Story-card layout shown. Feed graphics and motion reels honour the same palette.
+    </p>
+  </div>
+</aside>
+</div>
+
+<script>
+(function(){{
+  // Live update: every time a colour picker changes, repaint the
+  // mock card's CSS custom properties.
+  var mock = document.getElementById('mh-kit-mock');
+  var swP  = document.getElementById('mh-kit-sw-pri');
+  var swS  = document.getElementById('mh-kit-sw-sec');
+  var swA  = document.getElementById('mh-kit-sw-acc');
+  var pri  = document.getElementById('run-config-primary');
+  var sec  = document.getElementById('run-config-secondary');
+  var acc  = document.getElementById('run-config-accent');
+  function paint() {{
+    if (!mock) return;
+    if (pri) {{ mock.style.setProperty('--kit-primary',   pri.value); if (swP) swP.style.background = pri.value; }}
+    if (sec) {{ mock.style.setProperty('--kit-secondary', sec.value); if (swS) swS.style.background = sec.value; }}
+    if (acc) {{ mock.style.setProperty('--kit-accent',    acc.value); if (swA) swA.style.background = acc.value; }}
+  }}
+  ['input','change'].forEach(function(evt){{
+    if (pri) pri.addEventListener(evt, paint);
+    if (sec) sec.addEventListener(evt, paint);
+    if (acc) acc.addEventListener(evt, paint);
+  }});
+  paint();
+
+  // Photo thumbnails \u2014 when the user picks images, render previews.
+  var photos = document.getElementById('run-config-photos');
+  var grid   = document.getElementById('mh-photo-grid');
+  function renderPhotos() {{
+    if (!photos || !grid) return;
+    grid.innerHTML = '';
+    var files = photos.files || [];
+    for (var i = 0; i < files.length; i++) {{
+      (function(file){{
+        var item = document.createElement('div');
+        item.className = 'mh-photo-grid-item';
+        var img = document.createElement('img');
+        img.alt = '';
+        var rdr = new FileReader();
+        rdr.onload = function(e) {{ img.src = e.target.result; }};
+        rdr.readAsDataURL(file);
+        var nameEl = document.createElement('span');
+        nameEl.className = 'name';
+        nameEl.textContent = file.name;
+        item.appendChild(img);
+        item.appendChild(nameEl);
+        grid.appendChild(item);
+      }})(files[i]);
+    }}
+  }}
+  if (photos) photos.addEventListener('change', renderPhotos);
+}})();
+</script>
 """
         return _layout("Configure run", body, active="create")
 

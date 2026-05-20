@@ -990,6 +990,233 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 }
 
 /* =====================================================================
+   PHASE 4 — CONFIGURE & BRAND KIT
+   ===================================================================== */
+
+/* Two-column wide form layout: 1fr form + 320px sticky preview rail. */
+.mh-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--sp-6);
+  align-items: start;
+}
+.mh-form-grid > .mh-form-side {
+  position: sticky;
+  top: 88px;
+}
+@media (max-width: 960px) {
+  .mh-form-grid { grid-template-columns: 1fr; }
+  .mh-form-grid > .mh-form-side { position: static; }
+}
+
+/* Visual brand kit preview — mini mockup card that updates live as the
+   user fiddles with primary/secondary/accent colour pickers. */
+.mh-kit-preview {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-5);
+  position: relative;
+  overflow: hidden;
+}
+.mh-kit-preview h4 {
+  margin: 0 0 var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-kit-mock {
+  --kit-primary: var(--lane);
+  --kit-secondary: var(--ink);
+  --kit-accent: var(--medal);
+  position: relative;
+  height: 220px;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(160deg, var(--kit-secondary) 0%, color-mix(in oklab, var(--kit-secondary) 80%, black) 100%);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+.mh-kit-mock::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--kit-primary);
+}
+.mh-kit-mock-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(245, 242, 232, 0.65);
+}
+.mh-kit-mock-eyebrow::before {
+  content: '';
+  width: 5px; height: 5px;
+  background: var(--kit-primary);
+  border-radius: 50%;
+}
+.mh-kit-mock-headline {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: #fff;
+  margin: 8px 0 0;
+}
+.mh-kit-mock-headline em {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: 'opsz' 72;
+  color: var(--kit-accent);
+  text-transform: none;
+}
+.mh-kit-mock-time {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.mh-kit-mock-meta {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(245, 242, 232, 0.55);
+}
+.mh-kit-mock-meta b { color: var(--kit-primary); }
+.mh-kit-swatches {
+  display: flex; gap: 6px;
+  margin-top: var(--sp-4);
+}
+.mh-kit-swatches > div {
+  flex: 1;
+  height: 28px;
+  border-radius: 2px;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--hairline);
+}
+
+/* Swatch GRID — colour-only chips with hex labels under the live preview.
+   Used in the brand-kit visual editor section. */
+.mh-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-3);
+}
+.mh-swatch {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+}
+.mh-swatch-block {
+  height: 56px;
+  width: 100%;
+}
+.mh-swatch-body {
+  padding: 6px 10px 8px;
+  background: var(--surface);
+}
+.mh-swatch-role {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  display: block;
+}
+.mh-swatch-hex {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Photo grid — when the user picks files via the configure photos
+   input, the JS renders thumbnails into this grid. */
+.mh-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: var(--sp-3);
+}
+.mh-photo-grid-item {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: rgba(245, 242, 232, 0.03);
+}
+.mh-photo-grid-item img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.mh-photo-grid-item .name {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 4px 6px;
+  background: rgba(6, 7, 12, 0.72);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.06em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FIELDSET POLISH — replace the inline-style boxed fieldsets used on
+   the configure form with a cleaner section variant. */
+.mh-fieldset {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--sp-5) var(--sp-5);
+  margin-top: var(--sp-5);
+  background: var(--surface);
+}
+.mh-fieldset legend {
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.mh-fieldset-lede {
+  font-size: var(--fs-md);
+  color: var(--ink-dim);
+  margin: 0 0 var(--sp-4);
+}
+
+/* =====================================================================
    PHASE 3 — UPLOAD POLISH
    ===================================================================== */
 
