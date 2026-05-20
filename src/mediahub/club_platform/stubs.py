@@ -110,7 +110,7 @@ def _load_brand_context() -> dict:
         get_active = getattr(current_app, "active_profile", None)
         if get_active:
             prof = get_active()
-    except (RuntimeError, Exception):
+    except Exception:
         prof = None
     if prof is None:
         try:
@@ -635,7 +635,15 @@ def render_cards_html(
             if t:
                 tag_chips += f'<span class="mh-card-tag">#{_h(t)}</span>'
 
-        caption_for_copy = json.dumps(caption)
+        # Embed the caption literal inside a single-quoted ``onclick`` HTML
+        # attribute. ``json.dumps`` escapes ``"`` and ``\`` but leaves ``'``
+        # as a literal apostrophe — and a caption like ``Let's go!`` would
+        # then close the attribute mid-string, breaking Copy caption for any
+        # caption Gemini happens to write with an apostrophe. ``html.escape``
+        # with ``quote=True`` rewrites ``'`` → ``&#x27;`` (which the browser
+        # un-escapes back to ``'`` inside the JS double-quoted string),
+        # and leaves the JSON's ``\"`` and newline escapes intact.
+        caption_for_copy = html.escape(json.dumps(caption), quote=True)
         notes_html = (
             f'<div style="margin-top:10px;font-size:12px;color:var(--ink-muted)">'
             f'<em>{_h(notes)}</em></div>' if notes else ''
@@ -644,7 +652,7 @@ def render_cards_html(
         pill_html = ""
         if show_pill:
             bg, fg, label = _PILL_STYLE[status]
-            pill_url = f"{status_api_base}/{idx}"
+            pill_url = f"{status_api_base}/{idx}/status"
             pill_html = (
                 f'<button type="button" class="stub-wf-pill" data-pack="{_h(pack_id)}" '
                 f'data-idx="{idx}" data-status="{_h(status)}" data-url="{_h(pill_url)}" '

@@ -193,6 +193,61 @@ def test_resolve_returns_empty_when_no_sources(monkeypatch):
     ) == {}
 
 
+def test_is_chromatic_rejects_white_black_grey():
+    # Achromatic — must be rejected.
+    for h in ("#ffffff", "#000000", "#eeeeee", "#808080", "#1a1a1a", "#f5f5f5"):
+        assert palette._is_chromatic(h) is False, h
+    # Real brand colours — must pass.
+    for h in ("#f4b214", "#003c71", "#a30d2d", "#0066cc", "#fdb913"):
+        assert palette._is_chromatic(h) is True, h
+
+
+def test_resolve_returns_empty_when_only_achromatic(monkeypatch):
+    """A site whose only colour signal is white/grey has no real brand
+    identity. The resolver must return {} rather than painting the whole
+    palette white (the real-world cocsc.co.uk failure: all-white)."""
+    from mediahub.media_ai import llm as _llm
+    called = {"n": 0}
+
+    def _should_not_run(*a, **kw):
+        called["n"] += 1
+        return {}
+
+    monkeypatch.setattr(_llm, "is_available", lambda: True)
+    monkeypatch.setattr(_llm, "generate_json", _should_not_run)
+
+    sources = palette.gather_colour_sources(
+        link_palette_signals={"website": ["#ffffff", "#eeeeee", "#000000"]},
+    )
+    out = palette.resolve_palette(
+        org_name="Demo", voice_summary="", sources=sources, allow_fourth=False,
+    )
+    assert out == {}
+    # Bailed before spending an LLM call.
+    assert called["n"] == 0
+
+
+def test_resolve_keeps_white_as_accent_when_chromatic_present(monkeypatch):
+    """White is still a valid accent as long as a chromatic colour
+    anchors the palette (the cocsc.co.uk fix: gold primary + white)."""
+    from mediahub.media_ai import llm as _llm
+    monkeypatch.setattr(_llm, "is_available", lambda: True)
+    monkeypatch.setattr(
+        _llm, "generate_json",
+        lambda *a, **kw: {"primary": "#f4b214", "secondary": "#ffffff",
+                          "reasoning": "Gold primary, white for contrast."},
+    )
+    sources = palette.gather_colour_sources(
+        link_palette_signals={"website": ["#ffffff", "#f4b214"]},
+    )
+    out = palette.resolve_palette(
+        org_name="City of Chester SC", voice_summary="Competitive club.",
+        sources=sources, allow_fourth=False,
+    )
+    assert out["primary"] == "#f4b214"
+    assert out["secondary"] == "#ffffff"
+
+
 # ---------------------------------------------------------------------------
 # 5. effective_palette
 # ---------------------------------------------------------------------------

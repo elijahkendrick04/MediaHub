@@ -66,6 +66,21 @@ def _normalise_hex(value: str) -> Optional[str]:
     return None
 
 
+def _is_chromatic(hex_value: str, *, min_chroma: int = 18) -> bool:
+    """True if a #rrggbb colour carries real hue (not white/black/grey).
+
+    Chroma here is the spread between the max and min RGB channel — a
+    cheap saturation proxy. Pure white (#ffffff), pure black (#000000)
+    and any near-grey collapse to ~0 and are rejected; a club's navy,
+    gold, red, etc. all clear the threshold comfortably.
+    """
+    n = _normalise_hex(hex_value)
+    if not n:
+        return False
+    r, g, b = int(n[1:3], 16), int(n[3:5], 16), int(n[5:7], 16)
+    return (max(r, g, b) - min(r, g, b)) >= min_chroma
+
+
 def _clean_hex_list(items) -> list[str]:
     """Coerce a list-like to a clean ordered de-duplicated list of #rrggbb."""
     if not isinstance(items, list):
@@ -261,6 +276,19 @@ def resolve_palette(
     universe: set[str] = set()
     for hexes in sources.values():
         universe.update(hexes)
+
+    # Safety net: if EVERY candidate colour is achromatic (pure white,
+    # pure black, or near-grey), there's no real brand identity to
+    # resolve — returning a palette here just paints the whole UI
+    # white/grey, which looks broken and is worse than no palette.
+    # Bail with {} so the caller leaves the palette empty (the user
+    # picks manually and the chrome stays MediaHub default). When at
+    # least one chromatic colour exists, white/grey stay in the
+    # universe and remain valid as an accent.
+    if not any(_is_chromatic(h) for h in universe):
+        log.debug("palette: all %d candidate colours achromatic; no palette",
+                  len(universe))
+        return {}
 
     from mediahub.media_ai.llm import (
         ClaudeUnavailableError, generate_json, is_available,

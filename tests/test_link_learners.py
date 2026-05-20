@@ -133,6 +133,60 @@ class TestBlockDetector:
         out = block_detector.classify("https://x", status_code=200, body=body)
         assert out["label"] == "auth_walled"
 
+    # --- False-positive guards. A misclassification here discards ALL
+    # captured brand voice from the link (real_content-only extraction),
+    # so these club-site shapes must NOT be walled / 404'd / SPA'd. ---
+
+    def test_club_homepage_with_signin_link_is_real_content(self):
+        # A real club page that merely links to a members' "Sign in"
+        # area must keep its content, not get auth-walled.
+        body = (
+            "<html><body><h1>City of Glasgow Swim Team</h1>"
+            "<p>We are a friendly competitive swimming club based in the "
+            "west end. Our squads train six days a week across three pools. "
+            "New members always welcome — come along to a taster session "
+            "and meet our coaches. We compete across Scotland and pride "
+            "ourselves on community spirit.</p>"
+            "<nav><a href='/members'>Sign in</a></nav></body></html>"
+        )
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "real_content"
+
+    def test_prose_could_not_be_resolved_is_not_dns_error(self):
+        # "could not be resolved" in ordinary prose is not a DNS failure.
+        body = ("<html><body><h1>Our Club</h1>"
+                + "<p>A long and storied history of success here. " * 30
+                + "<p>After the 2019 dispute could not be resolved, the "
+                "committee was reformed.</p></body></html>")
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "real_content"
+
+    def test_create_account_cta_is_not_auth_walled(self):
+        body = ("<html><body><h1>Annual Gala 2026</h1>"
+                + "<p>Join us for our biggest meet of the year. " * 25
+                + "<p>Create account to register for the gala.</p></body></html>")
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "real_content"
+
+    def test_tiny_real_club_paragraph_is_real_content(self):
+        body = ("<html><body><p>Paisley Otters is a masters swimming club "
+                "training Tuesday and Thursday evenings at the Lagoon.</p>"
+                "</body></html>")
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "real_content"
+
+    def test_real_dns_error_json_is_not_found(self):
+        body = ('{"name":"ParamValidationError","message":'
+                '"Domain example.org could not be resolved"}')
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "not_found"
+
+    def test_react_spa_shell_is_soft_blocked(self):
+        body = ("<html><body><div id=root>You need to enable JavaScript "
+                "to run this app.</div></body></html>")
+        out = block_detector.classify("https://x", status_code=200, body=body)
+        assert out["label"] == "soft_blocked_spa"
+
 
 # ---------------------------------------------------------------------------
 # B9 — endpoint discoverer
@@ -242,3 +296,39 @@ class TestContentExtractor:
         # 3-digit expanded, missing # prepended, invalid hex dropped
         assert "#0066cc" in out["palette_mentions"]
         assert len([c for c in out["palette_mentions"] if c.startswith("#")]) == len(out["palette_mentions"])
+
+    def test_full_body_hex_merged_with_llm_palette(self, fake_llm):
+        # The LLM only sees the first ~6KB of body. The real brand
+        # colour (#f4b214 gold) lives further down in a <style> block.
+        # The LLM returns only the visible-header white; the regex scan
+        # of the FULL body must merge the gold in so the resolver has a
+        # real candidate. (Regression for the cocsc.co.uk all-white bug.)
+        fake_llm["response"] = {
+            "voice_summary": "Competitive club.",
+            "keywords": ["swimming"],
+            "palette_mentions": ["#ffffff"],
+        }
+        body = (
+            "<html><head><style>body{color:#ffffff}</style></head><body>"
+            + "padding text. " * 600
+            + "<style>.brand{background:#f4b214}</style></body></html>"
+        )
+        out = content_extractor.extract_brand_dna(
+            body, url="https://x", platform_intent="website",
+        )
+        assert "#f4b214" in out["palette_mentions"], out["palette_mentions"]
+
+    def test_full_body_scan_skips_pure_white_and_grey(self, fake_llm):
+        # The merged scan must not flood the candidates with #ffffff /
+        # near-grey UI tokens — only chromatic colours are added.
+        fake_llm["response"] = {"voice_summary": "x", "keywords": ["a"],
+                                "palette_mentions": []}
+        body = ("<html><body>" + "x " * 400
+                + "<div style='color:#ffffff;background:#eeeeee;border:#333333'>"
+                "<span style='color:#c0392b'>brand</span></div></body></html>")
+        out = content_extractor.extract_brand_dna(
+            body, url="https://x", platform_intent="website",
+        )
+        assert "#c0392b" in out["palette_mentions"]
+        assert "#ffffff" not in out["palette_mentions"]
+        assert "#eeeeee" not in out["palette_mentions"]

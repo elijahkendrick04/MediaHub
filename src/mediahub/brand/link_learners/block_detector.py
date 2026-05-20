@@ -63,19 +63,39 @@ _NOT_FOUND_PATTERNS = (
 )
 
 
-_SCRAPE_API_DNS_ERR_RE = re.compile(
-    r'"name"\s*:\s*"ParamValidationError"|'
-    r'"code"\s*:\s*40001|'
-    r"could not be resolved|"
-    r"ENOTFOUND|EAI_NONAME",
+# JS-only single-page-app shell tells. When a short body carries one of
+# these it's an empty React/Vue/Angular shell, not real content.
+_SPA_SHELL_RE = re.compile(
+    r"enable\s+javascript|javascript\s+is\s+(?:required|disabled)|"
+    r"javascript\s+to\s+run|you\s+need\s+to\s+enable|"
+    r"this\s+app\s+requires|please\s+wait\b|\bloading\b",
     re.IGNORECASE,
 )
 
 
+_SCRAPE_API_DNS_ERR_RE = re.compile(
+    r'"name"\s*:\s*"ParamValidationError"|'
+    r'"code"\s*:\s*40001|'
+    # "could not be resolved" is only a DNS error when it's about a
+    # domain/host — otherwise a club page saying "the dispute could
+    # not be resolved" was misread as a dead link (which, post-#106,
+    # discards ALL captured brand voice for that link).
+    r"(?:domain|host(?:name)?|dns)\b[^\"\n]{0,60}could not be resolved|"
+    r"could not be resolved[^\"\n]{0,30}\b(?:domain|host(?:name)?|dns)\b|"
+    r"\bENOTFOUND\b|\bEAI_NONAME\b",
+    re.IGNORECASE,
+)
+
+
+# Platform-specific login-wall fingerprints. Every entry names a
+# specific social platform or OAuth provider so a legitimate club
+# website can't trip them. The bare "create account" pattern was
+# REMOVED — it fired on ordinary signup CTAs ("Create account to
+# register for the gala") and, post-#106, that misclassification
+# discards all brand voice from the link.
 _LOGIN_WALL_PATTERNS = (
     r"log into\s+(?:instagram|facebook|twitter|tiktok|linkedin|x)\b",
     r"sign\s+up\s+to\s+(?:see|view|continue|connect|read|access)",
-    r"\bcreate\s+(?:a\s+new\s+)?account\b",
     r"\blogin\s+with\s+(?:facebook|google|apple|x)\b",
     r"\blog\s+in\s+with\s+(?:facebook|google|apple|x)\b",
     r"see\s+everyday\s+moments",
@@ -131,26 +151,38 @@ def _heuristic(status_code: int, body: str) -> str:
         return "auth_walled"
     if any(re.search(p, low) for p in _HARD_BLOCK_PATTERNS):
         return "hard_blocked"
-    if any(re.search(p, low) for p in _AUTH_PATTERNS) and len(visible) < 1_500:
-        return "auth_walled"
-    # Auth-wall pages on big platforms (Instagram, LinkedIn, Twitter,
-    # TikTok) can run well past 1.5 KB once you include their cookie
-    # banners, navigation, language-switcher footer and legal links —
-    # but the *substance* is still just "Log in / Sign up". When we
-    # see 3+ auth markers AND the page lacks any meaningful narrative
-    # signal (no paragraph-y sentences), call it auth_walled.
+    # Auth-wall detection keys on the ABSENCE of real narrative, not
+    # just body length. A login page is auth phrasing with no
+    # paragraph-length sentences; a small club homepage that merely
+    # links to a members' "Sign in" area has real prose and keeps its
+    # content. This matters because, post-#106, an auth_walled verdict
+    # discards ALL captured brand voice from the link — so a false
+    # positive on a sparse club site silently loses their whole voice.
     auth_hits = sum(1 for p in _AUTH_PATTERNS if re.search(p, low))
-    if auth_hits >= 3:
+    if auth_hits >= 1 and len(visible) < 1_500:
         long_sentences = sum(1 for s in re.split(r"[.!?]\s", visible) if len(s) > 80)
-        if long_sentences < 3:
+        # Bare login form: any auth marker + zero narrative.
+        bare_form = long_sentences < 1
+        # Chrome-heavy platform wall (Instagram/LinkedIn cookie banner +
+        # footer): many auth markers, still no real prose.
+        chrome_heavy_wall = auth_hits >= 3 and long_sentences < 3
+        if bare_form or chrome_heavy_wall:
             return "auth_walled"
     if any(re.search(p, low) for p in _NOT_FOUND_PATTERNS) and len(visible) < 1_500:
         return "not_found"
 
     # The classic JS-SPA tell — body is almost entirely a noscript
-    # placeholder, often under 800 visible chars after tag strip.
+    # placeholder. But a short body is NOT automatically an empty shell:
+    # a small club homepage with a real paragraph is legitimate content,
+    # and (post-#106) calling it soft_blocked_spa discards all its brand
+    # voice. So a short body is only an SPA shell when it either carries
+    # a JS-shell tell ("enable JavaScript", "loading…") or has no
+    # narrative sentence at all.
     if len(visible) < 350:
-        return "soft_blocked_spa"
+        spa_shell = bool(_SPA_SHELL_RE.search(low))
+        narrative = sum(1 for s in re.split(r"[.!?]\s", visible) if len(s) > 40)
+        if spa_shell or narrative < 1:
+            return "soft_blocked_spa"
 
     return "real_content"
 

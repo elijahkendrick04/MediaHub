@@ -119,6 +119,26 @@ def _has_gemini_key() -> bool:
     return bool(_resolve_gemini_key())
 
 
+def _redact_key(text: str, key: Optional[str]) -> str:
+    """Strip the Gemini API key from arbitrary text before logging.
+
+    Gemini's endpoint takes the key as a `?key=…` query parameter, so a
+    `requests` exception's repr (which embeds the failing URL) leaks the
+    secret straight into stdout. We rewrite both the literal key and any
+    `key=` query parameter to a stable redaction sentinel so logs are
+    safe to ship to operator dashboards or third-party aggregators.
+    """
+    if not text:
+        return text
+    out = text
+    if key:
+        out = out.replace(key, "***REDACTED***")
+    # Catch other shapes (URL-encoded, leftover ?key=…&… fragments)
+    import re as _re  # noqa: PLC0415
+    out = _re.sub(r"(?i)(\?|&)key=[^&\s'\")]+", r"\1key=***REDACTED***", out)
+    return out
+
+
 def _preferred_provider() -> str:
     """Return 'anthropic' if explicitly preferred via env, else 'gemini'."""
     pref = (os.environ.get("MEDIAHUB_LLM_PROVIDER") or "").strip().lower()
@@ -238,6 +258,41 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
 _GEMINI_MODEL = os.environ.get("MEDIAHUB_GEMINI_MODEL", "gemini-2.5-flash")
 _GEMINI_TIMEOUT = int(os.environ.get("MEDIAHUB_GEMINI_TIMEOUT", "45"))
 
+
+def _gemini_thinking_budget() -> int:
+    """Tokens the model is allowed to spend on internal "thinking".
+
+    Gemini 2.5 Flash ships with thinking enabled by default. Those
+    tokens count against ``maxOutputTokens`` but don't appear in
+    ``content.parts`` — so a caller that sized the budget for the
+    visible JSON it expected will see the response truncated mid-key
+    once thinking has eaten its share. Every JSON-output call in
+    MediaHub (palette resolver, block detector, content extractor, …)
+    sized their budgets for the response only and silently broke when
+    the default model gained thinking.
+
+    Default 0 (off) because every existing caller passes a max_tokens
+    sized for the visible output, not thinking. Operators can opt back
+    in per process via ``MEDIAHUB_GEMINI_THINKING_BUDGET`` if a new
+    caller wants the reasoning headroom.
+    """
+    raw = os.environ.get("MEDIAHUB_GEMINI_THINKING_BUDGET", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _gemini_generation_config(max_tokens: int) -> dict:
+    cfg: dict = {"maxOutputTokens": int(max_tokens)}
+    budget = _gemini_thinking_budget()
+    # thinkingConfig is only honoured by 2.5+ models; sending it to an
+    # older model is rejected as an unknown field. Gate on the model
+    # name so a downgrade via MEDIAHUB_GEMINI_MODEL still works.
+    if "2.5" in _GEMINI_MODEL or "3." in _GEMINI_MODEL:
+        cfg["thinkingConfig"] = {"thinkingBudget": budget}
+    return cfg
+
 # ---------------------------------------------------------------------------
 # Gemini overload circuit breaker
 # ---------------------------------------------------------------------------
@@ -299,6 +354,29 @@ def _gemini_breaker_record_success() -> None:
         _gemini_breaker_state["tripped_until"] = 0.0
 
 
+def gemini_breaker_snapshot() -> dict:
+    """Return the current breaker state in a JSON-serialisable shape.
+
+    Exposed for observability (the ``/healthz/breaker`` route reads
+    this) so operators can tell whether silent "ai_directed=false"
+    responses are caused by a tripped breaker. The values are
+    per-process — multi-worker deployments will see one snapshot per
+    gunicorn worker.
+    """
+    with _gemini_breaker_lock:
+        now = time.monotonic()
+        tripped_until = _gemini_breaker_state["tripped_until"]
+        return {
+            "open": now < tripped_until,
+            "consecutive_failures": int(
+                _gemini_breaker_state["consecutive_failures"]
+            ),
+            "seconds_until_reset": max(0.0, round(tripped_until - now, 1)),
+            "threshold": _GEMINI_BREAKER_THRESHOLD,
+            "cooldown_seconds": _GEMINI_BREAKER_COOLDOWN_S,
+        }
+
+
 def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -> Optional[str]:
     """Call Google Gemini generateContent. Returns text or None.
 
@@ -335,7 +413,7 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         })
     payload: dict[str, Any] = {
         "contents": contents,
-        "generationConfig": {"maxOutputTokens": max_tokens},
+        "generationConfig": _gemini_generation_config(max_tokens),
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
@@ -352,12 +430,13 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
             timeout=_GEMINI_TIMEOUT,
         )
     except Exception as e:
-        log.warning("gemini transport failed: %s", e)
+        safe_err = _redact_key(str(e), key)
+        log.warning("gemini transport failed: %s", safe_err)
         _log_call(
             provider="gemini", ok=False, model=_GEMINI_MODEL,
             duration_ms=(time.monotonic() - started) * 1000.0,
             error_kind="transport",
-            error_message=str(e),
+            error_message=safe_err,
         )
         return None
     dur_ms = (time.monotonic() - started) * 1000.0
@@ -372,10 +451,11 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
                   error_message="HTTP 429")
         return None
     if not r.ok:
-        log.warning("gemini non-ok (%s): %s", r.status_code, r.text[:300])
+        body_safe = _redact_key((r.text or "")[:300], key)
+        log.warning("gemini non-ok (%s): %s", r.status_code, body_safe)
         _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
                   duration_ms=dur_ms, error_kind=f"http_{r.status_code}",
-                  error_message=(r.text or "")[:300])
+                  error_message=body_safe)
         # 5xx / overload signals warrant tripping the breaker so the
         # next call this request doesn't waste another round-trip.
         # 4xx (other than 429, handled above) are usually our fault
@@ -453,7 +533,7 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
     parts.append({"text": prompt})
     payload: dict[str, Any] = {
         "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"maxOutputTokens": max_tokens},
+        "generationConfig": _gemini_generation_config(max_tokens),
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}

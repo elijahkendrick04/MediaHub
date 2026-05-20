@@ -260,23 +260,48 @@ def ai_creative_direction(
         recent_signatures=recent_signatures or [],
         recent_hooks=recent_hooks or [],
     )
+    # NOTE: every branch below now leaves a log line. Until 2026-05-19
+    # the ProviderNotConfigured + empty-output paths returned None
+    # silently, which made it impossible to tell from production logs
+    # whether ai_directed=false meant "no provider", "provider failed",
+    # "circuit breaker open" or "provider returned junk we couldn't
+    # parse". Logging is cheap and the cardinality is one line per
+    # regenerate, so over-logging is acceptable.
     try:
         out = ask(sys, user, max_tokens=600)
     except ProviderNotConfigured:
+        log.info("ai_director: no LLM provider configured — skipping AI direction")
         return None
     except ProviderError as e:
-        log.warning("ai_director: provider error: %s", str(e)[:200])
+        log.warning("ai_director: provider error: %s", str(e)[:400])
         return None
     except Exception as e:
-        log.warning("ai_director: unexpected error: %s", str(e)[:200])
+        log.warning("ai_director: unexpected error: %s", str(e)[:400])
         return None
     if not out:
+        # Common cause: Gemini circuit breaker is open (per
+        # media_ai.llm._gemini_breaker_*); the provider chain returned
+        # empty string instead of raising. Surface that explicitly.
+        try:
+            from mediahub.media_ai.llm import _gemini_breaker_is_open
+            breaker = "open" if _gemini_breaker_is_open() else "closed"
+        except Exception:
+            breaker = "unknown"
+        log.warning(
+            "ai_director: provider returned empty output (gemini breaker=%s)",
+            breaker,
+        )
         return None
     obj = _parse_strict_json(out)
     if obj is None:
         log.warning(
-            "ai_director: could not parse JSON from provider output: %s",
-            (out or "")[:200],
+            "ai_director: could not parse JSON from provider output (len=%d): %s",
+            len(out or ""), (out or "")[:500],
+        )
+    else:
+        log.debug(
+            "ai_director: parsed direction layout=%s hook=%s mood=%s",
+            obj.get("layout_family"), obj.get("hook_phrase"), obj.get("mood"),
         )
     return obj
 

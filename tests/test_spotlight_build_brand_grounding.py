@@ -1,0 +1,286 @@
+"""tests/test_spotlight_build_brand_grounding.py — pin the canonical brand
+context into the spotlight composite-post system prompt.
+
+PR #106 added basic brand context (org name, voice summary, keywords,
+tone notes) inline. That hand-rolled assembly silently skipped half the
+profile's voice fields — phrases_to_use, phrases_to_avoid, voice_profile
+(preferred_swimmer_address, openers/closers), brand_guidelines, and the
+non-negotiable mandatory_rules — so the composite caption could still
+read sport-generic even when the org had populated those fields.
+
+This module pins the fix:
+
+  1. The spotlight_build endpoint must route brand context through
+     ``brand.context.brand_context_for_llm`` (the same canonical helper
+     single-card captions use), not its own local stub.
+  2. Every meaningful brand field on the active profile must surface
+     in the system prompt the LLM sees.
+  3. Pure unit on the helper: tone_notes is included (it was the one
+     field PR #106 had but the canonical helper didn't).
+"""
+from __future__ import annotations
+
+import importlib
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+sys.path.insert(0, str(_ROOT / "src"))
+
+
+# ---------------------------------------------------------------------------
+# Unit: the canonical helper now picks up tone_notes too.
+# ---------------------------------------------------------------------------
+
+def test_brand_context_for_llm_includes_tone_notes():
+    """Freeform user-typed brand voice notes were the one signal PR #106
+    surfaced inline but the canonical helper still ignored. Pin the
+    extension: tone_notes lands in the prompt every tool sees."""
+    from mediahub.brand.context import brand_context_for_llm
+    from mediahub.web.club_profile import ClubProfile
+
+    p = ClubProfile(
+        profile_id="x",
+        display_name="City Aquatics",
+        tone_notes=(
+            "Use the swimmer's first name. Never refer to them as 'the "
+            "swimmer'. Drop the announcer-voice — we're a club, not a "
+            "broadcaster."
+        ),
+    )
+    out = brand_context_for_llm(p)
+    assert "Use the swimmer's first name" in out
+    assert "announcer-voice" in out
+
+
+# ---------------------------------------------------------------------------
+# Endpoint integration: /spotlight/<run>/<sw>/build feeds the canonical
+# brand context to the LLM and persists the saved pack.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def gated_app(tmp_path, monkeypatch):
+    """Spin up the Flask app with an isolated DATA_DIR and a populated
+    active profile carrying every voice signal we care about."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR",
+                       str(tmp_path / "club_profiles"))
+    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
+    for env in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+    importlib.reload(cp)
+    importlib.reload(wm)
+
+    from mediahub.web.club_profile import ClubProfile, save_profile
+    save_profile(ClubProfile(
+        profile_id="acmeswim",
+        display_name="ACME Aquatics",
+        short_name="ACME",
+        country="United Kingdom",
+        sponsor_name="Acme Sports",
+        brand_voice_summary=(
+            "Bold, hyped, irreverent club voice. Talks to the squad."
+        ),
+        brand_keywords=["bold", "hungry", "earned", "grit"],
+        brand_phrases_to_use=["Squad up.", "Earned it."],
+        brand_phrases_to_avoid=["thoughts and prayers", "blessed"],
+        tone_notes=(
+            "Use the swimmer's first name. Drop the announcer-voice."
+        ),
+        voice_profile={
+            "sentence_length_avg": 8,
+            "emoji_rate_per_caption": 0.0,
+            "preferred_swimmer_address": "first_name",
+        },
+        brand_guidelines={
+            "summary": "Warm but bold. Never cynical.",
+            "tone_dos": ["Celebrate effort"],
+            "tone_donts": ["Compare swimmers"],
+            "prohibited_words": ["loser"],
+        },
+        brand_guidelines_mandatory_rules=[
+            "Never publish a swimmer's age without consent.",
+        ],
+    ))
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+def _synthetic_run_with_achievements(run_id: str, runs_dir: Path) -> dict:
+    """Persist a minimal run JSON with one swimmer who has three
+    medal-gold achievements, plus the workflow sidecar approving all
+    three. This skips the full pipeline (parsing/recognition is covered
+    elsewhere) and isolates the spotlight build path."""
+    import json
+    swimmer_id = "acme:Lane,Lara"
+    swimmer_name = "Lara Lane"
+    achievements = []
+    for ev, time, cid_suffix in [
+        ("400m Freestyle (LC)", "4:26.95", "400FRLC"),
+        ("200m Freestyle (LC)", "2:07.71", "200FRLC"),
+        ("100m Freestyle (LC)", "0:59.83", "100FRLC"),
+    ]:
+        achievements.append({
+            "achievement": {
+                "swim_id":      f"{swimmer_id}:{cid_suffix}:gold",
+                "swimmer_id":   swimmer_id,
+                "swimmer_name": swimmer_name,
+                "event":        ev,
+                "time":         time,
+                "place":        1,
+                "type":         "medal_gold",
+                "headline": (
+                    f"{swimmer_name} wins gold in {ev} — {time}"
+                ),
+                "pb": False,
+            },
+            "priority":      9.0,
+            "quality_band":  "elite",
+        })
+    run_data = {
+        "run_id":     run_id,
+        "started_at": "2025-01-01T00:00:00Z",
+        "finished_at": "2025-01-01T00:01:00Z",
+        "file_name":  "test.pdf",
+        "meet":       {"name": "Test Invitational"},
+        "recognition_report": {
+            "meet_name": "Test Invitational",
+            "ranked_achievements": achievements,
+        },
+    }
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / f"{run_id}.json").write_text(json.dumps(run_data))
+
+    # Workflow sidecar: approve all three achievements.
+    from mediahub.workflow.store import WorkflowStore
+    from mediahub.workflow.status import CardStatus
+    ws = WorkflowStore(runs_dir)
+    for ra in achievements:
+        cid = ra["achievement"]["swim_id"]
+        ws.set_status(run_id, cid, CardStatus.APPROVED)
+
+    return run_data
+
+
+def test_spotlight_build_grounds_prompt_in_canonical_brand_context(
+    gated_app, tmp_path, monkeypatch
+):
+    """End-to-end through the Flask endpoint: hit /spotlight/<run>/<sw>/build,
+    capture the system prompt routed into ai_core.ask, assert every
+    brand signal we populated lands in it.
+
+    This is the regression test for PR #106's incomplete grounding."""
+    captured = {}
+
+    def _stub_ask(system, user, max_tokens=600, **kw):
+        captured["system"] = system
+        captured["user"] = user
+        return "STUBBED CAPTION"
+
+    # The endpoint imports `ask` from mediahub.ai_core at call time, so
+    # patching the package attribute is enough.
+    import mediahub.ai_core as ai_core_pkg
+    monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
+
+    run_id = "synth_run"
+    runs_dir = tmp_path / "runs_v4"
+    run = _synthetic_run_with_achievements(run_id, runs_dir)
+    swimmer_key = run["recognition_report"][
+        "ranked_achievements"
+    ][0]["achievement"]["swimmer_id"]
+
+    with gated_app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["active_profile_id"] = "acmeswim"
+        url = f"/spotlight/{run_id}/{swimmer_key}/build"
+        resp = c.post(url, follow_redirects=False)
+
+    assert resp.status_code == 302, (
+        f"expected redirect to /drafts/<id>, got {resp.status_code}: "
+        f"{resp.get_data(as_text=True)[:240]}"
+    )
+    assert "/drafts/" in (resp.headers.get("Location") or ""), (
+        f"redirect target not /drafts/: {resp.headers.get('Location')}"
+    )
+
+    sys_prompt = captured.get("system", "")
+    assert sys_prompt, "spotlight_build never called ask()"
+
+    # Identity — org name + sponsor + country must reach the prompt.
+    assert "ACME Aquatics" in sys_prompt
+    assert "Acme Sports" in sys_prompt
+    assert "United Kingdom" in sys_prompt
+
+    # Captured DNA — keywords, phrases_to_use, phrases_to_avoid.
+    assert "Bold, hyped" in sys_prompt
+    assert "Squad up" in sys_prompt
+    assert "Earned it" in sys_prompt
+    assert "thoughts and prayers" in sys_prompt
+    assert "off-brand" in sys_prompt or "never use" in sys_prompt.lower()
+
+    # tone_notes — the one PR-#106-only signal.
+    assert "Drop the announcer-voice" in sys_prompt
+
+    # Voice profile — preferred_swimmer_address + emoji policy.
+    assert "first name" in sys_prompt.lower()
+    assert "does NOT use emoji" in sys_prompt or "no emoji" in sys_prompt.lower()
+
+    # Brand guidelines — summary, do's/don'ts, prohibited words.
+    assert "Warm but bold" in sys_prompt
+    assert "Celebrate effort" in sys_prompt
+    assert "Compare swimmers" in sys_prompt
+    assert "loser" in sys_prompt
+
+    # Mandatory rules — must be marked as non-negotiable at the top.
+    assert "Never publish a swimmer's age" in sys_prompt
+    assert "NON-NEGOTIABLE" in sys_prompt
+
+    # The brief still carries the swimmer's first name explicitly so the
+    # LLM has a name to address even when the address rule is in the
+    # system prompt.
+    brief = captured.get("user", "")
+    assert "Lara Lane" in brief
+    assert "Test Invitational" in brief
+    # Three approved achievements must each appear as a bullet.
+    assert "400m Freestyle" in brief
+    assert "200m Freestyle" in brief
+    assert "100m Freestyle" in brief
+
+
+def test_spotlight_build_renders_saved_pack(gated_app, tmp_path, monkeypatch):
+    """After build, the /drafts/<pack_id> page renders 200 with the
+    composed caption present — i.e. the persisted stub-pack envelope
+    plumbs through to the view route end-to-end."""
+    def _stub_ask(system, user, **kw):
+        return "Lara took the meet by the throat."
+
+    import mediahub.ai_core as ai_core_pkg
+    monkeypatch.setattr(ai_core_pkg, "ask", _stub_ask)
+
+    run_id = "synth_run_2"
+    runs_dir = tmp_path / "runs_v4"
+    run = _synthetic_run_with_achievements(run_id, runs_dir)
+    swimmer_key = run["recognition_report"][
+        "ranked_achievements"
+    ][0]["achievement"]["swimmer_id"]
+
+    with gated_app.test_client() as c:
+        with c.session_transaction() as sess:
+            sess["active_profile_id"] = "acmeswim"
+        r1 = c.post(f"/spotlight/{run_id}/{swimmer_key}/build",
+                    follow_redirects=False)
+        assert r1.status_code == 302
+        loc = r1.headers["Location"]
+        r2 = c.get(loc)
+        assert r2.status_code == 200
+        html = r2.get_data(as_text=True)
+        assert "Lara took the meet by the throat" in html

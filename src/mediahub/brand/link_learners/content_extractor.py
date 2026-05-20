@@ -300,15 +300,25 @@ def extract_brand_dna(
         log.debug("content-extractor LLM call failed: %s", e)
         return _heuristic(raw_text)
     out = _normalise(raw)
-    # If the LLM didn't surface any palette_mentions, supplement with
-    # the regex scan over the raw body so the unified palette
-    # resolver has candidate colours to choose from. Without this the
-    # resolver gets zero signals from the website and the user lands
-    # on the setup page with an empty palette preview.
-    if not out.get("palette_mentions"):
-        scanned = _scan_hex_candidates(raw_text)
-        if scanned:
-            out["palette_mentions"] = scanned
+    # ALWAYS merge a regex scan of the full raw body into the palette
+    # candidates — not just when the LLM returns none. The LLM only
+    # sees the first ~6 KB of body, where the real brand colours often
+    # haven't appeared yet (they live further down, in inline <style>
+    # blocks or component CSS). On real club sites this meant the LLM
+    # returned only "#ffffff" from the visible header and the resolver
+    # had no choice but to paint the whole palette white. The regex
+    # scan covers the entire body and _scan_hex_candidates already
+    # drops pure white / black / near-grey, so merging surfaces the
+    # actual accent colours (e.g. a club's gold) for the resolver.
+    scanned = _scan_hex_candidates(raw_text)
+    if scanned:
+        merged = list(out.get("palette_mentions") or [])
+        seen = {h.lower() for h in merged}
+        for h in scanned:
+            if h.lower() not in seen:
+                merged.append(h)
+                seen.add(h.lower())
+        out["palette_mentions"] = merged[:12]
     # Empty LLM result → fall back to heuristic so the user's data
     # isn't silently dropped.
     has_signal = bool(out["voice_summary"] or out["keywords"]

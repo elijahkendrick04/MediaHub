@@ -30,6 +30,7 @@ import json
 import logging
 import math
 import os
+import re
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -149,6 +150,19 @@ def _hex_to_rgb(c: str) -> tuple[int, int, int]:
 def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     r, g, b = (max(0, min(255, int(v))) for v in rgb)
     return f"#{r:02X}{g:02X}{b:02X}"
+
+
+_BRAND_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _is_brand_hex(value) -> bool:
+    """True only for a real 3- or 6-digit CSS hex colour.
+
+    Used to decide whether a brief.palette role already carries a
+    confirmed brand colour (which must win) versus an empty / sentinel
+    slot the theme store may fill.
+    """
+    return isinstance(value, str) and bool(_BRAND_HEX_RE.match(value.strip()))
 
 
 def darken(hex_colour: str, amount: float = 0.25) -> str:
@@ -854,7 +868,17 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         try:
             from mediahub.theming.theme_store import palette_for_static
             p = palette_for_static(theme_json)
+            # The brief palette already carries the club's CONFIRMED brand
+            # colours (primary/secondary/accent from the BrandKit). Those
+            # win. The MD3 theme store is a single-seed projection that
+            # tone-shifts the brand for contrast and cannot represent a
+            # second brand colour — so for a navy+gold club it would emit
+            # a washed-out blue primary and drop the gold entirely. Let it
+            # only FILL a role the brief left unset, never override a
+            # confirmed brand hex.
             for k in ("primary", "secondary", "accent"):
+                if _is_brand_hex(palette.get(k)):
+                    continue
                 if isinstance(p.get(k), str) and p[k].startswith("#"):
                     palette[k] = p[k]
         except Exception:
