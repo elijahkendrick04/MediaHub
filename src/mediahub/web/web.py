@@ -449,29 +449,22 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
     return exp
 
 
-def _render_why_this_card(
-    ra: dict,
+def _render_why_inner(
+    exp: dict,
     *,
-    card_uuid: str,
+    ra: Optional[dict] = None,
     run_id: str = "",
+    card_uuid: str = "",
 ) -> str:
-    """Render the "Why this card?" disclosure HTML.
+    """Render the explanation-dependent body of a "Why this card?"
+    disclosure from a pre-built explanation dict.
 
-    Phase 1.4 changes the visibility default: the disclosure now opens
-    by default (``<details open>`` below) because the editorial
-    reasoning is the most marketable surface the product has — no
-    horizontal player can match per-card data-grounded "why".
-
-    The block is grounded: the headline / bullets come from the
-    ranker's factors and the source_lines are quoted verbatim from
-    the achievement's evidence entries. Two buttons:
-
-      • Copy reasoning — clipboard the plain-text reasoning.
-      • Use in next caption — when ``run_id`` is supplied, re-prompt
-        the caption LLM with the explanation as required content so
-        the visible intelligence flows back into the generated copy.
+    Split out of ``_render_why_this_card`` so the (LLM-backed) explanation
+    can be built lazily, one card at a time via ``api_why_card``, rather
+    than synchronously for every card during the review render. The block
+    stays grounded: headline / bullets come from the ranker + LLM, source
+    lines are quoted verbatim from the achievement's evidence.
     """
-    exp = _build_card_explanation(ra)
     headline = _h(exp.get("headline", ""))
     bullets = exp.get("bullets") or []
     source_lines = exp.get("source_lines") or []
@@ -563,19 +556,7 @@ def _render_why_this_card(
         run_id, _swim_id_for_btn, card_uuid,
     )
 
-    # Phase 1.4: explainer is now DEFAULT-VISIBLE everywhere. The
-    # editorial reasoning is the single most marketable surface MediaHub
-    # has — no horizontal player can match data-grounded "why" per
-    # card — so it shouldn't sit behind a click. The user can still
-    # collapse it via the disclosure triangle if they need pure
-    # caption-density.
     return f"""
-<details open class="why-card" style="margin-top:10px;padding:10px 12px;background:rgba(212,255,58,0.06);
-  border:1px solid rgba(212,255,58,0.25);border-radius:8px">
-  <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);user-select:none;
-    list-style:none;display:flex;align-items:center;gap:6px">
-    <span aria-hidden="true">&#9432;</span> Why this card?
-  </summary>
   <div style="margin-top:8px">
     <div style="font-size:13px;color:var(--ink);line-height:1.45;margin-bottom:6px">{headline}</div>
     {bullets_block}
@@ -591,8 +572,61 @@ def _render_why_this_card(
       {use_in_caption_btn}
     </div>
     {use_in_caption_panel}
-  </div>
-</details>"""
+  </div>"""
+
+
+def _why_card_cuid(card_uuid: str) -> str:
+    """DOM-id-safe slug for a card_uuid (shared by the lazy shell and the
+    api_why_card endpoint so the rendered element ids line up)."""
+    return "".join(
+        ch if (ch.isalnum() or ch in "_-") else "_" for ch in str(card_uuid)
+    )[:80]
+
+
+def _render_why_this_card(
+    ra: dict,
+    *,
+    card_uuid: str,
+    run_id: str = "",
+    ach_index: Optional[int] = None,
+    lazy: bool = False,
+) -> str:
+    """Render the "Why this card?" disclosure.
+
+    The explanation (headline + bullets + performance context) is written
+    by the active LLM — the ONLY LLM-backed surface on the review render
+    path. A typical meet produces 150+ cards, so building every card's
+    explanation inline made the review page fire 300+ blocking LLM calls
+    and take many minutes to render (long enough to block the gunicorn
+    worker until --max-requests recycled it). When ``lazy`` is set and an
+    ``ach_index`` + ``run_id`` are available, emit a placeholder instead
+    and let the page fetch each card's reasoning on demand via
+    ``api_why_card``; the disclosure stays default-open, the reasoning
+    just streams in. Eager mode (the default) is preserved for callers
+    and tests that want the fully-rendered block.
+    """
+    shell_open = (
+        '<details open class="why-card" style="margin-top:10px;padding:10px 12px;'
+        'background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.25);border-radius:8px">'
+        '<summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);'
+        'user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
+        '<span aria-hidden="true">&#9432;</span> Why this card?</summary>'
+    )
+    if lazy and ach_index is not None and run_id:
+        why_url = url_for("api_why_card", run_id=run_id, ach_index=int(ach_index))
+        return (
+            f'{shell_open}'
+            f'<div class="why-body" data-why-url="{_h(why_url)}" '
+            f'data-why-cuid="{_h(_why_card_cuid(card_uuid))}">'
+            f'<div class="muted" style="margin-top:8px;font-size:12px;color:var(--ink-muted)">'
+            f'Loading reasoning&hellip;</div></div></details>'
+        )
+    exp = _build_card_explanation(ra)
+    return (
+        f'{shell_open}'
+        f'{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}'
+        f'</details>'
+    )
 
 
 def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str, str]:
@@ -706,6 +740,19 @@ _TURN_INTO_TARGET = 20
 # Bound each run's log to the last N lines. A long pipeline emits ~20
 # messages but a bug could spam thousands — cap defensively.
 _RUN_LOG_LIMIT = 200
+# A run whose heartbeat hasn't advanced in this many seconds is treated
+# as dead: its gunicorn worker was recycled mid-pipeline (--max-requests)
+# or restarted, taking the daemon worker thread with it, or a network
+# call wedged past every per-call timeout. The status poller and the
+# startup reconciler then surface a terminal error instead of letting
+# the page spin forever. Generous on purpose — a single slow PB lookup
+# can chain a 45s + 60s LLM failover, so this must clear that worst case.
+_RUN_STALE_SECS = 180
+# Throttle for streaming the progress log to the DB from the worker's
+# progress callback. The in-memory entry updates on every line; the DB
+# (read by polls that land on the *other* gunicorn worker) only needs to
+# be fresh to the second.
+_RUN_DB_HEARTBEAT_SECS = 2.0
 
 
 def _maybe_evict_active_runs() -> None:
@@ -745,9 +792,54 @@ def _maybe_evict_turn_into_jobs() -> None:
 
 
 def _db():
-    conn = sqlite3.connect(DB_PATH)
+    # timeout + busy_timeout: with two gunicorn workers writing the same
+    # SQLite file (run-status updates, workflow state, progress streaming)
+    # a naive connect raises "database is locked" the instant they overlap.
+    # Waiting up to 5s for the lock turns those collisions into a brief
+    # stall instead of a 500 that the status poller would silently retry.
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
     return conn
+
+
+def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
+    """Seconds elapsed since an ISO-8601 timestamp, or None if unparseable."""
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds()
+    except (ValueError, TypeError):
+        return None
+
+
+def _persist_run_progress(run_id: str, status: str, log_list: list,
+                          error: Optional[str] = None) -> None:
+    """Best-effort stream of a run's status + progress log + heartbeat to
+    the DB. Polls that land on the gunicorn worker NOT running the
+    pipeline read this (the in-memory log lives only in the worker that
+    spawned the thread). Failures are swallowed — the in-memory entry
+    remains the primary source for same-worker polls."""
+    try:
+        conn = _db()
+        conn.execute(
+            "UPDATE runs SET status=?, progress_log=?, heartbeat_at=?, "
+            "error=COALESCE(?, error) WHERE id=?",
+            (status,
+             json.dumps((log_list or [])[-_RUN_LOG_LIMIT:]),
+             datetime.now(timezone.utc).isoformat(),
+             error, run_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def _init_db():
@@ -764,26 +856,77 @@ def _init_db():
             n_cards INTEGER,
             n_queue INTEGER,
             error TEXT,
-            file_name TEXT
+            file_name TEXT,
+            progress_log TEXT,       -- JSON array, streamed for cross-worker polls
+            heartbeat_at TEXT        -- ISO ts, advanced while the pipeline runs
         );
     """)
+    # Additive migration for DBs created before progress_log / heartbeat_at.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if "progress_log" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN progress_log TEXT")
+    if "heartbeat_at" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
     conn.commit()
     conn.close()
 
 
+def _reconcile_interrupted_runs():
+    """Stamp interrupted runs as failed at startup.
+
+    The pipeline runs in a daemon thread inside a gunicorn worker. When a
+    worker is recycled (--max-requests) or the container restarts, that
+    thread dies WITHOUT running _persist_run or the error handler, leaving
+    the DB row stuck at 'queued'/'running' forever — the status poller then
+    spins indefinitely. A daemon thread never survives its process, so any
+    non-terminal run whose heartbeat has gone stale (or was never set) is
+    definitively dead. Gate strictly on staleness so a run still in flight
+    on the *other* live worker (fresh heartbeat) is never wrongly killed.
+    """
+    try:
+        conn = _db()
+        rows = conn.execute(
+            "SELECT id, heartbeat_at, created_at FROM runs "
+            "WHERE status IN ('queued','running')"
+        ).fetchall()
+        dead = []
+        for r in rows:
+            age = _iso_age_secs(r["heartbeat_at"] or r["created_at"])
+            if age is None or age > _RUN_STALE_SECS:
+                dead.append(r["id"])
+        if dead:
+            conn.executemany(
+                "UPDATE runs SET status='error', error=? WHERE id=?",
+                [("Processing was interrupted before it finished (the server "
+                  "restarted mid-run). Please upload the file again.", d)
+                 for d in dead],
+            )
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 _init_db()
+_reconcile_interrupted_runs()
 
 
 def _prune_orphaned_runs():
-    """Remove rows from `runs` whose JSON file no longer exists on disk.
+    """Remove finished rows from `runs` whose JSON file no longer exists.
 
     The published sandbox is ephemeral, so when we redeploy the database may
     survive while the runs/<id>.json files are gone. Without this prune the
     home page lists dozens of broken /review/<id> links.
+
+    Scoped to status='done': a 'queued'/'running' row is an in-flight run
+    whose JSON hasn't been written yet (deleting it here — which the previous
+    unscoped query did on every worker restart — is exactly what made an
+    active run vanish into a "run not found" spinner), and a freshly-failed
+    'error' row is kept so the polling user still sees the failure reason.
     """
     try:
         conn = _db()
-        rows = conn.execute("SELECT id FROM runs").fetchall()
+        rows = conn.execute("SELECT id FROM runs WHERE status='done'").fetchall()
         stale = []
         for r in rows:
             run_id = r["id"] if hasattr(r, "keys") else r[0]
@@ -1606,14 +1749,20 @@ def _start_run(file_bytes: bytes, file_name: str,
             "log": ["Run queued"],
             "started_at": started_at,
             "file_name": file_name,
+            # epoch seconds — advanced on every progress line. Lets the
+            # status poller distinguish "still working" from "the worker
+            # died mid-run" without waiting on a wall-clock guess.
+            "heartbeat": time.time(),
         }
         # Evict completed older runs to keep the dict bounded.
         _maybe_evict_active_runs()
     conn = _db()
     conn.execute(
-        """INSERT INTO runs (id, created_at, status, file_name, profile_id)
-           VALUES (?,?,?,?,?)""",
-        (run_id, started_at, "queued", file_name, profile_id or ""),
+        """INSERT INTO runs (id, created_at, status, file_name, profile_id,
+                             progress_log, heartbeat_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (run_id, started_at, "queued", file_name, profile_id or "",
+         json.dumps(["Run queued"]), started_at),
     )
     conn.commit()
     conn.close()
@@ -1623,14 +1772,22 @@ def _start_run(file_bytes: bytes, file_name: str,
             entry = _active_runs.get(run_id)
             if entry is not None:
                 entry["status"] = "running"
+                entry["heartbeat"] = time.time()
+        _persist_run_progress(run_id, "running", ["Run queued"])
+
+        # Throttle DB writes: the in-memory log updates on every line, but
+        # the DB only needs to be fresh to the second for cross-worker polls.
+        _last_db = [0.0]
 
         def cb(msg: str):
+            now = time.time()
             with _active_lock:
                 entry = _active_runs.get(run_id)
                 if entry is None:
                     # Run was evicted from the bounded cache while in
                     # flight — silently drop the progress line.
                     return
+                entry["heartbeat"] = now
                 log_list = entry.setdefault("log", [])
                 log_list.append(msg)
                 # Cap each run's progress log so a buggy progress
@@ -1643,6 +1800,11 @@ def _start_run(file_bytes: bytes, file_name: str,
                     entry["log"] = (
                         log_list[:5] + log_list[-keep_tail:]
                     )
+                snapshot = list(entry["log"])
+            # Stream to the DB outside the lock (SQLite write is slow-ish).
+            if now - _last_db[0] >= _RUN_DB_HEARTBEAT_SECS:
+                _last_db[0] = now
+                _persist_run_progress(run_id, "running", snapshot)
 
         def _record_terminal(status: str, error: Optional[str] = None) -> None:
             """Stamp the in-memory entry with a terminal status. The
@@ -1655,6 +1817,7 @@ def _start_run(file_bytes: bytes, file_name: str,
                 if entry is None:
                     return
                 entry["status"] = status
+                entry["heartbeat"] = time.time()
                 if error is not None:
                     entry["error"] = error
 
@@ -6786,59 +6949,103 @@ def create_app() -> Flask:
 
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
+    <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for('upload')}">Try another file</a>
     <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
   </div>
 </div>
 
 <script>
 (function() {{
-  // Round-3 cleanup: the previous version had a STAGE_PATTERNS regex map,
-  // a parallel STAGES array, AND a duplicate labels[] array — all manually
-  // trying to categorise log lines into one of 5 stages. We trust the
-  // pipeline's own log voice instead: just surface the most recent line.
   var STATUS_URL = {json.dumps(_status_url)};
   var REVIEW_URL = {json.dumps(_review_url)};
-  function setStatus(status, lastLine) {{
-    var statusEl = document.getElementById('mh-current-stage');
-    var bar = document.querySelector('.mh-progress-bar');
-    if (status === 'done')  {{
-      statusEl.textContent = 'Complete';
-      bar.classList.remove('indeterminate');
+  // Poll cadence. The previous build polled every 800ms with no cap and
+  // no terminal handling for unknown/error responses — a stuck or missing
+  // run span the spinner forever, and the request flood helped trip
+  // gunicorn's --max-requests recycle (which then killed in-flight runs).
+  var BASE_MS = 1500, SLOW_MS = 8000, MAX_BACKOFF_MS = 6000;
+  var SOFT_CAP_MS = 90000;     // reassure the user it's still working
+  var HARD_CAP_MS = 480000;    // 8 min: slow down, keep going (big meets)
+  var FAIL_GIVEUP = 8;         // consecutive transport failures before we quit
+  var startedAt = Date.now(), fails = 0, stopped = false;
+  var stage = document.getElementById('mh-current-stage');
+  var stepEl = document.getElementById('mh-step-count');
+  var logEl = document.getElementById('log');
+  var bar = document.querySelector('.mh-progress-bar');
+  var lede = document.querySelector('.lede');
+  var reviewLink = document.getElementById('review-link');
+  var retryLink = document.getElementById('retry-link');
+
+  function fillBar(colour) {{
+    if (!bar) return;
+    bar.classList.remove('indeterminate');
+    if (bar.firstElementChild) {{
+      if (colour) bar.firstElementChild.style.background = colour;
       bar.firstElementChild.style.width = '100%';
-    }} else if (status === 'error') {{
-      statusEl.textContent = 'Run failed';
-      bar.classList.remove('indeterminate');
-      bar.firstElementChild.style.background = 'var(--bad)';
-      bar.firstElementChild.style.width = '100%';
-    }} else {{
-      statusEl.textContent = lastLine || 'Starting…';
-      bar.classList.add('indeterminate');
     }}
   }}
+  function showStuck(msg) {{
+    stopped = true;
+    if (stage) stage.textContent = 'Stopped';
+    fillBar('var(--bad)');
+    if (reviewLink) reviewLink.style.display = 'inline-flex';
+    if (retryLink) retryLink.style.display = 'inline-flex';
+    if (lede) lede.textContent = msg;
+    if (window.MH) MH.toast(msg, 'error', 9000);
+  }}
   async function poll() {{
+    if (stopped) return;
+    var waited = Date.now() - startedAt, r, j;
     try {{
-      var r = await fetch(STATUS_URL, {{cache:'no-store'}});
-      var j = await r.json();
-      var log = j.log || [];
-      var logEl = document.getElementById('log');
-      logEl.textContent = log.join('\\n');
-      logEl.scrollTop = logEl.scrollHeight;
-      document.getElementById('mh-step-count').textContent =
-        log.length + ' step' + (log.length === 1 ? '' : 's');
-      setStatus(j.status, log[log.length - 1] || '');
-      if (j.status === 'done') {{
-        document.getElementById('review-link').style.display = 'inline-flex';
-        if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
-        setTimeout(function() {{ location.replace(REVIEW_URL); }}, 1200);
+      r = await fetch(STATUS_URL, {{cache:'no-store'}});
+      if (!r.ok && r.status !== 404) throw new Error('http ' + r.status);
+      j = await r.json();
+    }} catch (e) {{
+      fails++;
+      if (fails >= FAIL_GIVEUP && waited > HARD_CAP_MS) {{
+        showStuck("We lost contact with the server while processing. Open the review queue to check whether it finished, or try uploading again.");
         return;
       }}
-      if (j.status === 'error') {{
-        logEl.textContent += '\\n\\nERROR: ' + (j.error || 'unknown');
-        if (window.MH) MH.toast('Run failed: ' + (j.error || 'see log'), 'error', 8000);
-        return;
-      }}
-    }} catch (e) {{}}
-    setTimeout(poll, 800);
+      setTimeout(poll, Math.min(MAX_BACKOFF_MS, BASE_MS * Math.pow(1.6, Math.min(fails, 5))));
+      return;
+    }}
+    fails = 0;
+    var status = (j && j.status) || 'unknown';
+    var log = (j && j.log) || [];
+    if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
+    if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+
+    if (status === 'done') {{
+      stopped = true;
+      if (stage) stage.textContent = 'Complete';
+      fillBar(null);
+      if (reviewLink) reviewLink.style.display = 'inline-flex';
+      if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
+      setTimeout(function() {{ location.replace(REVIEW_URL); }}, 900);
+      return;
+    }}
+    if (status === 'error') {{
+      stopped = true;
+      if (stage) stage.textContent = 'Run failed';
+      fillBar('var(--bad)');
+      if (retryLink) retryLink.style.display = 'inline-flex';
+      var emsg = (j && j.error) || 'unknown';
+      if (logEl) logEl.textContent += '\\n\\nERROR: ' + emsg;
+      if (lede) lede.textContent = 'The pipeline stopped before it could finish. ' + emsg;
+      if (window.MH) MH.toast('Run failed: ' + emsg, 'error', 9000);
+      return;
+    }}
+    if (status === 'unknown') {{
+      // Row is gone (cleared, deleted, or a different deployment). Don't spin.
+      showStuck("We can't find this run any more — it may have been cleared. Please upload the file again.");
+      return;
+    }}
+    // queued / running — keep the indeterminate bar moving.
+    if (stage) stage.textContent = log[log.length - 1] || 'Starting…';
+    if (bar) bar.classList.add('indeterminate');
+    if (waited > SOFT_CAP_MS && lede) {{
+      lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
+    }}
+    setTimeout(poll, waited > HARD_CAP_MS ? SLOW_MS : BASE_MS);
   }}
   poll();
 }})();
@@ -6846,24 +7053,100 @@ def create_app() -> Flask:
 """
         return _layout("Run progress", body, active="create")
 
+    # A run reported 'running'/'queued' but whose heartbeat has gone stale
+    # is dead (its worker was recycled or it wedged past every per-call
+    # timeout). Surface it as a terminal error so the poller stops instead
+    # of spinning forever.
+    _STALE_ERR = ("Processing stopped responding — the server worker was "
+                  "recycled mid-run or a step timed out. Please upload the "
+                  "file again.")
+
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
         # Tenant gate: status polling would otherwise let a foreign org
         # infer when another org's pipeline finishes.
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
             return jsonify({"status": "unknown", "error": "Run not found"}), 404
-        active = _active_runs.copy_value(run_id)
-        if active:
-            return jsonify(active)
-        # Fallback to persisted status
+
+        # In-memory snapshot (the worker that spawned the pipeline). Copy
+        # the log list *under the lock* — copy_value only shallow-copies the
+        # dict, so jsonify could otherwise iterate the list while the worker
+        # appends to it ("list changed size during iteration").
+        with _active_lock:
+            entry = _active_runs.get(run_id)
+            snap = None
+            if isinstance(entry, dict):
+                snap = {
+                    "status": entry.get("status"),
+                    "error": entry.get("error"),
+                    "log": list(entry.get("log") or []),
+                    "started_at": entry.get("started_at"),
+                    "heartbeat": entry.get("heartbeat"),
+                }
+        if snap is not None:
+            status = snap.get("status")
+            if status in ("queued", "running"):
+                hb = snap.get("heartbeat")
+                if hb is not None and (time.time() - hb) > _RUN_STALE_SECS:
+                    snap["status"] = "error"
+                    snap["error"] = _STALE_ERR
+            return jsonify(snap)
+
+        # Fallback to persisted status — this is the path every poll takes
+        # when it lands on the *other* gunicorn worker, so it must return the
+        # streamed progress log (not an empty one) and honour staleness.
         conn = _db()
         row = conn.execute(
-            "SELECT status, error FROM runs WHERE id = ?", (run_id,)
+            "SELECT status, error, progress_log, heartbeat_at "
+            "FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
         conn.close()
         if not row:
             return jsonify({"status": "unknown", "error": "Run not found"}), 404
-        return jsonify({"status": row["status"], "error": row["error"], "log": []})
+        status = row["status"]
+        error = row["error"]
+        try:
+            plog = json.loads(row["progress_log"]) if row["progress_log"] else []
+        except (ValueError, TypeError):
+            plog = []
+        if status in ("queued", "running"):
+            age = _iso_age_secs(row["heartbeat_at"])
+            if age is None or age > _RUN_STALE_SECS:
+                status = "error"
+                error = error or _STALE_ERR
+        return jsonify({"status": status, "error": error, "log": plog})
+
+    @app.route("/api/runs/<run_id>/why/<int:ach_index>")
+    def api_why_card(run_id, ach_index):
+        """Build one card's "Why this card?" reasoning on demand.
+
+        The review page renders these lazily (placeholder + this fetch) so
+        the LLM-backed explanation for a 150+ card meet no longer blocks the
+        whole page render. ``ach_index`` is the position in the persisted
+        ``ranked_achievements`` list, which is stable for a finished run.
+        """
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()) or not data:
+            return ("Run not found", 404)
+        rr = data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        if ach_index < 0 or ach_index >= len(ranked):
+            return ("", 404)
+        ra = ranked[ach_index]
+        meet_ctx = rr.get("meet_context") or {}
+        cuid = _why_card_cuid(request.args.get("cuid") or f"idx-{ach_index}")
+        try:
+            exp = _build_card_explanation(ra, meet_ctx)
+        except Exception as e:
+            exp = {
+                "headline": "AI explanation unavailable.",
+                "bullets": [],
+                "source_lines": _build_source_lines_from_evidence(
+                    ra.get("achievement") or {}),
+                "ai_error": str(e),
+            }
+        html = _render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=cuid)
+        return app.response_class(html, mimetype="text/html")
 
     # ---- REVIEW (V5 Recognition UI) ------------------------------------
     @app.route("/review/<run_id>")
@@ -6990,7 +7273,7 @@ def create_app() -> Flask:
             }.get(band, '')
 
         ach_rows_html = ""
-        for ra in top_achs:
+        for _why_idx, ra in enumerate(top_achs):
             a = ra.get('achievement', {})
             band = ra.get('quality_band', 'nice')
             prio = ra.get('priority', 0.0)
@@ -7026,7 +7309,8 @@ def create_app() -> Flask:
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
             _why_uuid = str(a.get('swim_id', f'top-{rank}')).replace(':', '_').replace(',', '_').replace('/', '_')
-            why_html = _render_why_this_card(ra, card_uuid=f"top-{_why_uuid}", run_id=run_id)
+            why_html = _render_why_this_card(ra, card_uuid=f"top-{_why_uuid}", run_id=run_id,
+                                             ach_index=_why_idx, lazy=True)
             ach_rows_html += f"""
 <div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -7422,7 +7706,7 @@ function turnMeetIntoPack() {{
         # --- V7: add status pills to achievement rows
         # Rebuild ach_rows_html with workflow status pills
         ach_rows_html_wf = ""
-        for ra in ranked_achs:
+        for _why_idx, ra in enumerate(ranked_achs):
             a = ra.get("achievement", {})
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
@@ -7575,7 +7859,11 @@ function turnMeetIntoPack() {{
             _wf_api_url = url_for("api_workflow_set", run_id=run_id, card_id=card_id_raw)
 
             # V9: "Why this card?" &mdash; plain-English, source-grounded reasoning.
-            why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}", run_id=run_id)
+            # Lazy: a 150+ card meet would otherwise fire 300+ blocking LLM
+            # calls during this render. Each card's reasoning streams in via
+            # api_why_card once it scrolls into view.
+            why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}", run_id=run_id,
+                                             ach_index=_why_idx, lazy=True)
 
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
@@ -8088,6 +8376,58 @@ function copyWhyCard(btn, taId) {{
     document.body.removeChild(t);
   }}
 }}
+
+// Lazy "Why this card?" loader. Each card's reasoning is LLM-backed; a big
+// meet has 150+ cards, so fetching them all up front (or server-side during
+// the page render) is what made /review take minutes. We fetch each card's
+// reasoning only when it scrolls near the viewport, a few at a time.
+(function() {{
+  var inflight = 0, MAXQ = 3, queue = [];
+  function pump() {{
+    while (inflight < MAXQ && queue.length) {{ loadWhy(queue.shift()); }}
+  }}
+  function loadWhy(el) {{
+    if (!el || el.dataset.whyLoaded) {{ return; }}
+    el.dataset.whyLoaded = '1';
+    var url = el.getAttribute('data-why-url');
+    if (!url) {{ return; }}
+    var cuid = el.getAttribute('data-why-cuid') || '';
+    var full = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cuid=' + encodeURIComponent(cuid);
+    inflight++;
+    fetch(full, {{cache:'no-store'}})
+      .then(function(r) {{ if (!r.ok) {{ throw new Error('http ' + r.status); }} return r.text(); }})
+      .then(function(html) {{ el.innerHTML = html; }})
+      .catch(function() {{
+        el.dataset.whyLoaded = '';
+        el.innerHTML = '<div class="muted" style="margin-top:8px;font-size:12px;color:var(--ink-muted)">'
+          + 'Could not load the reasoning. <a href="#" onclick="return mhRetryWhy(this)">Retry</a></div>';
+      }})
+      .then(function() {{ inflight--; pump(); }});
+  }}
+  window.mhRetryWhy = function(a) {{
+    var body = a.closest ? a.closest('.why-body') : null;
+    if (body) {{ body.dataset.whyLoaded = ''; queue.push(body); pump(); }}
+    return false;
+  }};
+  function init() {{
+    var bodies = Array.prototype.slice.call(document.querySelectorAll('.why-body[data-why-url]'));
+    if (!bodies.length) {{ return; }}
+    if ('IntersectionObserver' in window) {{
+      var obs = new IntersectionObserver(function(entries) {{
+        entries.forEach(function(e) {{
+          if (e.isIntersecting) {{ obs.unobserve(e.target); queue.push(e.target); pump(); }}
+        }});
+      }}, {{rootMargin: '600px 0px'}});
+      bodies.forEach(function(b) {{ obs.observe(b); }});
+    }} else {{
+      bodies.forEach(function(b) {{ queue.push(b); }});
+      pump();
+    }}
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', init);
+  }} else {{ init(); }}
+}})();
 
 function copyActiveTone(btn, cardId) {{
   // Find the active tone panel

@@ -425,13 +425,20 @@ def _enrich_pbs_via_discovery(
     from mediahub.pb_discovery import discover_swimmer_pbs
 
     snapshots: dict = {}
-    for key in sorted(our_swimmer_keys):
+    keys = sorted(our_swimmer_keys)
+    total = len(keys)
+    for idx, key in enumerate(keys, start=1):
         sw = meet.swimmers.get(key)
         if sw is None:
             continue
         full_name = f"{sw.first_name} {sw.last_name}".strip()
         if not full_name:
             continue
+        # Emit a per-swimmer step. PB discovery is the slowest phase (each
+        # lookup can chain an LLM call + HTTP fetches), so without this the
+        # progress log — and the run's heartbeat — would freeze for minutes,
+        # making the page look hung and tripping the stale-run watchdog.
+        step(f"Looking up personal bests {idx}/{total}: {full_name}")
         try:
             disc = discover_swimmer_pbs(
                 name=full_name,
