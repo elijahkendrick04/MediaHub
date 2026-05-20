@@ -421,34 +421,80 @@ def _enrich_pbs_via_discovery(
     """
     Run pb_discovery for each of our swimmers and bridge each result
     into the snapshot shape consumed by V3/V5 history.
-    """
-    from mediahub.pb_discovery import discover_swimmer_pbs
 
-    snapshots: dict = {}
-    keys = sorted(our_swimmer_keys)
-    total = len(keys)
-    for idx, key in enumerate(keys, start=1):
+    PB discovery is the slowest pipeline phase: each swimmer chains a few web
+    searches plus up to three page fetches — tens of seconds of network I/O.
+    The lookups are independent and I/O-bound, so we fan them out across a
+    bounded thread pool; a 38-swimmer meet drops from several minutes to well
+    under one. Per-swimmer caches and the trust ledger are concurrency-safe.
+    Set MEDIAHUB_PB_DISCOVERY_PARALLEL=0 to force the serial path (e.g. for
+    deterministic tests); MEDIAHUB_PB_DISCOVERY_WORKERS tunes the pool size.
+    """
+    import os
+    from mediahub.pb_discovery import discover_swimmer_pbs
+    from .pb_bridge import discovery_to_snapshot
+
+    # Resolve the swimmers we actually need to research (drop missing /
+    # nameless keys up front so the progress count reflects real work).
+    targets: list[tuple[str, str]] = []
+    for key in sorted(our_swimmer_keys):
         sw = meet.swimmers.get(key)
         if sw is None:
             continue
         full_name = f"{sw.first_name} {sw.last_name}".strip()
         if not full_name:
             continue
-        # Emit a per-swimmer step. PB discovery is the slowest phase (each
-        # lookup can chain an LLM call + HTTP fetches), so without this the
-        # progress log — and the run's heartbeat — would freeze for minutes,
-        # making the page look hung and tripping the stale-run watchdog.
+        targets.append((key, full_name))
+
+    snapshots: dict = {}
+    total = len(targets)
+    if total == 0:
+        return snapshots
+
+    def _lookup(key: str, full_name: str) -> tuple[str, object]:
+        disc = discover_swimmer_pbs(name=full_name, club=club_name, run_id=run_id)
+        return key, discovery_to_snapshot(disc, swimmer_key=key)
+
+    parallel = (
+        os.environ.get("MEDIAHUB_PB_DISCOVERY_PARALLEL", "1") != "0"
+        and total > 1
+    )
+
+    if parallel:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        max_workers = int(os.environ.get("MEDIAHUB_PB_DISCOVERY_WORKERS", "6") or "6")
+        max_workers = max(1, min(max_workers, total))
+        # One up-front line so the page shows activity immediately; the
+        # per-completion lines below keep the heartbeat fresh (well inside the
+        # stale-run watchdog) and report a monotonic done-count even though
+        # lookups finish out of order.
+        step(f"Looking up personal bests for {total} swimmers "
+             f"({max_workers} in parallel)…")
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_lookup, key, name): name
+                       for key, name in targets}
+            done = 0
+            # This loop body runs only in the calling thread, so the counter,
+            # the step() emissions and the snapshots dict need no extra locking.
+            for fut in as_completed(futures):
+                name = futures[fut]
+                done += 1
+                try:
+                    key, snap = fut.result()
+                except Exception as exc:
+                    step(f"PB lookup error for {name}: {exc}")
+                    continue
+                snapshots[key] = snap
+                step(f"Looking up personal bests {done}/{total}: {name}")
+        return snapshots
+
+    # Serial path (single swimmer, or explicitly disabled).
+    for idx, (key, full_name) in enumerate(targets, start=1):
         step(f"Looking up personal bests {idx}/{total}: {full_name}")
         try:
-            disc = discover_swimmer_pbs(
-                name=full_name,
-                club=club_name,
-                run_id=run_id,
-            )
+            rkey, snap = _lookup(key, full_name)
         except Exception as exc:
             step(f"PB lookup error for {full_name}: {exc}")
             continue
-        from .pb_bridge import discovery_to_snapshot
-        snap = discovery_to_snapshot(disc, swimmer_key=key)
-        snapshots[key] = snap
+        snapshots[rkey] = snap
     return snapshots
