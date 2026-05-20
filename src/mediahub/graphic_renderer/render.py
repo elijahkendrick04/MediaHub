@@ -616,23 +616,178 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
 # Logo / sponsor / result-chip block builders
 # ---------------------------------------------------------------------------
 
-def _build_logo_block(brand_kit, logo_path: Optional[str | Path]) -> str:
-    """Return inner HTML for ``.brand-corner .logo-mark``."""
+# Cache preprocessed logos by (abs path, mtime, size) so the trim/knockout
+# pixel work runs once per logo per process rather than on every card render.
+_LOGO_PREP_CACHE: dict[tuple, tuple[str, Optional[str]]] = {}
+
+
+def _knockout_uniform_background(img):
+    """Flood-fill a connected, near-uniform border background to transparent.
+
+    Handles white-background PNGs and JPG logos that otherwise render as an
+    opaque rectangle inside the chip. Conservative: only fills regions
+    connected to the four corners (interior fills of the same colour are
+    preserved), and reverts entirely if the fill would erase almost the whole
+    image (i.e. the logo itself was that colour).
+    """
+    from PIL import Image, ImageDraw
+    w, h = img.size
+    if w < 4 or h < 4:
+        return img
+    corners = [img.getpixel((0, 0)), img.getpixel((w - 1, 0)),
+               img.getpixel((0, h - 1)), img.getpixel((w - 1, h - 1))]
+    if all(len(c) == 4 and c[3] < 32 for c in corners):
+        return img  # already transparent border — nothing to do
+
+    def _close(a, b, t=28):
+        return all(abs(a[i] - b[i]) <= t for i in range(3))
+
+    base = corners[0]
+    if not all(_close(base, c) for c in corners[1:]):
+        return img  # non-uniform corners → real imagery, leave it alone
+
+    rgb = img.convert("RGB")
+    SENT = (1, 254, 2)  # improbable sentinel fill colour
+    for (x, y) in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        try:
+            ImageDraw.floodfill(rgb, (x, y), SENT, thresh=36)
+        except Exception:
+            return img
+    out = img.copy()
+    src = rgb.load()
+    dst = out.load()
+    removed = 0
+    for y in range(h):
+        for x in range(w):
+            if src[x, y] == SENT:
+                r, g, b, a = dst[x, y]
+                dst[x, y] = (r, g, b, 0)
+                removed += 1
+    if removed > 0.92 * (w * h):
+        return img  # would blank the logo — keep the original
+    return out
+
+
+def _logo_dominant_hex(img) -> Optional[str]:
+    """The logo's representative brand colour — average of its saturated,
+    opaque pixels (falls back to all opaque pixels). Used only to decide the
+    chip treatment, never to recolour the logo."""
+    rs = gs = bs = n = 0
+    rs2 = gs2 = bs2 = n2 = 0
+    for px in img.getdata():
+        if len(px) != 4:
+            continue
+        r, g, b, a = px
+        if a < 64:
+            continue
+        n2 += 1; rs2 += r; gs2 += g; bs2 += b
+        if max(r, g, b) - min(r, g, b) < 24:
+            continue  # near-neutral — skip when looking for the brand hue
+        n += 1; rs += r; gs += g; bs += b
+    if n >= max(20, n2 * 0.02):
+        return _rgb_to_hex((rs / n, gs / n, bs / n))
+    if n2:
+        return _rgb_to_hex((rs2 / n2, gs2 / n2, bs2 / n2))
+    return None
+
+
+def _prepare_logo_data_uri(logo_path: str | Path) -> tuple[str, Optional[str]]:
+    """Clean a raster logo for crisp, integrated placement.
+
+    Knocks out a uniform background, auto-trims whitespace, adds a small
+    transparent clear-zone, and renders at a crisp size. Returns
+    ``(png_data_uri, dominant_hex)``. SVGs are embedded as-is (no dominant
+    colour). Results are cached per file.
+    """
+    p = Path(logo_path)
+    suffix = p.suffix.lower().lstrip(".")
+    if suffix == "svg":
+        return _img_to_data_uri(logo_path), None
+    try:
+        st = p.stat()
+        key = (str(p.resolve()), int(st.st_mtime), int(st.st_size))
+    except Exception:
+        key = None
+    if key is not None and key in _LOGO_PREP_CACHE:
+        return _LOGO_PREP_CACHE[key]
+
+    import io
+    from PIL import Image
+    img = Image.open(p).convert("RGBA")
+    if max(img.size) > 400:
+        img.thumbnail((400, 400), Image.LANCZOS)
+    img = _knockout_uniform_background(img)
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    pad = max(2, int(0.06 * max(img.size)))
+    canvas = Image.new("RGBA", (img.size[0] + 2 * pad, img.size[1] + 2 * pad), (0, 0, 0, 0))
+    canvas.paste(img, (pad, pad), img)
+    img = canvas
+    target = 288  # ~3x the 96px chip so it stays sharp
+    if max(img.size) < target:
+        scale = target / max(img.size)
+        img = img.resize((int(img.size[0] * scale), int(img.size[1] * scale)), Image.LANCZOS)
+    dom = _logo_dominant_hex(img)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    result = (uri, dom)
+    if key is not None:
+        _LOGO_PREP_CACHE[key] = result
+    return result
+
+
+def _decide_logo_mark_mod(dominant_hex: Optional[str], surface_hex: str) -> str:
+    """Pick the chip treatment using the deterministic ΔE2000 / APCA gates.
+
+    Returns a class modifier appended to ``.logo-mark``:
+      ""                  → default white chip
+      " logo-mark--bare"  → no chip; the logo is distinct enough to sit bare
+      " logo-mark--dark"  → dark chip; the logo is too light for a white chip
+    """
+    if not dominant_hex or not surface_hex:
+        return ""
+    try:
+        from mediahub.theming.logo_chip import decide_logo_chip
+        if decide_logo_chip(dominant_hex, surface_hex).mode == "bare":
+            return " logo-mark--bare"
+        # Chip needed against the surface — choose its colour: white unless the
+        # logo is too close to white (then a white chip would hide it).
+        if decide_logo_chip(dominant_hex, "#FFFFFF").mode == "chip":
+            return " logo-mark--dark"
+    except Exception:
+        return ""
+    return ""
+
+
+def _build_logo_treatment(
+    brand_kit, logo_path: Optional[str | Path], surface_hex: str = "",
+) -> tuple[str, str]:
+    """Return ``(inner_html, logo_mark_modifier)`` for ``.brand-corner .logo-mark``."""
     if logo_path:
         try:
-            uri = _img_to_data_uri(logo_path)
-            return f'<img src="{uri}" alt="logo" />'
+            uri, dom = _prepare_logo_data_uri(logo_path)
+            return f'<img src="{uri}" alt="logo" />', _decide_logo_mark_mod(dom, surface_hex)
         except Exception:
-            pass
+            try:
+                return f'<img src="{_img_to_data_uri(logo_path)}" alt="logo" />', ""
+            except Exception:
+                pass
     # SVG logo string?
     svg = getattr(brand_kit, "logo_svg", None)
     if svg and isinstance(svg, str) and svg.lstrip().startswith("<"):
-        return svg
+        return svg, ""
     # Text-mark fallback: club initials
     name = getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or "CLUB"
     parts = [w for w in str(name).replace("Swimming Club", "").split() if w]
     initials = "".join(p[0].upper() for p in parts[:3]) or "CL"
-    return initials
+    return initials, ""
+
+
+def _build_logo_block(brand_kit, logo_path: Optional[str | Path]) -> str:
+    """Return inner HTML for ``.brand-corner .logo-mark`` (treatment-agnostic)."""
+    return _build_logo_treatment(brand_kit, logo_path)[0]
 
 
 def _build_athlete_block(athlete_data_uri: Optional[str], full_name: str) -> str:
@@ -846,6 +1001,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
                          logo_block: str,
                          result_chip: str,
                          sponsor_block: str,
+                         logo_mark_mod: str = "",
                          theme_json: Optional[dict] = None) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
@@ -1048,6 +1204,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "TEXT_ONLY_OPEN": "<!--text-only " if has_photo else "",
         "TEXT_ONLY_CLOSE": " text-only-->" if has_photo else "",
         "LOGO_BLOCK": logo_block,
+        "LOGO_MARK_MOD": logo_mark_mod,
         "RESULT_CHIP_BLOCK": result_chip,
         "SPONSOR_BLOCK": sponsor_block,
         "MEDAL_BADGE_BLOCK": medal_badge_html,
@@ -1654,11 +1811,20 @@ def render_brief(
         except Exception:
             venue_uri = None
 
-    # Build common replacements
+    # Build common replacements. The logo surface proxy is the brand primary
+    # (the dark ground the bottom-left logo usually sits over) — used only to
+    # pick chip vs. bare, never to recolour the logo.
+    _logo_surface = (
+        (brief.palette or {}).get("primary")
+        or getattr(brand_kit, "primary_colour", "")
+        or "#0A2540"
+    )
+    _logo_inner, _logo_mod = _build_logo_treatment(brand_kit, logo_path, _logo_surface)
     base_repl = _common_replacements(
         brief, width, height, brand_kit,
         athlete_data_uri=athlete_uri,
-        logo_block=_build_logo_block(brand_kit, logo_path),
+        logo_block=_logo_inner,
+        logo_mark_mod=_logo_mod,
         result_chip=_build_result_chip(
             "Time" if (brief.text_layers or {}).get("event_name") else "Result",
             (brief.text_layers or {}).get("result_value", ""),

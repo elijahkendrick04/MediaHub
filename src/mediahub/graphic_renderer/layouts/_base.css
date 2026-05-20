@@ -254,6 +254,19 @@ body {
   object-fit: contain;
   border-radius: 8px;
 }
+/* Adaptive chip treatment (decided by theming.logo_chip ΔE2000/APCA gates):
+   --bare drops the chip when the logo is distinct enough to sit directly on
+   the graphic; --dark swaps to a dark chip when the logo is too light to read
+   on white. Default (no modifier) keeps the safe white chip. */
+.brand-corner .logo-mark--bare {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+}
+.brand-corner .logo-mark--bare img { border-radius: 0; }
+.brand-corner .logo-mark--dark {
+  background: rgba(13,16,20,0.92);
+}
 .brand-corner .text-block {
   display: flex; flex-direction: column; line-height: 1.15;
 }
