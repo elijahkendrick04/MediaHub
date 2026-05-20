@@ -96,6 +96,11 @@ class TestHealthzRecordsHeartbeat:
         # Hit /healthz once.
         resp = c.get("/healthz")
         assert resp.status_code == 200
+        # The heartbeat write is dispatched off the request path so the
+        # liveness probe never blocks on disk; flush the queue before
+        # asserting the row landed.
+        import mediahub.web.web as wm
+        wm._HEARTBEAT_QUEUE.join()
         # The uptime log should now have one row.
         import mediahub.observability.uptime as upt
         latest = upt.latest_heartbeat()
@@ -112,6 +117,9 @@ class TestHealthzRecordsHeartbeat:
         assert resp.status_code in (200, 503)
         body = resp.get_json() or {}
         expected_ok = bool(body.get("ok"))
+        # Heartbeat write is async — flush before asserting (see above).
+        import mediahub.web.web as wm
+        wm._HEARTBEAT_QUEUE.join()
         import mediahub.observability.uptime as upt
         latest = upt.latest_heartbeat()
         assert latest is not None

@@ -12,6 +12,7 @@ file. Followed by 3 independent verification subtasks at the bottom.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -244,6 +245,7 @@ class TestM5StatusAndReread:
         with client as c:
             with c.session_transaction() as sess:
                 sess["active_profile_id"] = "m5"
+                sess["login_seen_at"] = int(time.time())
             body = c.get("/organisation/setup").get_data(as_text=True)
         assert "Learned" in body
 
@@ -260,6 +262,7 @@ class TestM5StatusAndReread:
         with client as c:
             with c.session_transaction() as sess:
                 sess["active_profile_id"] = "m5b"
+                sess["login_seen_at"] = int(time.time())
             body = c.get("/organisation/setup").get_data(as_text=True)
         assert "Blocked" in body
 
@@ -298,6 +301,7 @@ class TestM5StatusAndReread:
         with app.test_client() as c:
             with c.session_transaction() as sess:
                 sess["active_profile_id"] = "m5c"
+                sess["login_seen_at"] = int(time.time())
             r = c.post("/organisation/setup/reread/instagram")
             assert r.status_code in (302, 303)
 
@@ -472,6 +476,7 @@ class TestV3LegacyBackwardCompat:
         with app.test_client() as c:
             with c.session_transaction() as sess:
                 sess["active_profile_id"] = "legacy-pre-round2"
+                sess["login_seen_at"] = int(time.time())
             r = c.get("/organisation/setup")
             assert r.status_code == 200
             body = r.get_data(as_text=True)
