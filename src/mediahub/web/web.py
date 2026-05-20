@@ -4474,6 +4474,80 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   if (document.readyState !== 'loading') bindRelTimes();
   else document.addEventListener('DOMContentLoaded', bindRelTimes);
   MH.bindRelTimes = bindRelTimes;
+
+  // === Drawer (right-side slide-in panel) ===
+  // MH.openDrawer(title, bodyHTML) builds a scrim + panel, slides it in,
+  // and wires Esc + scrim-click + close-button to dismiss. Returns the
+  // close function so callers can dismiss programmatically.
+  MH.openDrawer = function(title, bodyHTML, opts) {
+    opts = opts || {};
+    var prevFocus = document.activeElement;
+    var scrim = document.createElement('div');
+    scrim.className = 'mh-drawer-scrim';
+    var drawer = document.createElement('aside');
+    drawer.className = 'mh-drawer';
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    drawer.setAttribute('aria-label', title || 'Panel');
+    drawer.innerHTML =
+      '<div class="mh-drawer-head"><h3></h3>' +
+      '<button class="mh-modal-close" aria-label="Close panel" data-mh-drawer-close>' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>' +
+      '</button></div>' +
+      '<div class="mh-drawer-body"></div>';
+    drawer.querySelector('h3').textContent = title || '';
+    var bodyEl = drawer.querySelector('.mh-drawer-body');
+    if (typeof bodyHTML === 'string') bodyEl.innerHTML = bodyHTML;
+    else if (bodyHTML instanceof Node) bodyEl.appendChild(bodyHTML);
+    document.body.appendChild(scrim);
+    document.body.appendChild(drawer);
+    // next frame → trigger transition
+    requestAnimationFrame(function(){ scrim.classList.add('is-open'); drawer.classList.add('is-open'); });
+    function onKey(e){ if (e.key === 'Escape') close(); }
+    function close(){
+      scrim.classList.remove('is-open');
+      drawer.classList.remove('is-open');
+      document.removeEventListener('keydown', onKey, true);
+      setTimeout(function(){ scrim.remove(); drawer.remove(); }, 340);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+      if (opts.onClose) opts.onClose();
+    }
+    scrim.addEventListener('click', close);
+    drawer.querySelectorAll('[data-mh-drawer-close]').forEach(function(b){ b.addEventListener('click', close); });
+    document.addEventListener('keydown', onKey, true);
+    var firstFocusable = drawer.querySelector('a[href],button:not([disabled]),input,select,textarea');
+    if (firstFocusable) firstFocusable.focus();
+    return close;
+  };
+
+  // === Popover toggling ===
+  // Any [data-mh-popover-trigger="<id>"] toggles the .mh-popover #<id>,
+  // positioning it just below the trigger. Click-outside + Esc close it.
+  function bindPopovers() {
+    document.querySelectorAll('[data-mh-popover-trigger]').forEach(function(trig){
+      if (trig.dataset.mhBound === '1') return;
+      trig.dataset.mhBound = '1';
+      var id = trig.getAttribute('data-mh-popover-trigger');
+      var pop = document.getElementById(id);
+      if (!pop) return;
+      function place(){
+        var r = trig.getBoundingClientRect();
+        pop.style.top = (window.scrollY + r.bottom + 8) + 'px';
+        pop.style.left = (window.scrollX + r.left) + 'px';
+      }
+      function open(){ place(); pop.classList.add('is-open'); document.addEventListener('click', outside, true); }
+      function closeP(){ pop.classList.remove('is-open'); document.removeEventListener('click', outside, true); }
+      function outside(e){ if (!pop.contains(e.target) && e.target !== trig && !trig.contains(e.target)) closeP(); }
+      trig.addEventListener('click', function(e){
+        e.preventDefault();
+        if (pop.classList.contains('is-open')) closeP(); else open();
+      });
+      document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeP(); });
+    });
+  }
+  if (document.readyState !== 'loading') bindPopovers();
+  else document.addEventListener('DOMContentLoaded', bindPopovers);
+  MH.bindPopovers = bindPopovers;
 })();
 </script>
 <script>
@@ -4912,19 +4986,19 @@ def create_app() -> Flask:
         # don't yet own. Numbers come from the seeded run counts.
         trust_html = (
             '<div class="mh-trust-strip">'
-            '<div class="mh-trust-cell">'
+            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="HY3, SD3, Sportsystems PDF — parsed deterministically, never guessed." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
             '<div><span class="label">We read</span><span class="value">Hytek .hy3, .zip, PDF</span></div>'
             '</div>'
-            '<div class="mh-trust-cell">'
+            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Your site and socials feed brand voice, palette, and tone." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>'
             '<div><span class="label">We crawl</span><span class="value">Club site &amp; socials</span></div>'
             '</div>'
-            '<div class="mh-trust-cell">'
+            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="A deterministic ranker scores content-worthiness with confidence." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 9 8.5 12 2"/></svg>'
             '<div><span class="label">We rank</span><span class="value">PBs, medals, first-times</span></div>'
             '</div>'
-            '<div class="mh-trust-cell">'
+            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Captions via Gemini; graphics + reels rendered server-side." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>'
             '<div><span class="label">We render</span><span class="value">Captions, graphics, reels</span></div>'
             '</div>'
