@@ -4377,6 +4377,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
+    signed_in_logo = ""
     if signed_in_pid:
         try:
             _p = load_profile(signed_in_pid)
@@ -4392,6 +4393,24 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                     signed_in_secondary = (_eff_pal.get("secondary") or "").strip()
                 except Exception:
                     pass
+                # Surface the org's logo in the signed-in chrome the same
+                # way the brand colours are. Prefer an uploaded logo
+                # (served per-profile, IDOR-guarded) and fall back to the
+                # logo URL captured from the org's website.
+                try:
+                    _uploaded = getattr(_p, "brand_logos", None) or []
+                    _first = _uploaded[0] if _uploaded else None
+                    _lid = (_first or {}).get("logo_id") if isinstance(_first, dict) else ""
+                    if _lid:
+                        signed_in_logo = url_for(
+                            "organisation_setup_logo_serve", logo_id=_lid,
+                        )
+                    else:
+                        _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
+                        if _cap.startswith("http://") or _cap.startswith("https://"):
+                            signed_in_logo = _cap
+                except Exception:
+                    signed_in_logo = ""
         except Exception:
             signed_in_name = ""
     return render_template_string("""
@@ -4485,6 +4504,15 @@ def _layout(title: str, body: str, active: str = "home") -> str:
               border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
               border-radius:999px;text-decoration:none;color:var(--ink);
               background:rgba(245,242,232,0.03);margin-left:8px">
+      {% if signed_in_logo %}
+      <span aria-hidden="true"
+            style="display:inline-flex;align-items:center;justify-content:center;
+                   width:20px;height:20px;border-radius:5px;overflow:hidden;
+                   background:#fff;border:1px solid rgba(245,242,232,0.20)">
+        <img src="{{ signed_in_logo }}" alt=""
+             style="width:100%;height:100%;object-fit:contain" />
+      </span>
+      {% endif %}
       {% if signed_in_primary %}
       <span aria-hidden="true"
             style="display:inline-block;width:10px;height:10px;border-radius:50%;
@@ -5160,6 +5188,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                signed_in_name=signed_in_name,
                signed_in_primary=signed_in_primary,
                signed_in_secondary=signed_in_secondary,
+               signed_in_logo=signed_in_logo,
                theme_seed_style=_theme_seed_style_block())
 
 
@@ -15486,13 +15515,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # we don't pile up duplicates when they re-run setup.
         existing = _active_profile()
         if existing and existing.display_name.strip().lower() == display_name.lower():
+            # Re-running setup for the org we're already signed in to.
             profile_id = existing.profile_id
         else:
             raw = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
             profile_id = raw[:48] or "default"
-            # Avoid clobbering a different org with the same slug.
-            if load_profile(profile_id) and (not existing or existing.profile_id != profile_id):
-                # Add a short suffix to keep the existing one intact.
+            # If a profile with this slug already exists for the SAME org
+            # name, reuse it. Re-running setup — commonly while signed
+            # out, which is now the default state — must UPDATE the real
+            # profile rather than orphan a "<slug>-<uuid>" clone that the
+            # freshly extracted colours and uploaded logos land on while
+            # the original profile stays empty. Only suffix when the slug
+            # genuinely collides with a DIFFERENT organisation, so we
+            # never clobber someone else's profile.
+            slug_match = load_profile(profile_id)
+            if (slug_match is not None
+                    and slug_match.display_name.strip().lower() != display_name.lower()):
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
 
         prof = load_profile(profile_id) or ClubProfile(
