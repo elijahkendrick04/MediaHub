@@ -1321,11 +1321,11 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
         f'<button class="btn" type="button" style="font-size:12px;padding:4px 10px;background:var(--good);color:var(--lane-ink);border:0"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f'{_disabled_attrs("approved")}'
-        f' title="Mark this card approved — it lands in the approved set the content pack exports.">Approve</button>'
+        f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">Approve</button>'
         f'<button class="btn danger" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="rejected" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f'{_disabled_attrs("rejected")}'
-        f' title="Reject this card so it\'s hidden from the approved content pack.">Reject</button>'
+        f' title="Reject this card so it\'s kept out of the content builder.">Reject</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f'{_disabled_attrs("queue")}'
@@ -1692,84 +1692,10 @@ def _schedule_modal_js() -> str:
     if (modal) modal.style.display = 'none';
   };
 
-  // Global workflow-status helper used by per-card Approve / Reject /
-  // Re-queue buttons across /review AND /pack/<id>/grouped. Posts to the
-  // shared /api/workflow/<run>/<card> endpoint. Returns a Promise so the
-  // caller can chain UI updates; surfaces failures via MH.toast.
-  window.mhWorkflowSet = function(runId, cardId, status) {
-    if (!runId || !cardId || !status) return Promise.reject(new Error('mhWorkflowSet: missing arg'));
-    var url = (API_BASE || '') + '/api/workflow/' + encodeURIComponent(runId) +
-              '/' + encodeURIComponent(cardId);
-    return fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action: 'set_status', status: status})
-    }).then(function(r){
-      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
-    }).then(function(o){
-      if (!o.ok || !o.body || o.body.ok === false) {
-        var msg = (o.body && (o.body.error || o.body.message)) || ('HTTP ' + (o.ok ? 200 : 'err'));
-        if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + msg, 'error', 4000);
-        throw new Error(msg);
-      }
-      return o.body;
-    }).catch(function(e){
-      if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + (e && e.message || e), 'error', 4000);
-      throw e;
-    });
-  };
-
-  // Delegated click handler for any element marked with
-  // data-mh-wf="approved|rejected|queue|posted". Updates pill on the
-  // same card group (matching data-mh-wf-target="<cardId>") and
-  // optimistically swaps in the new state before the server confirms.
-  document.addEventListener('click', function(e){
-    var btn = e.target.closest('[data-mh-wf]');
-    if (!btn) return;
-    var status = btn.getAttribute('data-mh-wf');
-    var runId  = btn.getAttribute('data-mh-run-id');
-    var cardId = btn.getAttribute('data-mh-card-id');
-    if (!runId || !cardId || !status) return;
-    e.preventDefault();
-    // Optimistic UI: tint matching pills on the same card AND swap the
-    // strap label so the user sees the new state immediately.
-    var labelMap = {
-      'queue':    'In queue',
-      'approved': 'Approved',
-      'rejected': 'Rejected',
-      'posted':   'Posted',
-      'edited':   'Edited'
-    };
-    var groupSel = '[data-mh-wf-target="' + (window.CSS && CSS.escape ? CSS.escape(cardId) : cardId) + '"]';
-    document.querySelectorAll(groupSel).forEach(function(el){
-      el.dataset.mhWfState = status;
-      var labelEl = el.querySelector('[data-mh-wf-label]');
-      if (labelEl) labelEl.textContent = labelMap[status] || status;
-    });
-    // De-emphasise the new "current" button across the card; restore the others.
-    var rowSel = '[data-mh-card-id="' + (window.CSS && CSS.escape ? CSS.escape(cardId) : cardId) + '"]';
-    document.querySelectorAll(rowSel + '[data-mh-wf]').forEach(function(b){
-      if (b.getAttribute('data-mh-wf') === status) {
-        b.setAttribute('aria-pressed', 'true');
-        b.style.opacity = '0.55';
-        b.style.cursor = 'default';
-      } else {
-        b.removeAttribute('aria-pressed');
-        b.style.opacity = '';
-        b.style.cursor = '';
-      }
-    });
-    var origLabel = btn.textContent;
-    btn.disabled = true;
-    btn.style.opacity = '0.7';
-    window.mhWorkflowSet(runId, cardId, status).then(function(){
-      btn.disabled = false; btn.style.opacity = '';
-      if (window.MH && MH.toast) MH.toast('Marked as ' + status, 'success', 1800);
-    }).catch(function(){
-      btn.disabled = false; btn.style.opacity = '';
-      btn.textContent = origLabel;
-    });
-  });
+  // NOTE: mhWorkflowSet + the data-mh-wf delegated click handler now live
+  // globally in _layout() so every page (Review triage, Content builder)
+  // shares one handler. Defining them here too would double-bind the click
+  // listener and fire two POSTs per Approve/Reject.
 
   window.mhScheduleSend = function() {
     var runId  = document.getElementById('mh-sched-run-id').value;
@@ -1867,6 +1793,719 @@ def _schedule_modal_js() -> str:
 })();
 </script>
 """
+
+def _card_creative_js() -> str:
+    """Shared client JS for the per-card creative toolbar: live caption
+    tone tabs, create-graphic, motion render, and the 3-variant graphic
+    picker. Lives on the Content builder page (post-approval). The host
+    page must define `WF_API_BASE` and `window._API_BASE` before this
+    block so caption edits and visual picks can persist."""
+    return """
+<script>
+// V8: Live caption tone toggle + regenerate
+// switchTone() kept for backwards compat (content pack, other pages).
+function switchTone(btn) {
+  var cardId = btn.dataset.card;
+  var newTone = btn.dataset.tone;
+  document.querySelectorAll('.tone-tab[data-card="' + cardId + '"]').forEach(function(tab) {
+    var isActive = tab.dataset.tone === newTone;
+    tab.classList.toggle('active', isActive);
+    if (isActive) {
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
+    } else {
+      tab.style.background = 'transparent';
+      tab.style.color = 'var(--ink-dim)';
+    }
+  });
+  document.querySelectorAll('.tone-panel[data-card="' + cardId + '"]').forEach(function(panel) {
+    panel.style.display = panel.dataset.tone === newTone ? '' : 'none';
+  });
+}
+
+// V8: switchToneLive &mdash; fetches caption from API on click.
+// AI tab: always fetches fresh. Warm/Hype/Precise tabs: cached for the session.
+// "&#x21BA; Regenerate" always forces a fresh fetch via regenerateCaption().
+var _captionCache = {};
+var _AI_TONE_KEYS = {'ai': true};  // other tones are cached after first gen
+
+function switchToneLive(btn, captionUrl, cardId) {
+  var newTone = btn.dataset.tone;
+  var isAiTone = !!_AI_TONE_KEYS[newTone];
+
+  // Update tab styles
+  document.querySelectorAll('.tone-tab[data-card="' + cardId + '"]').forEach(function(tab) {
+    var isActive = tab.dataset.tone === newTone;
+    tab.classList.toggle('active', isActive);
+    if (isActive) {
+      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
+      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
+      tab.style.fontWeight = '600';
+    } else {
+      tab.style.background = 'transparent';
+      tab.style.color = 'var(--ink-dim)';
+      tab.style.fontWeight = '400';
+    }
+  });
+
+  // Show active panel, hide others
+  document.querySelectorAll('.tone-panel[data-card="' + cardId + '"]').forEach(function(panel) {
+    panel.style.display = panel.dataset.tone === newTone ? '' : 'none';
+  });
+
+  var panel = document.querySelector('.tone-panel[data-tone="' + newTone + '"][data-card="' + cardId + '"]');
+  if (!panel) { return; }
+
+  var cacheKey = cardId + '|' + newTone;
+
+  // AI tab: always fetch fresh &mdash; never use cache.
+  // Named tones (warm/hype/precise): use session cache after first generation.
+  if (!isAiTone && _captionCache[cacheKey]) {
+    _renderCaption(panel, _captionCache[cacheKey]);
+    return;
+  }
+
+  // All panels start with a placeholder &mdash; fetch if placeholder still present
+  // (or if AI tone, always fetch).
+  var placeholder = panel.querySelector('.caption-placeholder');
+  if (!isAiTone && !placeholder) {
+    return;  // already generated; cache hit handled above
+  }
+
+  _fetchCaption(captionUrl, newTone, panel, cacheKey, isAiTone, cardId);
+}
+
+function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
+  var captionDiv = panel.querySelector('.caption-text');
+  var textarea = panel.querySelector('.caption-textarea');
+  if (captionDiv) {
+    captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
+  }
+  fetch(captionUrl + '?tone=' + encodeURIComponent(tone), {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      var text = j.caption || '';
+      var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
+      var fallbackNote = '';
+      // Distinguish transient (rate-limit / network blip) from terminal
+      // (no key configured). Transient errors must NOT flip the dot red
+      // permanently — the AI itself is still set up correctly, the
+      // request just needs a retry.
+      var isTransient = (j.error === 'transient' || (j.live === true && !text));
+      var isTerminal = (j.live === false && j.error !== 'transient');
+      if (isTerminal) {
+        if (captionDiv) {
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
+            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions are unavailable</div>'
+            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Contact your administrator to enable AI.') + '</div>'
+            + '</div>';
+        }
+        document.querySelectorAll('.ai-status-dot').forEach(function(d){ d.style.background='#ff5d6c'; });
+        return;
+      }
+      if (isTransient) {
+        if (captionDiv) {
+          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(212,255,58,0.20);border-radius:6px;background:rgba(212,255,58,0.04)">'
+            + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
+            + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
+            + '</div>';
+        }
+        // Keep the dot green — provider is reachable, just throttled.
+        return;
+      }
+      if (j.fallback && j.fallback_voice) {
+        fallbackNote = '<div style="margin-top:4px;font-size:10px;color:var(--warn);padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:4px">&#x26A0; AI generation unavailable, using ' + j.fallback_voice + '</div>';
+      }
+      // Render the caption + a variant picker if we got multiple back.
+      var variants = (j.variants && j.variants.length) ? j.variants : [text];
+      var safeText = function(t){ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+      function _renderActive(idx) {
+        var active = variants[idx] || text;
+        if (captionDiv) {
+          var pickerHtml = '';
+          if (variants.length > 1) {
+            var pills = variants.map(function(_, i) {
+              var sel = (i === idx);
+              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(212,255,58,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
+            }).join('');
+            pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
+          }
+          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
+            btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
+          });
+        }
+        if (textarea) { textarea.value = active; }
+      }
+      _renderActive(0);
+      // Update timestamp
+      var picker = panel.closest('.tone-picker');
+      if (picker) {
+        var tsEl = picker.querySelector('.caption-timestamp');
+        if (tsEl && ts) tsEl.textContent = 'regenerated just now &middot; ' + ts;
+      }
+      // Cache named-tone results for this session (not the AI tab &mdash; always fresh)
+      if (!isAi) { _captionCache[cacheKey] = {text: text, variants: variants}; }
+    })
+    .catch(function(err) {
+      if (captionDiv) {
+        captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Error generating caption. Please try again.</span>';
+      }
+    });
+}
+
+function _renderCaption(panel, cached) {
+  var captionDiv = panel.querySelector('.caption-text');
+  var textarea = panel.querySelector('.caption-textarea');
+  if (captionDiv && cached.text) {
+    captionDiv.innerHTML = '<span style="white-space:pre-wrap">' + cached.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>';
+  }
+  if (textarea && cached.text) {
+    textarea.value = cached.text;
+  }
+}
+
+function regenerateCaption(btn, captionUrl, cardId) {
+  // Find the active panel and force a fresh re-fetch (clears session cache).
+  var activeToneTab = document.querySelector('.tone-tab.active[data-card="' + cardId + '"]');
+  if (!activeToneTab) { return; }
+  var tone = activeToneTab.dataset.tone;
+  var cacheKey = cardId + '|' + tone;
+  delete _captionCache[cacheKey];  // force fresh generation
+  var panel = document.querySelector('.tone-panel[data-tone="' + tone + '"][data-card="' + cardId + '"]');
+  if (!panel) { return; }
+  var isAiTone = !!_AI_TONE_KEYS[tone];
+  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
+}
+
+
+function copyActiveTone(btn, cardId) {
+  // Find the active tone panel
+  var activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]:not([style*="none"])');
+  if (!activePanel) {
+    activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]');
+  }
+  if (!activePanel) { return; }
+  // Get text from caption-textarea or caption-text
+  var ta = activePanel.querySelector('.caption-textarea');
+  var textEl = activePanel.querySelector('.caption-text');
+  var text = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent : '');
+  // Also check old-style tone-text-ID elements
+  if (!text) {
+    var activeTone = activePanel.dataset.tone;
+    var oldTa = document.getElementById('tone-text-' + cardId + '-' + activeTone);
+    if (oldTa) text = oldTa.value;
+  }
+  if (!text) { return; }
+  navigator.clipboard.writeText(text).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  }).catch(function() {
+    var tempTa = document.createElement('textarea');
+    tempTa.value = text;
+    document.body.appendChild(tempTa);
+    tempTa.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempTa);
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  });
+}
+
+// V8: Lazy visual generation. Cached per (card, format) within session.
+var _visualCache = {};
+function createGraphic(btn, createUrl, cardId, fmt) {
+  fmt = fmt || 'feed_portrait';
+  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating&hellip;';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Generating graphic&hellip; this may take 5-15 seconds</div>';
+  var cacheKey = cardId + '|' + fmt;
+  if (_visualCache[cacheKey]) {
+    _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
+    btn.disabled = false; btn.textContent = origLabel;
+    return;
+  }
+  fetch(createUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({format: fmt})})
+    .then(function(r) { return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+    .then(function(res) {
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok || res.body.error) {
+        // Prefer user_message (clean operator copy, e.g. the "renderer
+        // busy" 429) over the raw error code.
+        var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
+        return;
+      }
+      _visualCache[cacheKey] = res.body;
+      _renderVisualPanel(panel, res.body, cardId, createUrl);
+    })
+    .catch(function(err) {
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
+    });
+}
+
+// Escape a JS expression so it can safely live inside an HTML onclick="..." attribute.
+// JSON.stringify produces a string with literal double quotes; those would close the HTML
+// attribute prematurely. We replace inner " with the &quot; entity (the browser decodes
+// them back to " before passing to the JS engine).
+function _attrEsc(jsExpr) {
+  return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
+}
+
+function _renderVisualPanel(panel, data, cardId, createUrl) {
+  var visuals = data.visuals || [];
+  if (!visuals.length) {
+    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visuals generated. ' + ((data.errors && data.errors.length) ? 'Errors: ' + data.errors.join('; ') : '') + '</div>';
+    return;
+  }
+  var v = visuals[0];
+  // Use absolute path that respects the deployed /port/5000 prefix; the backend prepends location.pathname's base via window._API_BASE.
+  var apiBase = (window._API_BASE || '');
+  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
+  var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
+  var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
+  var formats = ['feed_portrait', 'feed_square', 'story_vertical'];
+  var formatLabels = {'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'};
+  var tabsHtml = formats.map(function(f) {
+    var active = (f === (v.format_name || 'feed_portrait'));
+    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
+  }).join('');
+  panel.innerHTML =
+    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      '<div style="flex:0 0 220px;max-width:240px">' +
+        '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#0a0a0a" />' +
+      '</div>' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
+        (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
+        '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ')') + '>&#x21BA; Regenerate (3 variants)</button>' +
+          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('addGraphicToPack(this, ' + JSON.stringify(v.id) + ')') + '>+ Add to pack</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+// Motion-graphic generation: lazy, cached server-side. Streams the resulting
+// MP4 into an inline <video> on the card panel.
+var _motionCache = {};
+function generateMotion(btn, motionUrl, cardId) {
+  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering motion&hellip;';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
+  fetch(motionUrl, {method:'POST'})
+    .then(function(r) {
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
+        return r.blob().then(function(b) { return {ok:true, blob:b}; });
+      }
+      return r.json().then(function(j){ return {ok:false, body:j}; });
+    })
+    .then(function(res) {
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {
+        // Prefer user_message (clean operator-written copy) over detail
+        // (raw stack trace). The backend Phase 1.5 mapping translates
+        // known infra failures into actionable copy; falls back to detail
+        // for anything unexpected.
+        var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
+        return;
+      }
+      var url = URL.createObjectURL(res.blob);
+      _motionCache[cardId] = url;
+      panel.innerHTML =
+        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 200px;max-width:220px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:200px">' +
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; 1080&times;1920 &middot; 6s</div>' +
+            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    })
+    .catch(function(err) {
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
+    });
+}
+
+// Meet-reel generation: top-3 cards stitched into a 15-second reel.
+function generateReel(btn, reelUrl) {
+  var panel = document.getElementById('reel-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Rendering reel&hellip;';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
+  fetch(reelUrl, {method:'POST'})
+    .then(function(r) {
+      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
+        return r.blob().then(function(b) { return {ok:true, blob:b}; });
+      }
+      return r.json().then(function(j){ return {ok:false, body:j}; });
+    })
+    .then(function(res) {
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok) {
+        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+        return;
+      }
+      var url = URL.createObjectURL(res.blob);
+      panel.innerHTML =
+        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+          '<div style="flex:0 0 240px;max-width:260px">' +
+            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+          '</div>' +
+          '<div style="flex:1;min-width:240px">' +
+            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
+            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    })
+    .catch(function(err) {
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
+    });
+}
+
+function regenerateGraphic(btn, createUrl, cardId) {
+  // V8.1 issue 4: replace single-output regenerate with a 3-variant picker.
+  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
+  if (!panel) return;
+  panel.style.display = '';
+  // Derive the variants endpoint from the create-graphic URL.
+  var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
+  var origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating 3 options&hellip;';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
+  fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+    .then(function(res){
+      btn.disabled = false; btn.textContent = origLabel;
+      if (!res.ok || res.body.error) {
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'variants failed') + '</div>';
+        return;
+      }
+      _renderVariantPicker(panel, res.body.variants || [], cardId, createUrl);
+    })
+    .catch(function(err){
+      btn.disabled = false; btn.textContent = origLabel;
+      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
+    });
+}
+
+function _renderVariantPicker(panel, variants, cardId, createUrl) {
+  if (!variants.length) {
+    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No variants returned.</div>';
+    return;
+  }
+  var apiBase = (window._API_BASE || '');
+  var tilesHtml = variants.map(function(vt) {
+    var v = vt.visual;
+    if (!v) {
+      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
+    }
+    var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
+    var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
+    var hook = (vt.brief && vt.brief.primary_hook) || '';
+    return (
+      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+        '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
+        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
+        (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
+        '<button class="btn" data-pick-vid="' + v.id + '" data-pick-seed="' + vt.seed + '" data-pick-fmt="' + (v.format_name || 'feed_portrait') + '" style="margin-top:6px;width:100%;font-size:11px;padding:5px 0" onclick=' + _attrEsc('pickVariant(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(createUrl) + ')') + '>Pick this one</button>' +
+      '</div>'
+    );
+  }).join('');
+  panel.innerHTML =
+    '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Choose a variant</div>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' + tilesHtml + '</div>';
+}
+
+function pickVariant(btn, cardId, createUrl) {
+  var vid = btn.dataset.pickVid;
+  var seed = btn.dataset.pickSeed;
+  var fmt = btn.dataset.pickFmt || 'feed_portrait';
+  var apiBase = (window._API_BASE || '');
+  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(vid) + '/png/' + encodeURIComponent(fmt);
+  // Persist the choice in workflow sidecar
+  var url = WF_API_BASE + encodeURIComponent(cardId);
+  fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'set_edits', edits:{picked_visual_id: vid, picked_variation_seed: seed}})}).catch(function(){});
+  // Promote to primary view
+  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
+  var fakeData = {
+    visuals: [{id: vid, format_name: fmt, layout_template: btn.parentElement.querySelector('div').textContent || ''}],
+    brief: {},
+  };
+  _renderVisualPanel(panel, fakeData, cardId, createUrl);
+}
+
+function addGraphicToPack(btn, visualId) {
+  // Visuals are already persisted on render; this just confirms inclusion.
+  btn.textContent = '&#x2713; Added to pack';
+  btn.disabled = true;
+  setTimeout(function() { btn.textContent = '+ Add to pack'; btn.disabled = false; }, 2000);
+}
+
+// Poll LLM status on page load and every 30s afterwards. Self-healing:
+// if a previous transient 429 painted the dot red, the next poll
+// re-greens it once the rate-limit window has elapsed. Without this
+// the user had to reload the page to recover from any blip.
+(function pollLlmStatus(){
+  function _tick() {
+    try {
+      var url = (window._API_BASE || '') + '/api/settings/llm-status';
+      fetch(url, {cache:'no-store'})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          var dots = document.querySelectorAll('.ai-status-dot');
+          var color = j.live ? '#2cc97f' : '#ff5d6c';
+          var providerLabel = j.provider_label || 'AI key';
+          var title = j.live
+            ? ('Live AI enabled &mdash; provider: ' + providerLabel)
+            : 'Live AI DISABLED &mdash; contact your administrator to enable AI captions.';
+          dots.forEach(function(d){
+            d.style.background = color;
+            var btn = d.closest('button');
+            if (btn) btn.title = title;
+          });
+        })
+        .catch(function(){});
+    } catch(e){}
+  }
+  _tick();
+  setInterval(_tick, 30000);
+})();
+</script>
+"""
+
+
+def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
+    """Per-card creative toolbar for the Content builder (post-approval):
+    live AI caption tone tabs (AI / Warm / Hype / Precise), Copy, Regenerate,
+    Create graphic, Generate motion, and Schedule. Pairs with
+    `_card_creative_js()` on the host page. `card_id_raw` is the swim_id."""
+    card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
+    _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
+    _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
+    _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
+
+    _STD_TONES = [
+        ("ai",        "✦ AI", True,  "tone-tab-ai",
+         "rgba(212,255,58,0.15)", "var(--lane)",
+         "Live AI caption. Generates fresh each time."),
+        ("warm-club", "Warm",    False, "",
+         "rgba(212,255,58,0.15)", "var(--accent)",
+         "Warm & community — friendly, first-name, inclusive."),
+        ("hype",      "Hype",    False, "",
+         "rgba(212,255,58,0.15)", "var(--accent)",
+         "Energetic & hype — race-day language, high energy."),
+        ("data-led",  "Precise", False, "",
+         "rgba(212,255,58,0.15)", "var(--accent)",
+         "Data-led — numbers first, sponsor-friendly, no fluff."),
+    ]
+    tabs_html = ""
+    panels_html = ""
+    for t_key, t_label, is_active, extra_cls, active_bg, active_fg, title in _STD_TONES:
+        init_bg = active_bg if is_active else "transparent"
+        init_fg = active_fg if is_active else "var(--ink-dim)"
+        active_attr = "active" if is_active else ""
+        display = "" if is_active else "display:none"
+        status_dot = (
+            '<span class="ai-status-dot" style="display:inline-block;width:7px;height:7px;'
+            'border-radius:50%;background:#ffae3b" aria-hidden="true"></span>'
+            if t_key == "ai" else ""
+        )
+        tabs_html += (
+            f'<button class="tone-tab {extra_cls} {active_attr}" '
+            f'data-card="{card_uuid}" data-tone="{t_key}" '
+            f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
+            f'title="{_h(title)}" '
+            f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
+            f'cursor:pointer;background:{init_bg};color:{init_fg};'
+            f'font-family:inherit;margin-right:4px;font-weight:{"600" if is_active else "400"};'
+            f'display:inline-flex;align-items:center;gap:5px">'
+            f'{status_dot}{_h(t_label)}</button>'
+        )
+        panels_html += (
+            f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
+            f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
+            f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
+            f'Click to generate&hellip;</span></div>'
+            f'<textarea class="caption-textarea" style="display:none"></textarea>'
+            f'</div>'
+        )
+
+    _wf_card_el_id = f"wf-{card_uuid}"
+    schedule_btn = (
+        f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
+        f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
+        f'Schedule&hellip;</button>'
+    ) if card_id_raw else ""
+
+    return (
+        f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
+        f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
+        f'<div style="margin-bottom:8px">{tabs_html}</div>'
+        f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
+        f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
+        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
+        f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
+        f'{schedule_btn}'
+        f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
+        f'</div>'
+        f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
+        f'</div>'
+    )
+
+
+def _render_turn_into_card(run_id: str) -> str:
+    """The 'Turn meet into a derivative pack' generator (recap, spotlights,
+    thread, newsletter, sponsor thank-you, coach quote, next-meet preview).
+    Lives on the Content builder page — it is content creation, so it sits
+    after approval, never on the Review triage page."""
+    try:
+        from mediahub.turn_into import list_packs as _list_ti_packs
+        _ti_packs = _list_ti_packs(run_id, base_dir=DATA_DIR / "turn_into_packs")
+    except Exception:
+        _ti_packs = []
+    _turn_into_api = url_for("api_turn_into", run_id=run_id)
+
+    _ti_prior_html = ""
+    if _ti_packs:
+        rows = []
+        for p in _ti_packs[:5]:
+            _pid = p.get("pack_id", "")
+            _gen = p.get("generated_at", "")
+            _n = p.get("n_artefacts", 0)
+            _skipped = p.get("n_skipped", 0)
+            try:
+                _view = url_for("turn_into_pack_view", run_id=run_id, pack_id=_pid)
+            except Exception:
+                _view = "#"
+            rows.append(
+                f'<li style="font-size:12px;margin-bottom:4px">'
+                f'<a href="{_view}">{_h(_gen)}</a> '
+                f'<span class="muted">&mdash; {_n} artefacts'
+                + (f", {_skipped} skipped" if _skipped else "")
+                + '</span></li>'
+            )
+        _ti_prior_html = (
+            '<div style="margin-top:14px">'
+            '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
+            'Previously generated packs</div>'
+            f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
+            '</div>'
+        )
+
+    return f"""
+<div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <h2 style="margin-bottom:6px">Derivative content pack</h2>
+      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
+        Turn this meet into a full pack of 7 derivative artefacts &mdash;
+        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
+        sponsor thank-you, coach quote, and next-meet preview.
+      </p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
+        &#x2726; Generate derivative pack
+      </button>
+    </div>
+  </div>
+  <div id="ti-status" style="margin-top:10px;font-size:12px;color:var(--ink-muted);display:none"></div>
+  {_ti_prior_html}
+</div>
+<script>
+function turnMeetIntoPack() {{
+  var btn = document.getElementById('ti-btn');
+  var status = document.getElementById('ti-status');
+  var origText = btn.textContent;
+  var secs = 0;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  status.style.display = '';
+  status.textContent = 'Building artefacts — starting…';
+  var ticker = setInterval(function() {{
+    secs++;
+    status.textContent = 'Building artefacts with live AI — ' + secs + 's elapsed…';
+  }}, 1000);
+  function _fail(msg) {{
+    clearInterval(ticker);
+    status.textContent = 'Failed: ' + msg;
+    btn.disabled = false;
+    btn.textContent = origText;
+  }}
+  function _poll(statusUrl) {{
+    fetch(statusUrl).then(function(r) {{ return r.json(); }}).then(function(j) {{
+      if (j.status === 'running') {{
+        setTimeout(function() {{ _poll(statusUrl); }}, 2000);
+      }} else if (j.status === 'done' && j.pack_url) {{
+        clearInterval(ticker);
+        status.textContent = 'Done — opening pack…';
+        window.location.href = j.pack_url;
+      }} else {{
+        _fail(j.error || 'unknown error');
+      }}
+    }}).catch(function() {{ _fail('poll failed'); }});
+  }}
+  fetch({json.dumps(_turn_into_api)}, {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ async: true }}),
+  }}).then(function(r) {{ return r.json(); }})
+    .then(function(j) {{
+      if (j && j.status_url) {{
+        setTimeout(function() {{ _poll(j.status_url); }}, 2000);
+      }} else if (j && j.pack_url) {{
+        clearInterval(ticker);
+        status.textContent = 'Done — opening pack…';
+        window.location.href = j.pack_url;
+      }} else {{
+        _fail(j && j.message ? j.message : 'unknown error');
+      }}
+    }})
+    .catch(function() {{
+      _fail('Network error. Please retry.');
+    }});
+}}
+</script>"""
 
 
 # ---------------------------------------------------------------------
@@ -5272,6 +5911,73 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   if (document.readyState !== 'loading') bindReveals();
   else document.addEventListener('DOMContentLoaded', bindReveals);
   MH.bindReveals = bindReveals;
+
+  // === Global per-card workflow control (Approve / Reject / Re-queue) ===
+  // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
+  // data-mh-card-id triggers a POST to /api/workflow and optimistically
+  // updates matching status straps. Lives in _layout so EVERY page has it —
+  // previously it only shipped inside the schedule modal (pack pages only),
+  // which left the Review page's Approve/Reject buttons + keyboard shortcuts
+  // inert.
+  window.mhWorkflowSet = function(runId, cardId, status) {
+    if (!runId || !cardId || !status) return Promise.reject(new Error('mhWorkflowSet: missing arg'));
+    var base = window._API_BASE || '';
+    var url = base + '/api/workflow/' + encodeURIComponent(runId) + '/' + encodeURIComponent(cardId);
+    return fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'set_status', status: status})
+    }).then(function(r){
+      return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+    }).then(function(o){
+      if (!o.ok || !o.body || o.body.ok === false) {
+        var msg = (o.body && (o.body.error || o.body.message)) || ('HTTP ' + (o.ok ? 200 : 'err'));
+        if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + msg, 'error', 4000);
+        throw new Error(msg);
+      }
+      return o.body;
+    }).catch(function(e){
+      if (window.MH && MH.toast) MH.toast('Workflow update failed: ' + (e && e.message || e), 'error', 4000);
+      throw e;
+    });
+  };
+
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-mh-wf]');
+    if (!btn) return;
+    var status = btn.getAttribute('data-mh-wf');
+    var runId  = btn.getAttribute('data-mh-run-id');
+    var cardId = btn.getAttribute('data-mh-card-id');
+    if (!runId || !cardId || !status) return;
+    e.preventDefault();
+    var labelMap = {'queue':'In queue','approved':'Approved','rejected':'Rejected','edited':'Edited'};
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
+    document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
+      el.dataset.mhWfState = status;
+      var labelEl = el.querySelector('[data-mh-wf-label]');
+      if (labelEl) labelEl.textContent = labelMap[status] || status;
+    });
+    document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
+      if (b.getAttribute('data-mh-wf') === status) {
+        b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
+      } else {
+        b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
+      }
+    });
+    // On the Review page each card is an .ach-row carrying data-status; keep
+    // it in sync so the Queue / Approved / Rejected filter reflects the pile.
+    var rowCard = btn.closest('.ach-row');
+    if (rowCard) rowCard.dataset.status = status;
+    var origLabel = btn.textContent;
+    btn.disabled = true; btn.style.opacity = '0.7';
+    window.mhWorkflowSet(runId, cardId, status).then(function(){
+      btn.disabled = false; btn.style.opacity = '';
+      if (window.MH && MH.toast) MH.toast('Marked as ' + status, 'success', 1500);
+    }).catch(function(){
+      btn.disabled = false; btn.style.opacity = '';
+      btn.textContent = origLabel;
+    });
+  });
 })();
 </script>
 <script>
@@ -7398,31 +8104,21 @@ def create_app() -> Flask:
         _delete_url = url_for('privacy_delete_run', run_id=run_id)
         _status_url = url_for('api_status', run_id=run_id)
         _pack_url = url_for('content_pack', run_id=run_id)
-        _reel_url = url_for('api_run_reel', run_id=run_id)
-        _turn_into_api = url_for('api_turn_into', run_id=run_id)
-
-        # Prior Turn-Into packs for this run (so the user can revisit them).
-        try:
-            from mediahub.turn_into import list_packs as _list_ti_packs
-            _ti_packs = _list_ti_packs(run_id, base_dir=DATA_DIR / "turn_into_packs")
-        except Exception:
-            _ti_packs = []
+        # Reel + Turn-Into generation now live on the Content builder (they are
+        # content creation, which happens after approval). Review = triage only.
 
         # --- V7: Workflow state
         _wf_summary = {}
         _wf_states = {}
-        _wf_api_base = url_for('api_workflow_set', run_id=run_id, card_id='CARD_ID').replace('CARD_ID', '')
         ws = _get_wf_store()
         if ws is not None:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
-        # Workflow filter from query param. Allowlist mirrors every
-        # ``CardStatus`` value so the Review UI's "Rejected" tab and
-        # any future "Edited" surface actually filter; a malformed
-        # ``?wf=anything`` still falls back to "show all".
+        # Workflow filter from query param. Triage states only — a malformed
+        # or retired (`posted`) ``?wf=`` value falls back to "show all".
         _wf_filter = (request.args.get('wf', '') or '').strip().lower()
-        if _wf_filter not in ('', 'queue', 'approved', 'posted', 'rejected', 'edited'):
+        if _wf_filter not in ('', 'queue', 'approved', 'rejected'):
             _wf_filter = ''
 
         # --- Recognition summary band
@@ -7741,13 +8437,10 @@ def create_app() -> Flask:
                 o += f'<option value="{_h(item)}">{_h(item)}</option>'
             return o
 
-        # --- V7: build workflow summary card and status pill helpers
-        _wf_api_base_js = json.dumps(_wf_api_base)
+        # --- V7: build workflow summary card (triage counts)
         _wf_n_queue = _wf_summary.get("queue", 0)
         _wf_n_approved = _wf_summary.get("approved", 0)
         _wf_n_rejected = _wf_summary.get("rejected", 0)
-        _wf_n_posted = _wf_summary.get("posted", 0)
-        _wf_n_edited = _wf_summary.get("edited", 0)
         _wf_n_total = _wf_summary.get("total", 0)
 
         # Only show workflow card if there's any state or any achievements
@@ -7759,10 +8452,9 @@ def create_app() -> Flask:
                 "":         _wf_n_total or len(ranked_achs),
                 "queue":    _wf_n_queue if _wf_summary else len(ranked_achs),
                 "approved": _wf_n_approved,
-                "posted":   _wf_n_posted,
                 "rejected": _wf_n_rejected,
             }
-            for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("posted", "Posted"), ("rejected", "Rejected")]:
+            for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("rejected", "Rejected")]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
                 _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
@@ -7774,116 +8466,24 @@ def create_app() -> Flask:
                     f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
                     f'{_wf_opt[1]}{_wf_count_html}</a>'
                 )
-            # --- Turn-Into content pack card (top of content pack section) ---
-            _ti_prior_html = ""
-            if _ti_packs:
-                rows = []
-                for p in _ti_packs[:5]:
-                    _pid = p.get("pack_id", "")
-                    _gen = p.get("generated_at", "")
-                    _n = p.get("n_artefacts", 0)
-                    _skipped = p.get("n_skipped", 0)
-                    try:
-                        _view = url_for("turn_into_pack_view", run_id=run_id, pack_id=_pid)
-                    except Exception:
-                        _view = "#"
-                    rows.append(
-                        f'<li style="font-size:12px;margin-bottom:4px">'
-                        f'<a href="{_view}">{_h(_gen)}</a> '
-                        f'<span class="muted">&mdash; {_n} artefacts'
-                        + (f", {_skipped} skipped" if _skipped else "")
-                        + '</span></li>'
-                    )
-                _ti_prior_html = (
-                    '<div style="margin-top:14px">'
-                    '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
-                    'Previously generated packs</div>'
-                    f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
-                    '</div>'
-                )
-
-            turn_into_card = f"""
-<div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-    <div style="flex:1;min-width:240px">
-      <h2 style="margin-bottom:6px">Content pack</h2>
-      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
-        Turn this meet into a full pack of 7 derivative artefacts &mdash;
-        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
-        sponsor thank-you, coach quote, and next-meet preview.
-      </p>
-    </div>
-    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
-        &#x2726; Turn meet into content pack
-      </button>
-      <a class="btn secondary" href="{_pack_url}" style="align-self:flex-end">View workflow pack &rarr;</a>
-    </div>
-  </div>
-  <div id="ti-status" style="margin-top:10px;font-size:12px;color:var(--ink-muted);display:none"></div>
-  {_ti_prior_html}
-</div>
-<script>
-function turnMeetIntoPack() {{
-  var btn = document.getElementById('ti-btn');
-  var status = document.getElementById('ti-status');
-  var origText = btn.textContent;
-  var secs = 0;
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
-  status.style.display = '';
-  status.textContent = 'Building artefacts — starting…';
-  var ticker = setInterval(function() {{
-    secs++;
-    status.textContent = 'Building artefacts with live AI — ' + secs + 's elapsed…';
-  }}, 1000);
-  function _fail(msg) {{
-    clearInterval(ticker);
-    status.textContent = 'Failed: ' + msg;
-    btn.disabled = false;
-    btn.textContent = origText;
-  }}
-  function _poll(statusUrl) {{
-    fetch(statusUrl).then(function(r) {{ return r.json(); }}).then(function(j) {{
-      if (j.status === 'running') {{
-        setTimeout(function() {{ _poll(statusUrl); }}, 2000);
-      }} else if (j.status === 'done' && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
-      }} else {{
-        _fail(j.error || 'unknown error');
-      }}
-    }}).catch(function() {{ _fail('poll failed'); }});
-  }}
-  fetch({json.dumps(_turn_into_api)}, {{
-    method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify({{ async: true }}),
-  }}).then(function(r) {{ return r.json(); }})
-    .then(function(j) {{
-      if (j && j.status_url) {{
-        setTimeout(function() {{ _poll(j.status_url); }}, 2000);
-      }} else if (j && j.pack_url) {{
-        clearInterval(ticker);
-        status.textContent = 'Done — opening pack…';
-        window.location.href = j.pack_url;
-      }} else {{
-        _fail(j && j.message ? j.message : 'unknown error');
-      }}
-    }})
-    .catch(function() {{
-      _fail('Network error. Please retry.');
-    }});
-}}
-</script>"""
-
             # Progress maths — how much of the queue has the user actioned?
-            _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0) + (_wf_n_posted or 0)
+            _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
             _wf_grand_total = (_wf_n_total or len(ranked_achs) or 0)
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
 
-            workflow_summary_card = turn_into_card + f"""
+            workflow_summary_card = f"""
+<div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div style="flex:1;min-width:240px">
+    <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
+    <p class="dim" style="margin:0;font-size:13px;max-width:560px">
+      Approve or reject each achievement below. Approved cards flow into the
+      <strong>Content builder</strong>, where you pick a caption, create graphics
+      and video, then schedule to Buffer or download. Nothing is created until
+      you&rsquo;ve approved it.
+    </p>
+  </div>
+  <a class="btn" href="{_pack_url}" style="align-self:flex-start">Open content builder &rarr;</a>
+</div>
 <div class="mh-progress-strip" role="group" aria-label="Review progress">
   <span class="mh-progress-strip-label">Reviewed</span>
   <span class="mh-progress-strip-value">{_wf_decided}<span class="total">/ {_wf_grand_total}</span></span>
@@ -7898,7 +8498,6 @@ function turnMeetIntoPack() {{
         <div class="stat"><div class="l">Queue</div><div class="v">{_wf_n_queue or len(ranked_achs)}</div></div>
         <div class="stat good"><div class="l">Approved</div><div class="v">{_wf_n_approved}</div></div>
         <div class="stat bad"><div class="l">Rejected</div><div class="v">{_wf_n_rejected}</div></div>
-        <div class="stat live"><div class="l">Posted</div><div class="v">{_wf_n_posted}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -7906,7 +8505,7 @@ function turnMeetIntoPack() {{
               title="Approve every card currently shown in the queue">
         Approve all in queue
       </button>
-      <a class="btn" href="{_pack_url}" style="align-self:flex-end">View content pack &rarr;</a>
+      <a class="btn" href="{_pack_url}" style="align-self:flex-end">Open content builder &rarr;</a>
     </div>
   </div>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -7942,7 +8541,6 @@ function turnMeetIntoPack() {{
 
             # V7: workflow state for this card
             card_id_raw = a.get("swim_id", "")
-            card_id_safe = _h(card_id_raw)
             wf_state = _wf_states.get(card_id_raw)
             wf_status = wf_state.status.value if wf_state else "queue"
 
@@ -7951,15 +8549,6 @@ function turnMeetIntoPack() {{
                 continue
 
             band_cls = {"elite": "warn", "strong": "info", "story": "", "nice": "", "not_worthy": "bad"}.get(band, "")
-
-            status_colours = {
-                "queue": ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
-                "approved": ("rgba(34,197,94,0.15)", "#22C55E"),
-                "rejected": ("rgba(244,63,94,0.15)", "#F43F5E"),
-                "posted": ("rgba(212,255,58,0.15)", "var(--accent)"),
-                "edited": ("rgba(245,158,11,0.15)", "var(--warn)"),
-            }
-            s_bg, s_fg = status_colours.get(wf_status, status_colours["queue"])
 
             # Evidence list
             ev_html = ""
@@ -7980,102 +8569,11 @@ function turnMeetIntoPack() {{
                 freason = _h(f.get("reason",""))
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
-            # V8: Live caption tone toggle.
-            # All tabs (AI, Warm, Hype, Precise) generate captions live via the
-            # LLM. No pre-filled template text &mdash; clicking a tone tab always
-            # triggers a fresh, unique generation. Results are cached per session
-            # client-side; "&#x21BA; Regenerate" forces a new fetch.
-            tone_tabs_html = ""
-
+            # Caption tone, graphics, motion + scheduling all move to the
+            # Content builder (post-approval). Review stays pure triage:
+            # Approve / Reject only. `card_uuid` is still needed below for
+            # the "Why this card?" anchor + filter data attributes.
             card_uuid = card_id_raw.replace(":", "_").replace(",", "_")
-            swim_id_safe = _h(card_id_raw)
-            _caption_url = url_for("api_live_caption", run_id=run_id, swim_id=card_id_raw)
-
-            tabs_html = ""
-            panels_html = ""
-
-            # Standard tones &mdash; always shown, always AI-generated on demand.
-            # Order: AI (first, active) &rarr; Warm &rarr; Hype &rarr; Precise
-            _STD_TONES = [
-                ("ai",        "✦ AI", True,  "tone-tab-ai",
-                 "rgba(212,255,58,0.15)", "var(--lane)",
-                 "Live AI caption. Generates fresh each time."),
-                ("warm-club", "Warm",    False, "",
-                 "rgba(212,255,58,0.15)", "var(--accent)",
-                 "Warm & community — friendly, first-name, inclusive."),
-                ("hype",      "Hype",    False, "",
-                 "rgba(212,255,58,0.15)", "var(--accent)",
-                 "Energetic & hype — race-day language, high energy."),
-                ("data-led",  "Precise", False, "",
-                 "rgba(212,255,58,0.15)", "var(--accent)",
-                 "Data-led — numbers first, sponsor-friendly, no fluff."),
-            ]
-
-            for t_key, t_label, is_active, extra_cls, active_bg, active_fg, title in _STD_TONES:
-                init_bg = active_bg if is_active else "transparent"
-                init_fg = active_fg if is_active else "var(--ink-dim)"
-                active_attr = "active" if is_active else ""
-                display = "" if is_active else "display:none"
-                status_dot = (
-                    '<span class="ai-status-dot" style="display:inline-block;width:7px;height:7px;'
-                    'border-radius:50%;background:#ffae3b" aria-hidden="true"></span>'
-                    if t_key == "ai" else ""
-                )
-                tabs_html += (
-                    f'<button class="tone-tab {extra_cls} {active_attr}" '
-                    f'data-card="{card_uuid}" data-tone="{t_key}" '
-                    f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
-                    f'title="{_h(title)}" '
-                    f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-                    f'cursor:pointer;background:{init_bg};color:{init_fg};'
-                    f'font-family:inherit;margin-right:4px;font-weight:{"600" if is_active else "400"};'
-                    f'display:inline-flex;align-items:center;gap:5px">'
-                    f'{status_dot}{_h(t_label)}</button>'
-                )
-                panels_html += (
-                    f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
-                    f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
-                    f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
-                    f'Click to generate&hellip;</span></div>'
-                    f'<textarea class="caption-textarea" style="display:none"></textarea>'
-                    f'</div>'
-                )
-
-            # V8: Create-graphic API URL (lazy visual generation)
-            _create_graphic_url = url_for("api_create_graphic", run_id=run_id, card_id=card_id_raw)
-            _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
-            # Round-8: per-card Schedule button parity with /pack/grouped.
-            # The schedule modal reads the active tone's caption text via
-            # `pickActiveCaption(cardEl)` (web.py mhScheduleOpen), so we
-            # point it at the tone-picker's wrapper id `wf-{card_uuid}`
-            # which contains the `.tone-panel.active .caption-text`.
-            _wf_card_el_id = f"wf-{card_uuid}"
-            schedule_btn_review = (
-                f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
-                f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
-                f'Schedule&hellip;</button>'
-            ) if card_id_raw else ""
-
-            tone_tabs_html = (
-                f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
-                f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Caption tone</div>'
-                f'<div style="margin-bottom:8px">{tabs_html}</div>'
-                f'<div class="tone-panels" data-card="{card_uuid}">{panels_html}</div>'
-                f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
-                f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
-                f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
-                f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
-                f'{schedule_btn_review}'
-                f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
-                f'</div>'
-                f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
-                f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
-                f'</div>'
-            )
-            brand_cap_html = tone_tabs_html
-
-            _wf_api_url = url_for("api_workflow_set", run_id=run_id, card_id=card_id_raw)
 
             # V9: "Why this card?" &mdash; plain-English, source-grounded reasoning.
             # Lazy: a 150+ card meet would otherwise fire 300+ blocking LLM
@@ -8098,40 +8596,23 @@ function turnMeetIntoPack() {{
           <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
         </div>
         <span class="muted" style="font-size:11px">{prio:.2f}</span>
-        <!-- V7: Status pill -->
-        <button class="wf-pill" data-run="{_h(run_id)}" data-card="{card_id_safe}" data-status="{wf_status}"
-          style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:{s_bg};color:{s_fg};font-family:inherit;transition:opacity 150ms"
-          title="Click: queue &rarr; approved &rarr; posted. Right-click for more options.">{wf_status}</button>
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
-      {brand_cap_html}
-      <details style="margin-top:8px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Edit caption &middot; view factors &amp; evidence</summary>
+      <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
+           all happen later in the Content builder (approved cards only). -->
+      <div class="wf-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        {_render_wf_actions(run_id, card_id_raw, wf_status)}
+      </div>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">View ranking factors &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
-          <div style="padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
-            <strong style="font-size:13px">Caption editor</strong>
-            <span class="muted" style="font-size:11px;margin-left:6px">(warm-club tone &mdash; leave blank to use the default)</span>
-            <div style="margin-top:10px">
-              <label>Headline</label>
-              <textarea class="cap-edit" data-key="warm-club_headline" style="min-height:48px;font-size:12px" placeholder="Override the headline&hellip;"></textarea>
-              <label style="margin-top:var(--sp-3)">Body</label>
-              <textarea class="cap-edit" data-key="warm-club_body" style="min-height:64px;font-size:12px" placeholder="Override the body text&hellip;"></textarea>
-            </div>
-            <button class="btn" style="font-size:12px;padding:6px 14px;margin-top:10px"
-              onclick="saveCaption(this, '{_h(run_id)}', '{card_id_safe}')">Save caption edits</button>
-          </div>
-          <details style="margin-top:6px">
-            <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">Show ranking factors &amp; evidence</summary>
-            <div style="margin-top:8px">
-              <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
-              <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
-              <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
-              <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
-              <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
-            </div>
-          </details>
+          <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
+          <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
+          <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
+          <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
+          <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
         </div>
       </details>
     </div>
@@ -8233,7 +8714,7 @@ function turnMeetIntoPack() {{
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn" href="{_pack_url}">Open content pack &rarr;</a>
+    <a class="btn" href="{_pack_url}">Open content builder &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
     <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
@@ -8259,10 +8740,8 @@ function turnMeetIntoPack() {{
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
-    <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
-            onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+    <span class="muted" style="font-size:12px">Approve cards here &mdash; build graphics, video &amp; the reel in the content builder.</span>
   </div>
-  <div id="reel-panel" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
   <div class="filters-bar">
     <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
@@ -8346,231 +8825,6 @@ function clearFilters() {{
 }}
 applyFilters();
 
-// V7: Workflow pill cycling
-// Click-cycle skips rejected/edited (uncommon paths). Right-click cycles back.
-const WF_CYCLE = ['queue','approved','posted'];
-const WF_COLOURS = {{
-  queue:    ['rgba(255,255,255,0.06)','var(--ink-muted)'],
-  approved: ['rgba(34,197,94,0.15)','#22C55E'],
-  rejected: ['rgba(244,63,94,0.15)','#F43F5E'],
-  posted:   ['rgba(212,255,58,0.15)','var(--accent)'],
-  edited:   ['rgba(245,158,11,0.15)','var(--warn)'],
-}};
-const WF_API_BASE = {_wf_api_base_js};
-function _wfApply(btn, next) {{
-  var cur = btn.dataset.status || 'queue';
-  var cardId = btn.dataset.card;
-  btn.textContent = next;
-  btn.dataset.status = next;
-  var cols = WF_COLOURS[next] || WF_COLOURS.queue;
-  btn.style.background = cols[0];
-  btn.style.color = cols[1];
-  var row = btn.closest('.ach-row');
-  if (row) row.dataset.status = next;
-  var url = WF_API_BASE + encodeURIComponent(cardId);
-  fetch(url, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{action:'set_status',status:next}})}})
-    .then(r=>r.json())
-    .then(j=>{{ if(!j.ok){{btn.textContent=cur;btn.dataset.status=cur;}} }})
-    .catch(()=>{{btn.textContent=cur;btn.dataset.status=cur;}});
-}}
-
-document.addEventListener('click', function(e) {{
-  var btn = e.target.closest('.wf-pill');
-  if (!btn) return;
-  var cur = btn.dataset.status || 'queue';
-  // If currently rejected/edited (not in cycle), restart at approved
-  var idx = WF_CYCLE.indexOf(cur);
-  var next = idx === -1 ? 'approved' : WF_CYCLE[(idx + 1) % WF_CYCLE.length];
-  _wfApply(btn, next);
-}});
-
-// Right-click cycles: queue &rarr; rejected (rare path)
-document.addEventListener('contextmenu', function(e) {{
-  var btn = e.target.closest('.wf-pill');
-  if (!btn) return;
-  e.preventDefault();
-  var cur = btn.dataset.status || 'queue';
-  var next = cur === 'rejected' ? 'queue' : 'rejected';
-  _wfApply(btn, next);
-}});
-
-
-// V8: Live caption tone toggle + regenerate
-// switchTone() kept for backwards compat (content pack, other pages).
-function switchTone(btn) {{
-  var cardId = btn.dataset.card;
-  var newTone = btn.dataset.tone;
-  document.querySelectorAll('.tone-tab[data-card="' + cardId + '"]').forEach(function(tab) {{
-    var isActive = tab.dataset.tone === newTone;
-    tab.classList.toggle('active', isActive);
-    if (isActive) {{
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
-      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
-    }} else {{
-      tab.style.background = 'transparent';
-      tab.style.color = 'var(--ink-dim)';
-    }}
-  }});
-  document.querySelectorAll('.tone-panel[data-card="' + cardId + '"]').forEach(function(panel) {{
-    panel.style.display = panel.dataset.tone === newTone ? '' : 'none';
-  }});
-}}
-
-// V8: switchToneLive &mdash; fetches caption from API on click.
-// AI tab: always fetches fresh. Warm/Hype/Precise tabs: cached for the session.
-// "&#x21BA; Regenerate" always forces a fresh fetch via regenerateCaption().
-var _captionCache = {{}};
-var _AI_TONE_KEYS = {{'ai': true}};  // other tones are cached after first gen
-
-function switchToneLive(btn, captionUrl, cardId) {{
-  var newTone = btn.dataset.tone;
-  var isAiTone = !!_AI_TONE_KEYS[newTone];
-
-  // Update tab styles
-  document.querySelectorAll('.tone-tab[data-card="' + cardId + '"]').forEach(function(tab) {{
-    var isActive = tab.dataset.tone === newTone;
-    tab.classList.toggle('active', isActive);
-    if (isActive) {{
-      tab.style.background = tab.classList.contains('tone-tab-ai') ? 'rgba(212,255,58,0.15)' : 'rgba(212,255,58,0.15)';
-      tab.style.color = tab.classList.contains('tone-tab-ai') ? 'var(--lane)' : 'var(--accent)';
-      tab.style.fontWeight = '600';
-    }} else {{
-      tab.style.background = 'transparent';
-      tab.style.color = 'var(--ink-dim)';
-      tab.style.fontWeight = '400';
-    }}
-  }});
-
-  // Show active panel, hide others
-  document.querySelectorAll('.tone-panel[data-card="' + cardId + '"]').forEach(function(panel) {{
-    panel.style.display = panel.dataset.tone === newTone ? '' : 'none';
-  }});
-
-  var panel = document.querySelector('.tone-panel[data-tone="' + newTone + '"][data-card="' + cardId + '"]');
-  if (!panel) {{ return; }}
-
-  var cacheKey = cardId + '|' + newTone;
-
-  // AI tab: always fetch fresh &mdash; never use cache.
-  // Named tones (warm/hype/precise): use session cache after first generation.
-  if (!isAiTone && _captionCache[cacheKey]) {{
-    _renderCaption(panel, _captionCache[cacheKey]);
-    return;
-  }}
-
-  // All panels start with a placeholder &mdash; fetch if placeholder still present
-  // (or if AI tone, always fetch).
-  var placeholder = panel.querySelector('.caption-placeholder');
-  if (!isAiTone && !placeholder) {{
-    return;  // already generated; cache hit handled above
-  }}
-
-  _fetchCaption(captionUrl, newTone, panel, cacheKey, isAiTone, cardId);
-}}
-
-function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {{
-  var captionDiv = panel.querySelector('.caption-text');
-  var textarea = panel.querySelector('.caption-textarea');
-  if (captionDiv) {{
-    captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Generating&hellip;<span class="spin" style="display:inline-block;margin-left:6px;animation:spin 0.8s linear infinite">&#x27F3;</span></span>';
-  }}
-  fetch(captionUrl + '?tone=' + encodeURIComponent(tone), {{method: 'POST'}})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(j) {{
-      var text = j.caption || '';
-      var ts = j.generated_at ? new Date(j.generated_at).toLocaleTimeString() : '';
-      var fallbackNote = '';
-      // Distinguish transient (rate-limit / network blip) from terminal
-      // (no key configured). Transient errors must NOT flip the dot red
-      // permanently — the AI itself is still set up correctly, the
-      // request just needs a retry.
-      var isTransient = (j.error === 'transient' || (j.live === true && !text));
-      var isTerminal = (j.live === false && j.error !== 'transient');
-      if (isTerminal) {{
-        if (captionDiv) {{
-          captionDiv.innerHTML = '<div style="padding:10px;border:1px dashed var(--border);border-radius:6px;background:rgba(255,174,59,0.06);color:var(--ink-muted)">'
-            + '<div style="font-weight:600;color:var(--ink);margin-bottom:4px">&#x2726; AI captions are unavailable</div>'
-            + '<div style="font-size:11px;line-height:1.5">' + (j.message || 'Contact your administrator to enable AI.') + '</div>'
-            + '</div>';
-        }}
-        document.querySelectorAll('.ai-status-dot').forEach(function(d){{ d.style.background='#ff5d6c'; }});
-        return;
-      }}
-      if (isTransient) {{
-        if (captionDiv) {{
-          captionDiv.innerHTML = '<div style="padding:10px;border:1px solid rgba(212,255,58,0.20);border-radius:6px;background:rgba(212,255,58,0.04)">'
-            + '<div style="font-weight:600;color:var(--accent);margin-bottom:4px">&#x21BB; Briefly busy &mdash; try again</div>'
-            + '<div style="font-size:11px;line-height:1.5;color:var(--ink-dim)">' + (j.message || 'Wait a few seconds and click regenerate again.') + '</div>'
-            + '</div>';
-        }}
-        // Keep the dot green — provider is reachable, just throttled.
-        return;
-      }}
-      if (j.fallback && j.fallback_voice) {{
-        fallbackNote = '<div style="margin-top:4px;font-size:10px;color:var(--warn);padding:4px 8px;background:rgba(245,158,11,0.08);border-radius:4px">&#x26A0; AI generation unavailable, using ' + j.fallback_voice + '</div>';
-      }}
-      // Render the caption + a variant picker if we got multiple back.
-      var variants = (j.variants && j.variants.length) ? j.variants : [text];
-      var safeText = function(t){{ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }};
-      function _renderActive(idx) {{
-        var active = variants[idx] || text;
-        if (captionDiv) {{
-          var pickerHtml = '';
-          if (variants.length > 1) {{
-            var pills = variants.map(function(_, i) {{
-              var sel = (i === idx);
-              return '<button type="button" class="cap-var-pill" data-idx="' + i + '" style="font-size:10px;padding:3px 9px;border-radius:999px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'rgba(212,255,58,0.14)' : 'transparent') + ';color:' + (sel ? 'var(--accent)' : 'var(--ink-dim)') + ';cursor:pointer;font-family:inherit;margin-right:4px">v' + (i+1) + '</button>';
-            }}).join('');
-            pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
-          }}
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap">' + safeText(active) + '</span>' + fallbackNote;
-          captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {{
-            btn.addEventListener('click', function() {{ _renderActive(parseInt(btn.dataset.idx, 10) || 0); }});
-          }});
-        }}
-        if (textarea) {{ textarea.value = active; }}
-      }}
-      _renderActive(0);
-      // Update timestamp
-      var picker = panel.closest('.tone-picker');
-      if (picker) {{
-        var tsEl = picker.querySelector('.caption-timestamp');
-        if (tsEl && ts) tsEl.textContent = 'regenerated just now &middot; ' + ts;
-      }}
-      // Cache named-tone results for this session (not the AI tab &mdash; always fresh)
-      if (!isAi) {{ _captionCache[cacheKey] = {{text: text, variants: variants}}; }}
-    }})
-    .catch(function(err) {{
-      if (captionDiv) {{
-        captionDiv.innerHTML = '<span style="color:var(--ink-muted);font-style:italic">Error generating caption. Please try again.</span>';
-      }}
-    }});
-}}
-
-function _renderCaption(panel, cached) {{
-  var captionDiv = panel.querySelector('.caption-text');
-  var textarea = panel.querySelector('.caption-textarea');
-  if (captionDiv && cached.text) {{
-    captionDiv.innerHTML = '<span style="white-space:pre-wrap">' + cached.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>';
-  }}
-  if (textarea && cached.text) {{
-    textarea.value = cached.text;
-  }}
-}}
-
-function regenerateCaption(btn, captionUrl, cardId) {{
-  // Find the active panel and force a fresh re-fetch (clears session cache).
-  var activeToneTab = document.querySelector('.tone-tab.active[data-card="' + cardId + '"]');
-  if (!activeToneTab) {{ return; }}
-  var tone = activeToneTab.dataset.tone;
-  var cacheKey = cardId + '|' + tone;
-  delete _captionCache[cacheKey];  // force fresh generation
-  var panel = document.querySelector('.tone-panel[data-tone="' + tone + '"][data-card="' + cardId + '"]');
-  if (!panel) {{ return; }}
-  var isAiTone = !!_AI_TONE_KEYS[tone];
-  _fetchCaption(captionUrl, tone, panel, cacheKey, isAiTone, cardId);
-}}
-
 // V9: Copy "Why this card?" reasoning to clipboard (for sponsor reports etc.)
 function copyWhyCard(btn, taId) {{
   var ta = document.getElementById(taId);
@@ -8648,368 +8902,6 @@ function copyWhyCard(btn, taId) {{
   }} else {{ init(); }}
 }})();
 
-function copyActiveTone(btn, cardId) {{
-  // Find the active tone panel
-  var activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]:not([style*="none"])');
-  if (!activePanel) {{
-    activePanel = document.querySelector('.tone-panel[data-card="' + cardId + '"]');
-  }}
-  if (!activePanel) {{ return; }}
-  // Get text from caption-textarea or caption-text
-  var ta = activePanel.querySelector('.caption-textarea');
-  var textEl = activePanel.querySelector('.caption-text');
-  var text = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent : '');
-  // Also check old-style tone-text-ID elements
-  if (!text) {{
-    var activeTone = activePanel.dataset.tone;
-    var oldTa = document.getElementById('tone-text-' + cardId + '-' + activeTone);
-    if (oldTa) text = oldTa.value;
-  }}
-  if (!text) {{ return; }}
-  navigator.clipboard.writeText(text).then(function() {{
-    var orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function() {{ btn.textContent = orig; }}, 1500);
-  }}).catch(function() {{
-    var tempTa = document.createElement('textarea');
-    tempTa.value = text;
-    document.body.appendChild(tempTa);
-    tempTa.select();
-    document.execCommand('copy');
-    document.body.removeChild(tempTa);
-    var orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(function() {{ btn.textContent = orig; }}, 1500);
-  }});
-}}
-
-// V7: Caption save
-function saveCaption(btn, runId, cardId) {{
-  var container = btn.closest('div');
-  var edits = {{}};
-  container.querySelectorAll('.cap-edit').forEach(function(ta) {{
-    if(ta.value.trim()) edits[ta.dataset.key] = ta.value.trim();
-  }});
-  if(!Object.keys(edits).length) return;
-  var url = WF_API_BASE + encodeURIComponent(cardId);
-  btn.textContent = 'Saving&hellip;';
-  fetch(url, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{action:'set_edits',edits:edits}})}})
-    .then(r=>r.json())
-    .then(j=>{{
-      btn.textContent = j.ok ? 'Saved!' : 'Error';
-      // Reflect auto-bumped 'edited' status on the row's pill if backend set it
-      if (j.ok && j.status) {{
-        var row = btn.closest('.ach-row');
-        if (row) {{
-          var pill = row.querySelector('.wf-pill');
-          if (pill && pill.dataset.status === 'queue') {{
-            pill.textContent = j.status;
-            pill.dataset.status = j.status;
-            row.dataset.status = j.status;
-            var cols = WF_COLOURS[j.status] || WF_COLOURS.queue;
-            pill.style.background = cols[0];
-            pill.style.color = cols[1];
-          }}
-        }}
-      }}
-      setTimeout(function(){{ btn.textContent = 'Save caption edits'; }}, 1800);
-    }})
-    .catch(()=>{{ btn.textContent = 'Error'; }});
-}}
-
-// V8: Lazy visual generation. Cached per (card, format) within session.
-var _visualCache = {{}};
-function createGraphic(btn, createUrl, cardId, fmt) {{
-  fmt = fmt || 'feed_portrait';
-  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Generating&hellip;';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Generating graphic&hellip; this may take 5-15 seconds</div>';
-  var cacheKey = cardId + '|' + fmt;
-  if (_visualCache[cacheKey]) {{
-    _renderVisualPanel(panel, _visualCache[cacheKey], cardId, createUrl);
-    btn.disabled = false; btn.textContent = origLabel;
-    return;
-  }}
-  fetch(createUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{format: fmt}})}})
-    .then(function(r) {{ return r.json().then(function(j){{ return {{ok: r.ok, body: j}}; }}); }})
-    .then(function(res) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok || res.body.error) {{
-        // Prefer user_message (clean operator copy, e.g. the "renderer
-        // busy" 429) over the raw error code.
-        var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
-        return;
-      }}
-      _visualCache[cacheKey] = res.body;
-      _renderVisualPanel(panel, res.body, cardId, createUrl);
-    }})
-    .catch(function(err) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
-}}
-
-// Escape a JS expression so it can safely live inside an HTML onclick="..." attribute.
-// JSON.stringify produces a string with literal double quotes; those would close the HTML
-// attribute prematurely. We replace inner " with the &quot; entity (the browser decodes
-// them back to " before passing to the JS engine).
-function _attrEsc(jsExpr) {{
-  return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
-}}
-
-function _renderVisualPanel(panel, data, cardId, createUrl) {{
-  var visuals = data.visuals || [];
-  if (!visuals.length) {{
-    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visuals generated. ' + ((data.errors && data.errors.length) ? 'Errors: ' + data.errors.join('; ') : '') + '</div>';
-    return;
-  }}
-  var v = visuals[0];
-  // Use absolute path that respects the deployed /port/5000 prefix; the backend prepends location.pathname's base via window._API_BASE.
-  var apiBase = (window._API_BASE || '');
-  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
-  var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
-  var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
-  var formats = ['feed_portrait', 'feed_square', 'story_vertical'];
-  var formatLabels = {{'feed_portrait':'Portrait', 'feed_square':'Square', 'story_vertical':'Story'}};
-  var tabsHtml = formats.map(function(f) {{
-    var active = (f === (v.format_name || 'feed_portrait'));
-    return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
-  }}).join('');
-  panel.innerHTML =
-    '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="flex:0 0 220px;max-width:240px">' +
-        '<img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:#0a0a0a" />' +
-      '</div>' +
-      '<div style="flex:1;min-width:200px">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + (layout || 'auto') + '</div>' +
-        (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + why + '</div>' : '') +
-        '<div style="margin-bottom:8px">' + tabsHtml + '</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-          '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
-          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('regenerateGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ')') + '>&#x21BA; Regenerate (3 variants)</button>' +
-          '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' + _attrEsc('addGraphicToPack(this, ' + JSON.stringify(v.id) + ')') + '>+ Add to pack</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-}}
-
-// Motion-graphic generation: lazy, cached server-side. Streams the resulting
-// MP4 into an inline <video> on the card panel.
-var _motionCache = {{}};
-function generateMotion(btn, motionUrl, cardId) {{
-  var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering motion&hellip;';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
-  fetch(motionUrl, {{method:'POST'}})
-    .then(function(r) {{
-      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
-        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
-      }}
-      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
-    }})
-    .then(function(res) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {{
-        // Prefer user_message (clean operator-written copy) over detail
-        // (raw stack trace). The backend Phase 1.5 mapping translates
-        // known infra failures into actionable copy; falls back to detail
-        // for anything unexpected.
-        var msg = (res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
-        return;
-      }}
-      var url = URL.createObjectURL(res.blob);
-      _motionCache[cardId] = url;
-      panel.innerHTML =
-        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 200px;max-width:220px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; 1080&times;1920 &middot; 6s</div>' +
-            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-    }})
-    .catch(function(err) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
-}}
-
-// Meet-reel generation: top-3 cards stitched into a 15-second reel.
-function generateReel(btn, reelUrl) {{
-  var panel = document.getElementById('reel-panel');
-  if (!panel) return;
-  panel.style.display = '';
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Rendering reel&hellip;';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
-  fetch(reelUrl, {{method:'POST'}})
-    .then(function(r) {{
-      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {{
-        return r.blob().then(function(b) {{ return {{ok:true, blob:b}}; }});
-      }}
-      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
-    }})
-    .then(function(res) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {{
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
-        return;
-      }}
-      var url = URL.createObjectURL(res.blob);
-      panel.innerHTML =
-        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 240px;max-width:260px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:240px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-    }})
-    .catch(function(err) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
-}}
-
-function regenerateGraphic(btn, createUrl, cardId) {{
-  // V8.1 issue 4: replace single-output regenerate with a 3-variant picker.
-  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
-  if (!panel) return;
-  panel.style.display = '';
-  // Derive the variants endpoint from the create-graphic URL.
-  var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
-  var origLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Generating 3 options&hellip;';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
-  fetch(variantsUrl, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:'{{}}'}})
-    .then(function(r){{ return r.json().then(function(j){{ return {{ok:r.ok, body:j}}; }}); }})
-    .then(function(res){{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok || res.body.error) {{
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'variants failed') + '</div>';
-        return;
-      }}
-      _renderVariantPicker(panel, res.body.variants || [], cardId, createUrl);
-    }})
-    .catch(function(err){{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
-}}
-
-function _renderVariantPicker(panel, variants, cardId, createUrl) {{
-  if (!variants.length) {{
-    panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No variants returned.</div>';
-    return;
-  }}
-  var apiBase = (window._API_BASE || '');
-  var tilesHtml = variants.map(function(vt) {{
-    var v = vt.visual;
-    if (!v) {{
-      return '<div style="flex:1;min-width:160px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--bad);font-size:12px">Variant ' + vt.seed + ' failed: ' + ((vt.errors||[]).join("; ") || 'unknown') + '</div>';
-    }}
-    var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(v.format_name || 'feed_portrait');
-    var label = (vt.brief && vt.brief.layout_template) || v.layout_template || ('Variant ' + vt.seed);
-    var hook = (vt.brief && vt.brief.primary_hook) || '';
-    return (
-      '<div class="variant-tile" style="flex:1;min-width:160px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px;padding:8px">' +
-        '<img src="' + imgUrl + '" alt="Variant ' + vt.seed + '" style="width:100%;border-radius:6px;background:#0a0a0a;display:block" />' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-top:6px">Option ' + vt.seed + ' &middot; ' + label + '</div>' +
-        (hook ? '<div style="font-size:11px;color:var(--ink);margin-top:2px">' + hook + '</div>' : '') +
-        '<button class="btn" data-pick-vid="' + v.id + '" data-pick-seed="' + vt.seed + '" data-pick-fmt="' + (v.format_name || 'feed_portrait') + '" style="margin-top:6px;width:100%;font-size:11px;padding:5px 0" onclick=' + _attrEsc('pickVariant(this, ' + JSON.stringify(cardId) + ', ' + JSON.stringify(createUrl) + ')') + '>Pick this one</button>' +
-      '</div>'
-    );
-  }}).join('');
-  panel.innerHTML =
-    '<div style="font-size:11px;color:var(--ink-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Choose a variant</div>' +
-    '<div style="display:flex;gap:10px;flex-wrap:wrap">' + tilesHtml + '</div>';
-}}
-
-function pickVariant(btn, cardId, createUrl) {{
-  var vid = btn.dataset.pickVid;
-  var seed = btn.dataset.pickSeed;
-  var fmt = btn.dataset.pickFmt || 'feed_portrait';
-  var apiBase = (window._API_BASE || '');
-  var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(vid) + '/png/' + encodeURIComponent(fmt);
-  // Persist the choice in workflow sidecar
-  var url = WF_API_BASE + encodeURIComponent(cardId);
-  fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{action:'set_edits', edits:{{picked_visual_id: vid, picked_variation_seed: seed}}}})}}).catch(function(){{}});
-  // Promote to primary view
-  var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
-  var fakeData = {{
-    visuals: [{{id: vid, format_name: fmt, layout_template: btn.parentElement.querySelector('div').textContent || ''}}],
-    brief: {{}},
-  }};
-  _renderVisualPanel(panel, fakeData, cardId, createUrl);
-}}
-
-function addGraphicToPack(btn, visualId) {{
-  // Visuals are already persisted on render; this just confirms inclusion.
-  btn.textContent = '&#x2713; Added to pack';
-  btn.disabled = true;
-  setTimeout(function() {{ btn.textContent = '+ Add to pack'; btn.disabled = false; }}, 2000);
-}}
-
-// Poll LLM status on page load and every 30s afterwards. Self-healing:
-// if a previous transient 429 painted the dot red, the next poll
-// re-greens it once the rate-limit window has elapsed. Without this
-// the user had to reload the page to recover from any blip.
-(function pollLlmStatus(){{
-  function _tick() {{
-    try {{
-      var url = (window._API_BASE || '') + '/api/settings/llm-status';
-      fetch(url, {{cache:'no-store'}})
-        .then(function(r){{ return r.json(); }})
-        .then(function(j){{
-          var dots = document.querySelectorAll('.ai-status-dot');
-          var color = j.live ? '#2cc97f' : '#ff5d6c';
-          var providerLabel = j.provider_label || 'AI key';
-          var title = j.live
-            ? ('Live AI enabled &mdash; provider: ' + providerLabel)
-            : 'Live AI DISABLED &mdash; contact your administrator to enable AI captions.';
-          dots.forEach(function(d){{
-            d.style.background = color;
-            var btn = d.closest('button');
-            if (btn) btn.title = title;
-          }});
-        }})
-        .catch(function(){{}});
-    }} catch(e){{}}
-  }}
-  _tick();
-  setInterval(_tick, 30000);
-}})();
 </script>
 
 <!-- Phase 6 — keyboard navigation + bulk approve + help overlay -->
@@ -11554,7 +11446,7 @@ Relay team broke club record"></textarea>
                 "MediaHub card export.\n\n"
                 "- The .txt file contains the ready-to-post caption.\n"
                 "- The .png (if present) is the branded visual; if not,\n"
-                "  open the card in the content pack and click 'Create\n"
+                "  open the card in the content builder and click 'Create\n"
                 "  graphic' first.\n\n"
                 "Post the visual + caption to your chosen platform\n"
                 "manually. No Buffer / third-party scheduler required.\n"
@@ -12519,7 +12411,7 @@ Relay team broke club record"></textarea>
       <span class="muted" style="font-size:11px">{prio:.2f}</span>
       <button class="sp-pill wf-pill" data-run="{_h(run_id)}" data-card="{card_id_safe}" data-status="{wf_status}"
         style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:{s_bg};color:{s_fg};font-family:inherit"
-        title="Click: queue &rarr; approved &rarr; posted. Right-click for more options.">{wf_status}</button>
+        title="Click: queue &harr; approved. Right-click: reject.">{wf_status}</button>
     </div>
     <div style="font-size:14px;font-weight:600;color:var(--ink)">{event}</div>
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
@@ -12543,7 +12435,7 @@ Relay team broke club record"></textarea>
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content pack &rarr;</a>
+    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
     <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
       <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
@@ -12558,12 +12450,11 @@ Relay team broke club record"></textarea>
 
 <script>
 const SP_WF_API_BASE = {_wf_api_base_js};
-const SP_WF_CYCLE = ['queue','approved','posted'];
+const SP_WF_CYCLE = ['queue','approved'];
 const SP_WF_COLOURS = {{
   queue:    ['rgba(255,255,255,0.06)','var(--ink-muted)'],
   approved: ['rgba(34,197,94,0.15)','#22C55E'],
   rejected: ['rgba(244,63,94,0.15)','#F43F5E'],
-  posted:   ['rgba(212,255,58,0.15)','var(--accent)'],
   edited:   ['rgba(245,158,11,0.15)','var(--warn)'],
 }};
 function _spApply(btn, next) {{
@@ -16294,18 +16185,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- /pack/<run_id> &mdash; content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
     def content_pack(run_id):
-        # V7.3: redirect to the grouped pack which shows engine recommendations
-        # in 8 buckets (main_feed, stories, athlete_spotlights, weekend_recap,
-        # weekend_in_numbers, internal_notes, needs_review, rejected).
-        if _v73_ok and _build_grouped_pack is not None:
-            return redirect(url_for("content_pack_grouped", run_id=run_id))
-        # Pre-V7.3 fallback: legacy approval-based pack
-        return content_pack_approved_only(run_id)
+        """Content builder — the post-approval step.
 
-    def content_pack_approved_only(run_id):
-        """Legacy V7 approval-only pack. Reachable via /pack/<run_id>/approved."""
+        Shows only APPROVED cards. This is where the user picks a caption
+        tone, creates graphics + motion, then schedules to Buffer or downloads.
+        Approval / rejection happens first on the Review page; nothing is
+        created here until a card has been approved. The grouped 8-bucket
+        recommendation explorer still lives at /pack/<run_id>/grouped.
+        """
         if _run_state(run_id) == "in_progress":
-            return _layout("Still processing", _in_progress_page(run_id, "content_pack_approved_only"), active="home")
+            return _layout("Still processing", _in_progress_page(run_id, "content_pack"), active="home")
         run_data = _load_run(run_id)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             run_data = None
@@ -16321,151 +16210,96 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         try:
             from mediahub.workflow.pack import build_content_pack as _bcp
             approved = _bcp(run_id, profile_id, RUNS_DIR)
-        except Exception as e:
+        except Exception:
             approved = []
 
         _review_url = url_for("review", run_id=run_id)
-        _mark_all_url = url_for("api_workflow_mark_all_posted", run_id=run_id)
+        _grouped_url = url_for("content_pack_grouped", run_id=run_id)
         meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
 
+        # Empty state — nothing approved yet. Send the user back to triage.
         if not approved:
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
-                '<span class="mh-hero-eyebrow">Content pack</span>'
-                f'<h1>Nothing <em class="editorial">approved</em> yet.</h1>'
+                '<span class="mh-hero-eyebrow">Content builder</span>'
+                '<h1>Nothing <em class="editorial">approved</em> yet.</h1>'
                 '<p class="lede">'
-                f'Cards waiting on you in <strong>{meet_name}</strong>. Approve them in the review queue, '
-                'and they show up here as a ready-to-post pack with copy buttons, schedule, and export.'
+                f'The content builder holds the cards you approve in <strong>{meet_name}</strong>. '
+                'Approve a few in the review queue and they land here &mdash; ready to caption, turn into '
+                'graphics and video, then schedule to Buffer or download.'
                 '</p>'
                 '<div class="mh-hero-actions">'
-                f'<a class="mh-cta-primary" href="{_review_url}">Open review queue &rarr;</a>'
+                f'<a class="mh-cta-primary" href="{_review_url}">Go to review &amp; approve &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All runs</a>'
                 '</div>'
                 '</section>'
             )
-            return _layout("Content Pack", body, active="home")
+            return _layout("Content builder", body, active="home")
 
+        # Per-card builder rows: header + the live creative toolbar (caption
+        # tones, create graphic, motion, schedule) + a Buffer-free download.
         cards_html = ""
         for card in approved:
             ach = card.get("achievement") or {}
             swimmer = _h(ach.get("swimmer_name", ""))
             event = _h(ach.get("event", ""))
             headline = _h(ach.get("headline", ""))
-            active_cap = card.get("active_caption") or {}
-            brand_captions = card.get("brand_captions") or {}
-            cap_headline = _h(active_cap.get("headline", ""))
-            cap_body = _h(active_cap.get("body", ""))
-            cap_cta = _h(active_cap.get("cta", ""))
-            card_id_raw = card.get("_card_id", ach.get("swim_id", ""))
-            card_id = _h(card_id_raw)
+            card_id_raw = card.get("_card_id") or ach.get("swim_id", "")
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             wf = card.get("workflow") or {}
-            scheduled = _h(card.get("scheduled_for", ""))
-
-            # V7.4: Multi-tone picker for content pack
-            if brand_captions:
-                tone_labels = {"warm-club": "Warm club", "hype": "Hype", "data-led": "Data-led"}
-                pk_tabs = ""
-                pk_panels = ""
-                for pi, (t_key, t_label) in enumerate(tone_labels.items()):
-                    tc = brand_captions.get(t_key) or {}
-                    is_active = pi == 0
-                    display_style = "" if is_active else "display:none"
-                    tc_hl = _h(tc.get("headline", ""))
-                    tc_bd = _h(tc.get("body", ""))
-                    tc_ct = _h(tc.get("cta", ""))
-                    plain = f"{tc.get('headline','') or ''} {tc.get('body','') or ''} {tc.get('cta','') or ''}".strip()
-                    pk_tabs += (
-                        f'<button class="tone-tab {("active" if is_active else "")}" '
-                        f'data-card="pc-{card_uuid}" data-tone="{t_key}" onclick="switchTone(this)" '
-                        f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;'
-                        f'background:{("rgba(212,255,58,0.15)" if is_active else "transparent")};'
-                        f'color:{("var(--accent)" if is_active else "var(--ink-dim)")};font-family:inherit;margin-right:4px">'
-                        f'{t_label}</button>'
-                    )
-                    pk_panels += (
-                        f'<div class="tone-panel" data-tone="{t_key}" data-card="pc-{card_uuid}" style="{display_style}">'
-                        f'<div style="font-size:14px;font-weight:700;margin-bottom:4px">{tc_hl}</div>'
-                        f'<div style="font-size:13px;color:var(--ink-dim);margin-bottom:4px">{tc_bd}</div>'
-                        f'<div style="font-size:12px;color:var(--accent)">{tc_ct}</div>'
-                        f'<textarea id="tone-text-pc-{card_uuid}-{t_key}" style="display:none">{plain}</textarea>'
-                        f'</div>'
-                    )
-                inner_html = (
-                    f'<div style="margin-bottom:6px">{pk_tabs}</div>'
-                    f'<div class="tone-panels" data-card="pc-{card_uuid}">{pk_panels}</div>'
-                )
-            else:
-                inner_parts = []
-                if cap_headline and cap_headline != "&mdash;":
-                    inner_parts.append(f'<div style="font-size:14px;font-weight:700;margin-bottom:6px">{cap_headline}</div>')
-                if cap_body and cap_body != "&mdash;":
-                    inner_parts.append(f'<div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">{cap_body}</div>')
-                if cap_cta and cap_cta != "&mdash;":
-                    inner_parts.append(f'<div style="font-size:12px;color:var(--accent)">{cap_cta}</div>')
-                inner_html = "".join(inner_parts)
-            scheduled_html = (
-                f"<span class=\"muted\" style=\"font-size:12px\">Scheduled: {scheduled}</span>"
-                if scheduled else ""
-            )
-
-            # V7.3: build plain-text copy variants
-            if _v73_ok and _build_caption_text:
-                try:
-                    cap_plain_only = _build_caption_text(card, mode="caption_only")
-                    cap_plain_hash = _build_caption_text(card, mode="with_hashtags")
-                    cap_plain_full = _build_caption_text(card, mode="full_brief")
-                except Exception:
-                    cap_plain_only = cap_plain_hash = cap_plain_full = ""
-            else:
-                _plain_raw = f"{active_cap.get('headline','')} {active_cap.get('body','')} {active_cap.get('cta','')}".strip()
-                cap_plain_only = cap_plain_hash = cap_plain_full = _plain_raw
-
-            # Schedule-state pill from workflow sidecar (queued|scheduled|published|failed).
-            wf_dict = card.get("workflow") or {}
-            sched_state = (wf_dict.get("schedule_status") or "queued").lower()
-            sched_pill_class = {
-                "scheduled": "good",
-                "published": "good",
-                "failed":    "bad",
-            }.get(sched_state, "")
+            sched_state = (wf.get("schedule_status") or "queued").lower()
+            sched_pill_class = {"scheduled": "good", "published": "good", "failed": "bad"}.get(sched_state, "")
             sched_pill = (
-                f'<span class="tag {sched_pill_class}" data-schedule-pill="pc-{card_uuid}" '
+                f'<span class="tag {sched_pill_class}" data-schedule-pill="wf-{card_uuid}" '
                 f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
             )
-            # V9: "Why this card?" &mdash; explanation for the approved card.
-            why_html_pack = _render_why_this_card(card, card_uuid=f"pc-{card_uuid}", run_id=run_id)
-
+            _dl_url = url_for("api_card_download", run_id=run_id, card_id=card_id_raw)
             cards_html += f"""
-<div class="card" id="pc-{card_id}" style="page-break-inside:avoid">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px">
-    <div>
-      <div style="font-size:13px;font-weight:700;color:var(--ink)">{swimmer} &middot; {event}</div>
+<div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700">{swimmer}{(" &middot; " + event) if event else ""}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
       {sched_pill}
-      <span class="tag good" style="flex-shrink:0">approved</span>
+      <span class="tag good">approved</span>
     </div>
   </div>
-  <div style="padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px">
-    {inner_html}
-  </div>
-  <div class="no-print" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-  {why_html_pack}
-  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyActiveTone(this, 'pc-{card_uuid}')">Copy caption</button>
-    <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-2')">Copy + hashtags</button>
-    <button class="btn secondary" style="font-size:12px;padding:5px 12px" onclick="copyCaption(this, 'cap-text-{card_id}-3')">Copy full brief</button>
-    <button class="btn" style="font-size:12px;padding:5px 12px"
-      onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, "pc-{card_uuid}")'
-      data-mh-schedule-btn>Schedule&hellip;</button>
-    <textarea id="cap-text-{card_id}-1" style="display:none">{cap_plain_only}</textarea>
-    <textarea id="cap-text-{card_id}-2" style="display:none">{cap_plain_hash}</textarea>
-    <textarea id="cap-text-{card_id}-3" style="display:none">{cap_plain_full}</textarea>
-    {scheduled_html}
+  {_render_card_creative_toolbar(run_id, card_id_raw)}
+  <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
+       title="Download caption + visual as a .zip for manual posting (no Buffer needed)">&#x2B07; Download .zip</a>
+    <span class="muted" style="font-size:11px">Pick a tone, create a graphic or motion, then schedule to Buffer or download.</span>
   </div>
 </div>"""
+
+        _wf_api_base = url_for("api_workflow_set", run_id=run_id, card_id="CARD_ID").replace("CARD_ID", "")
+        _reel_url = url_for("api_run_reel", run_id=run_id)
+        _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
+        _newsletter_text_url = _newsletter_html_url + "?format=text"
+        _newsletter_zip_url = _newsletter_html_url + "?format=zip"
+        _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _turn_into_html = _render_turn_into_card(run_id)
+
+        # Single global AI-availability banner (same pattern as /review).
+        try:
+            from mediahub.media_ai.llm import is_available as _llm_available
+            _ai_banner_html = "" if _llm_available() else (
+                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
+                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
+                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
+                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                '<span style="color:var(--ink-dim)">'
+                'Captions and &ldquo;why this card&rdquo; explanations need a Gemini or '
+                'Anthropic key set by the deployment operator.'
+                '</span>'
+                '</div>'
+            )
+        except Exception:
+            _ai_banner_html = ""
 
         body = f"""
 <style>
@@ -16475,70 +16309,56 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   .card {{ border: 1px solid #ccc; box-shadow: none; }}
 }}
 </style>
+{_ai_banner_html}
 <section class="mh-hero no-print" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Content pack — approved</span>
+  <span class="mh-hero-eyebrow">Content builder</span>
   <h1>{meet_name}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{len(approved):02d} approved {"card" if len(approved) == 1 else "cards"}</span><span class="sep">·</span>
-    <span>Ready to post</span><span class="sep">/</span>
-    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
+    <a href="{_grouped_url}" style="color:var(--ink-muted);text-decoration:none">All recommendations</a>
   </div>
 </section>
 
-<div class="no-print" style="margin-bottom:var(--sp-6);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-  <form method="post" action="{_mark_all_url}" onsubmit="return confirm('Mark all approved cards as posted?')">
-    <button class="btn secondary" type="submit">Mark all posted</button>
-  </form>
+<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Meet reel</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Stitch the top 3 cards into a 15-second branded MP4 reel.</div>
+  </div>
+  <button class="btn" style="font-size:12px;padding:6px 14px;background:var(--medal);color:var(--medal-ink);border:none"
+          onclick="generateReel(this, {repr(_reel_url)})">&#x25B6; Generate reel from this meet</button>
+</div>
+<div id="reel-panel" class="no-print" style="display:none;margin-bottom:14px;padding:14px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>
+
+<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Parent newsletter</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">Branded HTML email + plaintext fallback, ready to paste into Mailchimp / ConvertKit / your email client.</div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}" target="_blank" rel="noopener">Preview HTML &rarr;</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_html_url)}?download=1">Download .html</a>
+    <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_text_url)}&download=1">Download .txt</a>
+    <a class="btn" style="font-size:12px;padding:6px 12px" href="{_h(_newsletter_zip_url)}">Download .zip</a>
+  </div>
+</div>
+
+<div class="no-print">{_turn_into_html}</div>
+
+<h2 style="margin:18px 0 12px">Approved cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(approved)}</span></h2>
+{cards_html}
+
+<div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <a class="btn secondary" href="{_zip_url}">Download all visuals (.zip)</a>
   <button class="btn secondary" onclick="window.print()">Print / Export PDF</button>
 </div>
 
-{cards_html}
-
 {_schedule_modal_html()}
-
-<script>
-// Robust copy with execCommand fallback for browsers without clipboard API.
-function copyCaption(btn, spanId) {{
-  var span = document.getElementById(spanId);
-  if (!span) {{ btn.textContent = 'Error'; return; }}
-  var text = span.textContent.trim();
-  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function(){{ btn.textContent = 'Copy caption'; }}, 1800); }};
-  if (navigator.clipboard && window.isSecureContext) {{
-    navigator.clipboard.writeText(text).then(function(){{ done(true); }}).catch(function(){{ fallback(); }});
-  }} else {{
-    fallback();
-  }}
-  function fallback() {{
-    var ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    try {{ var ok = document.execCommand('copy'); done(ok); }}
-    catch (e) {{ done(false); }}
-    document.body.removeChild(ta);
-  }}
-}}
-// V9: Copy "Why this card?" reasoning (textarea-based).
-function copyWhyCard(btn, taId) {{
-  var ta = document.getElementById(taId);
-  if (!ta) {{ return; }}
-  var text = ta.value || '';
-  var orig = btn.textContent;
-  var done = function(ok) {{ btn.textContent = ok ? 'Copied!' : 'Copy failed'; setTimeout(function() {{ btn.textContent = orig; }}, 1500); }};
-  if (navigator.clipboard && window.isSecureContext) {{
-    navigator.clipboard.writeText(text).then(function() {{ done(true); }}).catch(function() {{ fb(); }});
-  }} else {{ fb(); }}
-  function fb() {{
-    var t = document.createElement('textarea');
-    t.value = text; t.style.position = 'fixed'; t.style.left = '-9999px';
-    document.body.appendChild(t); t.focus(); t.select();
-    try {{ var ok = document.execCommand('copy'); done(ok); }} catch(e) {{ done(false); }}
-    document.body.removeChild(t);
-  }}
-}}
-</script>
+<script>var WF_API_BASE = {json.dumps(_wf_api_base)};</script>
+{_card_creative_js()}
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack — {meet_name}", body, active="home")
+        return _layout(f"Content builder — {meet_name}", body, active="home")
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
@@ -16579,16 +16399,6 @@ function copyWhyCard(btn, taId) {{
             return jsonify({"ok": True, "status": "edited"})
 
         return jsonify({"error": "unknown action"}), 400
-
-    @app.route("/api/workflow/<run_id>/mark-all-posted", methods=["POST"])
-    def api_workflow_mark_all_posted(run_id):
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return redirect(url_for("home"))
-        ws = _get_wf_store()
-        if ws is None:
-            return redirect(url_for("review", run_id=run_id))
-        ws.mark_all_posted(run_id)
-        return redirect(url_for("content_pack", run_id=run_id))
 
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
@@ -17404,11 +17214,11 @@ function tiRegenerate() {{
 {_ai_banner_html}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Content pack — grouped</span>
+  <span class="mh-hero-eyebrow">All recommendations</span>
   <h1>{meet_name}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a><span class="sep">/</span>
-    <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Classic pack view</a>
+    <a href="{_pack_url}" style="color:var(--ink-muted);text-decoration:none">Content builder &rarr;</a>
   </div>
 </section>
 
@@ -17539,7 +17349,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
+        return _layout(f"All recommendations — {meet_name}", body, active="home")
 
     # ===================================================================
     # V8: Media library + visuals
@@ -18165,7 +17975,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not sponsor_name:
             body = (
                 f'<p class="dim"><a href="{url_for("content_pack_grouped", run_id=run_id)}">'
-                f'&larr; Back to content pack</a></p>'
+                f'&larr; Back to recommendations</a></p>'
                 '<h1>Sponsor variant unavailable</h1>'
                 '<div class="card empty">'
                 '<p>No sponsor is configured for this organisation.</p>'
@@ -18290,7 +18100,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         swimmer = _h(ach.get("swimmer_name") or "")
         event = _h(ach.get("event") or "")
         body = f"""
-<p class="dim"><a href="{_pack_url}">&larr; Back to content pack</a></p>
+<p class="dim"><a href="{_pack_url}">&larr; Back to recommendations</a></p>
 <h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' · ' + event) if event else ''}</h1>
 <p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
