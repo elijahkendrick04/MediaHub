@@ -11,9 +11,18 @@ No domains are hardcoded — trust is earned through empirical parse success.
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Optional
+
+
+# Serialises the ledger's read-modify-write so concurrent PB lookups (the
+# pipeline now fans swimmers out across a thread pool) can't lose updates or
+# read a half-written file. Intra-process only; cross-process safety rests on
+# the atomic os.replace in _save_record.
+_LEDGER_LOCK = threading.Lock()
 
 
 def _ledger_path() -> Path:
@@ -69,8 +78,13 @@ def _save_record(record: dict) -> None:
                 lines.append(line)
     if not updated:
         lines.append(json.dumps(record))
+    # Write to a sibling temp file then atomically rename, so a concurrent
+    # reader (score_domain / rank_candidates) always sees a complete ledger,
+    # never a truncated mid-write one.
     try:
-        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        tmp = p.with_name(f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
     except Exception:
         pass
 
@@ -112,24 +126,25 @@ def record_attempt(domain: str, success: bool, purpose: str = "") -> None:
     Called after trying to extract structured data from a page.
     Updates parse_attempts / parse_successes in the trust ledger.
     """
-    ledger = _load_ledger()
-    record = ledger.get(domain, {
-        "domain": domain,
-        "first_seen": _now(),
-        "last_used": _now(),
-        "parse_attempts": 0,
-        "parse_successes": 0,
-        "domains_observed_for": [],
-    })
-    record["parse_attempts"] = record.get("parse_attempts", 0) + 1
-    if success:
-        record["parse_successes"] = record.get("parse_successes", 0) + 1
-    record["last_used"] = _now()
-    observed = record.get("domains_observed_for", [])
-    if purpose and purpose not in observed:
-        observed.append(purpose)
-    record["domains_observed_for"] = observed
-    _save_record(record)
+    with _LEDGER_LOCK:
+        ledger = _load_ledger()
+        record = ledger.get(domain, {
+            "domain": domain,
+            "first_seen": _now(),
+            "last_used": _now(),
+            "parse_attempts": 0,
+            "parse_successes": 0,
+            "domains_observed_for": [],
+        })
+        record["parse_attempts"] = record.get("parse_attempts", 0) + 1
+        if success:
+            record["parse_successes"] = record.get("parse_successes", 0) + 1
+        record["last_used"] = _now()
+        observed = record.get("domains_observed_for", [])
+        if purpose and purpose not in observed:
+            observed.append(purpose)
+        record["domains_observed_for"] = observed
+        _save_record(record)
 
 
 def _domain_from_url(url: str) -> str:
