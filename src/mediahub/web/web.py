@@ -4366,6 +4366,193 @@ def _theme_seed_style_block() -> str:
     )
 
 
+# Self-contained "Create graphic" panel script for pages OTHER than the meet
+# review page (which has its own richer createGraphic with motion + add-to-pack).
+# Exposes window.mhCreateGraphic(btn, createUrl, cardId, fmt): POSTs to createUrl,
+# then renders the returned visual into <div class="visual-panel" data-card="cardId">.
+# Defined once (guarded), no f-string interpolation — embed verbatim via {_VISUAL_PANEL_JS}.
+_VISUAL_PANEL_JS = """<script>
+(function(){
+  if (window.mhCreateGraphic) return;
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function jsq(s){ return String(s==null?'':s).replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'"); }
+  function panelFor(cardId){
+    var sel = (window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId;
+    return document.querySelector('.visual-panel[data-card="' + sel + '"]');
+  }
+  function render(panel, data, cardId, url, fmt){
+    var visuals = data.visuals || [];
+    if (!visuals.length){
+      panel.innerHTML = '<div style="padding:14px;color:var(--ink-muted);font-size:13px">No visual generated.' + ((data.errors && data.errors.length) ? ' (' + esc(data.errors.join('; ')) + ')' : '') + '</div>';
+      return;
+    }
+    var v = visuals[0];
+    var apiBase = (window._API_BASE || '');
+    var cur = v.format_name || fmt || 'feed_portrait';
+    var imgUrl = apiBase + '/api/visual/' + encodeURIComponent(v.id) + '/png/' + encodeURIComponent(cur);
+    var why = (data.brief && data.brief.why_this_design) || v.why_this_design || '';
+    var layout = v.layout_template || (data.brief && data.brief.layout_template) || '';
+    var formats = [['feed_portrait','Portrait'],['feed_square','Square']];
+    var tabs = formats.map(function(f){
+      var on = (f[0] === cur);
+      return '<button type="button" onclick="mhCreateGraphic(this,\\'' + jsq(url) + '\\',\\'' + jsq(cardId) + '\\',\\'' + f[0] + '\\')" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (on?'rgba(212,255,58,0.15)':'transparent') + ';color:' + (on?'var(--lane)':'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + f[1] + '</button>';
+    }).join('');
+    panel.innerHTML =
+      '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+        '<div style="flex:0 0 200px;max-width:220px"><img src="' + imgUrl + '" alt="Generated graphic" style="width:100%;border-radius:6px;border:1px solid var(--border);background:var(--bg)"/></div>' +
+        '<div style="flex:1;min-width:200px">' +
+          '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Generated visual &middot; ' + esc(layout || 'auto') + '</div>' +
+          (why ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">' + esc(why) + '</div>' : '') +
+          '<div style="margin-bottom:8px">' + tabs + '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<a class="btn secondary" href="' + imgUrl + '" download style="font-size:11px;padding:4px 10px">Download PNG</a>' +
+            '<button type="button" class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="mhCreateGraphic(this,\\'' + jsq(url) + '\\',\\'' + jsq(cardId) + '\\',\\'' + cur + '\\')">&#x21BA; Regenerate</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+  window.mhCreateGraphic = function(btn, url, cardId, fmt){
+    fmt = fmt || 'feed_portrait';
+    var panel = panelFor(cardId);
+    if (!panel) return;
+    panel.style.display = '';
+    var orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Generating\\u2026';
+    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px"><div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>Generating graphic\\u2026 this may take 5-15 seconds</div>';
+    fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({format: fmt})})
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+      .then(function(res){
+        btn.disabled = false; btn.textContent = orig;
+        if (!res.ok || res.body.error){
+          panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + esc(res.body.error || 'render failed') + '</div>';
+          return;
+        }
+        render(panel, res.body, cardId, url, fmt);
+      })
+      .catch(function(err){
+        btn.disabled = false; btn.textContent = orig;
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + esc(String(err)) + '</div>';
+      });
+  };
+})();
+</script>"""
+
+
+def _wrap_two_lines(text: str, limit: int = 18) -> tuple[str, str]:
+    """Split a short headline across two lines near a word boundary.
+
+    Used for the caption-only text-led graphics: the big recap headline
+    reads better as two balanced lines than one long one. Returns
+    ``(line1, line2)`` where ``line2`` may be empty for short input.
+    """
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text, ""
+    words = text.split(" ")
+    line1 = ""
+    i = 0
+    while i < len(words):
+        cand = (line1 + " " + words[i]).strip()
+        if len(cand) > limit and line1:
+            break
+        line1 = cand
+        i += 1
+    line2 = " ".join(words[i:])
+    if len(line2) > limit + 8:
+        line2 = line2[: limit + 7].rstrip() + "…"
+    return line1, line2
+
+
+_HOOK_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "to", "for", "and", "at", "in", "on",
+    "with", "is", "are", "was", "were", "this", "that", "our", "we",
+})
+
+
+def _short_hook(text: str, max_words: int = 3, max_chars: int = 22) -> str:
+    """First few words of ``text`` as a short headline hook.
+
+    The text-led headline is sized for ~2 short lines; a long first sentence
+    overflows and collides with the stat strip. The full copy still lives in
+    the bullets (and the copyable caption), so a punchy 2-3 word hook is the
+    right call for the big headline. Trailing filler words ("for", "the", …)
+    are trimmed so the hook never ends on a dangling preposition.
+    """
+    words = (text or "").split()
+    out: list[str] = []
+    total = 0
+    for w in words[:max_words]:
+        if out and total + len(w) + 1 > max_chars:
+            break
+        out.append(w)
+        total += len(w) + 1
+    while len(out) > 1 and out[-1].lower().strip(",.;:!?") in _HOOK_STOPWORDS:
+        out.pop()
+    return " ".join(out)
+
+
+def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> dict:
+    """Map a caption-only stub card into a text-led graphic ``content_item``.
+
+    The four AI-stub flows (Free Text / Session Update / Event Preview /
+    Sponsor Post) produce caption cards with no swim achievement, so the
+    creative-brief generator has nothing to synthesise a headline from. We
+    hand it ready-made display copy via ``graphic_text`` and pin the angle to
+    ``recap_mention`` so the renderer selects the text-led layout (which needs
+    no athlete photo). This is presentation shaping of already-AI-written copy
+    — not content generation — so it stays deterministic.
+    """
+    import re as _re
+    caption = str(card.get("caption") or "").strip()
+    fd = form_data or {}
+    meet = str(fd.get("meet_name") or "").strip()
+    sponsor = str(fd.get("sponsor_name") or "").strip()
+    # Sentence-ish split (also break on newlines).
+    parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+|\n+", caption) if p.strip()]
+
+    if stub_type == "sponsor_post":
+        hook = "SPONSOR"
+        head_src = _short_hook(sponsor or meet or "Thank you")
+        kicker = meet or sponsor or "Sponsor"
+        bullets = parts[:4]
+    elif stub_type == "weekend_preview":
+        hook = "PREVIEW"
+        head_src = _short_hook(meet or "Event preview")
+        kicker = meet or "Preview"
+        bullets = parts[:4]
+    elif stub_type == "session_update":
+        hook = "LIVE"
+        head_src = _short_hook(meet or "Session update")
+        kicker = meet or "Live update"
+        bullets = parts[:4]
+    else:  # free_text / other
+        hook = "HIGHLIGHT"
+        head_src = _short_hook(parts[0]) if parts else "Highlight"
+        kicker = meet or "Highlight"
+        # First sentence became the hook, so bullets are the rest (or the
+        # whole caption when there's only one sentence).
+        bullets = (parts[1:] if len(parts) > 1 else parts)[:4]
+
+    hl1, hl2 = _wrap_two_lines(str(head_src).upper(), limit=14)
+    bullets = [b[:80] for b in bullets if b]
+    if not bullets and caption:
+        bullets = [caption[:80]]
+    return {
+        "id": stub_type,
+        "post_angle": "recap_mention",
+        "confidence": 0.85,
+        "safe_to_post": {"level": "safe"},
+        "meet_name": kicker,
+        "achievement": {"post_angle": "recap_mention", "confidence": 0.85},
+        "graphic_text": {
+            "headline_line1": hl1,
+            "headline_line2": hl2,
+            "bullets": bullets,
+            "primary_hook": hook,
+        },
+    }
+
+
 def _layout(title: str, body: str, active: str = "home") -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
@@ -11711,8 +11898,8 @@ Relay team broke club record"></textarea>
             "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
             "weekend_preview":   (["Caption", "Graphic"],          "~ 40s"),
             "sponsor_post":      (["Caption", "Graphic"],          "~ 30s"),
-            "session_update":    (["Caption"],                     "~ 20s"),
-            "free_text":         (["Caption"],                     "~ 15s"),
+            "session_update":    (["Caption", "Graphic"],          "~ 20s"),
+            "free_text":         (["Caption", "Graphic"],          "~ 15s"),
         }
 
         tiles_html = ""
@@ -12314,6 +12501,27 @@ Relay team broke club record"></textarea>
                 cap_text = f"{headline}\\n\\n{angle}"
             cap_text_safe = cap_text.replace('"', '&quot;')
 
+            # "Create graphic" — only for achievements with a real swim_id,
+            # which api_create_graphic can resolve in the run's recognition
+            # report. Aggregate rows (synthetic "sp:..." ids) have no single
+            # swim to render, so they keep caption-only.
+            _sp_swim_id = a.get("swim_id")
+            sp_graphic_btn = ""
+            sp_visual_panel = ""
+            if _sp_swim_id:
+                _sp_g_url = url_for("api_create_graphic", run_id=run_id, card_id=_sp_swim_id)
+                sp_graphic_btn = (
+                    f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
+                    f"onclick=\"mhCreateGraphic(this, '{_h(_sp_g_url)}', '{card_id_safe}')\">"
+                    f'&#x2726; Create graphic</button>'
+                )
+                sp_visual_panel = (
+                    f'<div class="visual-panel" data-card="{card_id_safe}" '
+                    f'style="display:none;margin-top:10px;padding:12px;'
+                    f'background:rgba(212,255,58,0.04);border:1px solid var(--border);'
+                    f'border-radius:8px"></div>'
+                )
+
             rows_html += f"""
 <div class="sp-row" data-card="{card_id_safe}" style="padding:14px 0;border-bottom:1px solid var(--border);display:flex;gap:14px;align-items:flex-start">
   <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px">#{rank}</div>
@@ -12328,10 +12536,12 @@ Relay team broke club record"></textarea>
     </div>
     <div style="font-size:14px;font-weight:600;color:var(--ink)">{event}</div>
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
-    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
       <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
+      {sp_graphic_btn}
       <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
     </div>
+    {sp_visual_panel}
   </div>
 </div>"""
 
@@ -12423,6 +12633,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 }}
 </script>
 """
+        body += _VISUAL_PANEL_JS
         return _layout(f"Spotlight: {pack['swimmer_name']}", body, active="create")
 
     # ---- Stub routes (now functional with real LLM + fallback) ---------
@@ -12639,13 +12850,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # render_cards_html a base it can append "/<idx>/status" to.
             _pack_id = saved["pack_id"] if saved else None
             _status_api_base = None
+            _graphic_api_base = None
             if _pack_id:
                 _full = url_for("api_stub_pack_card_status",
                                 pack_id=_pack_id, card_idx=0)
                 _status_api_base = _full.rsplit("/", 2)[0]
+                # Same strip trick for the create-graphic base: render_cards_html
+                # appends "/<idx>/create-graphic" itself.
+                _full_g = url_for("api_stub_pack_create_graphic",
+                                  pack_id=_pack_id, card_idx=0)
+                _graphic_api_base = _full_g.rsplit("/", 2)[0]
             body = _stubs_mod.render_cards_html(
                 cards_payload, back, f"{title} — drafts",
                 pack_id=_pack_id, status_api_base=_status_api_base,
+                graphic_api_base=_graphic_api_base,
             )
             if saved:
                 _packs_url = url_for("stub_packs_list")
@@ -12658,6 +12876,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     ),
                     1,
                 )
+            if _graphic_api_base:
+                body += _VISUAL_PANEL_JS
             return _layout(title, body, active=active_tab)
         # GET &mdash; render hero + form
         body = _stub_hero(title) + _llm_unavailable_banner() + stub.render_stub_html()
@@ -13277,12 +13497,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "api_stub_pack_card_status", pack_id=pack_id, card_idx=0
         )
         _status_api_base = _full_status_url.rsplit("/", 2)[0]
+        _graphic_api_base = url_for(
+            "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
+        ).rsplit("/", 2)[0]
         cards_html = render_cards_html(
             {"cards": rec.get("cards") or []},
             back_url,
             rec.get("title") or "Draft pack",
             pack_id=pack_id,
             status_api_base=_status_api_base,
+            graphic_api_base=_graphic_api_base,
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
@@ -13323,7 +13547,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             footer,
             1,
         )
-        body = header + attached_html + cards_html
+        body = header + attached_html + cards_html + _VISUAL_PANEL_JS
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
@@ -13446,6 +13670,89 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "card_idx": card_idx,
             "status": card.get("status", status),
         })
+
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic",
+               methods=["POST"])
+    def api_stub_pack_create_graphic(pack_id, card_idx):
+        """Render a branded text-led graphic for one caption-only stub card.
+
+        Powers the "Create graphic" button on the Free Text / Event Preview /
+        Sponsor Post / Session Update draft pages. These flows carry no swim
+        achievement, so we shape the caption into a text-led item
+        (``_stub_card_to_graphic_item``) and render it through the same
+        graphic_renderer the meet-recap cards use, honouring the active
+        organisation's brand kit. PNGs land under a synthetic ``_stub_<pack_id>``
+        run dir so the existing /api/visual/<id>/png route serves them as-is.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+        from mediahub.club_platform.stub_pack_store import load_pack
+        rec = load_pack(pack_id)
+        # Tenant isolation: only the owning org may render its drafts. Same
+        # generic 404 as a real miss so existence isn't confirmable.
+        if not _can_access_pack(rec, _active_profile_id()):
+            return jsonify({"error": "pack_not_found"}), 404
+        cards = (rec or {}).get("cards") or []
+        if not (0 <= card_idx < len(cards)):
+            return jsonify({"error": "card_not_found"}), 404
+        card = cards[card_idx]
+        stub_type = rec.get("stub_type", "other")
+        form_data = rec.get("form_data") or {}
+        item = _stub_card_to_graphic_item(stub_type, card, form_data)
+
+        # Brand kit: the active organisation's palette + logo so the graphic is
+        # on-brand. Falls back to a neutral run-scoped kit when no org is
+        # pinned (pre-onboarding sandbox / tests).
+        run_id = f"_stub_{pack_id}"
+        prof = _active_profile()
+        try:
+            brand_kit = prof.get_brand_kit() if prof is not None else _v8_brand_kit_for(run_id)
+        except Exception:
+            brand_kit = _v8_brand_kit_for(run_id)
+        profile_id = rec.get("profile_id") or run_id
+
+        # Format from JSON body / query string (default portrait).
+        req_fmt = None
+        try:
+            if _req.is_json and _req.json:
+                req_fmt = _req.json.get("format")
+        except Exception:
+            req_fmt = None
+        if not req_fmt:
+            req_fmt = _req.args.get("format")
+        formats_kw = [req_fmt] if req_fmt else None
+
+        # Fresh palette / typography variety per click, but PIN the layout to
+        # the text-led family — a photo-needing family would render empty for a
+        # caption-only card. palette roles are restricted to the dark-primary-
+        # safe set so white headline text never disappears.
+        variation_profile = None
+        try:
+            import dataclasses as _dc
+            from mediahub.creative_brief.generator import random_variation_profile
+            vp = random_variation_profile(angle="recap_mention")
+            role = vp.palette_role_index if vp.palette_role_index in (0, 1, 3) else 0
+            variation_profile = _dc.replace(
+                vp, layout_family="text_led_recap",
+                photo_treatment="no-photo", palette_role_index=role,
+            )
+        except Exception:
+            variation_profile = None
+
+        try:
+            from mediahub.content_pack_visual.integration import create_visual_for_item
+            res = create_visual_for_item(
+                item, brand_kit,
+                profile_id=profile_id, run_id=run_id,
+                media_assets=[],
+                formats=formats_kw,
+                variation_profile=variation_profile,
+                use_ai_director=False,
+            )
+        except Exception as e:
+            return jsonify({"error": f"render_failed: {e}"}), 500
+        return jsonify({"ok": True, **res})
 
     @app.route("/add-input")
     def add_input_page():

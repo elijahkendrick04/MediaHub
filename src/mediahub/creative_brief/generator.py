@@ -496,6 +496,27 @@ def generate(content_item: dict, evaluation, brand_kit, *,
         mood = ""
         ai_directed = False
 
+    # ---- Caller-supplied display copy (caption-only content types) ----
+    # Free Text / Session Update / Event Preview / Sponsor Post carry no
+    # swim achievement to synthesise a headline + bullets from, so their
+    # route hands us ready-made text via ``graphic_text``. Honour it
+    # verbatim — it only feeds the text-led layouts, and the swim pipeline
+    # never sets this key, so the achievement-driven path is unaffected.
+    gt = content_item.get("graphic_text")
+    if isinstance(gt, dict):
+        if gt.get("headline_line1"):
+            layers["headline_line1"] = str(gt["headline_line1"])
+        if gt.get("headline_line2"):
+            layers["headline_line2"] = str(gt["headline_line2"])
+        _gt_bullets = gt.get("bullets")
+        if isinstance(_gt_bullets, list):
+            _clean = [str(b).strip() for b in _gt_bullets if str(b).strip()]
+            if _clean:
+                layers["bullets"] = _clean[:4]
+        if gt.get("primary_hook"):
+            primary_hook = str(gt["primary_hook"])
+            layers["achievement_label"] = primary_hook
+
     brief = CreativeBrief(
         id="cb_" + uuid.uuid4().hex[:12],
         content_item_id=str(content_item.get("id") or content_item.get("swim_id") or ach.get("swim_id") or ""),

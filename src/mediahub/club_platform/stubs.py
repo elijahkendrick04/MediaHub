@@ -601,6 +601,7 @@ def render_cards_html(
     title: str,
     pack_id: Optional[str] = None,
     status_api_base: Optional[str] = None,
+    graphic_api_base: Optional[str] = None,
 ) -> str:
     cards = (cards_payload or {}).get("cards") or []
     if not cards:
@@ -663,6 +664,28 @@ def render_cards_html(
                 f'{_h(label)}</button>'
             )
 
+        # "Create graphic" affordance — only when the page wired a graphic API
+        # base (the saved-pack flows do; the unsaved one-shot render doesn't).
+        # The button + panel reuse window.mhCreateGraphic (injected by the
+        # calling page via _VISUAL_PANEL_JS); cardId namespaces the panel by
+        # pack + index so multiple cards on one page don't collide.
+        graphic_button = ""
+        visual_panel = ""
+        if graphic_api_base and pack_id:
+            g_card_id = f"{pack_id}-{idx}"
+            g_url = f"{graphic_api_base}/{idx}/create-graphic"
+            graphic_button = (
+                f'<button type="button" class="secondary" '
+                f"onclick=\"mhCreateGraphic(this, '{_h(g_url)}', '{_h(g_card_id)}')\" "
+                f'style="font-size:13px">&#x2726; Create graphic</button>'
+            )
+            visual_panel = (
+                f'<div class="visual-panel" data-card="{_h(g_card_id)}" '
+                f'style="display:none;margin-top:10px;padding:12px;'
+                f'background:rgba(212,255,58,0.04);border:1px solid var(--border);'
+                f'border-radius:8px"></div>'
+            )
+
         cards_html += f"""
 <div class="mh-content-card" data-interactive data-card-status="{_h(status)}">
   <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
@@ -677,7 +700,9 @@ def render_cards_html(
         navigator.clipboard.writeText(c).then(function(){{ window.MH && MH.toast("Caption copied", "success"); }});
       }} else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
     }})(this)'>Copy caption</button>
+    {graphic_button}
   </div>
+  {visual_panel}
 </div>"""
 
     pill_js = ""
