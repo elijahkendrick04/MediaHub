@@ -2519,6 +2519,15 @@ a.card:hover, .card[data-interactive]:hover {
   100% { transform: translateX(440%); }
 }
 
+/* Active-org chip — wide-viewport defaults. Lives outside the inline
+   <a style="…"> so the @media (max-width: 1100px) override below can
+   actually win (inline-style specificity beat the media query, so the
+   chip used to stay full-size at 900–1099px and clip past the viewport
+   edge). The base rule must come BEFORE the media query so source order
+   doesn't reverse the precedence at narrow widths. */
+#active-org-chip { font-size: 12px; line-height: 1; padding: 5px 10px; }
+#active-org-chip > span:last-child { max-width: 140px; }
+
 /* === Responsive: nav scrollable, hide backend pill on narrow widths ===
    Audit found the topnav overflowed on every viewport between 721 and
    ~1100 px because the 9 signed-in items + brand + pill = ~1100 px wide.
@@ -2545,7 +2554,7 @@ a.card:hover, .card[data-interactive]:hover {
   /* Active-org chip shrinks on narrow widths so the brand chip + nav
      items both fit on one line under iPad / small-laptop viewports. */
   #active-org-chip { font-size: 11px; padding: 4px 8px; }
-  #active-org-chip span:last-child { max-width: 92px; }
+  #active-org-chip > span:last-child { max-width: 92px; }
 }
 /* Wider 720px treatment: smaller spacing, table tweaks, stat squeeze */
 @media (max-width: 720px) {
@@ -4029,9 +4038,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
        href="{{ url_for('organisation_setup') }}"
        title="Active organisation — click to review brand setup"
        style="display:inline-flex;align-items:center;gap:8px;
-              padding:5px 10px;border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
-              border-radius:999px;text-decoration:none;
-              color:var(--ink);font-size:12px;line-height:1;
+              border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
+              border-radius:999px;text-decoration:none;color:var(--ink);
               background:rgba(245,242,232,0.03);margin-left:8px">
       {% if signed_in_primary %}
       <span aria-hidden="true"
@@ -4045,7 +4053,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                    background:{{ signed_in_secondary }};
                    border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
       {% endif %}
-      <span style="font-weight:600;letter-spacing:0.01em;max-width:140px;
+      <span style="font-weight:600;letter-spacing:0.01em;
                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
         {{ signed_in_name }}
       </span>
