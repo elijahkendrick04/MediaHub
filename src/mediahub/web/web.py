@@ -4241,6 +4241,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
 <title>{{ title }} &mdash; MediaHub</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet"
@@ -8656,6 +8657,30 @@ Relay team broke club record"></textarea>
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         return jsonify(payload), (200 if payload["ok"] else 503)
 
+    _FAVICON_SVG = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+        '<rect width="32" height="32" rx="6" fill="#0A0B11"/>'
+        '<rect x="6" y="20" width="5" height="7" rx="1" fill="#B6B2A6"/>'
+        '<rect x="13.5" y="9" width="5" height="18" rx="1" fill="#D4FF3A"/>'
+        '<rect x="21" y="14" width="5" height="13" rx="1" fill="#F4D58D"/>'
+        '<line x1="4" y1="28.5" x2="28" y2="28.5" stroke="#D4FF3A" stroke-width="1.5"/>'
+        '</svg>'
+    )
+
+    @app.route("/favicon.svg")
+    @app.route("/favicon.ico")
+    def favicon():
+        # Browsers auto-request /favicon.ico on every first page load.
+        # Without a handler that produced a 404 on every cold visit
+        # (and a generic browser-tab icon). Serve the MediaHub podium
+        # mark as SVG; modern browsers render SVG favicons and the
+        # .ico alias keeps legacy auto-requests quiet.
+        return app.response_class(
+            _FAVICON_SVG,
+            mimetype="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @app.route("/healthz")
     def healthz():
         # Cheap liveness probe (no disk/db work). We still record a
@@ -10716,14 +10741,34 @@ Relay team broke club record"></textarea>
         # fail-soft so a corrupted data.db or missing schema doesn't 500
         # the spotlight landing page — the user gets a recovery hero
         # instead of a stack trace.
+        #
+        # TENANT ISOLATION: scope the picker to the active organisation's
+        # runs (plus legacy untagged runs, which stay readable per the
+        # _can_access_run philosophy). Without this filter the dropdown
+        # leaked every tenant's meet names + run ids, and a tampered
+        # ?run_id= surfaced another club's full swimmer roster (PII).
+        _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
         try:
             conn = _db()
             try:
-                recent_runs = conn.execute(
-                    "SELECT id, meet_name, file_name, created_at FROM runs WHERE status='done' ORDER BY created_at DESC LIMIT 20"
-                ).fetchall()
+                if _active_pid:
+                    recent_runs = conn.execute(
+                        "SELECT id, meet_name, file_name, created_at FROM runs "
+                        "WHERE status='done' AND "
+                        "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
+                        "ORDER BY created_at DESC LIMIT 20",
+                        (_active_pid,),
+                    ).fetchall()
+                else:
+                    # No active org (pre-onboarding sandbox / tests):
+                    # nothing to isolate against, so list everything as
+                    # before.
+                    recent_runs = conn.execute(
+                        "SELECT id, meet_name, file_name, created_at FROM runs "
+                        "WHERE status='done' ORDER BY created_at DESC LIMIT 20"
+                    ).fetchall()
             finally:
                 conn.close()
         except Exception as e:
@@ -10776,6 +10821,11 @@ Relay team broke club record"></textarea>
         swimmers_html = ""
         if run_id_param:
             run_data = _load_run(run_id_param)
+            # Tenant isolation: a tampered ?run_id= pointing at another
+            # org's run must not surface that org's swimmer roster (PII).
+            # Mirror the guard used by /review, /pack, /audit.
+            if run_data and not _can_access_run(run_id_param, run_data, _active_pid):
+                run_data = None
             if run_data:
                 # A malformed run_data (missing recognition_report keys,
                 # weird achievement shapes) would otherwise bubble out of
@@ -14736,7 +14786,7 @@ function copyWhyCard(btn, taId) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack &mdash; {meet_name}", body, active="home")
+        return _layout(f"Content Pack — {meet_name}", body, active="home")
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
@@ -15299,7 +15349,7 @@ function tiRegenerate() {{
 }}
 </script>
 """
-        return _layout(f"Turn-Into pack &mdash; {meet_name}", body, active="home")
+        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
@@ -15462,7 +15512,7 @@ function tiRegenerate() {{
      style="margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
-      <div style="font-size:13px;font-weight:700">{swimmer}{(" &middot; " + evt) if evt else ""}</div>
+      <div style="font-size:13px;font-weight:700">{swimmer}{(" · " + evt) if evt else ""}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -15737,7 +15787,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack (grouped) &mdash; {meet_name}", body, active="home")
+        return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
 
     # ===================================================================
     # V8: Media library + visuals
@@ -16486,7 +16536,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         event = _h(ach.get("event") or "")
         body = f"""
 <p class="dim"><a href="{_pack_url}">&larr; Back to content pack</a></p>
-<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' &middot; ' + event) if event else ''}</h1>
+<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' · ' + event) if event else ''}</h1>
 <p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
   <div class="card">
@@ -16499,7 +16549,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   </div>
 </div>
 """
-        return _layout(f"Sponsor variant &mdash; {swimmer}", body, active="home")
+        return _layout(f"Sponsor variant — {swimmer}", body, active="home")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):

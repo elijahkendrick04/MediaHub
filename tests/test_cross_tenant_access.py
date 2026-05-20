@@ -285,6 +285,38 @@ class TestOwnerStillHasAccess:
 
 
 # ---------------------------------------------------------------------------
+# Spotlight landing — the meet picker dropdown and the ?run_id= roster
+# render must both be tenant-scoped. Regression guard for the IDOR where
+# Beta's /spotlight listed every org's meet names and a tampered
+# ?run_id= surfaced another club's full swimmer roster (PII).
+# ---------------------------------------------------------------------------
+
+class TestSpotlightTenantScoped:
+    def test_beta_spotlight_dropdown_omits_alpha_meet(self, two_orgs):
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get("/spotlight")
+        body = r.get_data(as_text=True)
+        assert "SECRET ALPHA INVITATIONAL" not in body
+        assert two_orgs["run_id"] not in body
+
+    def test_beta_spotlight_run_id_param_hides_alpha_roster(self, two_orgs):
+        c = two_orgs["client"]
+        _pin(c, "org-beta")
+        r = c.get(f"/spotlight?run_id={two_orgs['run_id']}")
+        body = r.get_data(as_text=True)
+        assert "Alpha Athlete" not in body
+        assert "Alpha-only" not in body
+
+    def test_alpha_spotlight_dropdown_shows_own_meet(self, two_orgs):
+        c = two_orgs["client"]
+        _pin(c, "org-alpha")
+        r = c.get("/spotlight")
+        assert r.status_code == 200
+        assert "SECRET ALPHA INVITATIONAL" in r.get_data(as_text=True)
+
+
+# ---------------------------------------------------------------------------
 # Legacy lenience — runs / packs with no owner stamped (pre-multi-tenant
 # data) must remain accessible. Otherwise we'd orphan historical data.
 # ---------------------------------------------------------------------------
