@@ -24,10 +24,12 @@ State: SQLite at data.db (so publish_website snapshots it across deploys)
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import sqlite3
@@ -753,6 +755,139 @@ _RUN_STALE_SECS = 180
 # (read by polls that land on the *other* gunicorn worker) only needs to
 # be fresh to the second.
 _RUN_DB_HEARTBEAT_SECS = 2.0
+
+
+# ---------------------------------------------------------------------------
+# Async health-check heartbeat writer.
+#
+# /healthz is Render's configured liveness probe and must answer fast no
+# matter what else the box is doing. The heartbeat it records is a SQLite
+# INSERT+commit on the *shared persistent disk*; under a concurrent render
+# that disk is contended and the commit's fsync can stall for 10s+. A
+# synchronous write therefore turned a slow render into a failed health
+# probe -> Render restarted the whole container mid-render (the "image/
+# video generation crashed and overloaded the site" incident).
+#
+# We hand the write to one daemon thread per worker process and return from
+# the probe immediately. The write stays best-effort and lossy: a full queue
+# drops the row rather than blocking the probe.
+# ---------------------------------------------------------------------------
+_HEARTBEAT_QUEUE = queue.Queue(maxsize=512)
+_heartbeat_thread_started = False
+_heartbeat_thread_lock = threading.Lock()
+# A heartbeat write slower than this means the persistent disk is contended
+# (almost always by a concurrent render). Surface it at WARNING so the
+# slow-disk condition shows in the deployment logs without enabling INFO.
+_HEARTBEAT_SLOW_WARN_MS = 1000.0
+
+
+def _heartbeat_drain_loop() -> None:
+    """Drain queued heartbeats to the uptime store, off the request path."""
+    from mediahub.observability import uptime as _uptime
+    while True:
+        ok, source, response_ms, error = _HEARTBEAT_QUEUE.get()
+        try:
+            t0 = time.monotonic()
+            _uptime.record_heartbeat(
+                ok=ok, source=source, response_ms=response_ms, error=error
+            )
+            write_ms = (time.monotonic() - t0) * 1000.0
+            if write_ms >= _HEARTBEAT_SLOW_WARN_MS:
+                log.warning(
+                    "healthz: heartbeat DB write slow (%.0fms, source=%s) — "
+                    "persistent disk contended, likely a concurrent render",
+                    write_ms, source,
+                )
+        except Exception:
+            pass
+        finally:
+            _HEARTBEAT_QUEUE.task_done()
+
+
+def _ensure_heartbeat_thread() -> None:
+    """Start the heartbeat drain thread once per process (idempotent)."""
+    global _heartbeat_thread_started
+    if _heartbeat_thread_started:
+        return
+    with _heartbeat_thread_lock:
+        if _heartbeat_thread_started:
+            return
+        threading.Thread(
+            target=_heartbeat_drain_loop, name="heartbeat-writer", daemon=True
+        ).start()
+        _heartbeat_thread_started = True
+
+
+# ---------------------------------------------------------------------------
+# Heavy-render admission control.
+#
+# Image renders (Playwright/Chromium via graphic_renderer) and motion
+# renders (Remotion/Node/Chromium) are CPU- and memory-heavy. On the
+# single-CPU / 2 GB deployment, running several at once pegs the core and
+# blows the memory ceiling -> OOM -> container restart. The regenerate-
+# variants route alone fans out to three concurrent Chromium renders. Cap
+# how many run at once: single-shot routes get a fast 429 ("busy, try
+# again") instead of stacking more Chromium; internal batch members queue
+# for a slot so they serialise instead of stampeding.
+# ---------------------------------------------------------------------------
+_RENDER_LIMIT = max(1, int(os.environ.get("MEDIAHUB_MAX_CONCURRENT_RENDERS", "1") or "1"))
+_render_semaphore = threading.BoundedSemaphore(value=_RENDER_LIMIT)
+# Single-shot routes wait this briefly for a slot before returning 429:
+# long enough that back-to-back cache hits don't false-trip, short enough
+# that the user gets snappy "busy" feedback while a cold render runs.
+_RENDER_TRY_TIMEOUT = float(os.environ.get("MEDIAHUB_RENDER_TRY_TIMEOUT", "0.75") or "0.75")
+# Internal batch members (the variant threads) queue up to this long for a
+# slot so all of them complete, just serialised rather than concurrent.
+_RENDER_QUEUE_TIMEOUT = float(os.environ.get("MEDIAHUB_RENDER_QUEUE_TIMEOUT", "180") or "180")
+# A render holding a slot longer than this is logged at WARNING so slow
+# renders are visible without enabling INFO.
+_RENDER_SLOW_WARN_MS = 20_000.0
+
+
+class _RenderBusy(Exception):
+    """Raised when a render slot can't be acquired within the wait budget."""
+
+
+@contextlib.contextmanager
+def _render_slot(kind: str, label: str = "", *, timeout: float):
+    """Hold a global render slot for the duration of one heavy render.
+
+    Raises ``_RenderBusy`` if no slot frees up within ``timeout`` seconds.
+    Always releases the slot, even if the render raises.
+    """
+    if not _render_semaphore.acquire(timeout=timeout):
+        log.warning(
+            "render gate: %s rejected (no slot after %.2fs, limit=%d) label=%s",
+            kind, timeout, _RENDER_LIMIT, label,
+        )
+        raise _RenderBusy(kind)
+    t0 = time.monotonic()
+    try:
+        yield
+    finally:
+        dur_ms = (time.monotonic() - t0) * 1000.0
+        _render_semaphore.release()
+        if dur_ms >= _RENDER_SLOW_WARN_MS:
+            log.warning("render gate: %s finished SLOW (%.0fms) label=%s",
+                        kind, dur_ms, label)
+        else:
+            log.info("render gate: %s finished (%.0fms) label=%s",
+                     kind, dur_ms, label)
+
+
+def _render_busy_response(kind: str):
+    """Standard 429 payload returned when the render gate is saturated."""
+    resp = jsonify({
+        "error": "renderer_busy",
+        "kind": "busy",
+        "user_message": (
+            "The renderer is busy finishing another graphic or video. "
+            "Give it a few seconds and try again."
+        ),
+    })
+    resp.status_code = 429
+    resp.headers["Retry-After"] = "5"
+    return resp
 
 
 def _maybe_evict_active_runs() -> None:
@@ -8558,7 +8693,10 @@ function createGraphic(btn, createUrl, cardId, fmt) {{
     .then(function(res) {{
       btn.disabled = false; btn.textContent = origLabel;
       if (!res.ok || res.body.error) {{
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'render failed') + '</div>';
+        // Prefer user_message (clean operator copy, e.g. the "renderer
+        // busy" 429) over the raw error code.
+        var emsg = (res.body && res.body.user_message) || ('Error: ' + ((res.body && res.body.error) || 'render failed'));
+        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + emsg + '</div>';
         return;
       }}
       _visualCache[cacheKey] = res.body;
@@ -9920,15 +10058,24 @@ Relay team broke club record"></textarea>
 
     def _record_heartbeat_safe(source: str, ok: bool, started_at: float,
                                error: Optional[str] = None) -> None:
-        """Best-effort heartbeat write — never raises into a health probe."""
+        """Queue a heartbeat write OFF the request path.
+
+        The liveness probe must never block on disk I/O: a synchronous
+        SQLite commit here used to stall 10s+ when a concurrent render
+        saturated the shared persistent disk, tripping Render's
+        health-check timeout and restarting the container mid-render. We
+        hand the write to a background thread and return immediately; it
+        stays best-effort and lossy (a full queue drops the row).
+        """
         try:
-            import time as _time
-            from mediahub.observability import uptime as _uptime
-            _uptime.record_heartbeat(
-                ok=ok, source=source,
-                response_ms=(_time.monotonic() - started_at) * 1000.0,
-                error=error,
-            )
+            response_ms = (time.monotonic() - started_at) * 1000.0
+            _ensure_heartbeat_thread()
+            try:
+                _HEARTBEAT_QUEUE.put_nowait(
+                    (bool(ok), str(source), response_ms, error)
+                )
+            except queue.Full:
+                pass
         except Exception:
             pass
 
@@ -17863,17 +18010,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             ai_directed = True   # generate() will try the AI director first
 
         try:
-            res = _v8_create_visual_for_item(
-                item, brand_kit,
-                profile_id=profile_id, run_id=run_id,
-                media_assets=media_assets,
-                formats=formats_kw,
-                variation_seed=variation_seed,
-                variation_profile=variation_profile,
-                use_ai_director=ai_directed,
-                recent_signatures=recent_sigs,
-                recent_hooks=recent_hooks,
-            )
+            with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                res = _v8_create_visual_for_item(
+                    item, brand_kit,
+                    profile_id=profile_id, run_id=run_id,
+                    media_assets=media_assets,
+                    formats=formats_kw,
+                    variation_seed=variation_seed,
+                    variation_profile=variation_profile,
+                    use_ai_director=ai_directed,
+                    recent_signatures=recent_sigs,
+                    recent_hooks=recent_hooks,
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
         # V9: Attach the "Why this card?" explanation so JSON consumers can
@@ -18201,14 +18351,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         def _one(profile) -> dict:
             try:
-                res = _v8_create_visual_for_item(
-                    item, brand_kit,
-                    profile_id=profile_id, run_id=run_id,
-                    media_assets=media_assets,
-                    variation_profile=profile,
-                    use_ai_director=True,
-                    recent_signatures=sigs_so_far,
-                )
+                with _render_slot("variant", card_id, timeout=_RENDER_QUEUE_TIMEOUT):
+                    res = _v8_create_visual_for_item(
+                        item, brand_kit,
+                        profile_id=profile_id, run_id=run_id,
+                        media_assets=media_assets,
+                        variation_profile=profile,
+                        use_ai_director=True,
+                        recent_signatures=sigs_so_far,
+                    )
                 visuals = res.get("visuals") or []
                 # Pick the feed_portrait by default if present, else first.
                 primary = next((v for v in visuals if v.get("format_name") == "feed_portrait"), visuals[0] if visuals else None)
@@ -18407,13 +18558,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         brief_dict = _latest_brief_for_card(run_id, card_id)
 
         try:
-            mp4 = _motion.render_story_card(
-                card_payload,
-                brand_kit,
-                out_path,
-                variation_seed=variation_seed,
-                brief=brief_dict,
-            )
+            with _render_slot("motion", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                mp4 = _motion.render_story_card(
+                    card_payload,
+                    brand_kit,
+                    out_path,
+                    variation_seed=variation_seed,
+                    brief=brief_dict,
+                )
+        except _RenderBusy:
+            return _render_busy_response("motion")
         except RuntimeError as e:
             _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
         except Exception as e:
@@ -18511,13 +18665,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             brief_list.append(_latest_brief_for_card(run_id, cid) if cid else None)
 
         try:
-            mp4 = _motion.render_meet_reel(
-                cards,
-                brand_kit,
-                out_path,
-                meet_name=meet_name,
-                briefs=brief_list,
-            )
+            with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                mp4 = _motion.render_meet_reel(
+                    cards,
+                    brand_kit,
+                    out_path,
+                    meet_name=meet_name,
+                    briefs=brief_list,
+                )
+        except _RenderBusy:
+            return _render_busy_response("reel")
         except RuntimeError as e:
             _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
         except Exception as e:
