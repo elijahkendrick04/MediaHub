@@ -144,10 +144,9 @@ class TestSignInPage:
         session pin must clear; otherwise subsequent gates would refer
         to a profile that no longer exists on disk and crash.
 
-        After clearing, `_active_profile_id` may fall back to the
-        most-recent-mtime remaining profile via the existing helper —
-        what matters is that the *deleted* profile's id is no longer
-        the active one.
+        After clearing, the session is signed out — we no longer adopt
+        any remaining profile automatically — so what matters is that
+        the *deleted* profile's id is no longer the active one.
         """
         c, _, _ = app_two_profiles
         c.post("/sign-in", data={"profile_id": "wycombe"})
@@ -161,24 +160,29 @@ class TestSignInPage:
 class TestHomeHeroSwitching:
     def test_unpinned_home_shows_two_ctas_when_profiles_exist(self, app_two_profiles):
         c, _, _ = app_two_profiles
+        # A fresh session is signed out — the home page must NOT resume
+        # the last-used org. With profiles on disk but none pinned, the
+        # signed-out hero surfaces both CTAs.
         resp = c.get("/")
         body = resp.get_data(as_text=True)
         # Hero copy + both CTAs.
         assert "Sign in" in body
-        assert "Create new organisation" in body
+        assert "Set up my organisation" in body
         assert 'class="mh-cta-primary"' in body
         assert 'class="mh-cta-secondary"' in body
+        # The signed-in-only CTA must be absent — we are signed out.
+        assert "Create new content" not in body
 
     def test_unpinned_home_shows_create_first_when_no_profiles(self, app_no_profiles):
         c, _, _ = app_no_profiles
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        # Primary CTA leads to setup ("Create your first organisation").
-        assert "Create your first organisation" in body
+        # Primary CTA leads to organisation setup.
+        assert "Set up my organisation" in body
         # AND the secondary CTA offers the sign-in path — the user
         # must see both options even on a fresh deployment so the
         # "Sign in" button never looks broken.
-        assert "Sign in to my organisation profile" in body
+        assert "Sign in" in body
         assert 'class="mh-cta-primary"' in body
         assert 'class="mh-cta-secondary"' in body
 

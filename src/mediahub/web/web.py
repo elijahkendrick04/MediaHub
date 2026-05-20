@@ -5398,30 +5398,26 @@ def create_app() -> Flask:
     )
 
     def _active_profile_id() -> Optional[str]:
-        """Return the currently-selected organisation id, or None."""
-        # 1. Explicit session pin (set when the user saves an org).
+        """Return the signed-in organisation id, or ``None``.
+
+        The active org is ONLY ever the one explicitly pinned into the
+        session — by signing in (``/sign-in``), saving organisation
+        setup, or the set-active API. A fresh session is deliberately
+        signed OUT: we do NOT auto-adopt the most-recent profile on disk.
+        Opening the site therefore shows the signed-out home page (Sign
+        in / Set up my organisation) instead of silently resuming
+        whichever organisation was used last on this deployment.
+        """
         pid = session.get("active_profile_id")
-        if pid:
-            prof = load_profile(pid)
-            if prof:
-                return prof.profile_id
-            # Stale pin — drop it and fall through.
-            session.pop("active_profile_id", None)
-        # 2. Fall back to the most-recent profile on disk so a returning
-        #    user on a new session still finds their org.
-        profs = list_profiles()
-        if not profs:
+        if not pid:
             return None
-        # list_profiles() sorts alphabetically; prefer the file with the
-        # most recent mtime so "last edited" wins.
-        try:
-            from .club_profile import _profiles_dir
-            d = _profiles_dir()
-            best = max(profs, key=lambda p: (d / f"{p.profile_id}.json").stat().st_mtime)
-        except Exception:
-            best = profs[0]
-        session["active_profile_id"] = best.profile_id
-        return best.profile_id
+        prof = load_profile(pid)
+        if prof:
+            return prof.profile_id
+        # Stale pin (the profile was deleted) — drop it and report
+        # signed-out rather than guessing another org.
+        session.pop("active_profile_id", None)
+        return None
 
     def _active_profile() -> Optional[ClubProfile]:
         pid = _active_profile_id()
@@ -5468,7 +5464,15 @@ def create_app() -> Flask:
                 }),
                 409,
             )
-        # Browser request — redirect to the first-run flow.
+        # Browser request. If the visitor simply isn't signed in but
+        # organisations already exist on this deployment, send them to
+        # the sign-in picker so they can choose one — not into the
+        # create-new flow. Only fall through to organisation setup when
+        # there is genuinely nothing to sign into (fresh deployment), or
+        # when a not-yet-ready org is already pinned (so they can finish
+        # its setup).
+        if prof is None and list_profiles():
+            return redirect(url_for("sign_in_page"))
         return redirect(url_for("organisation_setup"))
 
     # ---- HOME ----------------------------------------------------------
@@ -5534,23 +5538,26 @@ def create_app() -> Flask:
                 'Nothing posts without you.'
             )
             if n_orgs > 0:
+                # Signed-out session with organisations on this
+                # deployment: lead with Sign in (pick an existing org),
+                # with Set up my organisation as the secondary path for a
+                # brand-new tenant.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
                     f'Sign in &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                    'Create new organisation</a>'
+                    'Set up my organisation</a>'
                 )
             else:
-                # Two-button hero even when no profiles exist yet — the
-                # sign-in route is now reachable from the empty state
-                # (it shows a friendly "no orgs yet" panel) so users can
-                # explore both paths without thinking the engine is
-                # half-broken.
+                # Fresh deployment with no organisations yet: lead with
+                # Set up my organisation, but still surface Sign in so the
+                # button is always present (the picker shows a friendly
+                # "no orgs yet" panel) and never looks broken.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    'Create your first organisation &rarr;</a>'
+                    'Set up my organisation &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    'Sign in to my organisation profile</a>'
+                    'Sign in</a>'
                 )
             eyebrow = 'Sport content automation'
             lane_no = '01'

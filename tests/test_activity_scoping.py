@@ -186,21 +186,16 @@ class TestHomeIsStripped:
 
     def test_home_banner_morphs_to_setup_when_no_org(self, gated_client):
         c, _ = gated_client
-        # The rebuilt home auto-pins the most-recent profile when none
-        # is in the session, so this test now verifies that one of the
-        # actionable paths is surfaced regardless of which branch the
-        # hero falls into (pinned or unsigned).
+        # A fresh session is signed out: the home page must NOT resume
+        # whichever org was used last. With organisations on disk but
+        # none pinned, the signed-out hero surfaces both the Sign in and
+        # the Set up my organisation paths.
         resp = c.get("/")
         body = resp.get_data(as_text=True)
-        assert (
-            "Sign in" in body
-            or "Sign out" in body
-            or "Switch organisation" in body
-            or "Switch org" in body
-            or "Create new organisation" in body
-            or "Create new content" in body
-            or "Create your first organisation" in body
-        )
+        assert "Sign in" in body
+        assert "Set up my organisation" in body
+        # The signed-in-only CTA must be absent — we are signed out.
+        assert "Create new content" not in body
 
 
 # ---------------------------------------------------------------------------
