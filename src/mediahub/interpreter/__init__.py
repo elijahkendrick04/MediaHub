@@ -198,29 +198,41 @@ def _try_native_parse(
         except Exception as exc:  # noqa: BLE001
             log.warning("sdif parser failed: %s", exc)
 
-    # ZIP: look for HY3 / CL2 members and parse them directly
+    # ZIP: look for HY3 / CL2 members and parse them directly. We cap
+    # member count and uncompressed size via _zip_safety so a malicious
+    # compression bomb can't OOM the worker.
     if data[:4] == _ZIP_MAGIC:
         import zipfile  # noqa: PLC0415
         import io  # noqa: PLC0415
+        from ._zip_safety import safe_member_names, safe_read_member, UnsafeZipError  # noqa: PLC0415
         try:
             zf = zipfile.ZipFile(io.BytesIO(data))
         except Exception:  # noqa: BLE001
             return None
         try:
-            members = zf.namelist()
-            hytek_members = [n for n in members if n.lower().endswith(".hy3")]
-            sdif_members = [n for n in members if n.lower().endswith((".cl2", ".sd3"))]
+            try:
+                safe_names = safe_member_names(zf)
+            except UnsafeZipError as exc:
+                log.warning("rejected unsafe ZIP: %s", exc)
+                return None
+            hytek_members = [n for n in safe_names if n.lower().endswith(".hy3")]
+            sdif_members = [n for n in safe_names if n.lower().endswith((".cl2", ".sd3"))]
             if not hytek_members and not sdif_members:
                 return None
             results: list[InterpretedMeet] = []
+            info_by_name = {info.filename: info for info in zf.infolist()}
             for n in hytek_members:
                 try:
-                    results.append(parse_hy3(zf.read(n)))
+                    results.append(parse_hy3(safe_read_member(zf, info_by_name[n])))
+                except UnsafeZipError as exc:
+                    log.warning("hytek member %s rejected: %s", n, exc)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("hytek member %s failed: %s", n, exc)
             for n in sdif_members:
                 try:
-                    results.append(parse_sdif(zf.read(n)))
+                    results.append(parse_sdif(safe_read_member(zf, info_by_name[n])))
+                except UnsafeZipError as exc:
+                    log.warning("sdif member %s rejected: %s", n, exc)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("sdif member %s failed: %s", n, exc)
             if results:

@@ -110,7 +110,18 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             "logo_svg": getattr(brand_kit, "logo_svg", ""),
         }
 
-    # Stage G: try the theme store first.
+    # Stage G's theme_store integration mapped motion to MD3's
+    # dark.primary / dark.secondary_container / dark.tertiary roles.
+    # In practice those are tonal-palette tokens designed for UI
+    # surfaces (buttons, containers), not full-bleed brand colour
+    # ground/surface fills — they produced washed-out low-contrast
+    # output in production (live verification 2026-05-19 showed
+    # pink-on-pink renders for a #FFD86E/#A30D2D/#000000 BrandKit).
+    # We now prefer the BrandKit's flat primary/secondary/accent
+    # fields (the same ones the static renderer's brief.palette
+    # carries) and only fall back to the theme store when the
+    # BrandKit is incomplete. This keeps motion and static visually
+    # aligned and restores the punch the brand was designed for.
     theme_palette: Optional[dict[str, str]] = None
     pid = src.get("profile_id") or src.get("profileId")
     if pid:
@@ -130,17 +141,22 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             )
             theme_palette = None
 
+    brand_primary = src.get("primary_colour") or src.get("primary")
+    brand_secondary = src.get("secondary_colour") or src.get("secondary")
+    brand_accent = src.get("accent_colour") or src.get("accent")
+    used_brand_kit = bool(brand_primary or brand_secondary or brand_accent)
+
     primary = (
-        (theme_palette or {}).get("primary")
-        or src.get("primary_colour") or src.get("primary") or "#0A2540"
+        brand_primary
+        or (theme_palette or {}).get("primary") or "#0A2540"
     )
     secondary = (
-        (theme_palette or {}).get("secondary")
-        or src.get("secondary_colour") or src.get("secondary") or "#000000"
+        brand_secondary
+        or (theme_palette or {}).get("secondary") or "#000000"
     )
     accent = (
-        (theme_palette or {}).get("accent")
-        or src.get("accent_colour") or src.get("accent") or "#FFFFFF"
+        brand_accent
+        or (theme_palette or {}).get("accent") or "#FFFFFF"
     )
 
     return {
@@ -152,7 +168,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "logoDataUri": _logo_to_data_uri(
             src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
         ),
-        "themeSource": "theme-store" if theme_palette else "brand-kit",
+        "themeSource": "brand-kit" if used_brand_kit else ("theme-store" if theme_palette else "brand-kit"),
     }
 
 

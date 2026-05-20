@@ -382,13 +382,15 @@ def _extract_zip(
     hint: Optional[str] = None,
     source_path: Optional[pathlib.Path] = None,
 ) -> IngestStream:
+    # Member iteration goes through _zip_safety so a compression bomb
+    # can't pass arbitrary-size payloads down into nested ingestion.
+    from ._zip_safety import safe_iter_members, UnsafeZipError
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             all_streams: list[IngestStream] = []
-            for name in zf.namelist():
+            for name, member_data in safe_iter_members(zf):
                 if name.endswith("/"):
                     continue
-                member_data = zf.read(name)
                 child_hint = name.rsplit(".", 1)[-1] if "." in name else hint
                 child_stream = ingest(
                     member_data,
@@ -409,6 +411,9 @@ def _extract_zip(
                 tables=combined_tables,
                 format_detected="zip",
             )
+    except UnsafeZipError as exc:
+        log.warning("ZIP rejected by safety check: %s", exc)
+        return IngestStream(text="", lines=[], tables=[], format_detected="zip-error")
     except Exception as exc:  # noqa: BLE001
         log.error("ZIP extraction failed: %s", exc)
         return IngestStream(text="", lines=[], tables=[], format_detected="zip-error")

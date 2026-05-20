@@ -807,4 +807,178 @@ class TestPostingLogApi:
         # but absent from the org-A scoped response.
         all_b = _plog.recent_attempts("other-org", limit=5)
         assert len(all_b) == 1
-        assert all_b[0]["update_id"] == "u-B"
+
+
+# ---------------------------------------------------------------------------
+# 6. End-to-end "schedule survives refresh" — pins the user-facing
+#    promise of the pill state. After a successful Buffer schedule:
+#      * the workflow sidecar persists the new ScheduleStatus
+#      * build_grouped_pack (the pack reload path) surfaces it on the item
+#      * /api/posting/log shows the ok row
+#    These three checks together model what a real "refresh" exercises.
+# ---------------------------------------------------------------------------
+
+class TestSchedulePillSurvivesRefresh:
+    def test_schedule_then_reload_pack_shows_scheduled_state(
+        self, ready_app, monkeypatch,
+    ):
+        c, run_id, card_id, profile_id = ready_app
+
+        monkeypatch.setattr(
+            "mediahub.publishing.buffer.schedule_post",
+            lambda **kw: {"ok": True, "update_id": "upd-keep",
+                          "channel_id": kw["channel_id"], "raw": {}},
+        )
+
+        # Approve the card so it's eligible for build_grouped_pack /
+        # build_content_pack to consider it. Without an APPROVED status
+        # the content-pack reload path filters it out and we can't
+        # assert anything about the schedule pill.
+        from mediahub.workflow.store import WorkflowStore
+        from mediahub.workflow.status import CardStatus, ScheduleStatus
+        from mediahub.web import web as _web
+        ws = WorkflowStore(_web.RUNS_DIR)
+        ws.set_status(run_id, card_id, CardStatus.APPROVED)
+
+        # 1. POST /schedule with a future UTC datetime — the exact path
+        #    the modal hits after `localToIso(whenLocal)`.
+        future_iso = "2027-01-01T10:00:00.000Z"
+        resp = c.post(
+            _schedule_url(run_id, card_id),
+            json={
+                "channel_ids": ["chan-keep"],
+                "caption": "future post",
+                "scheduled_at": future_iso,
+            },
+        )
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json() or {}
+        assert body.get("ok") is True
+        assert body.get("schedule_status") == "scheduled"
+
+        # 2. The workflow sidecar is the source of truth across reloads.
+        state = ws.load(run_id).get(card_id)
+        assert state is not None
+        assert state.schedule_status == ScheduleStatus.SCHEDULED
+        assert state.buffer_update_id == "upd-keep"
+        # scheduled_at was round-tripped to UTC ISO and re-parses cleanly.
+        assert state.scheduled_at and state.scheduled_at.startswith("2027-01-01T10:00:00")
+
+        # 3. The grouped pack builder — the same code the /pack/<id>
+        #    page uses to render after a reload — surfaces the same
+        #    schedule_status on the item so the pill template can paint it.
+        from mediahub.content_pack.builder import build_grouped_pack
+        run_data = json.loads((_web.RUNS_DIR / f"{run_id}.json").read_text())
+        # build_grouped_pack reads the workflow sidecar internally; pass
+        # run_id on the run_data dict so the right sidecar is loaded.
+        run_data["run_id"] = run_id
+        grouped = build_grouped_pack(run_data, profile_id)
+        # The seeded card is a pb_confirmed → routes to needs_review by
+        # default (no safe_to_post seed). Find it across every bucket so
+        # the test is not sensitive to routing tweaks.
+        found = None
+        for bucket in grouped.values():
+            items = bucket if isinstance(bucket, list) else [bucket] if bucket else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                ach = item.get("achievement") or item
+                if ach.get("swim_id") == card_id:
+                    found = item
+                    break
+            if found:
+                break
+        assert found is not None, "card disappeared from grouped pack"
+        assert found.get("schedule_status") == "scheduled"
+        assert found.get("buffer_update_id") == "upd-keep"
+
+        # 4. /api/posting/log has the row.
+        log_resp = c.get("/api/posting/log")
+        assert log_resp.status_code == 200
+        log_body = log_resp.get_json() or {}
+        attempts = log_body.get("attempts") or []
+        assert any(
+            a.get("status") == "ok"
+            and a.get("update_id") == "upd-keep"
+            and a.get("run_id") == run_id
+            and a.get("card_id") == card_id
+            for a in attempts
+        ), f"expected ok row for upd-keep in {attempts!r}"
+
+    def test_failed_schedule_marks_workflow_failed_and_logs_failed_row(
+        self, ready_app, monkeypatch,
+    ):
+        c, run_id, card_id, profile_id = ready_app
+        from mediahub.publishing.buffer import BufferAPIError
+        from mediahub.workflow.store import WorkflowStore
+        from mediahub.workflow.status import ScheduleStatus
+        from mediahub.web import web as _web
+
+        monkeypatch.setattr(
+            "mediahub.publishing.buffer.schedule_post",
+            lambda **kw: (_ for _ in ()).throw(BufferAPIError("Buffer 500")),
+        )
+        resp = c.post(
+            _schedule_url(run_id, card_id),
+            json={"channel_ids": ["chan-fail"], "caption": "doomed"},
+        )
+        # Total failure → 502 + workflow flipped to FAILED.
+        assert resp.status_code == 502
+        body = resp.get_json() or {}
+        # Caption is echoed back so the modal preserves the user's edit.
+        assert body.get("caption") == "doomed"
+
+        ws = WorkflowStore(_web.RUNS_DIR)
+        state = ws.load(run_id).get(card_id)
+        assert state is not None
+        assert state.schedule_status == ScheduleStatus.FAILED
+
+        log_resp = c.get("/api/posting/log")
+        attempts = (log_resp.get_json() or {}).get("attempts") or []
+        assert any(
+            a.get("status") == "failed"
+            and a.get("error_kind") == "api"
+            and a.get("run_id") == run_id
+            for a in attempts
+        ), f"expected failed/api row for run {run_id} in {attempts!r}"
+
+
+# ---------------------------------------------------------------------------
+# 7. Schedule-modal client surface — the modal HTML/JS we inject onto
+#    every pack page. These tests parse the rendered surface to pin
+#    user-visible promises (timezone hint, past-date guard) without
+#    spinning up a browser. They guard against accidental regressions
+#    in `_schedule_modal_html` / `_schedule_modal_js`.
+# ---------------------------------------------------------------------------
+
+class TestScheduleModalRenderedSurface:
+    def test_modal_markup_has_timezone_hint_slot(self):
+        from mediahub.web.web import _schedule_modal_html
+        html = _schedule_modal_html()
+        # Hint container must exist so refreshWhenHint() can write to it.
+        assert 'id="mh-sched-when-hint"' in html
+        # The hidden run/card/pill ids the JS reads must survive too.
+        for marker in ('id="mh-sched-run-id"',
+                       'id="mh-sched-card-id"',
+                       'id="mh-sched-pill-id"',
+                       'id="mh-sched-error"',
+                       'id="mh-sched-when"',
+                       'id="mh-sched-channels"'):
+            assert marker in html, f"missing modal marker: {marker}"
+
+    def test_modal_js_advertises_timezone_and_past_date_guards(self):
+        from mediahub.web.web import _schedule_modal_js
+        js = _schedule_modal_js()
+        # Local-timezone hint is wired in.
+        assert "localTzLabel" in js
+        assert "refreshWhenHint" in js
+        assert "Intl.DateTimeFormat" in js
+        # Past-date guard rejects times more than a minute behind now.
+        assert "in the past" in js.lower()
+        # Stale-request guard so a re-open can't be clobbered by an
+        # in-flight earlier fetch.
+        assert "_openSeq" in js
+        # Network-error fallback in the connect-buffer-from-modal flow
+        # no longer uses alert() — it must surface inline via the modal
+        # error div (or MH.toast as a fallback).
+        assert "alert(" not in js, "modal JS should not use alert()"

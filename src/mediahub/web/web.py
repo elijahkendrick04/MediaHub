@@ -888,11 +888,12 @@ def _load_run(run_id: str) -> Optional[dict]:
         return None
     try:
         return json.loads(p.read_text())
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         # A corrupted run JSON would otherwise 500 every route that
         # reads it (/review, /pack, /audit, /drafts/<pack_id>). Surface
         # "run not found" instead so the recovery_page renders cleanly;
         # the operator can find the offending file in the log.
+        # UnicodeDecodeError covers files written in a non-UTF-8 encoding.
         log.warning("run %s on disk but unreadable: %s", run_id, e)
         return None
 
@@ -1009,11 +1010,42 @@ def _delete_run(run_id: str) -> bool:
     existed = p.exists()
     if existed:
         p.unlink()
+    # Also drop any per-run sidecar directory (visuals, motion, briefs,
+    # caption_history, etc.) that pipelines write under runs_v4/<run_id>/.
+    # Leaving it behind defeats the user's intent when they hit "delete".
+    side_dir = RUNS_DIR / run_id
+    if side_dir.is_dir():
+        try:
+            import shutil  # noqa: PLC0415
+            shutil.rmtree(side_dir, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            log.warning("could not remove run sidecar dir for %s", run_id)
     conn = _db()
     conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
     conn.commit()
     conn.close()
     return existed
+
+
+def _run_owner_profile_id(run_id: str) -> Optional[str]:
+    """Look up the owning profile_id for ``run_id`` from the DB.
+
+    Returns the stored profile_id (possibly an empty string for legacy
+    rows written before per-tenant tagging), or ``None`` when no such
+    run exists.
+    """
+    try:
+        conn = _db()
+        row = conn.execute(
+            "SELECT profile_id FROM runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is None:
+        return None
+    pid = row[0] if not hasattr(row, "keys") else row["profile_id"]
+    return pid or ""
 
 
 # ---------------------------------------------------------------------
@@ -1065,6 +1097,8 @@ def _schedule_modal_html() -> str:
       <input id="mh-sched-when" type="datetime-local"
              style="padding:8px;border:1px solid var(--border,#252a36);border-radius:8px;
                     background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>
+      <div id="mh-sched-when-hint" class="muted"
+           style="font-size:11px;margin-top:4px;line-height:1.4"></div>
     </div>
     <input type="hidden" id="mh-sched-media-url"/>
     <input type="hidden" id="mh-sched-run-id"/>
@@ -1094,6 +1128,12 @@ def _schedule_modal_js() -> str:
 (function(){
   var API_BASE = window._API_BASE || '';
 
+  // Monotonic counter so a slow channel-list fetch can't clobber a
+  // newer one when the modal is re-opened on a different card before
+  // the first request settles. We compare on resolution and bail out
+  // if this isn't the most recent open call.
+  var _openSeq = 0;
+
   function fmtDt(d) {
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
     return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
@@ -1104,6 +1144,21 @@ def _schedule_modal_js() -> str:
     var d = new Date(local);
     if (isNaN(d.getTime())) return '';
     return d.toISOString();
+  }
+
+  // Resolve the user-visible label for the local timezone. Falls back
+  // to a UTC-offset string when Intl isn't available so the hint stays
+  // useful in older browsers.
+  function localTzLabel() {
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) return tz;
+    } catch (e) {}
+    var off = -new Date().getTimezoneOffset();
+    var sign = off >= 0 ? '+' : '-';
+    var abs = Math.abs(off);
+    var h = Math.floor(abs / 60), m = abs % 60;
+    return 'UTC' + sign + (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
   }
 
   function pickActiveCaption(cardEl) {
@@ -1130,15 +1185,62 @@ def _schedule_modal_js() -> str:
     return '';
   }
 
+  // Refresh the live hint under the datetime-local input. Reads the
+  // current value, parses it as local time (matching localToIso's
+  // semantics), and shows a UTC echo + a past-time warning when
+  // appropriate. Called on input and after the modal opens. We use
+  // textContent throughout to keep it XSS-safe (a Buffer error message
+  // never reaches this code path, but the tz string in pathological
+  // locales could).
+  function refreshWhenHint() {
+    var hint = document.getElementById('mh-sched-when-hint');
+    if (!hint) return;
+    var raw = (document.getElementById('mh-sched-when') || {}).value || '';
+    var tz = localTzLabel();
+    if (!raw) {
+      hint.style.color = '';
+      hint.textContent = 'Times use your local timezone (' + tz + '). '
+        + 'Leave blank to use the next available Buffer queue slot.';
+      return;
+    }
+    var d = new Date(raw);
+    if (isNaN(d.getTime())) {
+      hint.style.color = 'var(--bad)';
+      hint.textContent = 'Could not read that date/time.';
+      return;
+    }
+    var now = new Date();
+    // 1 minute grace for clock skew so picking "now" doesn't false-positive.
+    if (d.getTime() < now.getTime() - 60000) {
+      hint.style.color = 'var(--bad)';
+      hint.textContent = 'That time is in the past (' + tz
+        + '). Buffer will reject it — pick a future time or clear the field.';
+      return;
+    }
+    hint.style.color = '';
+    hint.textContent = tz + ' → sends to Buffer as '
+      + d.toISOString() + ' (UTC).';
+  }
+
   window.mhScheduleOpen = function(runId, cardId, cardElId) {
     var modal = document.getElementById('mh-sched-modal');
     if (!modal) return;
+    var seq = ++_openSeq;
     var cardEl = document.getElementById(cardElId);
     document.getElementById('mh-sched-run-id').value = runId || '';
     document.getElementById('mh-sched-card-id').value = cardId || '';
     document.getElementById('mh-sched-pill-id').value = cardElId || '';
     document.getElementById('mh-sched-caption').value = pickActiveCaption(cardEl);
-    document.getElementById('mh-sched-when').value = '';
+    var whenEl = document.getElementById('mh-sched-when');
+    whenEl.value = '';
+    // Bind the live hint refresher once. Marker attribute keeps us
+    // idempotent across multiple modal opens on the same page.
+    if (!whenEl.dataset.mhHintBound) {
+      whenEl.addEventListener('input', refreshWhenHint);
+      whenEl.addEventListener('change', refreshWhenHint);
+      whenEl.dataset.mhHintBound = '1';
+    }
+    refreshWhenHint();
     document.getElementById('mh-sched-media-url').value = pickMediaUrl(cardEl);
     var err = document.getElementById('mh-sched-error');
     err.style.display = 'none'; err.textContent = '';
@@ -1147,14 +1249,22 @@ def _schedule_modal_js() -> str:
     chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
 
     fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
-      return r.json().then(function(j){ return {status:r.status, body:j}; });
+      return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){
+        // Non-JSON response (e.g. a proxy returned HTML). Return a synthetic
+        // body so the downstream branches can still surface a clear error.
+        return {status:r.status, body:{message:'Server returned an unreadable response.'}};
+      });
     }).then(function(o){
-      if (o.status === 401 || !o.body.connected) {
-        // Per-profile Buffer: show the inline "Connect your Buffer
-        // account" form right inside the modal — paste a personal
-        // access token and we save it on this org's profile. Also
-        // offer the no-Buffer download alternative so clubs without
-        // Buffer aren't blocked from getting their content out.
+      // Stale-response guard: a newer mhScheduleOpen has fired while
+      // this fetch was in flight, so discard our result rather than
+      // overwriting the channel list / error UI for the new card.
+      if (seq !== _openSeq) return;
+      // 401 = no token configured OR token rejected by Buffer. Both
+      // cases want the inline Connect-Buffer form so the user can paste
+      // a (fresh) personal token without leaving the modal. The download
+      // fallback is always offered so a club with no Buffer at all
+      // isn't blocked from getting their content out.
+      if (o.status === 401) {
         var runIdForDl = document.getElementById('mh-sched-run-id').value;
         var cardIdForDl = document.getElementById('mh-sched-card-id').value;
         var capForDl = encodeURIComponent(
@@ -1219,6 +1329,7 @@ def _schedule_modal_js() -> str:
       }
       modal.style.display = 'flex';
     }).catch(function(e){
+      if (seq !== _openSeq) return;
       chWrap.innerHTML = '<p style="color:var(--bad);margin:0">Network error: ' + (e && e.message || e) + '</p>';
       modal.style.display = 'flex';
     });
@@ -1323,6 +1434,23 @@ def _schedule_modal_js() -> str:
     if (!ids.length) { err.style.display = 'block'; err.textContent = 'Pick at least one channel.'; return; }
     if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
 
+    // Past-date guard: a `datetime-local` input has no min and the
+    // server / Buffer would surface a cryptic 4xx if we sent yesterday.
+    // 1-minute grace so picking "now" doesn't false-positive on clock skew.
+    if (whenLocal) {
+      var pickedTs = new Date(whenLocal).getTime();
+      if (isNaN(pickedTs)) {
+        err.style.display = 'block';
+        err.textContent = 'Could not read the scheduled time.';
+        return;
+      }
+      if (pickedTs < Date.now() - 60000) {
+        err.style.display = 'block';
+        err.textContent = 'Scheduled time is in the past. Pick a future time or clear the field to use the next queue slot.';
+        return;
+      }
+    }
+
     var btn = document.getElementById('mh-sched-send');
     var orig = btn.textContent;
     btn.disabled = true; btn.textContent = 'Sending&hellip;';
@@ -1354,8 +1482,11 @@ def _schedule_modal_js() -> str:
         var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
         if (window.MH && typeof window.MH.toast === 'function') {
           window.MH.toast('Scheduled to Buffer.' + warn, warn ? 'info' : 'success');
-        } else {
-          alert('Scheduled to Buffer.' + warn);
+        } else if (window.console && console.log) {
+          // Quiet fallback for pathological host pages that lack
+          // MH.toast — log to console so a successful schedule never
+          // blocks the user with a synchronous browser dialog.
+          console.log('Scheduled to Buffer.' + warn);
         }
         mhScheduleClose();
       } else {
@@ -2545,6 +2676,15 @@ a.card:hover, .card[data-interactive]:hover {
   100% { transform: translateX(440%); }
 }
 
+/* Active-org chip — wide-viewport defaults. Lives outside the inline
+   <a style="…"> so the @media (max-width: 1100px) override below can
+   actually win (inline-style specificity beat the media query, so the
+   chip used to stay full-size at 900–1099px and clip past the viewport
+   edge). The base rule must come BEFORE the media query so source order
+   doesn't reverse the precedence at narrow widths. */
+#active-org-chip { font-size: 12px; line-height: 1; padding: 5px 10px; }
+#active-org-chip > span:last-child { max-width: 140px; }
+
 /* === Responsive: nav scrollable, hide backend pill on narrow widths ===
    Audit found the topnav overflowed on every viewport between 721 and
    ~1100 px because the 9 signed-in items + brand + pill = ~1100 px wide.
@@ -2589,7 +2729,7 @@ a.card:hover, .card[data-interactive]:hover {
        nav items scroll underneath. */
     box-shadow: -8px 0 12px -8px rgba(10,11,17,0.85);
   }
-  #active-org-chip span:last-child { max-width: 92px !important; }
+  #active-org-chip > span:last-child { max-width: 92px !important; }
 }
 /* Phone / tablet (≤860px): every interactive control needs the full
    44px tap area. Card-action utility buttons (Copy caption, etc.) and
@@ -4098,9 +4238,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
        href="{{ url_for('organisation_setup') }}"
        title="Active organisation — click to review brand setup"
        style="display:inline-flex;align-items:center;gap:8px;
-              padding:5px 10px;border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
-              border-radius:999px;text-decoration:none;
-              color:var(--ink);font-size:12px;line-height:1;
+              border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));
+              border-radius:999px;text-decoration:none;color:var(--ink);
               background:rgba(245,242,232,0.03);margin-left:8px">
       {% if signed_in_primary %}
       <span aria-hidden="true"
@@ -4114,7 +4253,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                    background:{{ signed_in_secondary }};
                    border:1px solid rgba(245,242,232,0.20);margin-left:-4px"></span>
       {% endif %}
-      <span style="font-weight:600;letter-spacing:0.01em;max-width:140px;
+      <span style="font-weight:600;letter-spacing:0.01em;
                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
         {{ signed_in_name }}
       </span>
@@ -4269,9 +4408,28 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var input = document.getElementById('mh-buf-token');
     var btn = document.getElementById('mh-buf-connect');
     if (!input || !btn) return;
+    // Helper to surface an error inline. Falls back to MH.toast when the
+    // modal's dedicated error div has been ripped out (e.g. the user
+    // closed the modal mid-request and we still resolved). We deliberately
+    // avoid alert() here — it's jarring relative to the rest of the
+    // modal's UX and steals focus from the connect form.
+    function showError(msg) {
+      var err = document.getElementById('mh-sched-error');
+      if (err) {
+        err.style.display = 'block';
+        err.textContent = msg;
+      } else if (window.MH && typeof window.MH.toast === 'function') {
+        window.MH.toast(msg, 'error');
+      }
+    }
+    // Clear any prior error so the user can tell a retry produced a
+    // fresh outcome rather than staring at a stale message.
+    var errEl = document.getElementById('mh-sched-error');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
     var token = (input.value || '').trim();
     if (!token) {
       input.focus();
+      showError('Paste your Buffer access token to connect.');
       return;
     }
     var origLabel = btn.textContent;
@@ -4282,7 +4440,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({buffer_access_token: token}),
     }).then(function(r){
-      return r.json().then(function(j){ return {status: r.status, body: j}; });
+      return r.json().then(function(j){ return {status: r.status, body: j}; }, function(){
+        return {status: r.status, body: {message: 'Server returned an unreadable response.'}};
+      });
     }).then(function(o){
       btn.disabled = false;
       btn.textContent = origLabel;
@@ -4297,19 +4457,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         return;
       }
       var msg = (o.body && (o.body.message || o.body.error)) || ('HTTP ' + o.status);
-      var err = document.getElementById('mh-sched-error');
-      if (err) {
-        err.style.display = 'block';
-        err.textContent = msg;
-      } else if (window.MH && typeof window.MH.toast === 'function') {
-        window.MH.toast(msg, 'error');
-      } else {
-        alert(msg);
-      }
+      showError(msg);
     }).catch(function(e){
       btn.disabled = false;
       btn.textContent = origLabel;
-      alert('Network error: ' + (e && e.message || e));
+      showError('Network error: ' + (e && e.message || e));
     });
   };
 
@@ -4704,8 +4856,23 @@ def create_app() -> Flask:
             _secret = os.urandom(32).hex()
             try:
                 _persistent_path.write_text(_secret)
+                # SECRET_KEY signs session cookies — anyone who can
+                # read this file can forge sessions. Restrict to the
+                # owner so a co-tenant on a shared host can't trivially
+                # impersonate the operator.
+                try:
+                    os.chmod(_persistent_path, 0o600)
+                except OSError:
+                    pass
             except OSError:
                 pass  # writable fallback not available; sessions won't survive restart
+        # Tighten perms on a pre-existing key file too — a previous
+        # release wrote it with the umask default (0644).
+        try:
+            if _persistent_path.exists():
+                os.chmod(_persistent_path, 0o600)
+        except OSError:
+            pass
     app.config["SECRET_KEY"] = _secret
 
     # Apply SCRIPT_NAME middleware so url_for generates prefixed URLs when
@@ -4998,15 +5165,27 @@ def create_app() -> Flask:
         if prof is None:
             return redirect(url_for("organisation_setup"))
 
-        conn = _db()
-        rows = conn.execute(
-            "SELECT id, created_at, finished_at, status, profile_id, "
-            "meet_name, our_swims, n_cards, n_queue, error, file_name "
-            "FROM runs WHERE profile_id = ? "
-            "ORDER BY created_at DESC LIMIT 100",
-            (prof.profile_id,),
-        ).fetchall()
-        conn.close()
+        # DB-read is fail-soft: a corrupted/missing data.db or a partial
+        # schema would otherwise 500 the entire Activity page. Treat the
+        # failure as "no runs visible" and surface a recovery hero so the
+        # user knows the page loaded but the store wasn't reachable.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 100",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("activity: runs DB unreachable: %s", e)
+            db_failed = True
 
         # Phase 1.3 — Recent posting activity. Last 20 Buffer attempts for
         # this organisation. Fail-soft: if the log module isn't available
@@ -5048,6 +5227,27 @@ def create_app() -> Flask:
                 summaries[run_id] = summary
 
         if not rows:
+            if db_failed:
+                # DB on disk but unreadable — surface honestly so the user
+                # doesn't think their runs vanished. Same shape as the
+                # quiet-weekend hero so the chrome stays familiar.
+                empty_body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Activity</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">runs</em>.</h1>'
+                    '<p class="lede">'
+                    "The runs database wasn't readable on this deployment, "
+                    "so the run list is empty even if work was done earlier. "
+                    "Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("activity_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Activity", empty_body, active="activity")
             empty_body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Activity</span>'
@@ -5460,6 +5660,21 @@ def create_app() -> Flask:
                 primary_cta=("Start an upload", url_for("upload")),
                 secondary_cta=("All input types", url_for("make_page")),
             )
+        # `run_id` is read from request.values (form + query), so a
+        # client can submit arbitrary bytes — including `..` segments.
+        # Reject anything that isn't shaped like a generated run token
+        # (12-char hex from uuid4().hex[:12], or the longer ids
+        # _start_run produces). This blocks path traversal where the
+        # file-system join would otherwise let the configure step read
+        # `upload_meta.json` from outside RUNS_DIR.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
+            return _recovery_page(
+                "Upload session expired",
+                "The staged upload only lives for a few minutes before it's swept. Start a new upload — the file picker is one click away.",
+                eyebrow="Upload",
+                primary_cta=("Start a new upload", url_for("upload")),
+                secondary_cta=("Recent runs", url_for("activity_page")),
+            )
         tmp_dir = RUNS_DIR / run_id
         meta_path = tmp_dir / "upload_meta.json"
         input_path = tmp_dir / "input.bin"
@@ -5839,12 +6054,12 @@ def create_app() -> Flask:
             _wf_summary = ws.summary(run_id)
             _wf_states = ws.load(run_id)
 
-        # Workflow filter from query param. Validated against the known
-        # set so a malformed ``?wf=anything`` doesn't silently filter to
-        # nothing (which used to render an empty Review page with no hint
-        # that the filter was the cause).
+        # Workflow filter from query param. Allowlist mirrors every
+        # ``CardStatus`` value so the Review UI's "Rejected" tab and
+        # any future "Edited" surface actually filter; a malformed
+        # ``?wf=anything`` still falls back to "show all".
         _wf_filter = (request.args.get('wf', '') or '').strip().lower()
-        if _wf_filter not in ('', 'queue', 'approved', 'posted'):
+        if _wf_filter not in ('', 'queue', 'approved', 'posted', 'rejected', 'edited'):
             _wf_filter = ''
 
         # --- Recognition summary band
@@ -6006,10 +6221,13 @@ def create_app() -> Flask:
             )
 
         # --- Legacy V4 cards (collapsed)
-        tcards = {t["card_id"]: t for t in trust.get("cards", [])}
+        # ``card_id`` is canonically present on every card / trust entry,
+        # but an old or hand-edited run JSON might omit it. Use .get()
+        # so a malformed card doesn't 500 the entire Review page.
+        tcards = {t.get("card_id", ""): t for t in trust.get("cards", []) if t.get("card_id")}
         v4_rows = []
         for c in cards:
-            t = tcards.get(c["card_id"], {})
+            t = tcards.get(c.get("card_id", ""), {})
             conf = t.get("confidence", "medium")
             safe = t.get("safe_to_post", "review")
             badge = {"high": "good", "medium": "warn", "low": "bad"}.get(conf, "")
@@ -8126,17 +8344,36 @@ Relay team broke club record"></textarea>
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")
     def privacy_page():
-        conn = _db()
-        n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-        conn.close()
-        n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
-        n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+        # Every inventory probe is fail-soft so a corrupted DB or missing
+        # directory falls through to a "0" count instead of 500ing this
+        # page — the user came here precisely BECAUSE they want to know
+        # what's on disk and how to delete it.
+        n_runs = 0
+        try:
+            conn = _db()
+            try:
+                n_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("privacy: runs DB unreachable: %s", e)
+        try:
+            n_files = sum(1 for _ in RUNS_DIR.glob("*.json"))
+        except Exception:
+            n_files = 0
+        try:
+            n_uploads = sum(1 for _ in UPLOADS_DIR.iterdir())
+        except Exception:
+            n_uploads = 0
         cache_dir = DATA_DIR / ".cache" / "pb_lookup"
         legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
-        n_cache = (
-            (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
-            + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
-        )
+        try:
+            n_cache = (
+                (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
+                + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
+            )
+        except Exception:
+            n_cache = 0
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
@@ -8177,6 +8414,41 @@ Relay team broke club record"></textarea>
 
     @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
     def privacy_delete_run(run_id):
+        # Defence in depth: run ids generated by _start_run / upload are
+        # 12-hex-char tokens. Flask's default string converter already
+        # blocks slashes, but tightening here rejects future shapes that
+        # might somehow slip through (e.g. URL-decoded `..` chains).
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
+            return _layout(
+                "Delete blocked",
+                '<div class="card"><p class="tag bad">That run id has an unexpected '
+                'shape and was not deleted.</p></div>',
+                active="privacy",
+            ), 400
+        # Multi-tenant guard: a run can only be deleted by the
+        # organisation that owns it. Legacy untagged runs (empty
+        # profile_id) are treated as belonging to whichever org is
+        # active so the user can still clean them up. A request that
+        # targets another tenant's run is refused with a 404 — we don't
+        # confirm-or-deny the existence to a cross-tenant attacker.
+        owner = _run_owner_profile_id(run_id)
+        active = _active_profile_id() or ""
+        if owner is None:
+            return _layout(
+                "Run not found",
+                '<div class="card"><p class="tag bad">No such run.</p></div>',
+                active="privacy",
+            ), 404
+        if owner and active and owner != active:
+            log.warning(
+                "privacy_delete_run: cross-tenant attempt active=%r owner=%r run=%r",
+                active, owner, run_id,
+            )
+            return _layout(
+                "Run not found",
+                '<div class="card"><p class="tag bad">No such run.</p></div>',
+                active="privacy",
+            ), 404
         _delete_run(run_id)
         return redirect(url_for("home"))
 
@@ -10044,17 +10316,47 @@ Relay team broke club record"></textarea>
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
             from mediahub.club_platform.stub_pack_store import save_pack
         except ImportError:
-            return _layout("Spotlight",
-                           '<div class="card"><p class="muted">club_platform not available.</p></div>',
-                           active="create"), 501
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "spotlight posts can't be built. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
         run_data = _load_run(run_id)
         if not run_data:
-            return _layout("Not found",
-                           '<div class="empty">Run not found.</div>'), 404
-        pack = build_spotlight_pack(run_data, swimmer_key)
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, "
+                "or the URL might be from a different deployment.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+        try:
+            pack = build_spotlight_pack(run_data, swimmer_key)
+        except Exception as e:
+            log.warning(
+                "spotlight_build: build_spotlight_pack failed for %s/%s: %s",
+                run_id, swimmer_key, e,
+            )
+            pack = None
         if not pack:
-            return _layout("No data",
-                           f'<div class="empty">No achievements for "{_h(swimmer_key)}".</div>'), 404
+            return _recovery_page(
+                "Swimmer not found",
+                f"No achievements were recorded for \"{swimmer_key}\" in this meet. "
+                "Pick another swimmer, or open the meet review to see who's in "
+                "the recognition report.",
+                eyebrow="Athlete spotlight",
+                primary_cta=(
+                    "Choose another swimmer",
+                    url_for("spotlight_landing") + f"?run_id={run_id}",
+                ),
+                secondary_cta=("Open review", url_for("review", run_id=run_id)),
+            )
 
         wf_states = {}
         try:
@@ -10136,58 +10438,28 @@ Relay team broke club record"></textarea>
             ask, ProviderNotConfigured, ProviderError,
         )
         # Ground the spotlight caption in the active organisation's
-        # brand — name, voice keywords, confirmed palette. Without this
-        # the writer produced sport-generic captions that ignored the
-        # club's tone and never referenced their colours. Previously the
-        # only thing the system prompt knew was "MediaHub's spotlight-
-        # post writer", which left the LLM to invent stylistic choices.
-        spotlight_system = (
+        # full brand context: mandatory rules from uploaded guidelines,
+        # identity (org type, country, sponsor), captured DNA (voice
+        # summary, keywords, phrases to use, phrases to avoid), and the
+        # learned voice profile (sentence length, emoji rate, preferred
+        # swimmer address, openers/closers).
+        #
+        # We delegate to brand.context.brand_context_for_llm — the same
+        # canonical helper that single-card captions use via
+        # web.ai_caption._brand_dna_prose — so the spotlight composite
+        # speaks in the exact voice the rest of the product already
+        # generates in.
+        tool_system = (
             "You are MediaHub's spotlight-post writer. Output only the "
             "caption text, no preamble or markdown."
         )
+        spotlight_system = tool_system
         try:
             spot_prof = _active_profile()
-            spot_brand_lines = []
-            if spot_prof is not None:
-                if (spot_prof.display_name or "").strip():
-                    spot_brand_lines.append(
-                        f"Organisation: {spot_prof.display_name.strip()}"
-                    )
-                try:
-                    from mediahub.brand.palette import effective_palette as _eff
-                    _spot_pal = _eff(
-                        manual=spot_prof.brand_palette_manual or {},
-                        extracted=spot_prof.brand_palette_extracted or {},
-                    )
-                except Exception:
-                    _spot_pal = {}
-                _pal_bits = [
-                    f"{slot} {_spot_pal[slot]}"
-                    for slot in ("primary", "secondary", "accent", "fourth")
-                    if isinstance(_spot_pal.get(slot), str)
-                    and _spot_pal[slot].startswith("#")
-                ]
-                if _pal_bits:
-                    spot_brand_lines.append(
-                        "Confirmed brand palette: " + ", ".join(_pal_bits)
-                    )
-                vs = (spot_prof.brand_voice_summary or "").strip()
-                if vs:
-                    spot_brand_lines.append(f"Brand voice: {vs[:400]}")
-                kws = [k for k in (spot_prof.brand_keywords or []) if k]
-                if kws:
-                    spot_brand_lines.append(
-                        "Brand keywords: " + ", ".join(kws[:8])
-                    )
-                tn = (spot_prof.tone_notes or "").strip()
-                if tn:
-                    spot_brand_lines.append(f"Tone notes: {tn[:240]}")
-            if spot_brand_lines:
-                spotlight_system = (
-                    spotlight_system
-                    + "\n\nWrite in this organisation's voice. Brand facts:\n"
-                    + "\n".join(spot_brand_lines)
-                )
+            from mediahub.brand.context import brand_context_for_llm
+            brand_block = brand_context_for_llm(spot_prof) if spot_prof else ""
+            if brand_block:
+                spotlight_system = brand_block + "\n\n" + tool_system
         except Exception:
             pass
         try:
@@ -10254,19 +10526,56 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import list_swimmers_in_run
         except ImportError:
-            return _layout("Athlete Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create")
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "spotlights can't be browsed. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
 
-        # List recent runs that have a recognition report
-        conn = _db()
-        recent_runs = conn.execute(
-            "SELECT id, meet_name, file_name, created_at FROM runs WHERE status='done' ORDER BY created_at DESC LIMIT 20"
-        ).fetchall()
-        conn.close()
+        # List recent runs that have a recognition report. DB-read is
+        # fail-soft so a corrupted data.db or missing schema doesn't 500
+        # the spotlight landing page — the user gets a recovery hero
+        # instead of a stack trace.
+        recent_runs: list = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                recent_runs = conn.execute(
+                    "SELECT id, meet_name, file_name, created_at FROM runs WHERE status='done' ORDER BY created_at DESC LIMIT 20"
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("spotlight: runs DB unreachable: %s", e)
+            db_failed = True
 
         run_id_param = request.args.get("run_id", "")
 
         # Empty state when no meets have been processed yet
         if not recent_runs:
+            if db_failed:
+                empty_body = (
+                    '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+                    '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">meets</em>.</h1>'
+                    '<p class="lede">'
+                    "The runs database wasn't readable on this deployment, "
+                    "so the meet picker is empty. Try refreshing &mdash; if it "
+                    "keeps happening, ask your operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("spotlight_landing")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Athlete Spotlight", empty_body, active="create")
             empty_body = (
                 '<section class="mh-hero" data-lane="01" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
@@ -10293,7 +10602,17 @@ Relay team broke club record"></textarea>
         if run_id_param:
             run_data = _load_run(run_id_param)
             if run_data:
-                swimmers = list_swimmers_in_run(run_data)
+                # A malformed run_data (missing recognition_report keys,
+                # weird achievement shapes) would otherwise bubble out of
+                # list_swimmers_in_run and 500 the page.
+                try:
+                    swimmers = list_swimmers_in_run(run_data)
+                except Exception as e:
+                    log.warning(
+                        "spotlight: list_swimmers_in_run failed for %s: %s",
+                        run_id_param, e,
+                    )
+                    swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
@@ -10336,7 +10655,16 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
         except ImportError:
-            return _layout("Spotlight", '<div class="card"><p class="muted">club_platform not available.</p></div>', active="create"), 501
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "this spotlight can't be opened. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
 
         run_data = _load_run(run_id)
         if not run_data:
@@ -10347,7 +10675,17 @@ Relay team broke club record"></textarea>
                 secondary_cta=("Back to home", url_for("home")),
             )
 
-        pack = build_spotlight_pack(run_data, swimmer_key)
+        # A malformed run_data shape would otherwise bubble out of
+        # build_spotlight_pack and 500 the page; treat it as "no pack"
+        # so the recovery hero below renders.
+        try:
+            pack = build_spotlight_pack(run_data, swimmer_key)
+        except Exception as e:
+            log.warning(
+                "spotlight_view: build_spotlight_pack failed for %s/%s: %s",
+                run_id, swimmer_key, e,
+            )
+            pack = None
         if not pack:
             return _recovery_page(
                 "Swimmer not found",
@@ -10726,12 +11064,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             back = url_for(route_endpoint)
             actions_url = url_for("stub_pack_view", pack_id=saved["pack_id"]) if saved else None
             # Wire the per-card approval pill when we have a saved pack_id.
+            # The status route is /api/drafts/<pid>/card/<idx>/status, so
+            # we strip the trailing "/<idx>/status" (two segments) to give
+            # render_cards_html a base it can append "/<idx>/status" to.
             _pack_id = saved["pack_id"] if saved else None
             _status_api_base = None
             if _pack_id:
                 _full = url_for("api_stub_pack_card_status",
-                                pack_id=_pack_id, card_idx=999999)
-                _status_api_base = _full.rsplit("/", 1)[0]
+                                pack_id=_pack_id, card_idx=0)
+                _status_api_base = _full.rsplit("/", 2)[0]
             body = _stubs_mod.render_cards_html(
                 cards_payload, back, f"{title} — drafts",
                 pack_id=_pack_id, status_api_base=_status_api_base,
@@ -10739,10 +11080,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if saved:
                 _packs_url = url_for("stub_packs_list")
                 body = body.replace(
-                    f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>',
+                    f'<a class="btn secondary" href="{_h(back)}">← Start over</a>',
                     (
-                        f'<a class="btn" href="{_h(actions_url)}">View & export this pack &rarr;</a>'
-                        f'<a class="btn secondary" href="{_h(back)}">&larr; Start over</a>'
+                        f'<a class="btn" href="{_h(actions_url)}">View &amp; export this pack →</a>'
+                        f'<a class="btn secondary" href="{_h(back)}">← Start over</a>'
                         f'<a class="btn secondary" href="{_h(_packs_url)}">All saved drafts</a>'
                     ),
                     1,
@@ -10866,7 +11207,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/free-text", methods=["GET"])
     def free_text_chat_page():
         from mediahub.free_text_chat.session import list_sessions
-        sessions = list_sessions(limit=20)
+        # Fail-soft: a corrupted chat store would otherwise 500 the
+        # Free-text landing page. Treat the failure as "no sessions
+        # visible" so the user can still start a new chat.
+        sessions: list = []
+        store_failed = False
+        try:
+            sessions = list_sessions(limit=20)
+        except Exception as e:
+            log.warning("free-text: list_sessions failed: %s", e)
+            store_failed = True
         rows_html = ""
         for it in sessions:
             view_url = url_for("free_text_chat_view", chat_id=it["chat_id"])
@@ -10904,7 +11254,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h2>Past chats</h2>
   {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
     '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
-   if rows_html else '<p class="muted">No chats yet.</p>'}
+   if rows_html else (
+       '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
+       'readable. You can still start a new chat above; if this persists, ask '
+       'your operator to check the data volume.</p>'
+       if store_failed else
+       '<p class="muted">No chats yet.</p>'
+   )}
 </div>
 
 <p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
@@ -11232,8 +11588,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/drafts")
     def stub_packs_list():
         from mediahub.club_platform.stub_pack_store import list_packs
-        items = list_packs(limit=100)
+        # Fail-soft: a corrupted pack store would otherwise 500 the
+        # Drafts page. Treat the failure as "no packs visible" and tell
+        # the user the store wasn't reachable so they don't think their
+        # drafts were silently deleted.
+        items: list = []
+        store_failed = False
+        try:
+            items = list_packs(limit=100)
+        except Exception as e:
+            log.warning("drafts: list_packs failed: %s", e)
+            store_failed = True
         if not items:
+            if store_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    '<span class="mh-hero-eyebrow">Saved drafts</span>'
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">drafts</em>.</h1>'
+                    '<p class="lede">'
+                    "The draft store wasn't readable on this deployment, "
+                    "so the list is empty even if you saved drafts earlier. "
+                    "Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume."
+                    '</p>'
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("stub_packs_list")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("make_page")}">Start fresh</a>'
+                    '</div>'
+                    '</section>'
+                )
+                return _layout("Saved drafts", body, active="create")
             body = (
                 '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
@@ -11289,19 +11673,34 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_pack_view(pack_id):
         from mediahub.club_platform.stub_pack_store import load_pack
         from mediahub.club_platform.stubs import render_cards_html
-        rec = load_pack(pack_id)
+        # ``load_pack`` reads from the saved-drafts store; a corrupt
+        # row or missing file should land on the same recovery hero as a
+        # genuinely-deleted draft, not a 500.
+        try:
+            rec = load_pack(pack_id)
+        except Exception as e:
+            log.warning("drafts: load_pack(%s) failed: %s", pack_id, e)
+            rec = None
         if not rec:
-            body = '<div class="empty">Draft not found.</div>'
-            return _layout("Draft not found", body, active="create"), 404
+            return _recovery_page(
+                "Draft not found",
+                "This draft may have been deleted, or the link could be stale. "
+                "Your other drafts are on the Saved drafts page.",
+                eyebrow="Saved drafts",
+                primary_cta=("All drafts", url_for("stub_packs_list")),
+                secondary_cta=("Start a new draft", url_for("make_page")),
+            )
 
         stub_type = rec.get("stub_type", "other")
         type_label = _STUB_TYPE_LABEL.get(stub_type, stub_type)
         # We pass back = saved-list so "Start over" goes somewhere sensible.
         back_url = url_for("stub_packs_list")
+        # /api/drafts/<pid>/card/<idx>/status → strip "/<idx>/status" so
+        # render_cards_html can append the correct per-card suffix itself.
         _full_status_url = url_for(
-            "api_stub_pack_card_status", pack_id=pack_id, card_idx=999999
+            "api_stub_pack_card_status", pack_id=pack_id, card_idx=0
         )
-        _status_api_base = _full_status_url.rsplit("/", 1)[0]
+        _status_api_base = _full_status_url.rsplit("/", 2)[0]
         cards_html = render_cards_html(
             {"cards": rec.get("cards") or []},
             back_url,
@@ -11337,10 +11736,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the active org are surfaced; foreign or deleted ids are silently
         # skipped so the panel can't leak photos across orgs.
         attached_html = _render_pack_attached_media(rec)
-        # Replace the renderer's default action row
+        # Replace the renderer's default action row. ``render_cards_html``
+        # emits the arrow as the unicode character ``←``, not the
+        # ``&larr;`` entity — match on the same form or the replace
+        # silently no-ops and the export/regenerate footer never appears.
         cards_html = cards_html.replace(
             f'<div style="margin-top:24px;display:flex;gap:10px">'
-            f'<a class="btn secondary" href="{_h(back_url)}">&larr; Start over</a>'
+            f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
             f'</div>',
             footer,
             1,
@@ -12719,7 +13121,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if brand_logos:
             cards = []
             for logo in brand_logos:
-                lid = _h(logo.get("logo_id", ""))
                 label = logo.get("label") or logo.get("original_filename") or "logo"
                 desc = (logo.get("ai_description") or "").strip()
                 mime = logo.get("mime") or ""
@@ -15164,7 +15565,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     def media_library_page():
         """Browse and upload reusable media assets."""
         if not _v8_ok:
-            return _layout("Media library", '<div class="empty">V8 media engine unavailable.</div>'), 503
+            # The V8 media engine is required for everything below — surface
+            # a recovery hero instead of a bare ``<div class="empty">`` so
+            # the user has somewhere to go.
+            return _recovery_page(
+                "Media library unavailable",
+                "The V8 media engine isn't enabled on this deployment, so the "
+                "library can't be browsed or uploaded to. Other parts of MediaHub "
+                "still work; ask your operator to enable the V8 engine if you need "
+                "a per-org photo library.",
+                eyebrow="Media library",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=503,
+            )
         from flask import request as _req
         requested_pid = _req.args.get("profile_id")
         active_pid = _active_profile_id()
@@ -15196,8 +15610,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
-        store = _v8_get_media_store()
-        assets = store.list(profile_id=profile_id)
+        # Fail-soft on the media store. A corrupted assets DB used to 500
+        # the whole page; now we keep the upload form visible and tell
+        # the user the listing wasn't loadable so they can keep working.
+        assets: list = []
+        store_failed = False
+        try:
+            store = _v8_get_media_store()
+            assets = store.list(profile_id=profile_id)
+        except Exception as e:
+            log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
+            store_failed = True
         rows_html = ""
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
@@ -15248,7 +15671,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
   <table style="width:100%">
     <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th></tr></thead>
-    <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'}</tbody>
+    <tbody>{rows_html or (
+        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+        'Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. '
+        'Uploads above still work; if this persists, ask your operator to check the data volume.'
+        '</td></tr>' if store_failed else
+        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+    )}</tbody>
   </table>
 </div>
 """
