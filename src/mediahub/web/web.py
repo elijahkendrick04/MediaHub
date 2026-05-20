@@ -3982,7 +3982,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-loader-sub">This usually takes a few seconds</div>
   </div>
 </div>
-<div id="mh-toast-container"></div>
+<div id="mh-toast-container" role="region" aria-label="Notifications" aria-live="polite" aria-atomic="false"></div>
 <header class="topnav">
   <a href="{{ url_for('home') }}" class="brand" aria-label="MediaHub — home">
     <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
