@@ -10506,6 +10506,19 @@ Relay team broke club record"></textarea>
         except ImportError:
             REGISTRY = {}
 
+        # Presentation-only metadata (output formats + rough effort) keyed
+        # by ContentType value. This is UI sugar — it does NOT live on the
+        # registry dataclass, so adding/removing keys here can never affect
+        # the engine. Unknown types fall back to a generic format chip.
+        _ct_presentation = {
+            "meet_recap":        (["Caption", "Graphic", "Reel"], "~ 60s"),
+            "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
+            "weekend_preview":   (["Caption", "Graphic"],          "~ 40s"),
+            "sponsor_post":      (["Caption", "Graphic"],          "~ 30s"),
+            "session_update":    (["Caption"],                     "~ 20s"),
+            "free_text":         (["Caption"],                     "~ 15s"),
+        }
+
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
@@ -10535,6 +10548,17 @@ Relay team broke club record"></textarea>
                 badge = '<span class="tag">Coming soon</span>'
                 action = f'href="{route_url}"' if href_ok else 'href="#" onclick="return false"'
                 disabled_cls = " is-disabled"
+
+            # Build the output-format chip row + effort estimate.
+            ct_val = getattr(meta.type, "value", str(ct))
+            formats, effort = _ct_presentation.get(ct_val, (["Caption"], ""))
+            fmt_chips = "".join(
+                f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
+            )
+            effort_html = (
+                f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
+            )
+
             tiles_html += (
                 f'<a {action} class="mh-template{disabled_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
@@ -10543,6 +10567,7 @@ Relay team broke club record"></textarea>
                 f'{badge}'
                 '</div>'
                 f'<p>{_h(meta.description)}</p>'
+                f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
                 '</a>'
             )

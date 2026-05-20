@@ -990,6 +990,89 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
 }
 
 /* =====================================================================
+   PHASE 7 — MAKE / CONTENT PICKER
+   ===================================================================== */
+
+/* Output-format chip row + effort estimate inside each .mh-template. */
+.mh-template-formats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: var(--sp-3) 0 0;
+}
+.mh-template-fmt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 3px 7px;
+  border-radius: 2px;
+  background: rgba(245, 242, 232, 0.04);
+  border: 1px solid var(--hairline);
+}
+.mh-template-effort {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mh-template-effort::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--lane);
+  opacity: 0.6;
+}
+
+/* Make the primary tile span two columns on wide grids so it reads as
+   the hero path, with a larger icon and a stronger CTA. */
+@media (min-width: 760px) {
+  .mh-template-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+  .mh-template-primary {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto auto;
+    column-gap: var(--sp-5);
+    align-items: start;
+    padding: var(--sp-6);
+  }
+  .mh-template-primary .mh-template-icon {
+    grid-row: 1 / span 3;
+    width: 56px; height: 56px;
+    align-self: center;
+  }
+  .mh-template-primary .mh-template-icon svg { width: 30px; height: 30px; }
+  .mh-template-primary h3 { font-size: var(--fs-2xl); }
+  .mh-template-primary .mh-template-cta {
+    grid-column: 2;
+  }
+}
+/* The icon block gets a soft brand wash so tiles aren't just an outline. */
+.mh-template-icon {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 242, 232, 0.04);
+  color: var(--ink-dim);
+  margin-bottom: var(--sp-3);
+  transition: color var(--dur-fast) var(--ease-out-quick),
+              background var(--dur-fast) var(--ease-out-quick);
+}
+.mh-template:hover .mh-template-icon { color: var(--lane); background: rgba(212, 255, 58, 0.06); }
+.mh-template-primary .mh-template-icon { color: var(--lane); background: rgba(212, 255, 58, 0.08); }
+
+/* =====================================================================
    PHASE 6 — REVIEW PAGE
    ===================================================================== */
 
