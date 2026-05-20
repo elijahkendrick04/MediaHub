@@ -187,23 +187,29 @@ def test_no_env_no_provider(app):
 # ---------------------------------------------------------------------------
 
 def test_rendered_page_has_only_topnav_settings_link(app):
-    """The Settings topnav anchor exists (one link to the consolidated
-    Operations page). Beyond that, no JS error message or Buffer flow
-    is allowed to redirect to /settings — those paths still need to
-    steer the user to their administrator, since the Settings page
-    has no credential controls."""
+    """The Settings navigation anchors exist (the desktop topnav link plus
+    the mobile bottom-tab link — both plain navigation, both to the
+    consolidated Operations page). Beyond those, no JS error message or
+    Buffer flow is allowed to redirect to /settings — those paths still
+    need to steer the user to their administrator, since the Settings
+    page has no credential controls."""
     import re
     c = app.test_client()
     r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    # Exactly one Settings anchor — the topnav link.
+    # The Settings anchors are navigation only: the desktop topnav link
+    # and the mobile bottom-tab link. (The bottom-tab nav was added in the
+    # mobile-nav pass; it's display:none on desktop but always in the DOM.)
     settings_anchors = re.findall(
         r"""<a[^>]+href\s*=\s*["']/settings["'][^>]*>""", html,
     )
-    assert len(settings_anchors) == 1, (
-        f"expected one topnav /settings anchor, found {len(settings_anchors)}"
+    assert len(settings_anchors) == 2, (
+        f"expected the topnav + mobile-bottomnav /settings anchors, "
+        f"found {len(settings_anchors)}"
     )
+    # Both must be plain navigation anchors, not credential-flow links.
+    assert all("aria-label" in a or 'class="' in a for a in settings_anchors)
     # No window.location redirect to /settings (the old schedule-modal fallback).
     assert not re.search(r"""window\.location\.href\s*=\s*['"]/settings['"]""", html)
     assert "API_BASE + '/settings'" not in html
