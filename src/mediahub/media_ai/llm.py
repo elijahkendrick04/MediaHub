@@ -119,6 +119,26 @@ def _has_gemini_key() -> bool:
     return bool(_resolve_gemini_key())
 
 
+def _redact_key(text: str, key: Optional[str]) -> str:
+    """Strip the Gemini API key from arbitrary text before logging.
+
+    Gemini's endpoint takes the key as a `?key=…` query parameter, so a
+    `requests` exception's repr (which embeds the failing URL) leaks the
+    secret straight into stdout. We rewrite both the literal key and any
+    `key=` query parameter to a stable redaction sentinel so logs are
+    safe to ship to operator dashboards or third-party aggregators.
+    """
+    if not text:
+        return text
+    out = text
+    if key:
+        out = out.replace(key, "***REDACTED***")
+    # Catch other shapes (URL-encoded, leftover ?key=…&… fragments)
+    import re as _re  # noqa: PLC0415
+    out = _re.sub(r"(?i)(\?|&)key=[^&\s'\")]+", r"\1key=***REDACTED***", out)
+    return out
+
+
 def _preferred_provider() -> str:
     """Return 'anthropic' if explicitly preferred via env, else 'gemini'."""
     pref = (os.environ.get("MEDIAHUB_LLM_PROVIDER") or "").strip().lower()
@@ -387,12 +407,13 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
             timeout=_GEMINI_TIMEOUT,
         )
     except Exception as e:
-        log.warning("gemini transport failed: %s", e)
+        safe_err = _redact_key(str(e), key)
+        log.warning("gemini transport failed: %s", safe_err)
         _log_call(
             provider="gemini", ok=False, model=_GEMINI_MODEL,
             duration_ms=(time.monotonic() - started) * 1000.0,
             error_kind="transport",
-            error_message=str(e),
+            error_message=safe_err,
         )
         return None
     dur_ms = (time.monotonic() - started) * 1000.0
@@ -407,10 +428,11 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
                   error_message="HTTP 429")
         return None
     if not r.ok:
-        log.warning("gemini non-ok (%s): %s", r.status_code, r.text[:300])
+        body_safe = _redact_key((r.text or "")[:300], key)
+        log.warning("gemini non-ok (%s): %s", r.status_code, body_safe)
         _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
                   duration_ms=dur_ms, error_kind=f"http_{r.status_code}",
-                  error_message=(r.text or "")[:300])
+                  error_message=body_safe)
         # 5xx / overload signals warrant tripping the breaker so the
         # next call this request doesn't waste another round-trip.
         # 4xx (other than 429, handled above) are usually our fault
