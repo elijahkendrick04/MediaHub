@@ -179,3 +179,101 @@ class TestZeroDriftAcrossSurfaces:
         assert motion["primary"] != email["primary"]
         assert motion["scheme"] == "dark"
         assert email["scheme"] == "light"
+
+
+class TestConfirmedBrandColoursWin:
+    """Regression for the off-brand-graphic bug: when the brief carries
+    the club's CONFIRMED brand colours, those must survive to the render
+    untouched — the MD3 theme store may only fill a role the brief left
+    unset. A navy+gold club must not be rendered in washed-out MD3 blue
+    with the gold dropped."""
+
+    def test_confirmed_palette_beats_theme_store(self, isolated_data_dir):
+        # Seed a theme from the navy primary. Its light.primary is the
+        # tone-shifted #426089 and its secondary_container is a pale
+        # blue — neither is the club's actual brand colour.
+        theme = _seed_theme("navy-gold", "#003C71")
+        light = theme["roles"]["light"]
+        assert light["primary"].upper() != "#003C71", (
+            "precondition: MD3 derivation must tone-shift the seed"
+        )
+
+        from mediahub.graphic_renderer.render import _common_replacements
+        brief = _minimal_brief(palette={"primary": "#003C71",
+                                        "secondary": "#FDB913",
+                                        "accent": "#FFFFFF"})
+        brand_kit = SimpleNamespace(profile_id="navy-gold",
+                                    primary_colour="#003C71",
+                                    secondary_colour="#FDB913",
+                                    display_name="Navy Gold SC")
+        result = _common_replacements(
+            brief, 1080, 1080, brand_kit=brand_kit,
+            athlete_data_uri=None, logo_block="", result_chip="",
+            sponsor_block="",
+        )
+        # Confirmed brand colours survive exactly.
+        assert result["PRIMARY"].upper() == "#003C71"
+        assert result["SECONDARY"].upper() == "#FDB913"
+        # And specifically NOT the theme-store tonal derivatives.
+        assert result["PRIMARY"].upper() != light["primary"].upper()
+        assert result["SECONDARY"].upper() != light["secondary_container"].upper()
+
+    def test_theme_store_fills_only_unset_roles(self, isolated_data_dir):
+        # primary is a real confirmed hex; secondary is a non-hex
+        # sentinel (an unset role). The theme store should fill the
+        # secondary slot but leave the confirmed primary alone.
+        theme = _seed_theme("partial", "#003C71")
+        from mediahub.graphic_renderer.render import _common_replacements
+        brief = _minimal_brief(palette={"primary": "#003C71",
+                                        "secondary": "UNSET",
+                                        "accent": "#FFFFFF"})
+        result = _common_replacements(
+            brief, 1080, 1080,
+            brand_kit=SimpleNamespace(profile_id="partial",
+                                      primary_colour="#003C71"),
+            athlete_data_uri=None, logo_block="", result_chip="",
+            sponsor_block="",
+        )
+        assert result["PRIMARY"].upper() == "#003C71"          # confirmed wins
+        expected_sec = theme["roles"]["light"]["secondary_container"].upper()
+        assert result["SECONDARY"].upper() == expected_sec      # sentinel filled
+
+
+class TestConfirmedBrandColoursWinAcrossSurfaces:
+    """The headline guarantee, brand-accurate edition: when a club has
+    confirmed brand colours, email + static both render that exact
+    colour (so they still agree — zero drift — but on-brand)."""
+
+    def test_email_and_static_agree_on_confirmed_primary(self, isolated_data_dir):
+        _seed_theme("agree-brand", "#003C71")
+
+        from mediahub.brand.newsletter_renderer import _resolve_email_primary
+        email_primary = _resolve_email_primary({
+            "profile_id": "agree-brand",
+            "brand_palette_manual": {"primary": "#003C71"},
+            "brand_primary": "#003C71",
+        })
+
+        from mediahub.graphic_renderer.render import _common_replacements
+        brief = _minimal_brief(palette={"primary": "#003C71",
+                                        "secondary": "#FDB913",
+                                        "accent": "#FFFFFF"})
+        static = _common_replacements(
+            brief, 1080, 1080,
+            brand_kit=SimpleNamespace(profile_id="agree-brand",
+                                      primary_colour="#003C71"),
+            athlete_data_uri=None, logo_block="", result_chip="",
+            sponsor_block="",
+        )
+        assert email_primary.upper() == static["PRIMARY"].upper() == "#003C71"
+
+    def test_motion_matches_static_confirmed_primary(self, isolated_data_dir):
+        _seed_theme("motion-brand", "#003C71")
+        from mediahub.visual.motion import _brand_to_dict
+        motion = _brand_to_dict({"profile_id": "motion-brand",
+                                 "primary_colour": "#003C71",
+                                 "secondary_colour": "#FDB913"})
+        # Motion must render the confirmed brand primary so a reel aligns
+        # with its still (CLAUDE.md), not the dark-scheme tonal variant.
+        assert motion["primary"] == "#003C71"
+        assert motion["themeSource"] == "brand-kit"

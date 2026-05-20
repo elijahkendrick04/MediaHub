@@ -64,12 +64,19 @@ class TestThemeStoreSource:
         assert result["primary"] == "#FF1234"
 
     def test_brand_kit_dataclass_input(self, isolated_data_dir):
+        """A dataclass BrandKit is accepted, and its CONFIRMED primary
+        wins over the theme store. CLAUDE.md requires motion to read the
+        same BrandKit palette as the static renderer so a card's reel
+        aligns with its still — the MD3 theme store only fills roles the
+        BrandKit left unset."""
         from mediahub.brand.kit import BrandKit
         kit = BrandKit(profile_id="dc-test", display_name="DC",
                        primary_colour="#06D6A0")
         kit.ensure_derived_palette()
         result = _brand_to_dict(kit)
-        assert result["themeSource"] == "theme-store"
+        # Confirmed brand primary is preserved exactly, not tone-shifted.
+        assert result["primary"] == "#06D6A0"
+        assert result["themeSource"] == "brand-kit"
 
 
 class TestSecondaryAccent:

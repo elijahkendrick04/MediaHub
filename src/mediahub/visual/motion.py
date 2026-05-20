@@ -130,19 +130,30 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             )
             theme_palette = None
 
+    # CONFIRMED brand colours win over the theme store. CLAUDE.md
+    # requires motion to "read the same BrandKit palette as the static
+    # graphic renderer" so a card's reel aligns with its still. The MD3
+    # theme store is a single-seed dark-scheme projection that
+    # tone-shifts the brand (a navy #003C71 becomes a pale #AAC8F7) and
+    # can't represent a second brand colour — so it only fills a role the
+    # BrandKit left unset, never overriding a confirmed brand hex.
+    theme = theme_palette or {}
     primary = (
-        (theme_palette or {}).get("primary")
-        or src.get("primary_colour") or src.get("primary") or "#0A2540"
+        src.get("primary_colour") or src.get("primary")
+        or theme.get("primary") or "#0A2540"
     )
     secondary = (
-        (theme_palette or {}).get("secondary")
-        or src.get("secondary_colour") or src.get("secondary") or "#000000"
+        src.get("secondary_colour") or src.get("secondary")
+        or theme.get("secondary") or "#000000"
     )
     accent = (
-        (theme_palette or {}).get("accent")
-        or src.get("accent_colour") or src.get("accent") or "#FFFFFF"
+        src.get("accent_colour") or src.get("accent")
+        or theme.get("accent") or "#FFFFFF"
     )
 
+    # Diagnostic flag: announce theme-store only when it actually
+    # supplied the primary (i.e. the BrandKit had no confirmed primary).
+    primary_from_brand = bool(src.get("primary_colour") or src.get("primary"))
     return {
         "primary": primary,
         "secondary": secondary,
@@ -152,7 +163,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "logoDataUri": _logo_to_data_uri(
             src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
         ),
-        "themeSource": "theme-store" if theme_palette else "brand-kit",
+        "themeSource": "theme-store" if (theme_palette and not primary_from_brand) else "brand-kit",
     }
 
 

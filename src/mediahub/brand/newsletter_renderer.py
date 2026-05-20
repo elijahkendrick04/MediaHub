@@ -84,14 +84,32 @@ def _safe_hex(value: Optional[str], fallback: str) -> str:
 
 
 def _resolve_email_primary(profile) -> str:
-    """Phase 1.6 Stage G: prefer the theme-store light-scheme primary
-    over the legacy ``brand_primary`` field.
+    """Resolve the header band's primary colour.
 
-    Emails are viewed on white email-body backgrounds (the current
-    template uses ``#f3f4f6``), so the LIGHT scheme's primary is the
-    correct role to inline into the header band — it's the darker,
-    more saturated brand tone with high contrast against white.
+    Mirrors ``_resolve_email_secondary`` so the email honours the
+    club's CONFIRMED brand colour over the MD3 theme-store derivation.
+    The theme store tone-shifts the seed for accessibility (a navy
+    ``#003C71`` becomes a washed-out ``#426089``), so a confirmed brand
+    primary must win — otherwise the header renders off-brand.
+
+    Order of preference:
+      1. ``brand_palette_manual["primary"]``    — explicit user override
+      2. ``brand_palette_extracted["primary"]`` — AI's confirmed pick
+      3. theme-store light-scheme primary       — derived fallback
+      4. legacy ``brand_primary`` field
+      5. Stage A default navy
+
+    The theme-store value is third (not first), matching the secondary
+    resolver: a club that confirmed a specific primary should see that
+    exact colour, not its tonal-spot derivative.
     """
+    manual = _get(profile, "brand_palette_manual") or {}
+    extracted = _get(profile, "brand_palette_extracted") or {}
+    for src in (manual, extracted):
+        if isinstance(src, dict):
+            v = src.get("primary")
+            if isinstance(v, str) and v.startswith("#"):
+                return _safe_hex(v, "#0A2540")
     pid = _get(profile, "profile_id")
     if pid:
         try:

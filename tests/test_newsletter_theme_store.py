@@ -72,6 +72,48 @@ class TestResolveEmailPrimary:
         assert result.upper() == theme["roles"]["light"]["primary"].upper()
 
 
+class FakeProfileWithPalette(FakeProfile):
+    """Profile that also carries confirmed palette dicts."""
+    def __init__(self, *, brand_palette_manual=None,
+                 brand_palette_extracted=None, **kw):
+        super().__init__(**kw)
+        self.brand_palette_manual = brand_palette_manual or {}
+        self.brand_palette_extracted = brand_palette_extracted or {}
+
+
+class TestConfirmedPrimaryBeatsTheme:
+    """Regression for the off-brand email-header bug: a club's CONFIRMED
+    primary must win over the MD3 theme-store derivation, which
+    tone-shifts a navy #003C71 seed into a washed-out #426089."""
+
+    def test_manual_primary_wins_over_theme(self, isolated_data_dir):
+        theme = _seed_theme("manual-win", "#003C71")
+        prof = FakeProfileWithPalette(
+            profile_id="manual-win", brand_primary="#003C71",
+            brand_palette_manual={"primary": "#003C71"},
+        )
+        result = _resolve_email_primary(prof)
+        assert result == "#003c71"  # _safe_hex lowercases
+        # Specifically NOT the tone-shifted theme primary.
+        assert result.upper() != theme["roles"]["light"]["primary"].upper()
+
+    def test_extracted_primary_wins_over_theme(self, isolated_data_dir):
+        _seed_theme("extracted-win", "#003C71")
+        prof = FakeProfileWithPalette(
+            profile_id="extracted-win", brand_primary="#003C71",
+            brand_palette_extracted={"primary": "#003C71"},
+        )
+        assert _resolve_email_primary(prof) == "#003c71"
+
+    def test_theme_still_used_without_confirmed_palette(self, isolated_data_dir):
+        # No manual/extracted → theme store remains the source (the
+        # zero-drift fallback for clubs that never confirmed colours).
+        theme = _seed_theme("no-confirm", "#003C71")
+        prof = FakeProfile(profile_id="no-confirm", brand_primary="#003C71")
+        assert _resolve_email_primary(prof).upper() == \
+            theme["roles"]["light"]["primary"].upper()
+
+
 class TestRenderEmailHTML:
     """End-to-end: the rendered HTML should carry the light primary
     in the header band's inline background style."""
