@@ -14786,7 +14786,7 @@ function copyWhyCard(btn, taId) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack &mdash; {meet_name}", body, active="home")
+        return _layout(f"Content Pack — {meet_name}", body, active="home")
 
     # ---- Workflow API --------------------------------------------------
     @app.route("/api/workflow/<run_id>/<card_id>", methods=["POST"])
@@ -15349,7 +15349,7 @@ function tiRegenerate() {{
 }}
 </script>
 """
-        return _layout(f"Turn-Into pack &mdash; {meet_name}", body, active="home")
+        return _layout(f"Turn-Into pack — {meet_name}", body, active="home")
 
     @app.route("/pack/<run_id>/grouped")
     def content_pack_grouped(run_id):
@@ -15787,7 +15787,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </script>
 {_schedule_modal_js()}
 """
-        return _layout(f"Content Pack (grouped) &mdash; {meet_name}", body, active="home")
+        return _layout(f"Content Pack (grouped) — {meet_name}", body, active="home")
 
     # ===================================================================
     # V8: Media library + visuals
@@ -16549,7 +16549,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   </div>
 </div>
 """
-        return _layout(f"Sponsor variant &mdash; {swimmer}", body, active="home")
+        return _layout(f"Sponsor variant — {swimmer}", body, active="home")
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):
