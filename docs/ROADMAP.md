@@ -14,6 +14,44 @@ credibly serve a club, society or team without going through MediaHub.
 
 ---
 
+## Roadmap status (auto-updated)
+
+This roadmap stays current automatically. A GitHub Action
+([`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml),
+backed by [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py))
+refreshes the stamp and activity feed below on **every push to `main`**, and
+flips an item's status badge when a commit message contains a directive line:
+
+> `roadmap: <ID> <status>` — where `<ID>` is a phase (`1.6`, `2.1`, …) or an
+> Appendix item (`PAR-1`, `SEQ-1`, `Step 8`), and `<status>` is one of
+> `done` · `wip` · `blocked` · `todo`. Example commit trailer:
+> `roadmap: SEQ-1 done`.
+
+<!-- ROADMAP:LAST_UPDATED -->
+**Last updated:** 2026-05-21 · `c338ab4c5` · Consolidate all roadmap material into one forward-looking ROADMAP.md
+<!-- /ROADMAP:LAST_UPDATED -->
+
+**Recent activity**
+
+<!-- ROADMAP:ACTIVITY -->
+| Date | Commit | Summary |
+|---|---|---|
+| 2026-05-21 | `c338ab4c5` | Consolidate all roadmap material into one forward-looking ROADMAP.md |
+| 2026-05-21 | `692e10e96` | Consolidate into one roadmap: fold generation prompts into ROADMAP.md Appendix A |
+| 2026-05-21 | `4770cc67f` | Add Generative Content Engine v2 roadmap with per-stage build prompts |
+| 2026-05-21 | `39bff2558` | Replace additive-only rule with gated removal process |
+| 2026-05-21 | `cc8e26729` | Trim CLAUDE.md to accurate, skill-free project guidance |
+| 2026-05-21 | `087c92c91` | Add generative-AI surgical thesis; fold verification corrections into evaluation |
+| 2026-05-20 | `30f6553c8` | Add generation-engine competitor evaluation (research) |
+| 2026-05-20 | `ae4fdbd33` | Fix derivative content pack: cross-worker job state + genuine AI copy |
+| 2026-05-20 | `c5a5742cf` | Let users add a photo to the caption-only graphics too |
+| 2026-05-20 | `0de4a6e3b` | Let users choose which photo goes on each graphic |
+| 2026-05-20 | `db9985422` | Upgrade logo rendering: knockout, trim, and adaptive chip |
+| 2026-05-20 | `372e0fb26` | Make caption-only graphics AI-directed (constrained to text-led) |
+<!-- /ROADMAP:ACTIVITY -->
+
+---
+
 ## Where we are today (May 2026)
 
 Two structural facts shape the work ahead:
