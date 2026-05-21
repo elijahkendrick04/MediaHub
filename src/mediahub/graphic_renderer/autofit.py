@@ -1,0 +1,337 @@
+"""Deterministic text auto-fit for the graphic renderer (Tier A layout intelligence).
+
+Pure layout maths — **no network, no LLM, no judgement**. Given a string and a
+box, :func:`fit_font_px` binary-searches the largest integer pixel font size at
+which the text (wrapped to the box width) fits inside ``box_w x box_h``.
+
+Why this exists
+---------------
+MediaHub's archetype templates must absorb wildly variable content — a 3-letter
+relay tag vs. a 28-character double-barrelled surname — without overflowing or
+under-filling their slots. Auto-fit is the deterministic primitive that lets a
+single archetype hold any name gracefully (the "auto-fit text" item in the
+generative-AI thesis, Tier A / Phase 1). This is layout *maths*, not creative
+judgement, so it deliberately lives outside ``media_ai.llm`` / ``ai_core.llm``.
+
+Measurement strategy (deterministic by construction)
+----------------------------------------------------
+* **Primary — char-width table.** Each glyph has an *advance width* expressed as
+  a fraction of the em (the font size). The width of a line at size ``S`` is
+  ``sum(em_width[c] for c in line) * S``. The base table is the Helvetica/Arial
+  AFM advance-width set; per-family classes (condensed / serif / mono) scale or
+  override it. This needs **no font files**, so results are identical on every
+  machine — which is exactly what makes :func:`fit_font_px` reproducible and
+  golden-testable.
+* **Optional — Pillow.** When a caller has the real ``.ttf``/``.otf`` and passes
+  ``font_path`` to :func:`measure_line_px`, Pillow's :class:`~PIL.ImageFont`
+  measures the true advance width (``getlength``; ``getbbox`` width as a fallback
+  on very old Pillow). Still deterministic for a given file — used for
+  pixel-accurate fitting where the font ships with the deployment.
+
+The table is an **approximation, by design**: no kerning, ligatures, optical
+sizing, or complex-script shaping. For Latin display/headline text in
+fixed-width boxes it is accurate to within a few percent — more than enough to
+choose a font size that will not overflow. When in doubt it errs slightly *wide*
+(via the unlisted-glyph default), so it prefers a smaller, safe size over an
+overflowing one.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+__all__ = [
+    "fit_font_px",
+    "fit_text",
+    "wrap_text",
+    "measure_line_px",
+    "em_width",
+]
+
+# --------------------------------------------------------------------------- #
+# Char-width table
+# --------------------------------------------------------------------------- #
+# Helvetica / Arial advance widths in 1/1000 em (the standard AFM WidthsArray).
+# These are *advance* widths (pen movement), which is what governs how wide a
+# run of text is — not the ink bounding box.
+_AFM_1000: dict[str, int] = {
+    " ": 278, "!": 278, '"': 355, "#": 556, "$": 556, "%": 889, "&": 667,
+    "'": 222, "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333,
+    ".": 278, "/": 278,
+    "0": 556, "1": 556, "2": 556, "3": 556, "4": 556,
+    "5": 556, "6": 556, "7": 556, "8": 556, "9": 556,
+    ":": 278, ";": 278, "<": 584, "=": 584, ">": 584, "?": 556, "@": 1015,
+    "A": 667, "B": 667, "C": 722, "D": 722, "E": 667, "F": 611, "G": 778,
+    "H": 722, "I": 278, "J": 500, "K": 667, "L": 556, "M": 833, "N": 722,
+    "O": 778, "P": 667, "Q": 778, "R": 722, "S": 667, "T": 611, "U": 722,
+    "V": 667, "W": 944, "X": 667, "Y": 667, "Z": 611,
+    "[": 278, "\\": 278, "]": 278, "^": 469, "_": 556, "`": 333,
+    "a": 556, "b": 556, "c": 500, "d": 556, "e": 556, "f": 278, "g": 556,
+    "h": 556, "i": 222, "j": 222, "k": 500, "l": 222, "m": 833, "n": 556,
+    "o": 556, "p": 556, "q": 556, "r": 333, "s": 500, "t": 278, "u": 556,
+    "v": 500, "w": 722, "x": 500, "y": 500, "z": 500,
+    "{": 334, "|": 260, "}": 334, "~": 584,
+}
+
+# Base profile in em units (fraction of font size).
+_SANS_EM: dict[str, float] = {ch: w / 1000.0 for ch, w in _AFM_1000.items()}
+
+# Advance for any glyph not in the table (accented Latin, punctuation we did not
+# enumerate, non-Latin). Sits at the typical lowercase width so unusual names
+# such as "Müller" or "Núñez" estimate sensibly; errs marginally wide for safety.
+_DEFAULT_EM = 0.556
+
+# Monospace: every glyph advances by one fixed width.
+_MONO_EM = 0.600
+
+# Per-class multipliers applied on top of the sans base table. The "mono" class
+# is handled separately in _char_em (fixed advance) and so has no entry here.
+#   condensed  — Anton / Bebas / Oswald are far narrower than Helvetica.
+#   serif      — Lora / Georgia run a touch wider than the sans base.
+_PROFILE_SCALE: dict[str, float] = {
+    "sans": 1.0,
+    "condensed": 0.60,
+    "serif": 1.03,
+}
+
+# Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
+# first family in a CSS stack). Anything unrecognised falls back to "sans".
+_CONDENSED_FAMILIES = frozenset({
+    "anton", "bebas neue", "bebas", "oswald", "impact", "teko",
+    "archivo narrow", "barlow condensed", "roboto condensed", "saira condensed",
+    "fjalla one", "staatliches", "big shoulders", "boldonse",
+})
+_MONO_FAMILIES = frozenset({
+    "monospace", "jetbrains mono", "ibm plex mono", "roboto mono", "space mono",
+    "dm mono", "geist mono", "red hat mono", "courier", "courier new",
+    "consolas", "menlo", "silkscreen",
+})
+_SERIF_FAMILIES = frozenset({
+    "serif", "lora", "georgia", "times", "times new roman", "playfair display",
+    "merriweather", "crimson pro", "crimson", "libre baskerville",
+    "instrument serif", "ibm plex serif", "gloock",
+})
+
+
+def _classify_family(font_family: str) -> str:
+    """Map a CSS-style family name (or stack) to a width profile class."""
+    if not font_family:
+        return "sans"
+    first = font_family.split(",", 1)[0].strip().strip("'\"").lower()
+    if first in _MONO_FAMILIES:
+        return "mono"
+    if first in _CONDENSED_FAMILIES:
+        return "condensed"
+    if first in _SERIF_FAMILIES:
+        return "serif"
+    return "sans"
+
+
+# Weight-name -> numeric weight (CSS scale). Bolder faces advance slightly wider.
+_WEIGHT_NAMES: dict[str, int] = {
+    "thin": 100, "hairline": 100, "extralight": 200, "ultralight": 200,
+    "light": 300, "book": 400, "normal": 400, "regular": 400,
+    "medium": 500, "semibold": 600, "demibold": 600, "demi": 600,
+    "bold": 700, "extrabold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
+}
+
+
+def _weight_factor(weight: int | str) -> float:
+    """Width multiplier for a font weight. ~+1.2% per 100 units above 400."""
+    if isinstance(weight, str):
+        numeric = _WEIGHT_NAMES.get(weight.strip().lower(), 400)
+    else:
+        numeric = int(weight)
+    numeric = max(100, min(900, numeric))
+    return 1.0 + (numeric - 400) / 100.0 * 0.012
+
+
+def _char_em(ch: str, profile: str) -> float:
+    """Advance width of one character in em units, for a profile class."""
+    if profile == "mono":
+        return _MONO_EM
+    base = _SANS_EM.get(ch, _DEFAULT_EM)
+    return base * _PROFILE_SCALE[profile]
+
+
+# --------------------------------------------------------------------------- #
+# Public measurement primitives
+# --------------------------------------------------------------------------- #
+def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) -> float:
+    """Width of ``text`` in **em units** (multiply by the px size to get px).
+
+    Deterministic and font-file-free: this is the char-width-table estimate.
+    """
+    if not text:
+        return 0.0
+    profile = _classify_family(font_family)
+    factor = _weight_factor(weight)
+    return sum(_char_em(ch, profile) for ch in text) * factor
+
+
+@lru_cache(maxsize=256)
+def _load_truetype(font_path: str, size: int):  # pragma: no cover - thin Pillow shim
+    from PIL import ImageFont
+
+    return ImageFont.truetype(font_path, size)
+
+
+def measure_line_px(
+    line: str,
+    font_px: float,
+    *,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    font_path: str | None = None,
+) -> float:
+    """Pixel width of a single (already-wrapped) line at ``font_px``.
+
+    With ``font_path`` and Pillow available, measures the real advance width via
+    :class:`~PIL.ImageFont` (``getlength``, falling back to ``getbbox``). Without
+    it, uses the deterministic char-width table. ``font_path`` requires an
+    integer pixel size, so it is rounded for the Pillow lookup.
+    """
+    if not line:
+        return 0.0
+    if font_path:
+        font = _load_truetype(font_path, int(round(font_px)))
+        get_length = getattr(font, "getlength", None)
+        if get_length is not None:
+            return float(get_length(line))
+        # Very old Pillow: fall back to the ink bounding-box width.
+        left, _, right, _ = font.getbbox(line)
+        return float(right - left)
+    return em_width(line, font_family=font_family, weight=weight) * font_px
+
+
+# --------------------------------------------------------------------------- #
+# Multi-line wrapping
+# --------------------------------------------------------------------------- #
+def wrap_text(
+    text: str,
+    box_w: float,
+    font_px: float,
+    *,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    font_path: str | None = None,
+) -> list[str]:
+    """Greedy word-wrap ``text`` to ``box_w`` at ``font_px``.
+
+    Hard newlines in ``text`` are honoured as line breaks. Words are never
+    hyphenated: a single token wider than ``box_w`` is placed on its own line and
+    will exceed the box — :func:`fit_font_px` resolves that by shrinking the
+    size. Returns ``[]`` for empty / whitespace-only input.
+    """
+    def measure(line: str) -> float:
+        return measure_line_px(
+            line, font_px, font_family=font_family, weight=weight, font_path=font_path
+        )
+
+    lines: list[str] = []
+    for paragraph in text.splitlines() or [text]:
+        words = paragraph.split()
+        if not words:
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if measure(candidate) <= box_w + 1e-6:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return lines
+
+
+# --------------------------------------------------------------------------- #
+# Auto-fit
+# --------------------------------------------------------------------------- #
+def fit_font_px(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    min_px: int = 8,
+    max_px: int = 240,
+    line_height: float = 1.0,
+) -> int:
+    """Largest **integer** px font size at which ``text`` fits in ``box_w x box_h``.
+
+    The text is word-wrapped to ``box_w`` at the candidate size; it fits when the
+    wrapped block height (``n_lines * size * line_height``) is within ``box_h``
+    *and* every wrapped line is within ``box_w``. Found by binary search over the
+    monotonic fit predicate, so the cost is ``O(log(max_px - min_px))`` wraps.
+
+    Returns ``max_px`` if even the largest size fits, and ``min_px`` (the floor)
+    if nothing in range fits — at the floor the caller decides whether to truncate
+    or grow the box, but the function never returns a value outside
+    ``[min_px, max_px]`` and never lies about fitting.
+
+    ``line_height`` is the CSS-style line-height **multiplier** (e.g. ``1.2``),
+    not an absolute pixel value.
+    """
+    if box_w <= 0 or box_h <= 0:
+        raise ValueError("box_w and box_h must be positive")
+    if min_px < 1:
+        raise ValueError("min_px must be >= 1")
+    if min_px > max_px:
+        raise ValueError("min_px must be <= max_px")
+
+    if not text or not text.strip():
+        return max_px
+
+    def fits(size: int) -> bool:
+        lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
+        if not lines:
+            return True
+        if len(lines) * size * line_height > box_h + 1e-6:
+            return False
+        widest = max(
+            measure_line_px(ln, size, font_family=font_family, weight=weight)
+            for ln in lines
+        )
+        return widest <= box_w + 1e-6
+
+    if fits(max_px):
+        return max_px
+    if not fits(min_px):
+        return min_px
+
+    lo, hi, best = min_px, max_px, min_px
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if fits(mid):
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def fit_text(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    font_family: str = "Inter",
+    weight: int | str = 400,
+    min_px: int = 8,
+    max_px: int = 240,
+    line_height: float = 1.0,
+) -> tuple[int, list[str]]:
+    """Convenience wrapper: the fitted size **and** the wrapped lines at that size.
+
+    Templates usually need both — the size to set on the element and the line
+    breaks to emit. Equivalent to calling :func:`fit_font_px` then
+    :func:`wrap_text` with the result, sharing the same measurement.
+    """
+    size = fit_font_px(
+        text, box_w, box_h,
+        font_family=font_family, weight=weight,
+        min_px=min_px, max_px=max_px, line_height=line_height,
+    )
+    lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
+    return size, lines
