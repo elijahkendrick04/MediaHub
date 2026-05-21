@@ -28,7 +28,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-21 · `c338ab4c5` · Consolidate all roadmap material into one forward-looking ROADMAP.md
+**Last updated:** 2026-05-21 · `0044a43a7` · Merge pull request #138 from elijahkendrick04/claude/enhance-content-generation-5jJHo
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -36,6 +36,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-21 | `243c061b8` | Add roadmap auto-update on push to main |
 | 2026-05-21 | `c338ab4c5` | Consolidate all roadmap material into one forward-looking ROADMAP.md |
 | 2026-05-21 | `692e10e96` | Consolidate into one roadmap: fold generation prompts into ROADMAP.md Appendix A |
 | 2026-05-21 | `4770cc67f` | Add Generative Content Engine v2 roadmap with per-stage build prompts |
@@ -47,7 +48,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-20 | `c5a5742cf` | Let users add a photo to the caption-only graphics too |
 | 2026-05-20 | `0de4a6e3b` | Let users choose which photo goes on each graphic |
 | 2026-05-20 | `db9985422` | Upgrade logo rendering: knockout, trim, and adaptive chip |
-| 2026-05-20 | `372e0fb26` | Make caption-only graphics AI-directed (constrained to text-led) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
