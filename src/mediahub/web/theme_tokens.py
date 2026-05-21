@@ -61,7 +61,7 @@ strategy baked in).
 - Material Design 3 — Color Roles
 - CSS Color Module Level 5 — Relative colour syntax + color-mix
 - W3C CSS Properties and Values API Level 1 — @property
-- docs/stage_c_css_architecture_plan.md
+- docs/THEMING.md
 """
 from __future__ import annotations
 

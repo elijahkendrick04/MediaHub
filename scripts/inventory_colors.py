@@ -5,7 +5,7 @@ literals and classifies each occurrence by the surrounding context so the
 migration in Stage A2 can target only the genuine f-string hardcodes.
 
 Emits:
-- CSV at the path passed via --out (default docs/stage_a_color_inventory.csv)
+- CSV at the path passed via --out (default data/stage_a_color_inventory.csv)
 - Stdout summary table
 
 Run from repo root:
@@ -130,7 +130,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--targets", nargs="*", default=["src/mediahub/web/web.py"],
                     help="Files to scan (relative to repo root)")
-    ap.add_argument("--out", default="docs/stage_a_color_inventory.csv")
+    ap.add_argument("--out", default="data/stage_a_color_inventory.csv")
     ap.add_argument("--migration-targets-only", action="store_true",
                     help="If set, the exit code reflects whether any inline_fstring "
                          "or inline_html_style hex hardcodes remain (non-zero = fail).")

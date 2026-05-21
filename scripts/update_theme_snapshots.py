@@ -11,7 +11,7 @@ The script is the single source of truth for snapshot content —
 the test loads + compares only; the script writes.
 
 References:
-    - docs/stage_i_test_coverage_plan.md §4
+    - docs/THEMING.md §4
 """
 from __future__ import annotations
 

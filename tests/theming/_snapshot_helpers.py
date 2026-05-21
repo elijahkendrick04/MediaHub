@@ -9,7 +9,7 @@ Two responsibilities:
   2. ``load_snapshot(seed_hex)`` — read the JSON for a seed.
 
 The snapshot shape is documented in
-``docs/stage_i_test_coverage_plan.md`` §4.
+``docs/THEMING.md`` §4.
 """
 from __future__ import annotations
 

@@ -23,7 +23,7 @@ Public API
 - ``palette_for_static(theme_json)`` — light-scheme {primary,secondary,accent}
 
 Each ``palette_for_*`` helper encodes the role-mapping convention
-documented in ``docs/stage_g_single_source_of_truth_plan.md`` §7.
+documented in ``docs/THEMING.md`` §7.
 The dark/light split is intentional: motion (video-grade output)
 needs higher saturation; email + static graphics live on white
 backgrounds so they need higher contrast.
@@ -40,7 +40,7 @@ Safety
 
 References:
     - W3C Design Tokens Format Module (DTCG)
-    - docs/stage_g_single_source_of_truth_plan.md
+    - docs/THEMING.md
 """
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ def delete_theme(profile_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Role-mapping convention (docs/stage_g_single_source_of_truth_plan.md §7)
+# Role-mapping convention (docs/THEMING.md §7)
 # ---------------------------------------------------------------------------
 # Each helper maps Stage B's ~30 MD3 role tokens onto the legacy
 # {primary, secondary, accent} shape that the three consumers

@@ -5,7 +5,7 @@ rule for cross-document crossfade, the :root seed transition for
 in-page interpolation, and the prefers-reduced-motion overrides
 for both.
 
-See ``docs/stage_e_looks_right_cascade_plan.md`` for the full
+See ``docs/THEMING.md`` for the full
 architecture.
 """
 from __future__ import annotations

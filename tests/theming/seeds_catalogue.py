@@ -11,7 +11,7 @@ short tag — "identity", "common", "hostile", "saturated",
 seeds equally).
 
 References:
-    - docs/stage_i_test_coverage_plan.md §4
+    - docs/THEMING.md §4
 """
 from __future__ import annotations
 

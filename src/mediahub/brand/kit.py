@@ -84,7 +84,7 @@ class BrandKit:
         defaults to ``self.logo_svg`` if present, otherwise
         ``self.safe_primary()``.
 
-        Computation pipeline (see docs/stage_b_colour_science_plan.md):
+        Computation pipeline (see docs/THEMING.md):
           seed → HCT → 5 tonal palettes × 13 tones → MD3 role mapping
           (light + dark) → APCA + WCAG2 + ΔE + CVD gates → repair loop.
 

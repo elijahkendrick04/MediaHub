@@ -24,6 +24,6 @@ replicate>=0.25
 # Android 12 Monet, and the 50+ dynamic-color role tokens.
 # coloraide is the pure-Python W3C CSS Color 4/5 reference impl
 # (OKLCH conversions, gamut mapping, CIEDE2000).
-# See docs/stage_b_colour_science_plan.md for the architecture.
+# See docs/THEMING.md for the architecture.
 materialyoucolor>=3.0
 coloraide>=4.0
