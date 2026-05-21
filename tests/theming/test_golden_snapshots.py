@@ -13,7 +13,7 @@ The script is the only path that writes snapshots; this test
 only reads.
 
 References:
-    - docs/stage_i_test_coverage_plan.md §4
+    - docs/THEMING.md §4
     - Feathers (2004) — characterisation tests
 """
 from __future__ import annotations

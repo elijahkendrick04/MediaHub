@@ -402,21 +402,7 @@ citation matches a specific algorithm choice in the code:
 
 ## 13. Phase 1.6 stage index
 
-Each stage shipped with its own thesis plan. For the deeper
-view of any one stage, the relevant plan is:
-
-| Stage | Plan |
-|---|---|
-| A — Token foundation | [`docs/stage_a_token_foundation_plan.md`](stage_a_token_foundation_plan.md) |
-| B — Colour science | [`docs/stage_b_colour_science_plan.md`](stage_b_colour_science_plan.md) |
-| C — CSS architecture | [`docs/stage_c_css_architecture_plan.md`](stage_c_css_architecture_plan.md) |
-| E — "Looks right" cascade | [`docs/stage_e_looks_right_cascade_plan.md`](stage_e_looks_right_cascade_plan.md) |
-| F — Logo intelligence | [`docs/stage_f_logo_intelligence_plan.md`](stage_f_logo_intelligence_plan.md) |
-| G — Single source of truth | [`docs/stage_g_single_source_of_truth_plan.md`](stage_g_single_source_of_truth_plan.md) |
-| H — Explainability + QA | [`docs/stage_h_explainability_plan.md`](stage_h_explainability_plan.md) |
-| I — Test coverage | [`docs/stage_i_test_coverage_plan.md`](stage_i_test_coverage_plan.md) |
-| J — Cutover + polish | [`docs/stage_j_cutover_polish_plan.md`](stage_j_cutover_polish_plan.md) |
-
-The stage plans capture the *thinking*; this doc captures
-the *output*. Read this file first, drill into the per-stage
-plan when you need the historical context.
+The detailed per-stage thesis plans (A–J) that documented this work
+have been consolidated — **this file is now the single canonical record
+of the theming architecture and its stages**. The stage breakdown and
+acceptance criteria live in [`docs/ROADMAP.md`](ROADMAP.md) §1.6.

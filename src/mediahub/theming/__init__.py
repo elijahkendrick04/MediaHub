@@ -19,7 +19,7 @@ identical output every time. Computation happens once at brand-kit
 save time (see BrandKit.ensure_derived_palette); nothing in this
 package reads at request time.
 
-See docs/stage_b_colour_science_plan.md for the architecture and
+See docs/THEMING.md for the architecture and
 academic citations. The seven internal modules:
 
   seed_extract — SVG fast-path → raster fallback → QuantizeCelebi + Score

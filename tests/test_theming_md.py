@@ -179,17 +179,3 @@ class TestStageIndexPresent:
                "Stage index" in doc_text, (
             "stage index missing — readers can't drill into per-stage plans"
         )
-
-    @pytest.mark.parametrize("plan", [
-        "stage_a_token_foundation_plan.md",
-        "stage_b_colour_science_plan.md",
-        "stage_c_css_architecture_plan.md",
-        "stage_e_looks_right_cascade_plan.md",
-        "stage_f_logo_intelligence_plan.md",
-        "stage_g_single_source_of_truth_plan.md",
-        "stage_h_explainability_plan.md",
-        "stage_i_test_coverage_plan.md",
-        "stage_j_cutover_polish_plan.md",
-    ])
-    def test_each_plan_referenced(self, doc_text, plan):
-        assert plan in doc_text, f"stage plan not referenced: {plan}"

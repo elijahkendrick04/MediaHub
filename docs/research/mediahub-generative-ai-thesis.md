@@ -3,7 +3,7 @@
 **A diagnosis of why "click generate" produces a boring, repeating graphic — and a surgical plan, grounded in the actual code, to replace the generation system with a genuinely generative one without sacrificing the deterministic, explainable engine that is MediaHub's moat. With a full cost model.**
 
 **Date:** May 2026
-**Companion documents:** `docs/research/generation-engine-competitor-evaluation.md` (how the 2026 field generates content, mechanism by mechanism — read first); `docs/competitor_dissertation_2026.md` (the prior business-landscape/go-to-market study).
+**Companion documents:** `docs/research/generation-engine-competitor-evaluation.md` (how the 2026 field generates content, mechanism by mechanism — read first); `docs/ROADMAP.md` (the product roadmap, with the build-prompt appendices).
 **Status:** research + plan. No code is changed by this document; it specifies the surgery and its cost for review before implementation.
 
 ---

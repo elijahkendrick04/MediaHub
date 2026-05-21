@@ -1,0 +1,74 @@
+# Roadmap auto-update — keeps docs/ROADMAP.md current on every push to main.
+#
+# On each push to `main` this workflow runs scripts/roadmap_autoupdate.py, which:
+#   1. refreshes the "Last updated" stamp (date · short SHA · subject),
+#   2. refreshes the "Recent activity" feed (last ~12 non-bot commits),
+#   3. applies any `roadmap: <ID> <status>` directives found in the pushed
+#      commit messages (e.g. `roadmap: SEQ-1 done`) by flipping the status
+#      badge on the matching roadmap heading.
+# Then it commits the updated ROADMAP.md back to main.
+#
+# Why only `main`? So the file-disjoint feature-branch PRs (Appendix A's
+# parallel bucket) never collide on ROADMAP.md — the roadmap moves when work
+# *lands* on the mainline, not on every feature-branch push.
+#
+# Loop safety: the commit-back is pushed with the built-in GITHUB_TOKEN, and
+# GitHub does NOT trigger `push` workflows for commits made with GITHUB_TOKEN —
+# so this cannot recurse. The auto-commit also carries `[skip ci]` as a
+# belt-and-braces guard, and we only commit when ROADMAP.md actually changed.
+#
+# Branch protection: if `main` requires PRs / blocks direct pushes, the final
+# push step will fail. It is written fail-soft (logs and exits 0) so it never
+# shows a spurious red X; to let the update land, allow the github-actions bot
+# to push to main (Settings → Actions → "Read and write permissions", and a
+# branch-protection bypass for the bot if protection is on).
+
+name: Roadmap auto-update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: roadmap-autoupdate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update roadmap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for the commit range + push-back
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Refresh ROADMAP.md
+        env:
+          ROADMAP_BEFORE: ${{ github.event.before }}
+          ROADMAP_AFTER: ${{ github.sha }}
+        run: python scripts/roadmap_autoupdate.py
+
+      - name: Commit & push if changed
+        run: |
+          if git diff --quiet -- docs/ROADMAP.md; then
+            echo "No roadmap changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ROADMAP.md
+          git commit -m "docs: auto-update roadmap [skip ci]"
+          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            echo "Roadmap auto-update pushed."
+          else
+            echo "::warning::Could not push roadmap update (branch protection or"
+            echo "::warning::workflow write-permission?). Update computed but not landed."
+          fi
