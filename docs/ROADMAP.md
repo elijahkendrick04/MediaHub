@@ -31,7 +31,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-21 · `0044a43a7` · Merge pull request #138 from elijahkendrick04/claude/enhance-content-generation-5jJHo
+**Last updated:** 2026-05-21 · `1ec90af6e` · Merge pull request #144 from elijahkendrick04/claude/add-roadmap-prompts-VIrwO
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -39,6 +39,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-21 | `4ef45ec71` | docs(roadmap): mark 1.6 shipped + add Appendix C verification prompts |
 | 2026-05-21 | `243c061b8` | Add roadmap auto-update on push to main |
 | 2026-05-21 | `c338ab4c5` | Consolidate all roadmap material into one forward-looking ROADMAP.md |
 | 2026-05-21 | `692e10e96` | Consolidate into one roadmap: fold generation prompts into ROADMAP.md Appendix A |
@@ -50,7 +51,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-20 | `ae4fdbd33` | Fix derivative content pack: cross-worker job state + genuine AI copy |
 | 2026-05-20 | `c5a5742cf` | Let users add a photo to the caption-only graphics too |
 | 2026-05-20 | `0de4a6e3b` | Let users choose which photo goes on each graphic |
-| 2026-05-20 | `db9985422` | Upgrade logo rendering: knockout, trim, and adaptive chip |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
