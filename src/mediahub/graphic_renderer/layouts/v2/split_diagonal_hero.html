@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   split_diagonal_hero  (v2 archetype, PAR-7)
+
+   A hard diagonal cleaves the canvas into two zones:
+     - an upper full-bleed PHOTO stage (the athlete in the moment), and
+     - a lower solid BRAND wedge that carries every fact, edged by a
+       thin accent seam along the diagonal.
+
+   The structural signature is the angled seam + the asymmetric, fully
+   left-aligned data wedge — deliberately unlike the centred numeral of
+   big_number_hero or the floating cutout-over-gradient of
+   individual_hero. The wedge is bottom-anchored and a fixed content
+   height, so the same composition reads at both 1080x1350 (the photo is
+   roughly half the frame) and 1080x1920 (the photo grows tall above an
+   unchanged data band).
+
+   Colours come ONLY from the resolved brand roles supplied by the
+   renderer as CSS custom properties; neutral rgba() is used solely for
+   depth (shadow / photo scrim / hairlines), never for brand colour.
+   =================================================================== */
+
+.sd {
+  /* geometry knobs — the seam angle depends only on --slant and the
+     canvas width, so it is identical across both portrait ratios */
+  --wedge-h: 690px;   /* height of the data band, anchored to the bottom */
+  --slant: 184px;     /* vertical drop of the diagonal, left edge to right */
+  --seam: 14px;       /* thickness of the accent edge along the diagonal  */
+  --pad: 78px;        /* horizontal inset for wedge content               */
+
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--mh-surface);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.sd *, .sd *::before, .sd *::after { box-sizing: border-box; }
+
+/* ---- Photo stage (fills the whole canvas, sits behind the wedge) ---- */
+.sd__stage { position: absolute; inset: 0; z-index: 0; background: var(--mh-surface); }
+.sd__media { position: absolute; inset: 0; }
+.sd__media img,
+.sd__media svg {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+  display: block;
+}
+/* deepen the lower stage so the diagonal seam keeps a clean edge even
+   over a bright photo */
+.sd__scrim {
+  position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg,
+              rgba(0,0,0,0) 42%,
+              rgba(0,0,0,0.18) 72%,
+              rgba(0,0,0,0.42) 100%);
+  pointer-events: none;
+}
+
+/* ---- The diagonal wedge: accent sliver behind, brand ground in front ---- */
+.sd__wedge {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  /* diagonal top edge: tall on the left (y=0), shorter on the right (y=slant) */
+  clip-path: polygon(0 0, 100% var(--slant), 100% 100%, 0 100%);
+}
+.sd__wedge--accent {
+  z-index: 2;
+  height: calc(var(--wedge-h) + var(--seam));
+  background: var(--mh-accent);
+}
+.sd__wedge--ground {
+  z-index: 3;
+  height: var(--wedge-h);
+  background: var(--mh-primary);
+}
+
+/* ---- Data ledger (the facts), laid over the brand wedge ---- */
+.sd__ledger {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 4;
+  height: var(--wedge-h);
+  padding: calc(var(--slant) + 48px) var(--pad) 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.sd__kicker {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 23px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+}
+.sd__tick {
+  width: 40px; height: 6px; border-radius: 3px;
+  background: var(--mh-accent);
+}
+
+.sd__first {
+  margin-top: 22px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.sd__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400;
+  font-size: 132px;
+  line-height: 0.84;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: nowrap;
+  text-shadow: 0 6px 26px rgba(0,0,0,0.28);
+}
+.sd__event {
+  margin-top: 14px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 30px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mh-accent);
+}
+
+/* result + emphasis stat, separated from the name block by an outline rule */
+.sd__data {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding-top: 26px;
+  border-top: 1px solid var(--mh-outline);
+}
+.sd__result { display: flex; flex-direction: column; }
+.sd__result-lab {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--mh-accent);
+  margin-bottom: 8px;
+}
+.sd__result-val {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: 96px;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  color: var(--mh-on-primary);
+}
+.sd__stat {
+  text-align: right;
+  max-width: 42%;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 1.12;
+  letter-spacing: 0.02em;
+  color: var(--mh-on-primary);
+}
+
+/* foot: brand lockup + optional sponsor block */
+.sd__foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.sd__brand { display: flex; align-items: center; gap: 18px; }
+.sd__logo { height: 66px; width: auto; flex: 0 0 auto; }
+.sd__logo img,
+.sd__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.sd__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
+.sd__club {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+}
+.sd__meet {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  color: var(--mh-on-primary);
+  opacity: 0.78;
+  margin-top: 4px;
+}
+.sd__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="sd">
+
+  <div class="sd__stage">
+    <div class="sd__media">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="sd__scrim"></div>
+  </div>
+
+  <div class="sd__wedge sd__wedge--accent"></div>
+  <div class="sd__wedge sd__wedge--ground"></div>
+
+  <div class="sd__ledger">
+    <div class="sd__head">
+      <div class="sd__kicker"><span class="sd__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+      <div class="sd__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="sd__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+      <div class="sd__event">{{EVENT_NAME}}</div>
+    </div>
+
+    <div class="sd__data">
+      <div class="sd__result">
+        <span class="sd__result-lab">Result</span>
+        <span class="sd__result-val">{{RESULT_VALUE}}</span>
+      </div>
+      <div class="sd__stat">{{HERO_STAT}}</div>
+    </div>
+
+    <div class="sd__foot">
+      <div class="sd__brand">
+        <div class="sd__logo">{{LOGO_BLOCK}}</div>
+        <div class="sd__brand-text">
+          <div class="sd__club">{{CLUB_FULL}}</div>
+          <div class="sd__meet">{{MEET_NAME}}</div>
+        </div>
+      </div>
+      <div class="sd__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>
