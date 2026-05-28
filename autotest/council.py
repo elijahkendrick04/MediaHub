@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import random
 import re
 import time
@@ -66,28 +67,49 @@ def _ask(system: str, user: str, max_tokens: int) -> str:
     return ask(system=system, user=user, max_tokens=max_tokens)
 
 
+def _safe_ask(system: str, user: str, max_tokens: int, retries: int = 1) -> str:
+    """A council member that never takes down the whole session: on error
+    (e.g. a rate limit) it backs off and retries, then returns '' so the rest
+    of the council can still deliberate with whoever answered."""
+    for attempt in range(retries + 1):
+        try:
+            out = _ask(system, user, max_tokens)
+            if out and out.strip():
+                return out
+        except Exception:
+            pass
+        if attempt < retries:
+            time.sleep(2.5 * (attempt + 1))
+    return ""
+
+
 # --- the methodology ---------------------------------------------------------
 def deliberate(framed_question: str) -> dict[str, Any] | None:
     """Run a full council session on a framed question. Returns the session dict
     (advisors, reviews, verdict, report paths) or None if no provider / failure."""
     if not available():
         return None
+    # Gentle concurrency: parallel bursts trip free-tier rate limits, and one
+    # failed call must not abandon the whole council. Default 2 in flight.
+    workers = max(1, int(os.environ.get("AUTOTEST_COUNCIL_CONCURRENCY", "2")))
     try:
-        # step 2: 5 advisors in parallel
+        # step 2: advisors (tolerate partial failures — keep whoever answered)
         def run_advisor(item: tuple[str, str]) -> tuple[str, str]:
             name, style = item
             system = (f"You are {name} on an LLM Council.\n\nYour thinking style: {style}\n\n"
                       "Respond independently. Do not hedge or try to be balanced. Lean fully "
                       "into your assigned angle. 150-300 words, no preamble.")
-            return name, _ask(system, framed_question, 700)
+            return name, _safe_ask(system, framed_question, 700)
 
-        with ThreadPoolExecutor(max_workers=len(ADVISORS)) as pool:
-            advisor_results = dict(pool.map(run_advisor, ADVISORS))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            advisor_results = {n: r for n, r in pool.map(run_advisor, ADVISORS) if r.strip()}
+        if len(advisor_results) < 2:
+            return None  # too few advisors answered to be a real council
 
-        # step 3: anonymise A-E (randomised) and peer-review in parallel
+        # step 3: anonymise (randomised) and peer-review whoever we have
         names = list(advisor_results)
         random.shuffle(names)
-        letters = ["A", "B", "C", "D", "E"][:len(names)]
+        letters = [chr(65 + i) for i in range(len(names))]
         mapping = dict(zip(letters, names))   # letter -> advisor name
         anon_block = "\n\n".join(
             f"**Response {ltr}:**\n{advisor_results[mapping[ltr]]}" for ltr in letters)
@@ -98,14 +120,14 @@ def deliberate(framed_question: str) -> dict[str, Any] | None:
                     f"{anon_block}\n\n1. Which response is strongest? Why?\n"
                     "2. Which has the biggest blind spot? What is it missing?\n"
                     "3. What did ALL responses miss that the council should consider?")
-            return _ask(system, user, 500)
+            return _safe_ask(system, user, 500)
 
-        with ThreadPoolExecutor(max_workers=len(letters)) as pool:
-            reviews = list(pool.map(run_review, range(len(letters))))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            reviews = [r for r in pool.map(run_review, range(len(letters))) if r.strip()]
 
-        # step 4: chairman synthesis (de-anonymised)
+        # step 4: chairman synthesis (de-anonymised; retries — this one matters)
         advisor_block = "\n\n".join(f"**{n}:**\n{advisor_results[n]}" for n in advisor_results)
-        review_block = "\n\n".join(f"Review {i+1}:\n{r}" for i, r in enumerate(reviews))
+        review_block = "\n\n".join(f"Review {i+1}:\n{r}" for i, r in enumerate(reviews)) or "(none)"
         chair_system = ("You are the Chairman of an LLM Council. Synthesise the advisors and "
                         "peer reviews into a final verdict. Be direct, don't hedge.")
         chair_user = (
@@ -113,7 +135,9 @@ def deliberate(framed_question: str) -> dict[str, Any] | None:
             f"PEER REVIEWS:\n{review_block}\n\nProduce the verdict with these exact sections:\n"
             "## Where the Council Agrees\n## Where the Council Clashes\n"
             "## Blind Spots the Council Caught\n## The Recommendation\n## The One Thing to Do First")
-        verdict = _ask(chair_system, chair_user, 1100)
+        verdict = _safe_ask(chair_system, chair_user, 1100, retries=2)
+        if not verdict.strip():
+            return None
 
         session = {
             "framed_question": framed_question,
@@ -149,6 +173,13 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
         "perspective (a busy club social-media volunteer), decide which are genuine "
         "problems worth fixing versus over-flagged noise, and what single fix matters "
         "most. Be skeptical of over-flagging — a false bug wastes the team's time.\n\n"
+        "IMPORTANT TEST CONTEXT (judge fairly against this): this is an automated COLD "
+        "run — a freshly-seeded test organisation that is not a real club in the meet, a "
+        "single uploaded file, and NO historical personal-best data. So outcomes like "
+        "'zero/few content cards', 'no PB achievements detected', or 'captions absent "
+        "when no AI key' can be EXPECTED artifacts of this setup, not product bugs. "
+        "Distinguish genuine defects (crashes, broken UX, fabricated/incorrect output) "
+        "from test-setup artifacts.\n\n"
         f"Flow result: {artifacts.get('flow_result')}\n"
         f"Content summary: {_content_summary(artifacts)}\n\n"
         f"Candidate issues:\n{issues_txt}")

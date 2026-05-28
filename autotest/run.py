@@ -596,7 +596,13 @@ class Tester:
                               expected="Export returns the run JSON",
                               actual=str(exc), evidence=str(exc)), shoot=False)
             return "failed:export"
-        return "passed" if (st and st < 400) else "passed-with-review-issue"
+        # Honest status: a flow that 'passes' but yields zero content cards is
+        # not the same as one that produced a pack. (The council flagged the
+        # original blanket 'passed' as a misleading success signal.)
+        n_cards = len((self.artifacts.get("export_json") or {}).get("cards") or [])
+        if not (st and st < 400):
+            return "passed-with-review-issue"
+        return "passed" if n_cards > 0 else "passed-empty"
 
     # --- flow helpers ---------------------------------------------------------
     def _submit(self, form_selector: str) -> bool:
