@@ -231,7 +231,10 @@ the motion render of a given card visually aligns with its still graphic.
 ## Deployment
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.
-Branch model: feature branches from `dev`; never merge to `main` without approval.
+Branch model: feature branches from `dev`. Merges to `main` may happen
+autonomously without human approval, gated only on green CI — `main` is a
+trunk that auto-deploys to Render production, so a red build must never be
+merged. (This replaces the former human-approval-before-`main` rule.)
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path.
 

@@ -69,3 +69,9 @@ node_modules/
 .coverage
 htmlcov/
 data/stub_packs/
+
+# Autonomous tester runtime artefacts (the deduped report itself is tracked,
+# but per-run raw logs, screenshots and downloaded test inputs are not)
+autotest/screenshots/
+autotest/runs/
+autotest/cache/
