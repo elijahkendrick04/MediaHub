@@ -301,6 +301,8 @@ class Tester:
         self.findings: list[Finding] = []
         self.routes_probed = 0
         self.pages_crawled = 0
+        self.visited: list[dict] = []        # (route, status) coverage for the judges
+        self.artifacts: dict = {}            # captured for the semantic subagents
 
     # screenshot a finding's page state, keyed by fingerprint
     def _shoot(self, f: Finding) -> None:
@@ -375,6 +377,7 @@ class Tester:
 
         new_log = self.server.log_since(log_pos) if self.server else ""
         self._evaluate(route, url, label, status, html, new_log, from_link)
+        self.visited.append({"route": route, "status": status})
         links = self._extract_links(html) if status and status < 400 else []
         return status, html, links
 
@@ -474,8 +477,19 @@ class Tester:
 
     # --- the primary user flow ------------------------------------------------
     def run_primary_flow(self, flow_timeout: float) -> str:
-        if not SAMPLE.exists():
-            return "skipped:no-sample"
+        # Rotate the upload file across the corpus + downloaded inputs so no two
+        # sweeps test the same file (anti-complacency). AUTOTEST_INPUT overrides.
+        from autotest import acquire
+        sweep = int(os.environ.get("AUTOTEST_SWEEP", "0"))
+        override = os.environ.get("AUTOTEST_INPUT")
+        if override and Path(override).exists():
+            input_file = Path(override)
+        else:
+            input_file = acquire.next_input(sweep) or (SAMPLE if SAMPLE.exists() else None)
+        if input_file is None:
+            return "skipped:no-input"
+        self.artifacts["input_file"] = str(input_file)
+        self._flow_log_pos = self.server.log_size() if self.server else 0
         self.probe(self.base + "/upload", "flow:upload-get", route_template="/upload")
         # locate + fill the file input
         finp = self.page.locator("#mh-upload-form input[type=file]")
@@ -490,33 +504,33 @@ class Tester:
                               repro=["Open /upload"]))
             return "failed:no-file-input"
         log_pos = self.server.log_size() if self.server else 0
-        finp.first.set_input_files(str(SAMPLE))
+        finp.first.set_input_files(str(input_file))
         if not self._submit("#mh-upload-form"):
             return "failed:upload-submit"
         self._settle()
         if "/upload/configure" not in self.page.url:
-            self._flow_fail("Upload did not advance to the configure step",
-                            "/upload", "Redirect to /upload/configure?run_id=…",
-                            f"Landed on {self.page.url}", log_pos)
-            return "failed:no-configure"
+            return self._no_progress(
+                "Upload did not advance to the configure step", "/upload",
+                "Redirect to /upload/configure?run_id=… (or a clear rejection message)",
+                f"Landed on {self.page.url}", "no-configure")
 
         # configure: pick a club + submit
         sel = self.page.locator("select[name=club_filter]")
         if sel.count() == 0:
-            self._flow_fail("Configure step has no club_filter select",
-                            "/upload/configure", "A <select name=club_filter> of parsed clubs",
-                            "Select not present (did parsing find no clubs?)", log_pos)
-            return "failed:no-club-select"
+            return self._no_progress(
+                "Configure step has no club_filter select", "/upload/configure",
+                "A <select name=club_filter> of parsed clubs (or a clear 'no clubs found' state)",
+                "Select not present (parsing found no clubs for this file)", "no-club-select")
         value = self.page.evaluate(
             """() => {const s=document.querySelector('select[name=club_filter]');
                      if(!s) return null;
                      for (const o of s.options){if(o.value && o.value.trim()) return o.value;}
                      return null;}""")
         if not value:
-            self._flow_fail("No selectable club on configure step",
-                            "/upload/configure", "At least one club parsed from the file",
-                            "club_filter select had no non-empty option", log_pos)
-            return "failed:no-club-option"
+            return self._no_progress(
+                "No selectable club on configure step", "/upload/configure",
+                "At least one club parsed from the file",
+                "club_filter select had no non-empty option", "no-club-option")
         log_pos = self.server.log_size() if self.server else 0
         sel.first.select_option(value=value)
         form_sel = "form:has(select[name=club_filter])"
@@ -526,10 +540,9 @@ class Tester:
 
         m = re.search(r"/runs/([A-Za-z0-9_-]+)", self.page.url)
         if not m:
-            self._flow_fail("Configure submit did not start a run",
-                            "/upload/configure", "Redirect to /runs/<id>",
-                            f"Landed on {self.page.url}", log_pos)
-            return "failed:no-run"
+            return self._no_progress(
+                "Configure submit did not start a run", "/upload/configure",
+                "Redirect to /runs/<id>", f"Landed on {self.page.url}", "no-run")
         run_id = m.group(1)
 
         status, err = self._poll_status(run_id, flow_timeout)
@@ -556,9 +569,18 @@ class Tester:
     def _verify_results(self, run_id: str) -> str:
         st, _, _ = self.probe(self.base + f"/review/{run_id}", "flow:review",
                               route_template="/review/<run_id>")
+        try:
+            self.artifacts["review_text"] = self.page.inner_text("body")[:6000]
+        except Exception:
+            pass
         # export is JSON; check via the context request (carries session cookie)
         try:
             r = self.page.context.request.get(self.base + f"/api/runs/{run_id}/export")
+            if r.status == 200:
+                try:
+                    self.artifacts["export_json"] = r.json()
+                except Exception:
+                    self.artifacts["export_json"] = {"_raw": r.text()[:2000]}
             if r.status != 200:
                 self._add(Finding(category="flow_failure", severity="high",
                                   title="Export endpoint did not return the run",
@@ -618,6 +640,31 @@ class Tester:
             time.sleep(2.0)
         return last, ""
 
+    def _no_progress(self, reason: str, route: str, expected: str, actual: str,
+                     soft_result: str) -> str:
+        """The flow can't continue from here. If the app crashed (5xx/traceback)
+        it's a real bug. If it responded gracefully (e.g. rejected a junk upload,
+        or a PDF that yields no clubs) this input simply isn't drivable — record a
+        low-key non-bug note and stop. Keeps input rotation + fuzzing from
+        spamming false 'critical' failures."""
+        new_log = self.server.log_since(getattr(self, "_flow_log_pos", 0)) if self.server else ""
+        tb = _last_exception_block(new_log) if TRACEBACK_MARK in new_log else ""
+        try:
+            crashed = bool(tb) or 'data-lane="500"' in self.page.content()
+        except Exception:
+            crashed = bool(tb)
+        if crashed:
+            self._flow_fail(reason, route, expected, actual, getattr(self, "_flow_log_pos", 0))
+            return "failed:" + soft_result
+        self._add(Finding(
+            category="input_not_drivable", severity="info",
+            title=f"{reason} (graceful — input not drivable)", route=route,
+            expected=expected,
+            actual=actual + " — app responded gracefully (HTTP 2xx, no crash)",
+            evidence=f"input={self.artifacts.get('input_file', '?')}\n{new_log[-600:]}",
+            is_bug=False), shoot=False)
+        return "skipped:" + soft_result
+
     def _flow_fail(self, title: str, route: str, expected: str, actual: str,
                    log_pos: int, extra_evidence: str = "") -> None:
         new_log = self.server.log_since(log_pos) if (self.server and log_pos) else ""
@@ -664,6 +711,8 @@ def _resolve_base() -> tuple[str, AppServer | None]:
 
 
 def main() -> int:
+    from autotest._env import load_dotenv
+    load_dotenv()  # pick up GEMINI_API_KEY etc. from the gitignored .env
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:4]
     max_pages = int(os.environ.get("AUTOTEST_MAX_PAGES", "40"))
     flow_timeout = float(os.environ.get("AUTOTEST_FLOW_TIMEOUT", "210"))
@@ -675,6 +724,7 @@ def main() -> int:
     if server is not None and not profile_id:
         profile_id = _seed_ready_profile(server.data_dir)
     flow_result = "not-run"
+    council_verdict = ""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
@@ -685,9 +735,15 @@ def main() -> int:
             col.attach(page)
             tester = Tester(server, base, page, col, max_pages)
 
-            # 0) sign in so the gated content routes are actually reachable
+            # 0) sign in so the gated content routes are actually reachable,
+            #    then capture the signed-in home text for the user-brain judge.
             if profile_id:
                 tester.ensure_signed_in(profile_id)
+                try:
+                    page.goto(base + "/", wait_until="domcontentloaded", timeout=20000)
+                    tester.artifacts["home_text"] = page.inner_text("body")[:6000]
+                except Exception:
+                    pass
 
             # 1) probe every registered no-arg GET route. Skip /api/* (fetch
             #    endpoints — exercised via XHR during real page loads) and any
@@ -701,10 +757,31 @@ def main() -> int:
 
             # 2) the money flow: upload → configure → process → review → export
             flow_result = tester.run_primary_flow(flow_timeout)
+            tester.artifacts["flow_result"] = flow_result
+            tester.artifacts["pages"] = tester.visited
 
             # 3) bounded read-only crawl of internal links
             tester.crawl([base + r for r in ("/", "/activity", "/research",
                                              "/settings", "/privacy", "/status")])
+
+            # 4) semantic subagents — judge MEANING (output correctness, UX,
+            #    functional intent), not just crashes. Then the LLM Council
+            #    adjudicates their findings (anti-sycophancy: confirm real bugs,
+            #    demote noise, surface blind spots). Both self-skip with no key.
+            if (os.environ.get("AUTOTEST_SEMANTIC", "1") != "0"
+                    and tester.artifacts.get("export_json")):
+                try:
+                    from autotest import semantic
+                    sem = semantic.evaluate(tester.artifacts)
+                    candidates = [f for f in sem if f.is_bug]
+                    passthrough = [f for f in sem if not f.is_bug]
+                    if candidates and os.environ.get("AUTOTEST_COUNCIL", "1") != "0":
+                        from autotest import council
+                        candidates, council_verdict = council.adjudicate(
+                            candidates, tester.artifacts)
+                    tester.findings.extend(passthrough + candidates)
+                except Exception:
+                    pass
             browser.close()
     finally:
         if server:
@@ -725,7 +802,8 @@ def main() -> int:
 
     stats = report.merge_findings(tester.findings, run_id)
     run_meta = {"run_id": run_id, "base_url": base, "routes_probed": tester.routes_probed,
-                "pages_crawled": tester.pages_crawled, "flow_result": flow_result}
+                "pages_crawled": tester.pages_crawled, "flow_result": flow_result,
+                "council_verdict": council_verdict}
     report.write_report(run_meta)
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)

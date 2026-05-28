@@ -75,3 +75,5 @@ data/stub_packs/
 autotest/screenshots/
 autotest/runs/
 autotest/cache/
+autotest/reports/council/*
+!autotest/reports/council/.gitkeep

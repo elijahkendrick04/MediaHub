@@ -173,6 +173,14 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 See `.env.example` for the full list.
 
+**RULE — API keys are env/`.env` only, NEVER hard-coded.** Provider keys
+(`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, …) must be read from the process
+environment (loaded from the gitignored `.env`), never written as a literal in
+any source file, test, comment, commit, log line, or pushed artifact. The
+operator rotates the key by editing `.env` alone — no code change. This holds
+for the autonomous tester/builder too: they load `.env` via `autotest/_env.py`.
+A key committed to the repo is a leak even if later removed.
+
 ## Running Tests
 
 All test files pass. Run the full suite with no ignores:

@@ -250,6 +250,9 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
     out.append(f"- **Open bugs:** {len(open_bugs)} ({sev_summary}) · "
                f"**In progress:** {len(fixing)} · **Fixed:** {len(fixed)} · "
                f"**Skipped (expected/infra):** {len(skipped)}")
+    if run_meta.get("council_verdict"):
+        out.append(f"- **🏛️ {run_meta['council_verdict']}** "
+                   "(full transcript under `autotest/reports/council/`)")
     out.append("")
 
     out.append("## 🔴 Open bugs")
