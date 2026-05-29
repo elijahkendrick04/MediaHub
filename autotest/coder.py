@@ -131,4 +131,3 @@ def write_code(task: str, *, complex: bool = False, review: bool = True,
         ok2, out2 = run_coder(REVIEW_PROMPT, cwd=cwd, timeout=timeout)
         log += "\n\n--- self-review/refine pass ---\n" + (out2 or "")[-1200:]
     return True, log
-
