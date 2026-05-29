@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-29T09:36:52+00:00",
+  "generated_at": "2026-05-29T10:43:41+00:00",
   "bugs": {},
   "skipped": {
     "5fe1b78a67a5": {
@@ -20,6 +20,27 @@
       "last_seen": "2026-05-29T09:36:52+00:00",
       "seen_count": 2,
       "last_run_id": "20260529T093553Z-67b3",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null
+    },
+    "1623e36e552d": {
+      "fingerprint": "1623e36e552d",
+      "category": "input_not_drivable",
+      "severity": "info",
+      "title": "Configure step has no club_filter select (graceful \u2014 input not drivable)",
+      "route": "/upload/configure",
+      "expected": "A <select name=club_filter> of parsed clubs (or a clear 'no clubs found' state)",
+      "actual": "Select not present (parsing found no clubs for this file) \u2014 app responded gracefully (HTTP 2xx, no crash)",
+      "evidence": "input=/home/runner/work/MediaHub/MediaHub/samples/learning_corpus/level1/2025_11_nd_open_championships/results.pdf\n127.0.0.1 - - [29/May/2026 10:43:07] \"GET /upload HTTP/1.1\" 200 -\n127.0.0.1 - - [29/May/2026 10:43:07] \"GET /healthz HTTP/1.1\" 200 -\n127.0.0.1 - - [29/May/2026 10:43:27] \"\u001b[32mPOST /upload HTTP/1.1\u001b[0m\" 302 -\n127.0.0.1 - - [29/May/2026 10:43:27] \"GET /upload/configure?run_id=d80cd3130013 HTTP/1.1\" 200 -\n127.0.0.1 - - [29/May/2026 10:43:27] \"GET /healthz HTTP/1.1\" 200 -\n",
+      "suspect": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-05-29T10:43:41+00:00",
+      "last_seen": "2026-05-29T10:43:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260529T104246Z-5fa4",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null
