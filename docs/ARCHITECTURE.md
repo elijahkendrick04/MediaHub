@@ -1,5 +1,14 @@
 # Architecture
 
+> **In plain words:** MediaHub works like a kitchen. A results file comes in the
+> door and someone reads it (**Interpreter**). The cooks spot what's special — a
+> personal best, a medal (**Recognition**). The dish is plated as a picture
+> (**Visual Renderer**) with a written **caption**, and it all goes out on a tray
+> you can download (**Content Pack**). Each "station" below is one folder in
+> `src/mediahub/`. New here? Read [`../START_HERE.md`](../START_HERE.md) and
+> [`../GLOSSARY.md`](../GLOSSARY.md) first — the rest of this page is the engineer
+> version.
+
 MediaHub is a single-process Flask app organised around a **content spine** that
 runs once per upload:
 

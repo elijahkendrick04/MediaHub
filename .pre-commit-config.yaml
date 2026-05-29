@@ -1,0 +1,36 @@
+# Pre-commit hygiene hooks for MediaHub.
+#
+# These keep the tree tidy on every commit. The downloaded *-main reference
+# toolkits and the read-only legacy/ tree are excluded everywhere, so hooks
+# never reformat or churn code we don't own or maintain. Ruff (lint + format)
+# is scoped to the live package, src/mediahub/, only.
+#
+# One-time setup:   pre-commit install
+# Run on demand:    make tidy        (same as: pre-commit run --all-files)
+exclude: |
+  (?x)^(
+    .*-main/.*|
+    legacy/.*|
+    src/mediahub/remotion/node_modules/.*
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'              # .editorconfig keeps trailing spaces in markdown
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ["--maxkb=1500"]        # web.py (~908KB) + sample PDFs pass; blocks new giants
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff                       # lint (autofix); scoped to the live package
+        args: ["--fix"]
+        files: '^src/mediahub/.*\.py$'
+      - id: ruff-format
+        files: '^src/mediahub/.*\.py$'

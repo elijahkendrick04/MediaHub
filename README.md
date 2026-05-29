@@ -7,6 +7,14 @@
 [![Tests](https://img.shields.io/badge/tests-287%20passing-brightgreen.svg)](docs/AUDIT_REPORTS.md)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
+> **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
+> plain-English tour of the project. Confused by a word? See
+> **[GLOSSARY.md](GLOSSARY.md)**.
+>
+> **In plain words:** MediaHub takes a file of swim results and turns it into
+> ready-to-post pictures and captions for a club's social media — it spots the
+> special moments (like personal bests) and writes them up for you.
+
 MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs.
 
 ---

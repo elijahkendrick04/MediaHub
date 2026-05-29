@@ -1,5 +1,5 @@
 # MediaHub — developer Makefile
-.PHONY: install media-deps playwright remotion test run build clean deploy-render deploy-fly docker docker-run lint
+.PHONY: install media-deps playwright remotion test run build clean deploy-render deploy-fly docker docker-run lint tidy
 
 PYTHON ?= python3
 PIP    ?= pip
@@ -61,3 +61,9 @@ deploy-fly:
 
 lint:
 	$(PYTHON) -m py_compile $$(find src/mediahub -name '*.py')
+	-$(PYTHON) -m ruff check src/mediahub
+
+# Run all the tidy-up hooks (whitespace, end-of-file, large-file guard, ruff).
+# Advisory: never fails the build, just reports + autofixes what it can.
+tidy:
+	pre-commit run --all-files || true
