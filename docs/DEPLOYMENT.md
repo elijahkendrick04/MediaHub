@@ -70,13 +70,6 @@ fly deploy
 fly volumes create mediahub_data --size 1
 ```
 
-## Vercel
-
-Vercel is **not** a great fit for MediaHub's backend (long-running threads,
-persistent disk, Chromium). Use the included `vercel.json` only to host the
-static landing page in `dist/public/`. Deploy the backend on Render, Fly, or
-your own Docker host.
-
 ## Persistent volumes
 
 These directories must persist across deploys for the app to retain state:
