@@ -56,6 +56,10 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
     elif be == "claude":
         if not shutil.which("claude"):
             return False, "claude CLI not found (npm i -g @anthropic-ai/claude-code)"
+        # Auth is read from the environment by the CLI: CLAUDE_CODE_OAUTH_TOKEN
+        # (a Pro/Max SUBSCRIPTION token from `claude setup-token` — flat cost) is
+        # preferred; ANTHROPIC_API_KEY (metered) is the fallback. The CI
+        # workflows set only the subscription token so billing stays flat.
         # NOTE: --dangerously-skip-permissions is refused under root; acceptEdits
         # auto-approves file edits headlessly and works as root.
         flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE",

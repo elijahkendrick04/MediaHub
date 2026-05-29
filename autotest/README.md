@@ -6,12 +6,15 @@ desktop, no Cowork). A headless browser does real uploads/downloads inside the
 runner, so nothing needs to "escape a sandbox".
 
 **Cloud setup (this is the engine):**
-1. Add repo secrets: **`ANTHROPIC_API_KEY`** — the **Claude coder** that writes
-   the code (no fallback; best quality) — and **`GEMINI_API_KEY`** — the cheap,
-   high-volume finder + subagents + council (free tier). No `ANTHROPIC_API_KEY`
-   → the build/fix steps skip cleanly, so nothing runs wild until you arm it.
-   On repeated failure the loop **opens a GitHub issue and stops** (capped
-   attempts) instead of burning credits on something that won't work.
+1. Add repo secrets: **`CLAUDE_CODE_OAUTH_TOKEN`** — the **Claude coder** that
+   writes the code, on a **Pro/Max subscription** (flat cost, no metered API).
+   Generate it once with **`claude setup-token`** and paste the token. Plus
+   **`GEMINI_API_KEY`** — the cheap, high-volume finder + subagents + council
+   (free tier). No token → the build/fix steps skip cleanly, so nothing runs
+   wild until you arm it. On repeated failure the loop **opens a GitHub issue
+   and stops** (capped attempts) instead of wasting subscription quota.
+   *(Prefer metered API or a different coder? `ANTHROPIC_API_KEY` still works,
+   or set `AUTOTEST_CODER=gemini` for the free-tier coder.)*
 2. Settings → General → enable **Allow auto-merge**, and allow the actions bot
    to merge to `main` (loosen branch protection / required reviews as needed).
 3. That's it. `.github/workflows/autotest.yml` (hourly) finds + fixes bugs and
