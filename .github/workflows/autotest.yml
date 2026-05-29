@@ -32,7 +32,7 @@ jobs:
   sweep:
     name: Test sweep + commit report + fix
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,13 +85,22 @@ jobs:
           AUTOTEST_FIX_APPLY: "1"
           AUTOTEST_BUILD_MERGE: "1"   # fully autonomous: auto-merge fix PRs on green CI
           AUTOTEST_CODER: "claude"
+          # Time budget: one careful, root-caused fix per tick. These bound the
+          # Claude coder so the fix pass finishes inside the job's wall clock
+          # instead of being hard-killed (which marks the whole run red).
+          AUTOTEST_FIX_MAX: "1"            # one bug per tick; the next tick takes the next
+          AUTOTEST_GATE_MAX_ITERS: "2"     # implement + one root-cause retry, then stop
+          AUTOTEST_CODER_TIMEOUT: "600"    # cap each Claude coder call at 10 min
         run: |
           if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
             echo "No CLAUDE_CODE_OAUTH_TOKEN secret — skipping the autonomous fix pass."
             exit 0
           fi
           npm install -g @anthropic-ai/claude-code
-          python -m autotest.fix_loop || echo "fix pass finished with issues"
+          # Soft wall (35 min) BELOW the job timeout so a long fix stops CLEANLY and
+          # the run stays green — the bug simply carries over to the next tick.
+          timeout 2100 python -m autotest.fix_loop \
+            || echo "::notice::fix pass stopped at its time budget; continues next tick"
 
       - name: Upload evidence
         if: always()
