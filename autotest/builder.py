@@ -99,10 +99,11 @@ def _build_prompt(item: roadmap.RoadmapItem) -> str:
     )
 
 
-def _run_coder(prompt: str) -> tuple[bool, str]:
-    """Drive the configured agentic coder (default: Gemini CLI, free tier)."""
+def _run_coder(prompt: str, *, complex: bool = False) -> tuple[bool, str]:
+    """Drive the agentic coder (default: Gemini CLI, free) with the ruflo coding
+    discipline — standards-guided implement pass + a self-review/refine pass."""
     from autotest import coder
-    return coder.run_coder(prompt, cwd=REPO_ROOT)
+    return coder.write_code(prompt, complex=complex, cwd=REPO_ROOT)
 
 
 def _test_gate() -> tuple[bool, str]:
@@ -166,7 +167,7 @@ def build_cycle() -> dict:
     if rc != 0:
         _git("checkout", "-B", branch)
 
-    ok, coder_out = _run_coder(prompt)
+    ok, coder_out = _run_coder(prompt, complex=True)  # roadmap items: SPARC + review
     if not ok:
         _record(False)
         return {**plan, "result": "coder-failed", "detail": coder_out[-400:]}

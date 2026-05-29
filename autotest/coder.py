@@ -76,3 +76,60 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         return False, f"{be} coder timed out after {timeout:.0f}s"
     except Exception as exc:
         return False, f"{be} coder error: {exc}"
+
+
+# --- quality discipline (from the vendored ruflo coding skills) --------------
+SKILLS_DIR = REPO_ROOT / "autotest" / "skills" / "coding"
+
+CODING_STANDARDS = """\
+Write code to a professional standard, following the discipline in the skills under
+autotest/skills/coding/ (agent-coder, sparc-methodology, agent-reviewer, agent-tester) —
+read them if useful. Core rules:
+- Clarity: clear names, single responsibility, small functions; match the surrounding
+  code's conventions and style EXACTLY.
+- Robustness: handle edge cases and errors; validate inputs; never crash on bad data.
+- Tests: add or extend tests for new behaviour; the full suite must stay green.
+- MediaHub rules (CLAUDE.md, non-negotiable): do NOT modify the deterministic engine
+  (parsers in interpreter/ & pb_discovery/, detectors in recognition*/, the ranker,
+  colour-science); route AI through media_ai.llm / ai_core.llm; NEVER hard-code API keys
+  (env/.env only); storage via DATA_DIR; internal links via url_for(); HTML-escape output.
+- Keep the diff minimal and focused — only what the task needs, no unrelated refactors.
+- Do NOT run git; the harness commits.
+"""
+
+SPARC_NOTE = """\
+This is a non-trivial change: PLAN before coding (SPARC) — briefly establish the
+specification, the approach, and the files/interfaces you'll touch, THEN implement.
+"""
+
+REVIEW_PROMPT = """\
+Now switch roles to a senior code REVIEWER (see autotest/skills/coding/agent-reviewer.md
+and agent-analyze-code-quality.md). Inspect the current uncommitted changes — you may run
+`git diff` to see them (read-only; do NOT commit, push, or revert) — and FIX any problems
+you find, directly in the files. Check: requirement fully met; edge cases + error handling;
+security (XSS/injection/IDOR, no leaked secrets); the protected deterministic engine is
+untouched; repo conventions followed; tests exist and would pass; no debug/leftover code.
+If it's already solid, make no changes.
+"""
+
+
+def write_code(task: str, *, complex: bool = False, review: bool = True,
+               cwd: Path | None = None, timeout: float | None = None) -> tuple[bool, str]:
+    """Run the coder with the ruflo coding discipline: a standards-guided
+    implement pass, then (default) a reviewer/refine pass on the same working
+    tree. ``complex=True`` adds a SPARC plan-first instruction (for roadmap
+    builds). Returns (ok, combined_log)."""
+    cwd = cwd or REPO_ROOT
+    parts = [CODING_STANDARDS]
+    if complex:
+        parts.append(SPARC_NOTE)
+    parts.append("TASK:\n" + task)
+    ok, out = run_coder("\n\n".join(parts), cwd=cwd, timeout=timeout)
+    if not ok:
+        return False, out
+    log = (out or "")[-1200:]
+    if review:
+        ok2, out2 = run_coder(REVIEW_PROMPT, cwd=cwd, timeout=timeout)
+        log += "\n\n--- self-review/refine pass ---\n" + (out2 or "")[-1200:]
+    return True, log
+
