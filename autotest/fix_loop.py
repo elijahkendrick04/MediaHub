@@ -73,9 +73,9 @@ def fix_one(bug: dict) -> dict:
     if rc != 0:
         builder._git("checkout", "-B", branch)
 
-    ok, out = builder._run_claude(_fix_prompt(bug))
+    ok, out = builder._run_coder(_fix_prompt(bug))
     if not ok:
-        return {"fp": fp, "result": "claude-failed", "detail": out[-300:]}
+        return {"fp": fp, "result": "coder-failed", "detail": out[-300:]}
     files, ins = builder._changed_files()
     if not files:
         return {"fp": fp, "result": "no-op"}
