@@ -1,0 +1,69 @@
+# Autonomous tester — cloud backstop.
+#
+# The primary tester runs CONSTANTLY on the operator's machine / Cowork desktop
+# (python -m autotest.loop). This workflow is a no-machine-needed safety net: it
+# runs the finder on a schedule (and on demand), so there's always a recent bug
+# report even when the desktop is off. It only FINDS + reports — it never fixes
+# or merges (that stays on the controlled runner).
+#
+# Add GEMINI_API_KEY as a repo secret to enable the semantic subagents + the
+# LLM Council in CI; without it they skip cleanly and the deterministic finder
+# still runs. The report is uploaded as a build artifact (BUGS.md + screenshots).
+
+name: Autonomous tester (backstop)
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autotest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    name: Autonomous test sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install MediaHub (dev + render extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+
+      - name: Install Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run the finder
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MEDIAHUB_LLM_PROVIDER: auto
+          AUTOTEST_FLOW_TIMEOUT: "200"
+          AUTOTEST_MAX_PAGES: "40"
+        run: python -m autotest.run
+
+      - name: Upload bug report + evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotest-report
+          path: |
+            autotest/reports/BUGS.md
+            autotest/reports/ledger.json
+            autotest/screenshots/
+            autotest/runs/
+          if-no-files-found: warn
+          retention-days: 14

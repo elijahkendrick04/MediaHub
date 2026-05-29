@@ -806,6 +806,14 @@ def main() -> int:
                         evidence=tb, suspect=_extract_suspect(tb)))
             server.stop()
 
+    # roadmap acceptance handshake: consume any builder handovers, judge them
+    # against roadmap intent + this sweep's evidence, mark done or auto-revert.
+    try:
+        from autotest import accept
+        tester.findings.extend(accept.process(tester.findings, tester.artifacts))
+    except Exception:
+        pass
+
     stats = report.merge_findings(tester.findings, run_id)
     run_meta = {"run_id": run_id, "base_url": base, "routes_probed": tester.routes_probed,
                 "pages_crawled": tester.pages_crawled, "flow_result": flow_result,
