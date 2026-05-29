@@ -99,18 +99,10 @@ def _build_prompt(item: roadmap.RoadmapItem) -> str:
     )
 
 
-def _run_claude(prompt: str) -> tuple[bool, str]:
-    import shutil
-    if not shutil.which("claude"):
-        return False, "claude CLI not found on this runner"
-    flags = os.environ.get("AUTOTEST_CLAUDE_FLAGS", "--permission-mode acceptEdits").split()
-    try:
-        p = subprocess.run(["claude", "-p", prompt, *flags], cwd=str(REPO_ROOT),
-                           capture_output=True, text=True,
-                           timeout=float(os.environ.get("AUTOTEST_BUILD_CLAUDE_TIMEOUT", "1800")))
-        return p.returncode == 0, (p.stdout or "")[-2000:] + (p.stderr or "")[-1000:]
-    except subprocess.TimeoutExpired:
-        return False, "claude -p timed out"
+def _run_coder(prompt: str) -> tuple[bool, str]:
+    """Drive the configured agentic coder (default: Gemini CLI, free tier)."""
+    from autotest import coder
+    return coder.run_coder(prompt, cwd=REPO_ROOT)
 
 
 def _test_gate() -> tuple[bool, str]:
@@ -174,10 +166,10 @@ def build_cycle() -> dict:
     if rc != 0:
         _git("checkout", "-B", branch)
 
-    ok, claude_out = _run_claude(prompt)
+    ok, coder_out = _run_coder(prompt)
     if not ok:
         _record(False)
-        return {**plan, "result": "claude-failed", "detail": claude_out[-400:]}
+        return {**plan, "result": "coder-failed", "detail": coder_out[-400:]}
 
     files, insertions = _changed_files()
     if not files:
@@ -219,7 +211,7 @@ def build_cycle() -> dict:
     merge_status = _merge_to_main(item, branch)
     handover.write({
         "item_id": item.id, "title": item.title,
-        "intent": item.body[:2000], "summary": claude_out[-600:],
+        "intent": item.body[:2000], "summary": coder_out[-600:],
         "files_changed": files, "insertions": insertions,
         "branch": branch, "pr": pr_url, "base": BASE_BRANCH,
         "merge_target": "main", "merge_status": merge_status,

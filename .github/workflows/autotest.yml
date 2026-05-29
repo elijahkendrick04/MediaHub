@@ -67,19 +67,19 @@ jobs:
           git pull --rebase --autostash origin main || true
           git push origin main || echo "::warning::could not push report"
 
-      - name: Autonomous fix pass (needs Anthropic key)
+      - name: Autonomous fix pass (free Gemini coder)
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUTOTEST_FIX_APPLY: "1"
-          AUTOTEST_CLAUDE_FLAGS: "--permission-mode acceptEdits --dangerously-skip-permissions"
+          AUTOTEST_CODER: "gemini"
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "No ANTHROPIC_API_KEY secret — skipping the autonomous fix pass."
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "No GEMINI_API_KEY secret — skipping the autonomous fix pass."
             exit 0
           fi
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @google/gemini-cli
           python -m autotest.fix_loop || echo "fix pass finished with issues"
 
       - name: Upload evidence
