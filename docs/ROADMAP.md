@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-29 · `c367a96b3` · autotest: live-site testing + new-club sign-up + create/delete lifecycle (#158)
+**Last updated:** 2026-05-29 · `54939cdf0` · Merge pull request #157 from elijahkendrick04/claude/trusting-planck-LubQe
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -64,6 +64,8 @@ flips an item's status badge when a commit message contains a directive line:
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-05-29 | `c367a96b3` | autotest: live-site testing + new-club sign-up + create/delete lifecycle (#158) |
+| 2026-05-29 | `bd0b06821` | chore: remove unused Vercel config (we deploy on Render only) |
+| 2026-05-29 | `a51972df9` | chore: consolidate downloaded skill toolkits under vendor/ |
 | 2026-05-29 | `d40290224` | autotest: stabilize the primary flow on a known-good meet + real club |
 | 2026-05-29 | `0287d1add` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `a799eef98` | ci(repo-hygiene): scope pre-commit to a PR's changed files |
@@ -72,8 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-29 | `e46185614` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `3d5521cbd` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `c88489386` | fix: add GET /healthz/ping ultra-light liveness route (#149) |
-| 2026-05-29 | `61d5e2d35` | autotest: free autonomous fixing — Gemini coder instead of Claude API |
-| 2026-05-29 | `9101a606f` | Autopilot: autonomous tester + roadmap builder + self-healing fix loop (#147) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
