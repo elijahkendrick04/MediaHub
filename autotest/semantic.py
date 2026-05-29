@@ -74,13 +74,14 @@ CHARTERS = (
         persona=("You ARE the user: a busy swimming-club social-media volunteer who "
                  "uploaded a meet results file to get post-ready content fast. You are "
                  "not technical and you have low patience for confusion."),
-        rubric=("From the home page and the review page text plus the flow outcome, ask: "
-                "could I actually accomplish what I came to do? Flag anything confusing, "
-                "broken, mislabeled, dead-ending, or missing that would stop a real "
-                "volunteer — empty states with no next step, primary actions that don't "
-                "obviously work, jargon, or a review screen with nothing to approve/"
-                "export. Be concrete about what blocked you and where."),
-        artifact_keys=("home_text", "review_text", "flow_result"),
+        rubric=("From the home page, the SIGN-UP/onboarding text, and the review page text "
+                "plus the flow outcome, ask: could I actually accomplish what I came to do — "
+                "from first-time sign-up through to getting content? Flag anything confusing, "
+                "broken, mislabeled, dead-ending, or missing that would stop a real volunteer "
+                "— a sign-up/onboarding step that's unclear or fails, empty states with no "
+                "next step, primary actions that don't obviously work, jargon, or a review "
+                "screen with nothing to approve/export. Be concrete about what blocked you."),
+        artifact_keys=("home_text", "signup_text", "review_text", "flow_result"),
     ),
 )
 
@@ -136,6 +137,7 @@ def _build_artifacts(raw: dict[str, Any]) -> dict[str, str]:
         "content_pack": _content_pack(export),
         "meet_summary": _meet_summary(export),
         "home_text": _trim(raw.get("home_text", "")),
+        "signup_text": _trim(raw.get("signup_text", "")),
         "review_text": _trim(raw.get("review_text", "")),
     }
 

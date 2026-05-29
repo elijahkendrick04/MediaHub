@@ -350,6 +350,132 @@ class Tester:
                 shoot=False)
             return False
 
+    def ensure_signed_in_live(self) -> bool:
+        """Sign in on a LIVE deployment. Enumerate the orgs on /sign-in and
+        prefer a REAL, populated one (so the judges get real content) over our
+        own throwaway 'autotest-*' test orgs. AUTOTEST_PROFILE_ID forces one.
+        Records the chosen org + a run id in artifacts when content is found."""
+        try:
+            forced = os.environ.get("AUTOTEST_PROFILE_ID", "").strip()
+            self.page.goto(self.base + "/sign-in", wait_until="domcontentloaded", timeout=30000)
+            pids = self.page.evaluate(
+                "()=>Array.from(new Set(Array.from(document.querySelectorAll('[name=profile_id]'))"
+                ".map(e=>e.value).filter(Boolean)))")
+            if forced:
+                pids = [forced]
+            if not pids:
+                self._add(Finding(category="live_signin", severity="info", is_bug=False,
+                    title="Live sign-in: no organisation listed", route="/sign-in",
+                    expected="At least one org on the sign-in picker",
+                    actual="No profile_id control found", evidence=self.page.content()[:800]),
+                    shoot=False)
+                return False
+            # real orgs first, our own test orgs last
+            ordered = ([p for p in pids if not p.startswith("autotest")]
+                       + [p for p in pids if p.startswith("autotest")])
+            signed_any = False
+            for pid in ordered:
+                self.page.context.request.post(self.base + "/sign-in", form={"profile_id": pid})
+                self.page.goto(self.base + "/activity", wait_until="domcontentloaded", timeout=30000)
+                if "/sign-in" in self.page.url:
+                    continue
+                signed_any = True
+                runs = re.findall(r"/(?:review|runs)/([A-Za-z0-9_-]{6,})", self.page.content())
+                if runs:
+                    self.artifacts["live_org"] = pid
+                    self.artifacts["live_run_id"] = runs[0]
+                    return True
+            return signed_any
+        except Exception as exc:
+            self._add(Finding(category="live_signin", severity="medium",
+                title="Live sign-in raised", route="/sign-in",
+                expected="Sign-in pins an org", actual=str(exc)[:200], evidence=str(exc)),
+                shoot=False)
+            return False
+
+    def capture_existing_content(self) -> None:
+        """Grab an EXISTING run's content pack (found during sign-in, else from
+        /activity) so the AI judges evaluate REAL cards/captions — no upload."""
+        run_id = self.artifacts.get("live_run_id")
+        if not run_id:
+            try:
+                self.page.goto(self.base + "/activity", wait_until="domcontentloaded", timeout=30000)
+                m = re.search(r"/(?:review|runs)/([A-Za-z0-9_-]{6,})", self.page.content())
+                run_id = m.group(1) if m else None
+            except Exception:
+                run_id = None
+        if not run_id:
+            return
+        self.artifacts["live_run_id"] = run_id
+        try:
+            try:
+                r = self.page.context.request.get(self.base + f"/api/runs/{run_id}/export")
+                if r.ok:
+                    self.artifacts["export_json"] = r.json()
+            except Exception:
+                pass
+            self.probe(self.base + f"/review/{run_id}", "live:review",
+                       route_template="/review/<run_id>")
+            try:
+                self.artifacts["review_text"] = self.page.inner_text("body")[:6000]
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def run_signup_flow(self) -> str:
+        """Exercise the new-club SIGN-UP / onboarding journey
+        (/organisation/setup -> /organisation/setup/capture) — what a brand-new
+        club hits. On a live site this creates a clearly-labelled test org
+        (authorised). Captures the onboarding text for the user-brain judge and
+        flags crashes."""
+        self._flow_log_pos = self.server.log_size() if self.server else 0
+        st, html, _ = self.probe(self.base + "/organisation/setup", "signup:get",
+                                 route_template="/organisation/setup")
+        if st is not None and st >= 500:
+            return "failed:setup-page-5xx"
+        if 'name="display_name"' not in html:
+            return "skipped:no-setup-form"
+        name = f"Autotest Club {uuid.uuid4().hex[:6]}"
+        website = os.environ.get("AUTOTEST_SIGNUP_WEBSITE", "").strip()
+        try:
+            self.page.fill('input[name="display_name"]', name)
+            self.page.evaluate(
+                """()=>{const s=document.querySelector('select[name=org_type]');
+                   if(s){for(const o of s.options){if(o.value){s.value=o.value;
+                     s.dispatchEvent(new Event('change',{bubbles:true}));break;}}}}""")
+            if website:
+                try:
+                    self.page.fill('input[name="website_url"]', website)
+                except Exception:
+                    pass
+        except Exception as exc:
+            self._add(Finding(category="flow_failure", severity="high",
+                title="Sign-up form could not be filled", route="/organisation/setup",
+                expected="A fillable org-creation form", actual=str(exc)[:200],
+                evidence=str(exc), repro=["Open /organisation/setup"]))
+            return "failed:fill"
+        if not (self._submit('form[action="/organisation/setup/capture"]')
+                or self._submit('form')):
+            return "failed:submit"
+        self._settle()
+        try:
+            self.artifacts["signup_text"] = self.page.inner_text("body")[:5000]
+        except Exception:
+            pass
+        new_log = self.server.log_since(getattr(self, "_flow_log_pos", 0)) if self.server else ""
+        tb = _last_exception_block(new_log) if TRACEBACK_MARK in new_log else ""
+        content = self.page.content()
+        if tb or 'data-lane="500"' in content:
+            self._add(Finding(category="flow_failure", severity="critical",
+                title="Sign-up / onboarding crashed", route="/organisation/setup/capture",
+                expected="Onboarding proceeds without error after submitting org details",
+                actual=f"Crash during capture (landed {self.page.url})",
+                evidence=(tb or content[:1500]), suspect=_extract_suspect(tb) if tb else "",
+                repro=["Open /organisation/setup", "Fill org name + type", "Submit"]))
+            return "failed:capture-crash"
+        return f"completed (landed {urlparse(self.page.url).path})"
+
     def probe(self, url: str, label: str, *, route_template: str | None = None,
               from_link: bool = False) -> tuple[int | None, str, list[str]]:
         """Navigate to `url`, run every detector, return (status, html, links)."""
@@ -738,6 +864,7 @@ def main() -> int:
 
     routes = discover_get_routes()
     base, server = _resolve_base()
+    live_mode = server is None  # external URL (e.g. the live/staging deployment)
     profile_id = os.environ.get("AUTOTEST_PROFILE_ID") or None
     if server is not None and not profile_id:
         profile_id = _seed_ready_profile(server.data_dir)
@@ -753,15 +880,17 @@ def main() -> int:
             col.attach(page)
             tester = Tester(server, base, page, col, max_pages)
 
-            # 0) sign in so the gated content routes are actually reachable,
-            #    then capture the signed-in home text for the user-brain judge.
-            if profile_id:
+            # 0) sign in so the gated content routes are reachable, then capture
+            #    the signed-in home text for the user-brain judge.
+            if live_mode:
+                tester.ensure_signed_in_live()
+            elif profile_id:
                 tester.ensure_signed_in(profile_id)
-                try:
-                    page.goto(base + "/", wait_until="domcontentloaded", timeout=20000)
-                    tester.artifacts["home_text"] = page.inner_text("body")[:6000]
-                except Exception:
-                    pass
+            try:
+                page.goto(base + "/", wait_until="domcontentloaded", timeout=20000)
+                tester.artifacts["home_text"] = page.inner_text("body")[:6000]
+            except Exception:
+                pass
 
             # 1) probe every registered no-arg GET route. Skip /api/* (fetch
             #    endpoints — exercised via XHR during real page loads) and any
@@ -773,9 +902,20 @@ def main() -> int:
                 tester.probe(base + rule, f"route:{rule}", route_template=rule)
                 tester.routes_probed += 1
 
-            # 2) the money flow: upload → configure → process → review → export
-            flow_result = tester.run_primary_flow(flow_timeout)
+            # 2) content journey: on a live site judge EXISTING real content
+            #    (no upload unless AUTOTEST_LIVE_UPLOAD=1); locally drive upload.
+            if live_mode and os.environ.get("AUTOTEST_LIVE_UPLOAD") != "1":
+                tester.capture_existing_content()
+                flow_result = ("live:judged-existing-content"
+                               if tester.artifacts.get("export_json") else "live:no-existing-content")
+            else:
+                flow_result = tester.run_primary_flow(flow_timeout)
             tester.artifacts["flow_result"] = flow_result
+
+            # 2b) exercise the new-club SIGN-UP / onboarding journey too.
+            if os.environ.get("AUTOTEST_SIGNUP", "1") != "0":
+                tester.artifacts["signup_result"] = tester.run_signup_flow()
+
             tester.artifacts["pages"] = tester.visited
 
             # 3) bounded read-only crawl of internal links
@@ -786,8 +926,13 @@ def main() -> int:
             #    functional intent), not just crashes. Then the LLM Council
             #    adjudicates their findings (anti-sycophancy: confirm real bugs,
             #    demote noise, surface blind spots). Both self-skip with no key.
-            if (os.environ.get("AUTOTEST_SEMANTIC", "1") != "0"
-                    and tester.artifacts.get("export_json")):
+            # Run the judges whenever there's ANY real surface to evaluate —
+            # a content pack, the home page, the sign-up text, or a review page —
+            # not only a full content pack. (Without this, a content-less live
+            # site left the AI brain off and found nothing.)
+            _judgeable = any(tester.artifacts.get(k) for k in
+                             ("export_json", "home_text", "signup_text", "review_text"))
+            if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
                 try:
                     from autotest import semantic
                     sem = semantic.evaluate(tester.artifacts)
