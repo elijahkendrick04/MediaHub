@@ -1,7 +1,29 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-29T10:43:41+00:00",
-  "bugs": {},
+  "generated_at": "2026-05-29T11:41:59+00:00",
+  "bugs": {
+    "e6f9dc3b346d": {
+      "fingerprint": "e6f9dc3b346d",
+      "category": "council:blind_spot",
+      "severity": "high",
+      "title": "AI Judge incorrectly flags 'passed-empty' and '0 cards produced' as functional bugs in cold-run tests",
+      "route": "Automated Testing Framework",
+      "expected": "AI judge should interpret 'passed-empty' and '0 cards produced' as expected behavior (informational/non-issue) under cold-run conditions as defined by test context.",
+      "actual": "AI judge flags 'passed-empty' and '0 cards produced' as high-priority functional bugs, leading to over-flagging and wasted engineering effort.",
+      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nChairman verdict explicitly states these are 'expected artifacts of this setup, not product bugs' and that 'The AI judge's flags are over-flagged noise and constitute a bug in the automated testing framework itself.'",
+      "suspect": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-05-29T11:41:59+00:00",
+      "last_seen": "2026-05-29T11:41:59+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260529T114007Z-6617",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null
+    }
+  },
   "skipped": {
     "5fe1b78a67a5": {
       "fingerprint": "5fe1b78a67a5",
@@ -41,6 +63,52 @@
       "last_seen": "2026-05-29T10:43:41+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T104246Z-5fa4",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null
+    },
+    "ee03ff2dd60f": {
+      "fingerprint": "ee03ff2dd60f",
+      "category": "semantic:functional (council:noise)",
+      "severity": "high",
+      "title": "Upload of 'ARENA Manchester International' meet file resulted in zero content cards",
+      "route": "Content Generation",
+      "expected": "Successful processing of a meet file to generate relevant content cards.",
+      "actual": "The content summary indicates 0 cards were generated despite the meet name being provided.",
+      "evidence": "AI judge (functional, confidence high):\ncontent_summary: meet=ARENA Manchester International; cards=0; cards_with_caption=0; trust={\"cards\": [], \"overall_confidence\": \"low\", \"overall_summary\": \"No content cards were generated.\"}\n\n[council triage] demoted \u2014 Expected behavior for cold run based on test context; AI judge is over-flagging.",
+      "suspect": "",
+      "repro": [
+        "Reproduce the flow (result: passed-empty) and inspect the functional aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-05-29T11:41:59+00:00",
+      "last_seen": "2026-05-29T11:41:59+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260529T114007Z-6617",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null
+    },
+    "22cedc9ab58e": {
+      "fingerprint": "22cedc9ab58e",
+      "category": "semantic:functional (council:noise)",
+      "severity": "high",
+      "title": "Successful upload but no content generated",
+      "route": "Content Generation",
+      "expected": "A 'passed' flow result should indicate successful content generation if an input file was provided and processed.",
+      "actual": "The flow_result is 'passed-empty', and the content_summary confirms 'No content cards were generated'.",
+      "evidence": "AI judge (functional, confidence high):\nflow_result: passed-empty; content_summary: 'No content cards were generated.'\n\n[council triage] demoted \u2014 Expected behavior for cold run based on test context; AI judge is over-flagging.",
+      "suspect": "",
+      "repro": [
+        "Reproduce the flow (result: passed-empty) and inspect the functional aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-05-29T11:41:59+00:00",
+      "last_seen": "2026-05-29T11:41:59+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260529T114007Z-6617",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null
