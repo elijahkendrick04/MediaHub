@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-29 · `bccc85df0` · autotest: builder picks small PAR items first; council is live-aware (#160)
+**Last updated:** 2026-05-29 · `cc43eb2b3` · Merge pull request #161 from elijahkendrick04/claude/coder-subscription
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,10 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-29 | `c6ccb7fec` | autotest: fix end-of-file newline on coder.py (pre-commit hygiene) |
+| 2026-05-29 | `dd804cf3c` | autotest: zero API keys — judges + council + coder all on the Claude CLI |
+| 2026-05-29 | `6b8593e4d` | autotest(ci): coder runs on a Claude subscription token, not the metered API |
+| 2026-05-29 | `10472a991` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `bccc85df0` | autotest: builder picks small PAR items first; council is live-aware (#160) |
 | 2026-05-29 | `4c39c5650` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `6b55678f5` | autotest(ci): hourly loop tests the live site so it finds + fixes real bugs (#159) |
@@ -71,10 +75,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-29 | `c367a96b3` | autotest: live-site testing + new-club sign-up + create/delete lifecycle (#158) |
 | 2026-05-29 | `bd0b06821` | chore: remove unused Vercel config (we deploy on Render only) |
 | 2026-05-29 | `a51972df9` | chore: consolidate downloaded skill toolkits under vendor/ |
-| 2026-05-29 | `d40290224` | autotest: stabilize the primary flow on a known-good meet + real club |
-| 2026-05-29 | `0287d1add` | autotest: refresh bug report [skip ci] |
-| 2026-05-29 | `a799eef98` | ci(repo-hygiene): scope pre-commit to a PR's changed files |
-| 2026-05-29 | `bfc19a00b` | Add plain-English docs, repo-hygiene automation, and a repo-tidy skill |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
