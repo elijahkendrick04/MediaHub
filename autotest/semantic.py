@@ -9,11 +9,10 @@ answer the questions a human tester would:
   * user_brain   — "I have the brain of the user — does this work in all the
                     ways I'd want it to?" (a club social-media volunteer's POV)
 
-Each charter is dispatched as its own subagent (parallel threads) through
-MediaHub's own provider-agnostic ``ai_core.ask`` (Gemini → Anthropic failover),
-so the judges honour the same key the product uses. With no provider
-configured this skips cleanly — it never crashes the loop and never invents
-findings.
+Each charter is dispatched as its own subagent (parallel threads) through the
+Claude CLI on a flat subscription token (autotest.cli_llm) — NO API key. With
+the CLI unavailable this skips cleanly — it never crashes the loop and never
+invents findings.
 
 Judges are told to be conservative and cite evidence; low-confidence verdicts
 are dropped, so the bug ledger isn't polluted by speculation. Findings carry a
@@ -157,12 +156,12 @@ def _parse_verdict(text: str) -> list[dict]:
 
 
 def _run_charter(charter: Charter, arts: dict[str, str]) -> list[Finding]:
-    from mediahub.ai_core import ask  # lazy: avoid import cost / hard dep at module load
+    from autotest import cli_llm  # judges run on the Claude CLI (subscription, no API key)
 
     body = "\n\n".join(f"## {k}\n{arts.get(k, '(none)')}" for k in charter.artifact_keys)
     system = f"{charter.persona}\n\n{charter.rubric}\n\n{_VERDICT_CONTRACT}"
     try:
-        answer = ask(system=system, user=body, max_tokens=1100)
+        answer = cli_llm.ask(system=system, user=body, max_tokens=1100)
     except Exception as exc:
         return [Finding(category=f"semantic:{charter.name}", severity="info",
                         title=f"Semantic charter '{charter.name}' could not run",
@@ -194,16 +193,16 @@ def _run_charter(charter: Charter, arts: dict[str, str]) -> list[Finding]:
 def evaluate(raw_artifacts: dict[str, Any]) -> list[Finding]:
     """Dispatch all charters in parallel; return their findings. Never raises."""
     try:
-        from mediahub.ai_core import active_provider
-        if active_provider() is None:
+        from autotest import cli_llm
+        if not cli_llm.available():
             return [Finding(
                 category="semantic_skipped", severity="info",
-                title="Semantic subagents skipped — no AI provider configured",
+                title="Semantic subagents skipped — Claude CLI not available",
                 route="(semantic)",
-                expected="With GEMINI_API_KEY or ANTHROPIC_API_KEY set, the AI judges run",
-                actual="No LLM provider is configured in this environment",
-                evidence="Set GEMINI_API_KEY (or ANTHROPIC_API_KEY) so the semantic "
-                         "testers can evaluate output correctness and UX.",
+                expected="The judges run on the Claude CLI (subscription token)",
+                actual="claude CLI not installed / no CLAUDE_CODE_OAUTH_TOKEN",
+                evidence="Install @anthropic-ai/claude-code and set CLAUDE_CODE_OAUTH_TOKEN "
+                         "(from `claude setup-token`) so the judges can evaluate output + UX.",
                 is_bug=False)]
     except Exception:
         return []

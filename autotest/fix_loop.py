@@ -120,7 +120,7 @@ def fix_one(bug: dict) -> dict:
             notify.notify(
                 "Autopilot coder error (Claude)",
                 f"The Claude coder errored fixing bug `{fp}` — no fallback. {info}\n\n"
-                "Check ANTHROPIC_API_KEY, credits, and rate limits.")
+                "Check CLAUDE_CODE_OAUTH_TOKEN and subscription rate limits.")
             return {"fp": fp, "result": "coder-failed", "detail": info}
         return _give_up_or_retry(bug, attempts, info)
 

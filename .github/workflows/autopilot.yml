@@ -12,12 +12,13 @@
 #      the item's status on the merge.
 #
 # REQUIRED secrets:
-#   ANTHROPIC_API_KEY  — the Claude coder writes the code (no fallback; best
-#                        quality). No key → this workflow no-ops, so nothing runs
-#                        wild until armed. On repeated failure the loop opens a
-#                        GitHub issue and stops, rather than burning credits.
-#   GEMINI_API_KEY     — the tester's subagents + council during the test step
-#                        (free tier; they skip cleanly without it).
+#   CLAUDE_CODE_OAUTH_TOKEN — the Claude coder writes the code on a Pro/Max
+#                        SUBSCRIPTION (flat cost, no metered API). Generate with
+#                        `claude setup-token` and add it as a repo secret. No
+#                        token → this workflow no-ops (nothing runs wild). On
+#                        repeated failure the loop opens a GitHub issue and stops.
+#   (No API keys: the test step's subagents + council also run on the Claude
+#    CLI via the same subscription token — they skip cleanly without it.)
 # REQUIRED repo settings for the merge to land:
 #   Settings → General → "Allow auto-merge"; and either disable "require a PR
 #   review" on main or allow the actions bot to merge (the token used here is
@@ -55,13 +56,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Guard — the coder needs the Anthropic key
+      - name: Guard — the coder needs the Claude subscription token
         id: guard
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::warning::No ANTHROPIC_API_KEY secret — the Claude coder needs it. Skipping (add the secret to arm autonomous building)."
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::warning::No CLAUDE_CODE_OAUTH_TOKEN secret — the Claude coder runs on a Pro/Max subscription token (claude setup-token). Skipping until it's added."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -89,7 +90,9 @@ jobs:
         name: Build the next roadmap item (branch only)
         id: build
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Subscription token (flat cost), NOT the metered ANTHROPIC_API_KEY —
+          # so it can never silently fall back to per-token API billing.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUTOTEST_BUILD_APPLY: "1"
           AUTOTEST_BUILD_MERGE: "0"
@@ -103,7 +106,8 @@ jobs:
       - if: steps.guard.outputs.skip != 'true' && steps.build.outputs.result == 'built'
         name: Test the built branch
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Judges + council run on the Claude CLI subscription token (no API key).
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           AUTOTEST_FLOW_TIMEOUT: "200"
           AUTOTEST_SWEEP: ${{ github.run_number }}
         run: |

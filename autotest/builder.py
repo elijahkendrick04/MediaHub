@@ -229,7 +229,7 @@ def build_cycle() -> dict:
             from autotest import notify
             notify.notify(f"Autopilot couldn't build roadmap {item.id}",
                           f"Stopped after iterating: {info}. Branch reset, not merged — "
-                          "needs a human (or check ANTHROPIC_API_KEY / credits).")
+                          "needs a human (or check CLAUDE_CODE_OAUTH_TOKEN / subscription limits).")
         except Exception:
             pass
         return {**plan, "result": info}

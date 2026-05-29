@@ -11,8 +11,10 @@ every test sweep instead of needing an interactive `claude` session:
 In the tester it plays one job: **adjudicate the semantic subagents' findings.**
 Single LLM judges are sycophantic and over-flag; the council's adversarial
 peer-review is the antidote — it confirms the real bugs, demotes the noise, and
-surfaces blind spots the judges missed. It reuses MediaHub's `ai_core.ask`
-(Gemini→Anthropic) and self-skips cleanly when no provider is configured.
+surfaces blind spots the judges missed. It runs on the Claude CLI via a flat
+subscription token (autotest.cli_llm) — NO API key — and self-skips cleanly when
+the CLI is unavailable. Uses a reduced advisor set by default to respect
+subscription rate limits (AUTOTEST_COUNCIL_ADVISORS).
 """
 from __future__ import annotations
 
@@ -54,17 +56,28 @@ ADVISORS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Most bug-triage-relevant advisors first (flaws, fresh-eyes UX, actionability),
+# so a reduced council still covers the key angles. Default 3 to respect Claude
+# subscription rate limits; raise AUTOTEST_COUNCIL_ADVISORS for more depth.
+_ADVISOR_ORDER = ("The Contrarian", "The Outsider", "The Executor",
+                  "The First Principles Thinker", "The Expansionist")
+
+
+def _advisors() -> list[tuple[str, str]]:
+    n = max(2, min(len(ADVISORS), int(os.environ.get("AUTOTEST_COUNCIL_ADVISORS", "3"))))
+    by_name = dict(ADVISORS)
+    return [(nm, by_name[nm]) for nm in _ADVISOR_ORDER if nm in by_name][:n]
+
+
 def available() -> bool:
-    try:
-        from mediahub.ai_core import active_provider
-        return active_provider() is not None
-    except Exception:
-        return False
+    from autotest import cli_llm
+    return cli_llm.available()
 
 
 def _ask(system: str, user: str, max_tokens: int) -> str:
-    from mediahub.ai_core import ask
-    return ask(system=system, user=user, max_tokens=max_tokens)
+    # Council runs on the Claude CLI (subscription token), not an API key.
+    from autotest import cli_llm
+    return cli_llm.ask(system=system, user=user, max_tokens=max_tokens)
 
 
 def _safe_ask(system: str, user: str, max_tokens: int, retries: int = 1) -> str:
@@ -102,7 +115,7 @@ def deliberate(framed_question: str) -> dict[str, Any] | None:
             return name, _safe_ask(system, framed_question, 700)
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            advisor_results = {n: r for n, r in pool.map(run_advisor, ADVISORS) if r.strip()}
+            advisor_results = {n: r for n, r in pool.map(run_advisor, _advisors()) if r.strip()}
         if len(advisor_results) < 2:
             return None  # too few advisors answered to be a real council
 

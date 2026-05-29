@@ -51,13 +51,13 @@ def _judge(record: dict[str, Any], findings: list[Finding], artifacts: dict[str,
                 "reason": f"{len(regs)} critical/high finding(s) this sweep: "
                           + "; ".join(f.title for f in regs[:3])}
     try:
-        from mediahub.ai_core import active_provider, ask
-        if active_provider() is None:
-            # No AI: conservative — accept only if the flow produced content.
+        from autotest import cli_llm
+        if not cli_llm.available():
+            # No judge: conservative — accept only if the flow produced content.
             ok = str(artifacts.get("flow_result", "")).startswith("passed") and \
                 artifacts.get("flow_result") != "passed-empty"
             return {"passed": ok, "via": "heuristic",
-                    "reason": f"flow_result={artifacts.get('flow_result')}, no AI judge available"}
+                    "reason": f"flow_result={artifacts.get('flow_result')}, no Claude CLI available"}
         system = ("You are an acceptance tester. Decide if an autonomously-built roadmap item "
                   "is genuinely done and nothing regressed. Be strict but fair. Reply ONLY "
                   'JSON: {"passed":true|false,"reason":"..."}.')
@@ -68,7 +68,7 @@ def _judge(record: dict[str, Any], findings: list[Finding], artifacts: dict[str,
                 f"cards={len((artifacts.get('export_json') or {}).get('cards') or [])}, "
                 f"bugs_found={[f.title for f in findings if f.is_bug][:5]}\n\n"
                 "Did the item's behaviour land AND nothing break?")
-        raw = ask(system=system, user=user, max_tokens=300)
+        raw = cli_llm.ask(system=system, user=user, max_tokens=300)
         obj = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
         return {"passed": bool(obj.get("passed")), "via": "ai-judge",
                 "reason": str(obj.get("reason", ""))[:300]}

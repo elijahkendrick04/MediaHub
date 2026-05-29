@@ -1,19 +1,16 @@
-"""Pluggable coding agent — keep the autonomous fixer FREE.
+"""Pluggable coding agent for the autonomous builder/fixer.
 
-The tester, subagents and council already run on Gemini (via ai_core). The
-builder/fixer needs an *agentic coder* that edits files — and that does NOT have
-to be Claude (which bills per token on the API). Google's Gemini CLI is an
-agentic coder too, and runs on the same GEMINI_API_KEY you already use, on
-Gemini's free tier. So by default the fixer uses Gemini — one free key powers
-the whole loop. Claude stays available as an opt-in (AUTOTEST_CODER=claude).
+By default the coder is **Claude Code on a flat Pro/Max subscription** — it
+authenticates from CLAUDE_CODE_OAUTH_TOKEN (a subscription token, NOT an API
+key), so there is no per-token API billing. The whole autotest loop (judges,
+council, coder) runs on that one subscription token; no API keys are linked.
 
-  AUTOTEST_CODER       gemini (default) | claude | auto
-  AUTOTEST_CODER_MODEL gemini model (default gemini-2.5-flash — best free limits)
-  AUTOTEST_CODER_FLAGS extra CLI flags (default headless auto-approve)
+  AUTOTEST_CODER        claude (default) | gemini
+  AUTOTEST_CODER_MODEL  model for the gemini backend, if used
+  AUTOTEST_CODER_FLAGS  extra CLI flags (default headless auto-approve)
 
-Cost note: with a GEMINI_API_KEY this uses Gemini's API free tier (generous,
-rate-limited); heavy use could exceed the free quota. It is free/again-cheap
-versus the Claude API, and nothing here ever bills Anthropic unless you opt in.
+The gemini backend (Gemini CLI on GEMINI_API_KEY) remains available as an
+opt-in for anyone who prefers the free tier over a Claude subscription.
 """
 from __future__ import annotations
 
@@ -56,6 +53,10 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
     elif be == "claude":
         if not shutil.which("claude"):
             return False, "claude CLI not found (npm i -g @anthropic-ai/claude-code)"
+        # Auth is read from the environment by the CLI: CLAUDE_CODE_OAUTH_TOKEN
+        # (a Pro/Max SUBSCRIPTION token from `claude setup-token` — flat cost) is
+        # preferred; ANTHROPIC_API_KEY (metered) is the fallback. The CI
+        # workflows set only the subscription token so billing stays flat.
         # NOTE: --dangerously-skip-permissions is refused under root; acceptEdits
         # auto-approves file edits headlessly and works as root.
         flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE",
@@ -130,4 +131,3 @@ def write_code(task: str, *, complex: bool = False, review: bool = True,
         ok2, out2 = run_coder(REVIEW_PROMPT, cwd=cwd, timeout=timeout)
         log += "\n\n--- self-review/refine pass ---\n" + (out2 or "")[-1200:]
     return True, log
-
