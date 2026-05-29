@@ -6608,6 +6608,7 @@ def create_app() -> Flask:
         "status_page",
         "api_status_json",
         "healthz_usage",
+        "healthz_ping",
         "static",
     })
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -10423,6 +10424,10 @@ Relay team broke club record"></textarea>
                    "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         return jsonify(payload)
+
+    @app.route("/healthz/ping")
+    def healthz_ping():
+        return jsonify({"pong": True})
 
     @app.route("/healthz/memory")
     def healthz_memory():

@@ -127,6 +127,15 @@ class TestHealthzRecordsHeartbeat:
         assert latest["ok"] is expected_ok
 
 
+class TestHealthzPing:
+    def test_ping_returns_200_with_pong(self, fresh_app):
+        c, _ = fresh_app
+        resp = c.get("/healthz/ping")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body == {"pong": True}
+
+
 class TestStatusPageWithSeededHeartbeats:
     def test_renders_uptime_pct_from_seeded_heartbeats(self, fresh_app):
         c, _ = fresh_app
