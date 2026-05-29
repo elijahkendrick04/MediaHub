@@ -31,7 +31,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-29 · `ad004245d` · Merge pull request #148 from elijahkendrick04/claude/vibrant-davinci-GlUos
+**Last updated:** 2026-05-29 · `9101a606f` · Autopilot: autonomous tester + roadmap builder + self-healing fix loop (#147)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -39,6 +39,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-29 | `9101a606f` | Autopilot: autonomous tester + roadmap builder + self-healing fix loop (#147) |
 | 2026-05-29 | `8372f3972` | Add mediahub-engineering Claude Code skill |
 | 2026-05-21 | `42838034f` | Add DesignSpec contract + strict normaliser for the LLM art-director |
 | 2026-05-21 | `57c7fecbf` | Add split_diagonal_hero v2 graphic archetype (PAR-7) |
@@ -50,7 +51,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-21 | `7b28c46ab` | Add deterministic text auto-fit helper for the graphic renderer |
 | 2026-05-21 | `243c061b8` | Add roadmap auto-update on push to main |
 | 2026-05-21 | `c338ab4c5` | Consolidate all roadmap material into one forward-looking ROADMAP.md |
-| 2026-05-21 | `692e10e96` | Consolidate into one roadmap: fold generation prompts into ROADMAP.md Appendix A |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
