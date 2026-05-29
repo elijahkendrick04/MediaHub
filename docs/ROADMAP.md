@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-29 · `c83b20d22` · Merge pull request #152 from elijahkendrick04/claude/trusting-planck-LubQe
+**Last updated:** 2026-05-29 · `3c06cfaf1` · Merge pull request #156 from elijahkendrick04/claude/realistic-tester
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,8 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-29 | `d40290224` | autotest: stabilize the primary flow on a known-good meet + real club |
+| 2026-05-29 | `0287d1add` | autotest: refresh bug report [skip ci] |
 | 2026-05-29 | `a799eef98` | ci(repo-hygiene): scope pre-commit to a PR's changed files |
 | 2026-05-29 | `bfc19a00b` | Add plain-English docs, repo-hygiene automation, and a repo-tidy skill |
 | 2026-05-29 | `32f0b192a` | Make the autonomous coder write code properly: ruflo skills + Claude coder + self-correcting gate lo |
@@ -72,7 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-29 | `61d5e2d35` | autotest: free autonomous fixing — Gemini coder instead of Claude API |
 | 2026-05-29 | `9101a606f` | Autopilot: autonomous tester + roadmap builder + self-healing fix loop (#147) |
 | 2026-05-29 | `8372f3972` | Add mediahub-engineering Claude Code skill |
-| 2026-05-21 | `42838034f` | Add DesignSpec contract + strict normaliser for the LLM art-director |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
