@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-05-29T05:07:06+00:00",
+  "generated_at": "2026-05-29T09:36:52+00:00",
   "bugs": {},
   "skipped": {
     "5fe1b78a67a5": {
@@ -17,9 +17,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-29T05:07:06+00:00",
-      "last_seen": "2026-05-29T05:07:06+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260529T050607Z-5323",
+      "last_seen": "2026-05-29T09:36:52+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260529T093553Z-67b3",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null
