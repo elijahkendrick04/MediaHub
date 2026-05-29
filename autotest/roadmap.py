@@ -85,12 +85,13 @@ def parse_items(path: Path | None = None) -> list[RoadmapItem]:
 
 
 def _priority(item: RoadmapItem) -> tuple[int, int]:
-    """Sort key: SEQ (sequential/foundational) first, then PAR (isolated, low
-    risk), then Step, each by their number; partial before todo."""
+    """Sort key: PAR ('standalone, inert', low-risk) FIRST so the autonomous
+    builder lands small wins before the big sequential (SEQ) / Step work;
+    each by number; partial before todo."""
     kind, num = 9, 9999
     m = re.match(r"(SEQ|PAR)-(\d+)", item.id, re.IGNORECASE)
     if m:
-        kind = 0 if m.group(1).upper() == "SEQ" else 1
+        kind = 1 if m.group(1).upper() == "SEQ" else 0   # PAR=0 (first), SEQ=1
         num = int(m.group(2))
     elif item.id.lower().startswith("step"):
         kind = 2

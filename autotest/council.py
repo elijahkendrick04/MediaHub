@@ -166,6 +166,25 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
         f"[{i}] ({c.category}/{c.severity}) {c.title} — expected: {c.expected[:160]} | "
         f"actual: {c.actual[:160]} | evidence: {c.evidence[:300]}"
         for i, c in enumerate(listed))
+    live = (str(artifacts.get("flow_result", "")).startswith("live")
+            or bool(artifacts.get("live_run_id")))
+    if live:
+        context = (
+            "IMPORTANT CONTEXT (judge against this): this swept the LIVE production "
+            "deployment with the operator's REAL organisations, meets and data. So "
+            "outcomes like 'zero content cards for a real meet', 'a run whose export "
+            "404s', or 'no review/approve/export path' are GENUINE product bugs that "
+            "affect real users — NOT expected artifacts. Be skeptical only of "
+            "subjective nitpicks; treat missing/empty/broken REAL output as a real defect.")
+    else:
+        context = (
+            "IMPORTANT TEST CONTEXT (judge fairly against this): this is an automated "
+            "COLD run — a freshly-seeded test organisation that is not a real club in "
+            "the meet, a single uploaded file, and NO historical personal-best data. So "
+            "outcomes like 'zero/few content cards', 'no PB achievements detected', or "
+            "'captions absent when no AI key' can be EXPECTED artifacts of this setup, "
+            "not product bugs. Distinguish genuine defects (crashes, broken UX, "
+            "fabricated/incorrect output) from test-setup artifacts.")
     framed = (
         "An automated tester swept MediaHub — a tool that turns swimming-meet result "
         "files into post-ready social content (cards, captions, confidence scores). "
@@ -173,13 +192,7 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
         "perspective (a busy club social-media volunteer), decide which are genuine "
         "problems worth fixing versus over-flagged noise, and what single fix matters "
         "most. Be skeptical of over-flagging — a false bug wastes the team's time.\n\n"
-        "IMPORTANT TEST CONTEXT (judge fairly against this): this is an automated COLD "
-        "run — a freshly-seeded test organisation that is not a real club in the meet, a "
-        "single uploaded file, and NO historical personal-best data. So outcomes like "
-        "'zero/few content cards', 'no PB achievements detected', or 'captions absent "
-        "when no AI key' can be EXPECTED artifacts of this setup, not product bugs. "
-        "Distinguish genuine defects (crashes, broken UX, fabricated/incorrect output) "
-        "from test-setup artifacts.\n\n"
+        f"{context}\n\n"
         f"Flow result: {artifacts.get('flow_result')}\n"
         f"Content summary: {_content_summary(artifacts)}\n\n"
         f"Candidate issues:\n{issues_txt}")
