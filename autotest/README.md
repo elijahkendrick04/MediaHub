@@ -1,11 +1,24 @@
 # MediaHub Autopilot — autonomous tester + builder
 
 Two cooperating loops that test, find/fix bugs, and build the roadmap on their
-own. Designed to run **on your own machine or your Cowork desktop**, where they
-have a real browser, real web access, and a real filesystem — **not** in a
-sandbox. (The cloud container this was developed in is just a dev box; nothing
-here depends on it, and nothing "escapes a sandbox" — a headless browser does
-real uploads/downloads natively.)
+own — **fully autonomous and cloud-based, running in GitHub Actions** (no
+desktop, no Cowork). A headless browser does real uploads/downloads inside the
+runner, so nothing needs to "escape a sandbox".
+
+**Cloud setup (this is the engine):**
+1. Add repo secrets: **`GEMINI_API_KEY`** (tester subagents + council) and
+   **`ANTHROPIC_API_KEY`** (the builder/fixer's Claude Code — without it the
+   build/fix steps skip, so nothing runs wild until you arm it).
+2. Settings → General → enable **Allow auto-merge**, and allow the actions bot
+   to merge to `main` (loosen branch protection / required reviews as needed).
+3. That's it. `.github/workflows/autotest.yml` (hourly) finds + fixes bugs and
+   commits `BUGS.md` back; `.github/workflows/autopilot.yml` (every 2h) builds
+   the next roadmap item, tests it, and merges it to `main` if it didn't
+   regress. The roadmap status flips itself via the existing autoupdate.
+
+The `loop.py` / `build_loop.py` "run forever" drivers below are an OPTIONAL
+always-on worker (e.g. a cloud VM) if you ever want continuous rather than
+scheduled — the cloud default is the two workflows.
 
 ```
                 ┌───────────────── BUILDER loop (autotest.build_loop) ─────────────────┐
@@ -21,7 +34,10 @@ real uploads/downloads natively.)
                                   → fixer (autotest.fix_loop) turns bugs into PRs
 ```
 
-## Quick start
+## Optional: run it locally (the cloud workflows are the default)
+
+These are the same single-shot entrypoints the workflows call — handy for a
+local smoke test or an always-on worker. The cloud needs none of this.
 
 ```bash
 # 1) put your key in a gitignored .env (NEVER hard-code it anywhere):

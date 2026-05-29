@@ -34,7 +34,9 @@ from autotest._env import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STOP_FILE = REPO_ROOT / "autotest" / "STOP"
-STATE_PATH = REPO_ROOT / "autotest" / "cache" / "builder_state.json"
+# Tracked (not under cache/) so the circuit breaker survives stateless cloud
+# runs — the workflow commits it back. Otherwise a failing item retries forever.
+STATE_PATH = REPO_ROOT / "autotest" / "reports" / "builder_state.json"
 BASE_BRANCH = os.environ.get("AUTOTEST_BASE_BRANCH", "main")
 
 # Deterministic engine — must never be AI-edited without explicit approval

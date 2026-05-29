@@ -820,6 +820,21 @@ def main() -> int:
                 "council_verdict": council_verdict}
     report.write_report(run_meta)
 
+    # Stable machine-readable summary the cloud autopilot reads to decide
+    # whether to merge a freshly-built branch or discard it.
+    crit_high = sum(1 for f in tester.findings if f.is_bug and f.severity in ("critical", "high"))
+    # Hard regressions = unambiguous crashes a build could have introduced (NOT
+    # subjective UX/semantic nitpicks, which must not block an autonomous merge).
+    _crash = {"http_5xx", "server_traceback", "navigation_error", "flow_failure"}
+    hard_crashes = sum(1 for f in tester.findings if f.is_bug and f.category in _crash)
+    (report.REPORTS_DIR / "last_run.json").write_text(json.dumps({
+        "run_id": run_id, "flow_result": flow_result, "open_bugs": stats["open"],
+        "critical_high": crit_high, "hard_crashes": hard_crashes,
+        "council_verdict": council_verdict,
+        "roadmap_accepted": any(f.category == "roadmap_accepted" for f in tester.findings),
+        "roadmap_blocked": any(f.category == "roadmap_regression" for f in tester.findings),
+    }, indent=2), encoding="utf-8")
+
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     (RUNS_DIR / f"{run_id}.json").write_text(json.dumps({
         "run_meta": run_meta, "stats": stats,
