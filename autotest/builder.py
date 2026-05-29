@@ -73,7 +73,20 @@ def _save_state(s: dict) -> None:
 
 def _record(ok: bool) -> None:
     s = _state()
-    s["consecutive_failures"] = 0 if ok else int(s.get("consecutive_failures", 0)) + 1
+    if ok:
+        s["consecutive_failures"] = 0
+    else:
+        s["consecutive_failures"] = int(s.get("consecutive_failures", 0)) + 1
+        if s["consecutive_failures"] == BREAKER_LIMIT:
+            try:
+                from autotest import notify
+                notify.notify(
+                    "Autopilot builder halted (circuit breaker)",
+                    f"The roadmap builder hit {BREAKER_LIMIT} consecutive failed cycles and "
+                    "stopped to avoid wasting credits. A human should review the recent "
+                    "autotest/build-* branches and autotest/reports/NEEDS_ATTENTION.md.")
+            except Exception:
+                pass
     _save_state(s)
 
 
@@ -170,6 +183,13 @@ def build_cycle() -> dict:
     ok, coder_out = _run_coder(prompt, complex=True)  # roadmap items: SPARC + review
     if not ok:
         _record(False)
+        try:
+            from autotest import notify
+            notify.notify("Autopilot coder error (Claude)",
+                          f"The Claude coder failed building roadmap {item.id} — no fallback. "
+                          f"Detail:\n{coder_out[-500:]}\n\nCheck ANTHROPIC_API_KEY / credits.")
+        except Exception:
+            pass
         return {**plan, "result": "coder-failed", "detail": coder_out[-400:]}
 
     files, insertions = _changed_files()

@@ -6,11 +6,12 @@ desktop, no Cowork). A headless browser does real uploads/downloads inside the
 runner, so nothing needs to "escape a sandbox".
 
 **Cloud setup (this is the engine):**
-1. Add ONE repo secret: **`GEMINI_API_KEY`** — it powers EVERYTHING on Gemini's
-   free tier: the tester's subagents + council AND the builder/fixer's coding
-   agent (Gemini CLI). **No Claude/Anthropic API cost.** (Claude is opt-in only,
-   via `AUTOTEST_CODER=claude`.) No key → the build/fix steps skip cleanly, so
-   nothing runs wild until you arm it.
+1. Add repo secrets: **`ANTHROPIC_API_KEY`** — the **Claude coder** that writes
+   the code (no fallback; best quality) — and **`GEMINI_API_KEY`** — the cheap,
+   high-volume finder + subagents + council (free tier). No `ANTHROPIC_API_KEY`
+   → the build/fix steps skip cleanly, so nothing runs wild until you arm it.
+   On repeated failure the loop **opens a GitHub issue and stops** (capped
+   attempts) instead of burning credits on something that won't work.
 2. Settings → General → enable **Allow auto-merge**, and allow the actions bot
    to merge to `main` (loosen branch protection / required reviews as needed).
 3. That's it. `.github/workflows/autotest.yml` (hourly) finds + fixes bugs and
@@ -24,7 +25,7 @@ scheduled — the cloud default is the two workflows.
 
 ```
                 ┌───────────────── BUILDER loop (autotest.build_loop) ─────────────────┐
-  docs/ROADMAP.md → pick next item → Gemini coder builds it → guards + test gate →
+  docs/ROADMAP.md → pick next item → Claude coder builds it → guards + test gate →
                      commit + PR → (arm) merge to main → writes a HANDOVER ───────────┐
                                                                                        │
                 ┌───────────────── TESTING loop (autotest.loop) ──────────────────────▼─┐
@@ -113,7 +114,8 @@ change and production, and they are strict:
 | `AUTOTEST_BUILD_MERGE` | `0` | **arm** CI-gated auto-merge to `main` (full auto to prod). One flag from hands-off |
 | `AUTOTEST_ACCEPT_APPLY` | `0` | let the tester push roadmap `done`/`blocked` directives + reverts |
 | `AUTOTEST_FIX_APPLY` | `1` | run the bug-fixer (`0` = list only) |
-| `AUTOTEST_CODER` | `gemini` | coding agent for build/fix: `gemini` (free) or `claude` (paid) |
+| `AUTOTEST_CODER` | `claude` | coding agent: `claude` (best quality, no fallback) or `gemini` |
+| `AUTOTEST_FIX_MAX_ATTEMPTS` | `2` | give up + open a GitHub issue after N failed fix tries (credit guard) |
 | `AUTOTEST_SEMANTIC` / `AUTOTEST_COUNCIL` | `1` | enable the AI judges / the council |
 | `AUTOTEST_DISCOVER` | unset | let `claude` find more test files on the web |
 | `AUTOTEST_BUILD_ITEM` | — | force a specific roadmap id (e.g. `PAR-2`) |

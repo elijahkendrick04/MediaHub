@@ -26,15 +26,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def backend() -> str:
-    pref = os.environ.get("AUTOTEST_CODER", "auto").strip().lower()
-    if pref in ("gemini", "claude"):
-        return pref
-    # auto: prefer the FREE agent.
-    if shutil.which("gemini"):
-        return "gemini"
-    if shutil.which("claude"):
-        return "claude"
-    return "none"
+    # Claude-only by default (operator's choice: best code quality, NO Gemini
+    # fallback for the coder — a Claude problem must surface, not silently
+    # downgrade). Set AUTOTEST_CODER=gemini to override explicitly.
+    pref = os.environ.get("AUTOTEST_CODER", "claude").strip().lower()
+    return pref if pref in ("gemini", "claude") else "claude"
 
 
 def available() -> bool:
@@ -59,9 +55,11 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         cmd = ["gemini", "-p", prompt, "-m", model, *flags]
     elif be == "claude":
         if not shutil.which("claude"):
-            return False, "claude CLI not found"
+            return False, "claude CLI not found (npm i -g @anthropic-ai/claude-code)"
+        # NOTE: --dangerously-skip-permissions is refused under root; acceptEdits
+        # auto-approves file edits headlessly and works as root.
         flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE",
-                               "--permission-mode acceptEdits --dangerously-skip-permissions").split()
+                               "--permission-mode acceptEdits").split()
         env = os.environ.copy()
         cmd = ["claude", "-p", prompt, *flags]
     else:

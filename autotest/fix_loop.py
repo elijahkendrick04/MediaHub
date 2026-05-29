@@ -28,12 +28,46 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
+def _max_attempts() -> int:
+    return int(os.environ.get("AUTOTEST_FIX_MAX_ATTEMPTS", "2"))
+
+
 def _open_bugs(limit: int) -> list[dict]:
+    """Open bugs still worth attempting: not already in-flight, not given up on,
+    and under the per-bug attempt cap (so we never keep spending credits on a
+    bug that won't fix)."""
+    cap = _max_attempts()
     ledger = report.load_ledger()
     bugs = [b for b in ledger["bugs"].values()
-            if b.get("status") == "open" and not b.get("fix_pr")]
+            if b.get("status") == "open" and not b.get("fix_pr")
+            and int(b.get("fix_attempts", 0)) < cap]
     bugs.sort(key=lambda b: SEV_ORDER.get(b.get("severity", "low"), 4))
     return bugs[:limit]
+
+
+def _update(fingerprint: str, **fields) -> None:
+    ledger = report.load_ledger()
+    entry = ledger["bugs"].get(fingerprint)
+    if entry:
+        entry.update(fields)
+        report.save_ledger(ledger)
+
+
+def _give_up_or_retry(bug: dict, attempts: int, reason: str) -> dict:
+    """A fix attempt failed. If we've hit the cap, mark the bug needs-human and
+    notify the operator; otherwise leave it open to retry next run."""
+    fp = bug["fingerprint"]
+    if attempts >= _max_attempts():
+        _update(fp, status="needs-human")
+        from autotest import notify
+        notify.notify(
+            f"Autopilot can't auto-fix: {bug.get('title', '')[:70]}",
+            f"Gave up after {attempts} attempt(s); last reason: {reason}.\n\n"
+            f"Bug `{fp}` ({bug.get('category')}) at `{bug.get('route')}`.\n"
+            f"Expected: {bug.get('expected')}\nActual: {bug.get('actual')}\n\n"
+            f"Stopped retrying to avoid wasting Claude credits — this one needs a human.")
+        return {"fp": fp, "result": f"gave-up after {attempts} ({reason})"}
+    return {"fp": fp, "result": f"failed: {reason} (attempt {attempts})"}
 
 
 def _fix_prompt(bug: dict) -> str:
@@ -68,6 +102,8 @@ def fix_one(bug: dict) -> dict:
     branch = f"autotest/fix-{fp}"
     if builder.STOP_FILE.exists():
         return {"halted": "kill switch"}
+    attempts = int(bug.get("fix_attempts", 0)) + 1
+    _update(fp, fix_attempts=attempts)   # record before trying, so a crash still counts
     builder._git("fetch", "origin", builder.BASE_BRANCH)
     rc, _ = builder._git("checkout", "-B", branch, f"origin/{builder.BASE_BRANCH}")
     if rc != 0:
@@ -75,20 +111,27 @@ def fix_one(bug: dict) -> dict:
 
     ok, out = builder._run_coder(_fix_prompt(bug))
     if not ok:
+        # A coder failure (no fallback) is usually systemic — auth, rate limit,
+        # or out of credits. Surface it immediately rather than retrying.
+        from autotest import notify
+        notify.notify(
+            "Autopilot coder error (Claude)",
+            f"The Claude coder failed on bug `{fp}` — there is no fallback. Detail:\n"
+            f"{out[-500:]}\n\nCheck ANTHROPIC_API_KEY, credits, and rate limits.")
         return {"fp": fp, "result": "coder-failed", "detail": out[-300:]}
     files, ins = builder._changed_files()
     if not files:
-        return {"fp": fp, "result": "no-op"}
+        return _give_up_or_retry(bug, attempts, "no-op (coder made no changes)")
     if builder._touches_protected(files):
         builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
-        return {"fp": fp, "result": "aborted: touched protected engine"}
+        return _give_up_or_retry(bug, attempts, "touched protected engine")
     if len(files) > builder.MAX_FILES or ins > builder.MAX_INSERTIONS:
         builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
-        return {"fp": fp, "result": "aborted: diff too large"}
+        return _give_up_or_retry(bug, attempts, "diff too large")
     gate_ok, tail = builder._test_gate()
     if not gate_ok:
         builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
-        return {"fp": fp, "result": "aborted: tests not green", "tail": tail[-300:]}
+        return _give_up_or_retry(bug, attempts, "tests not green")
 
     builder._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
                  f"finding {fp} ({bug.get('category')}).")
