@@ -1,0 +1,140 @@
+# Autopilot — fully autonomous, cloud-based build → test → merge.
+#
+# This is the "autonomously build my SaaS" engine, running entirely in GitHub
+# Actions (no desktop / Cowork). On each tick it:
+#   1. builds the next uncompleted roadmap item with headless Claude Code, on a
+#      branch (no merge yet);
+#   2. boots that branch and runs the full tester (finder + AI subagents + LLM
+#      council + acceptance) against it;
+#   3. merges to main ONLY if the build introduced no hard regression (server
+#      5xx / traceback / flow crash) and acceptance didn't block it — otherwise
+#      it closes the PR and moves on. The existing roadmap-autoupdate then flips
+#      the item's status on the merge.
+#
+# REQUIRED secrets:
+#   ANTHROPIC_API_KEY  — the builder uses Claude Code to write code (no key →
+#                        this workflow no-ops, so nothing runs wild until armed).
+#   GEMINI_API_KEY     — the tester's subagents + council (optional; they skip
+#                        cleanly without it).
+# REQUIRED repo settings for the merge to land:
+#   Settings → General → "Allow auto-merge"; and either disable "require a PR
+#   review" on main or allow the actions bot to merge (the token used here is
+#   the built-in GITHUB_TOKEN).
+#
+# Safety nets (the operator chose full auto-to-main; these are the only guards):
+# protected-engine path guard + scope cap + green-test gate (in builder.py),
+# the hard-regression merge gate here, and the persisted circuit breaker.
+
+name: Autopilot (autonomous build → test → merge)
+
+on:
+  schedule:
+    - cron: "23 */2 * * *"   # every 2 hours
+  workflow_dispatch:
+    inputs:
+      item:
+        description: "Force a specific roadmap id (e.g. PAR-2). Blank = next."
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autopilot
+  cancel-in-progress: false
+
+jobs:
+  autopilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard — builder needs an Anthropic key
+        id: guard
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::No ANTHROPIC_API_KEY secret — the builder uses Claude Code. Skipping (add the secret to arm autonomous building)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - if: steps.guard.outputs.skip != 'true'
+        name: Install MediaHub + Chromium + Claude Code
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+          python -m playwright install --with-deps chromium
+          npm install -g @anthropic-ai/claude-code
+
+      - if: steps.guard.outputs.skip != 'true'
+        name: Git identity
+        run: |
+          git config user.name "mediahub-autopilot[bot]"
+          git config user.email "mediahub-autopilot[bot]@users.noreply.github.com"
+
+      - if: steps.guard.outputs.skip != 'true'
+        name: Build the next roadmap item (branch only)
+        id: build
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTOTEST_BUILD_APPLY: "1"
+          AUTOTEST_BUILD_MERGE: "0"
+          AUTOTEST_BUILD_ITEM: ${{ github.event.inputs.item }}
+          AUTOTEST_CLAUDE_FLAGS: "--permission-mode acceptEdits --dangerously-skip-permissions"
+        run: |
+          python -m autotest.builder | tee /tmp/build.json
+          echo "branch=$(python -c "import json,sys;print(json.load(open('/tmp/build.json')).get('branch',''))")" >> "$GITHUB_OUTPUT"
+          echo "result=$(python -c "import json,sys;print(json.load(open('/tmp/build.json')).get('result',''))")" >> "$GITHUB_OUTPUT"
+
+      - if: steps.guard.outputs.skip != 'true' && steps.build.outputs.result == 'built'
+        name: Test the built branch
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AUTOTEST_FLOW_TIMEOUT: "200"
+          AUTOTEST_SWEEP: ${{ github.run_number }}
+        run: |
+          git checkout "${{ steps.build.outputs.branch }}"
+          python -m autotest.run
+
+      - if: steps.guard.outputs.skip != 'true' && steps.build.outputs.result == 'built'
+        name: Merge to main if no hard regression, else discard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          crashes=$(python -c "import json;print(json.load(open('autotest/reports/last_run.json'))['hard_crashes'])")
+          blocked=$(python -c "import json;print(json.load(open('autotest/reports/last_run.json'))['roadmap_blocked'])")
+          echo "hard_crashes=$crashes roadmap_blocked=$blocked"
+          if [ "$crashes" = "0" ] && [ "$blocked" = "False" ]; then
+            gh pr merge "${{ steps.build.outputs.branch }}" --squash --delete-branch --admin \
+              || gh pr merge "${{ steps.build.outputs.branch }}" --squash --delete-branch \
+              || echo "::warning::merge failed — check 'Allow auto-merge' + branch protection"
+          else
+            gh pr close "${{ steps.build.outputs.branch }}" \
+              --comment "Autopilot: $crashes hard regression(s) / blocked=$blocked — not merging." \
+              --delete-branch || true
+          fi
+
+      - if: always() && steps.guard.outputs.skip != 'true'
+        name: Persist circuit-breaker state to main
+        run: |
+          cp -f autotest/reports/builder_state.json /tmp/bs.json 2>/dev/null || true
+          git checkout -f main || git checkout -B main origin/main
+          git pull --rebase --autostash origin main || true
+          mkdir -p autotest/reports
+          cp -f /tmp/bs.json autotest/reports/builder_state.json 2>/dev/null || true
+          git add autotest/reports/builder_state.json 2>/dev/null || true
+          git commit -m "autopilot: persist builder state [skip ci]" || echo "nothing to persist"
+          git push origin main || echo "::warning::could not push state"

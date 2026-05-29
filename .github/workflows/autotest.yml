@@ -1,0 +1,94 @@
+# Autonomous tester — the primary, cloud-based bug finder + fixer.
+#
+# Runs entirely in GitHub Actions (no desktop / Cowork). On each tick it:
+#   1. boots MediaHub from `main` and runs the full tester (finder + AI
+#      subagents + LLM council), producing a deduped, fix-ready BUGS.md;
+#   2. commits BUGS.md + ledger.json back to `main` so the dedup memory and the
+#      report PERSIST across these stateless runs (without this, every run
+#      re-reports the same bugs);
+#   3. runs the fixer — turns new bugs into fix PRs (and merges them when armed)
+#      with the same gates as the builder.
+#
+# Secrets: GEMINI_API_KEY (subagents + council; skip cleanly if absent),
+#          ANTHROPIC_API_KEY (the fixer's Claude Code; no key → no auto-fix).
+
+name: Autonomous tester
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autotest
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Test sweep + commit report + fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install MediaHub (dev + render extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+          python -m playwright install --with-deps chromium
+
+      - name: Run the finder + subagents + council
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MEDIAHUB_LLM_PROVIDER: auto
+          AUTOTEST_FLOW_TIMEOUT: "200"
+          AUTOTEST_MAX_PAGES: "40"
+          AUTOTEST_SWEEP: ${{ github.run_number }}
+          AUTOTEST_ACCEPT: "0"   # acceptance handled by the autopilot workflow
+        run: python -m autotest.run
+
+      - name: Commit the bug report back (persists dedup memory)
+        run: |
+          git config user.name "mediahub-autotest[bot]"
+          git config user.email "mediahub-autotest[bot]@users.noreply.github.com"
+          git add autotest/reports/BUGS.md autotest/reports/ledger.json 2>/dev/null || true
+          git commit -m "autotest: refresh bug report [skip ci]" || echo "no change"
+          git pull --rebase --autostash origin main || true
+          git push origin main || echo "::warning::could not push report"
+
+      - name: Autonomous fix pass (needs Anthropic key)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTOTEST_FIX_APPLY: "1"
+          AUTOTEST_CLAUDE_FLAGS: "--permission-mode acceptEdits --dangerously-skip-permissions"
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "No ANTHROPIC_API_KEY secret — skipping the autonomous fix pass."
+            exit 0
+          fi
+          npm install -g @anthropic-ai/claude-code
+          python -m autotest.fix_loop || echo "fix pass finished with issues"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autotest-report
+          path: |
+            autotest/reports/BUGS.md
+            autotest/screenshots/
+          if-no-files-found: warn
+          retention-days: 14

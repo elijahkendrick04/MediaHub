@@ -173,6 +173,14 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 See `.env.example` for the full list.
 
+**RULE — API keys are env/`.env` only, NEVER hard-coded.** Provider keys
+(`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, …) must be read from the process
+environment (loaded from the gitignored `.env`), never written as a literal in
+any source file, test, comment, commit, log line, or pushed artifact. The
+operator rotates the key by editing `.env` alone — no code change. This holds
+for the autonomous tester/builder too: they load `.env` via `autotest/_env.py`.
+A key committed to the repo is a leak even if later removed.
+
 ## Running Tests
 
 All test files pass. Run the full suite with no ignores:
@@ -231,7 +239,10 @@ the motion render of a given card visually aligns with its still graphic.
 ## Deployment
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.
-Branch model: feature branches from `dev`; never merge to `main` without approval.
+Branch model: feature branches from `dev`. Merges to `main` may happen
+autonomously without human approval, gated only on green CI — `main` is a
+trunk that auto-deploys to Render production, so a red build must never be
+merged. (This replaces the former human-approval-before-`main` rule.)
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path.
 
