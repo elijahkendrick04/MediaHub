@@ -73,7 +73,20 @@ def _save_state(s: dict) -> None:
 
 def _record(ok: bool) -> None:
     s = _state()
-    s["consecutive_failures"] = 0 if ok else int(s.get("consecutive_failures", 0)) + 1
+    if ok:
+        s["consecutive_failures"] = 0
+    else:
+        s["consecutive_failures"] = int(s.get("consecutive_failures", 0)) + 1
+        if s["consecutive_failures"] == BREAKER_LIMIT:
+            try:
+                from autotest import notify
+                notify.notify(
+                    "Autopilot builder halted (circuit breaker)",
+                    f"The roadmap builder hit {BREAKER_LIMIT} consecutive failed cycles and "
+                    "stopped to avoid wasting credits. A human should review the recent "
+                    "autotest/build-* branches and autotest/reports/NEEDS_ATTENTION.md.")
+            except Exception:
+                pass
     _save_state(s)
 
 
@@ -99,10 +112,11 @@ def _build_prompt(item: roadmap.RoadmapItem) -> str:
     )
 
 
-def _run_coder(prompt: str) -> tuple[bool, str]:
-    """Drive the configured agentic coder (default: Gemini CLI, free tier)."""
+def _run_coder(prompt: str, *, complex: bool = False) -> tuple[bool, str]:
+    """Drive the agentic coder (default: Gemini CLI, free) with the ruflo coding
+    discipline — standards-guided implement pass + a self-review/refine pass."""
     from autotest import coder
-    return coder.run_coder(prompt, cwd=REPO_ROOT)
+    return coder.write_code(prompt, complex=complex, cwd=REPO_ROOT)
 
 
 def _test_gate() -> tuple[bool, str]:
@@ -139,6 +153,44 @@ def _merge_to_main(item: roadmap.RoadmapItem, branch: str) -> str:
     return "auto-merge to main enabled (will land when CI is green)"
 
 
+def implement_until_green(task: str, *, complex: bool = False,
+                          label: str = "change") -> tuple[bool, list[str], int, str]:
+    """Implement the task, then ITERATE against the test gate — feeding each
+    failure back to the coder to fix the ROOT CAUSE (using the repo's coding
+    skills) — until the suite is green or the iteration cap is hit. The
+    protected-path and scope guards are re-checked every iteration. Bounded by
+    AUTOTEST_GATE_MAX_ITERS so it can never burn credits forever. Returns
+    (ok, files, insertions, info)."""
+    from autotest import coder
+    max_iters = max(1, int(os.environ.get("AUTOTEST_GATE_MAX_ITERS", "3")))
+    files: list[str] = []
+    ins = 0
+    feedback = ""
+    for attempt in range(1, max_iters + 1):
+        prompt = task if attempt == 1 else feedback
+        ok, log = coder.write_code(prompt, complex=(complex and attempt == 1), cwd=REPO_ROOT)
+        if not ok:
+            return False, files, ins, f"coder-failed (iter {attempt}): {log[-300:]}"
+        files, ins = _changed_files()
+        if not files:
+            return False, files, ins, "no-op (coder made no changes)"
+        prot = _touches_protected(files)
+        if prot:
+            return False, files, ins, f"aborted: touched protected engine {prot}"
+        if len(files) > MAX_FILES or ins > MAX_INSERTIONS:
+            return False, files, ins, f"aborted: diff too large ({len(files)} files, +{ins})"
+        gate_ok, tail = _test_gate()
+        if gate_ok:
+            return True, files, ins, f"green after {attempt} gate iteration(s)"
+        # Feed the failure back so the coder fixes the ROOT CAUSE next iteration.
+        feedback = (
+            f"Your change to {label} FAILED the test gate. Find and fix the ROOT CAUSE "
+            f"so `python -m pytest tests/ -q` passes. Do NOT delete, skip, or weaken any "
+            f"test to force a pass — fix the actual problem. Follow the discipline in "
+            f"autotest/skills/coding/. Do NOT run git. pytest output:\n{tail[-2500:]}")
+    return False, files, ins, f"still failing the gate after {max_iters} iterations"
+
+
 def build_cycle() -> dict:
     load_dotenv()
     apply = os.environ.get("AUTOTEST_BUILD_APPLY", "1") != "0"
@@ -166,30 +218,21 @@ def build_cycle() -> dict:
     if rc != 0:
         _git("checkout", "-B", branch)
 
-    ok, coder_out = _run_coder(prompt)
+    # Implement + iterate to green: a gate failure is fed back to the coder to
+    # fix the root cause (using the repo skills), not abandoned. Bounded.
+    ok, files, insertions, info = implement_until_green(
+        prompt, complex=True, label=f"roadmap {item.id}")
     if not ok:
-        _record(False)
-        return {**plan, "result": "coder-failed", "detail": coder_out[-400:]}
-
-    files, insertions = _changed_files()
-    if not files:
-        _record(False)
-        return {**plan, "result": "no-op (claude made no changes)"}
-    protected = _touches_protected(files)
-    if protected:
         _git("reset", "--hard", f"origin/{BASE_BRANCH}")
         _record(False)
-        return {**plan, "result": "aborted: touched protected engine paths", "protected": protected}
-    if len(files) > MAX_FILES or insertions > MAX_INSERTIONS:
-        _git("reset", "--hard", f"origin/{BASE_BRANCH}")
-        _record(False)
-        return {**plan, "result": f"aborted: diff too large ({len(files)} files, +{insertions})"}
-
-    gate_ok, gate_tail = _test_gate()
-    if not gate_ok:
-        _git("reset", "--hard", f"origin/{BASE_BRANCH}")
-        _record(False)
-        return {**plan, "result": "aborted: test suite not green", "pytest_tail": gate_tail}
+        try:
+            from autotest import notify
+            notify.notify(f"Autopilot couldn't build roadmap {item.id}",
+                          f"Stopped after iterating: {info}. Branch reset, not merged — "
+                          "needs a human (or check ANTHROPIC_API_KEY / credits).")
+        except Exception:
+            pass
+        return {**plan, "result": info}
 
     # commit (carry the existing roadmap directive: WIP until the tester confirms)
     msg = (f"build({item.id}): {item.title[:60]}\n\n"
@@ -211,7 +254,7 @@ def build_cycle() -> dict:
     merge_status = _merge_to_main(item, branch)
     handover.write({
         "item_id": item.id, "title": item.title,
-        "intent": item.body[:2000], "summary": coder_out[-600:],
+        "intent": item.body[:2000], "summary": info,
         "files_changed": files, "insertions": insertions,
         "branch": branch, "pr": pr_url, "base": BASE_BRANCH,
         "merge_target": "main", "merge_status": merge_status,

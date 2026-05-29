@@ -67,19 +67,19 @@ jobs:
           git pull --rebase --autostash origin main || true
           git push origin main || echo "::warning::could not push report"
 
-      - name: Autonomous fix pass (free Gemini coder)
+      - name: Autonomous fix pass (Claude coder)
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AUTOTEST_FIX_APPLY: "1"
-          AUTOTEST_CODER: "gemini"
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          AUTOTEST_BUILD_MERGE: "1"   # fully autonomous: auto-merge fix PRs on green CI
+          AUTOTEST_CODER: "claude"
         run: |
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "No GEMINI_API_KEY secret — skipping the autonomous fix pass."
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "No ANTHROPIC_API_KEY secret — skipping the autonomous fix pass."
             exit 0
           fi
-          npm install -g @google/gemini-cli
+          npm install -g @anthropic-ai/claude-code
           python -m autotest.fix_loop || echo "fix pass finished with issues"
 
       - name: Upload evidence
