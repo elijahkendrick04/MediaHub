@@ -48,14 +48,21 @@ jobs:
           pip install -e ".[dev,render]"
           python -m playwright install --with-deps chromium
 
-      - name: Run the finder + subagents + council
+      - name: Run the finder + subagents + council (against the LIVE site)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MEDIAHUB_LLM_PROVIDER: auto
+          # Test the real deployment so the loop finds the bugs that actually
+          # affect users (an empty local boot finds nothing). Read-only:
+          # judge existing content + flag empties/404s/UX; no sign-up/uploads
+          # in the hourly loop (the create/delete lifecycle stays opt-in).
+          AUTOTEST_BASE_URL: https://mediahub-gzwc.onrender.com
+          AUTOTEST_ALLOW_PROD: "1"
+          AUTOTEST_SIGNUP: "0"
           AUTOTEST_FLOW_TIMEOUT: "200"
-          AUTOTEST_MAX_PAGES: "40"
+          AUTOTEST_MAX_PAGES: "30"
           AUTOTEST_SWEEP: ${{ github.run_number }}
-          AUTOTEST_ACCEPT: "0"   # acceptance handled by the autopilot workflow
+          AUTOTEST_ACCEPT: "0"
         run: python -m autotest.run
 
       - name: Commit the bug report back (persists dedup memory)
