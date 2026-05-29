@@ -1,5 +1,29 @@
 # MediaHub Roadmap
 
+## In plain words (start here)
+
+A **roadmap** is our plan for what to build next, and *why*. MediaHub's plan has
+three big stages:
+
+1. **Catch up** (we call it *Parity*) — make MediaHub as polished as the big,
+   general-purpose tools everyone already knows.
+2. **Stand out** (*Distinction*) — do things for sports clubs that those big,
+   general tools simply can't.
+3. **Lead** (*Leadership*) — become the tool every club, society and team reaches
+   for first.
+
+Below, each task carries a little badge so you can see how it's going:
+✅ done · 🔵 in progress · ⚠️ stuck · ❌ not started yet.
+
+The **"Last updated"** line and the **"Recent activity"** table further down update
+themselves automatically whenever we ship something — you don't edit those by hand.
+
+> New to the team? Read **[../START_HERE.md](../START_HERE.md)** first, then come
+> back here to see what's next. Hit a tricky word? See
+> **[../GLOSSARY.md](../GLOSSARY.md)**.
+
+---
+
 > **Reading this:** the single forward-looking roadmap for MediaHub —
 > Phase 1: Parity → Phase 2: Distinction → Phase 3: Leadership. Only
 > *not-yet-done* work is tracked here; shipped work has been removed to

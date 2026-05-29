@@ -1,0 +1,75 @@
+# Repo hygiene — keeps the tree tidy on every PR.
+#
+# Two jobs:
+#   1. pre-commit   — runs the hygiene hooks. Advisory for now (continue-on-error)
+#                     so the team can adopt ruff without it blocking merges; flip
+#                     it to blocking once the first findings are cleared.
+#   2. bloat-guard  — fails a PR only if it ADDS a too-large file or an unusually
+#                     large batch of NEW files. It diffs against the PR base and
+#                     looks only at added files, so the existing downloaded
+#                     *-main toolkits are never counted — it just stops the *next*
+#                     accidental ZIP-dump from landing.
+name: Repo hygiene
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-hygiene-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Hygiene hooks (pre-commit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    continue-on-error: true            # advisory during rollout — see file header
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip pre-commit
+      - run: pre-commit run --all-files --show-diff-on-failure
+
+  bloat-guard:
+    name: New-file bloat guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0               # need base history for the diff
+      - name: Fail on large or excessive NEW files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAX_KB: "1500"               # matches check-added-large-files
+          MAX_NEW_FILES: "300"         # *-main folders are pre-existing, never counted
+        run: |
+          # Only files this PR ADDS (status=A) versus the base — never pre-existing files.
+          mapfile -t added < <(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA")
+          echo "PR adds ${#added[@]} new file(s)."
+          fail=0
+          if [ "${#added[@]}" -gt "$MAX_NEW_FILES" ]; then
+            echo "::error::This PR adds ${#added[@]} new files (limit $MAX_NEW_FILES). If this is an intentional vendored drop, raise MAX_NEW_FILES in repo-hygiene.yml."
+            fail=1
+          fi
+          for f in "${added[@]}"; do
+            [ -f "$f" ] || continue
+            kb=$(( ( $(stat -c%s "$f") + 1023 ) / 1024 ))
+            if [ "$kb" -gt "$MAX_KB" ]; then
+              echo "::error::New file too large: $f (${kb} KB > ${MAX_KB} KB). Add it to .gitignore or store it outside git."
+              fail=1
+            fi
+          done
+          exit $fail
