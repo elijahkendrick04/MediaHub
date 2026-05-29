@@ -477,15 +477,18 @@ class Tester:
 
     # --- the primary user flow ------------------------------------------------
     def run_primary_flow(self, flow_timeout: float) -> str:
-        # Rotate the upload file across the corpus + downloaded inputs so no two
-        # sweeps test the same file (anti-complacency). AUTOTEST_INPUT overrides.
-        from autotest import acquire
-        sweep = int(os.environ.get("AUTOTEST_SWEEP", "0"))
+        # The PRIMARY flow uses a known-good meet so the pipeline produces REAL
+        # content (cards/captions) for the AI judges to evaluate — testing an
+        # empty shell finds nothing. AUTOTEST_INPUT overrides; rotated/fuzz
+        # inputs belong to separate variety passes, not the core flow.
         override = os.environ.get("AUTOTEST_INPUT")
         if override and Path(override).exists():
             input_file = Path(override)
+        elif SAMPLE.exists():
+            input_file = SAMPLE
         else:
-            input_file = acquire.next_input(sweep) or (SAMPLE if SAMPLE.exists() else None)
+            from autotest import acquire
+            input_file = acquire.next_input(int(os.environ.get("AUTOTEST_SWEEP", "0")))
         if input_file is None:
             return "skipped:no-input"
         self.artifacts["input_file"] = str(input_file)
@@ -521,11 +524,20 @@ class Tester:
                 "Configure step has no club_filter select", "/upload/configure",
                 "A <select name=club_filter> of parsed clubs (or a clear 'no clubs found' state)",
                 "Select not present (parsing found no clubs for this file)", "no-club-select")
+        # Pick a club that actually yields content (a real club in the meet),
+        # preferring AUTOTEST_PRIMARY_CLUB (default "manchester" — present in the
+        # bundled MISM sample and known to produce cards), else the first club.
+        preferred = os.environ.get("AUTOTEST_PRIMARY_CLUB", "manch").lower()
         value = self.page.evaluate(
-            """() => {const s=document.querySelector('select[name=club_filter]');
-                     if(!s) return null;
-                     for (const o of s.options){if(o.value && o.value.trim()) return o.value;}
-                     return null;}""")
+            """(pref) => {const s=document.querySelector('select[name=club_filter]');
+                 if(!s) return null;
+                 let first=null;
+                 for (const o of s.options){
+                   const v=(o.value||'').trim(); if(!v) continue;
+                   if(first===null) first=v;
+                   if(((o.textContent||v).toLowerCase()).includes(pref)) return v;
+                 }
+                 return first;}""", preferred)
         if not value:
             return self._no_progress(
                 "No selectable club on configure step", "/upload/configure",
