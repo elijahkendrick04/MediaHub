@@ -27,30 +27,89 @@ from autotest._env import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
+# Ledger changes this run, keyed by fingerprint. The per-bug fix attempt does
+# `git reset --hard` (to drop the coder's failed edits), which also wipes any
+# in-place ledger write — so we journal every change and re-apply it to a clean
+# `main` at the end (_persist_to_main). Without this the attempt-cap and
+# human-escalation never persist and the fixer re-picks the same bug forever.
+_JOURNAL: dict[str, dict] = {}
+
+# Findings about the tester / AI-judge itself, not the product. The autonomous
+# coder can't fix "the AI judge over-flags X" in MediaHub's code, so it must not
+# pick these or it flails and burns cycles; they stay in BUGS.md as tester-tuning
+# feedback. Matched against the finding's route + title.
+_META_MARKERS = (
+    "testing framework", "testing infrastructure", "test framework",
+    "test harness", "automated testing", "autotest", "ai judge", "ai/testing",
+)
+
 
 def _max_attempts() -> int:
     return int(os.environ.get("AUTOTEST_FIX_MAX_ATTEMPTS", "2"))
 
 
+def _is_meta_finding(bug: dict) -> bool:
+    blob = f"{bug.get('route', '')} {bug.get('title', '')}".lower()
+    return any(m in blob for m in _META_MARKERS)
+
+
 def _open_bugs(limit: int) -> list[dict]:
-    """Open bugs still worth attempting: not already in-flight, not given up on,
-    and under the per-bug attempt cap (so we never keep spending credits on a
-    bug that won't fix)."""
+    """Open bugs worth a fix attempt RIGHT NOW. We require all of:
+    - status ``open``, no fix already in flight, under the per-bug attempt cap
+      (so we never keep spending credits on a bug that won't fix);
+    - ``present_last_run`` — reproduced in the latest sweep, so we don't chase
+      stale or flaky findings that aren't actually happening any more;
+    - not a meta/framework finding about the tester itself (the product coder
+      can't fix those — that's tester tuning, not a product bug).
+    """
     cap = _max_attempts()
     ledger = report.load_ledger()
     bugs = [b for b in ledger["bugs"].values()
             if b.get("status") == "open" and not b.get("fix_pr")
-            and int(b.get("fix_attempts", 0)) < cap]
+            and int(b.get("fix_attempts", 0)) < cap
+            and b.get("present_last_run", True)
+            and not _is_meta_finding(b)]
     bugs.sort(key=lambda b: SEV_ORDER.get(b.get("severity", "low"), 4))
     return bugs[:limit]
 
 
 def _update(fingerprint: str, **fields) -> None:
+    """Record a ledger change: journal it (so it survives the per-bug `git reset`
+    and is re-applied to `main` by _persist_to_main) AND write it through to the
+    working-tree ledger best-effort."""
+    _JOURNAL.setdefault(fingerprint, {}).update(fields)
     ledger = report.load_ledger()
     entry = ledger["bugs"].get(fingerprint)
     if entry:
         entry.update(fields)
         report.save_ledger(ledger)
+
+
+def _persist_to_main() -> None:
+    """Re-apply this run's fixer memory (attempts, fixing/needs-human, fix_pr)
+    onto a clean ``main`` ledger and commit+push it, so the dedup/attempt memory
+    survives to the next CI run. The per-bug `git reset --hard` above discards
+    the working-tree ledger, so without this nothing the fixer learned persists
+    and it loops on the same bug every run."""
+    if not _JOURNAL:
+        return
+    builder._git("checkout", "-f", builder.BASE_BRANCH)
+    builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
+    ledger = report.load_ledger()
+    changed = False
+    for fp, fields in _JOURNAL.items():
+        entry = ledger["bugs"].get(fp)
+        if entry:
+            entry.update(fields)
+            changed = True
+    if not changed:
+        return
+    report.save_ledger(ledger)
+    builder._git("add", "autotest/reports/ledger.json")
+    rc, _ = builder._git("commit", "-m", "autotest: persist fixer memory [skip ci]")
+    if rc == 0:
+        builder._git("pull", "--rebase", "--autostash", "origin", builder.BASE_BRANCH)
+        builder._git("push", "origin", builder.BASE_BRANCH)
 
 
 def _give_up_or_retry(bug: dict, attempts: int, reason: str) -> dict:
@@ -88,13 +147,7 @@ def _fix_prompt(bug: dict) -> str:
 
 
 def _mark_fixing(fingerprint: str, branch: str, pr: str) -> None:
-    ledger = report.load_ledger()
-    entry = ledger["bugs"].get(fingerprint)
-    if entry:
-        entry["status"] = "fixing"
-        entry["fix_branch"] = branch
-        entry["fix_pr"] = pr or branch
-        report.save_ledger(ledger)
+    _update(fingerprint, status="fixing", fix_branch=branch, fix_pr=pr or branch)
 
 
 def fix_one(bug: dict) -> dict:
@@ -149,6 +202,7 @@ def main() -> int:
     results = []
     for bug in _open_bugs(int(os.environ.get("AUTOTEST_FIX_MAX", "3"))):
         results.append(fix_one(bug))
+    _persist_to_main()   # survive the per-bug resets so attempts/escalation stick
     print(json.dumps(results, indent=2))
     return 0
 
