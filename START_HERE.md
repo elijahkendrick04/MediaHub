@@ -27,7 +27,7 @@ Think of the project as a building. Here's what's in each room (folder):
 | `scripts/` | Small helper programs the team runs by hand (build steps, reports). |
 | `autotest/` | A robot that tests the whole app by itself in the cloud and reports bugs. |
 | `.github/`, `.claude/` | Settings for the automatic cloud checks and for the AI assistant. |
-| `skills-main/`, `ui-ux-pro-max-skill-main/`, `agent-skills-main/`, `bencium-marketplace-main/`, `taste-skill-main/`, `claude-marketplace-main/` | **Downloaded toolkits — NOT part of MediaHub.** They're reference kits kept for ideas. You can ignore them. |
+| `vendor/` | **Downloaded toolkits — NOT part of MediaHub.** Reference kits (Claude skill "marketplaces") kept for ideas, tucked away in one folder. You can ignore this whole folder. |
 
 > Each important folder has its own `README.md` with one or two plain sentences.
 > Open it to learn what that folder does.

@@ -10,6 +10,8 @@ __pycache__
 .venv
 venv/
 node_modules/
+# Downloaded reference toolkits — not needed in the production image
+vendor/
 runs_v4/
 uploads_v4/
 smoke_v8_output/

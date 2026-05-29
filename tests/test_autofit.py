@@ -249,7 +249,7 @@ def test_measure_line_px_scales_linearly_with_size():
 # --------------------------------------------------------------------------- #
 def _find_font_file():
     root = Path(__file__).resolve().parents[1]
-    fonts = root / "skills-main" / "skills" / "canvas-design" / "canvas-fonts"
+    fonts = root / "vendor" / "skills-main" / "skills" / "canvas-design" / "canvas-fonts"
     if fonts.is_dir():
         for ttf in sorted(fonts.glob("*.ttf")):
             return ttf

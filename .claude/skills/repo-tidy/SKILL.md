@@ -1,6 +1,6 @@
 ---
 name: repo-tidy
-description: Keeps the MediaHub repo tidy and beginner-readable. Use whenever you add a new folder or package, add or change docs, notice runtime junk getting committed, or the user asks to "clean up" / "keep it tidy" / "make it understandable". Encodes where the plain-English docs live, the README-per-folder rule, the 10-year-old readability standard, the hygiene tooling, and the hands-off rule for legacy/ and the downloaded *-main toolkits.
+description: Keeps the MediaHub repo tidy and beginner-readable. Use whenever you add a new folder or package, add or change docs, notice runtime junk getting committed, or the user asks to "clean up" / "keep it tidy" / "make it understandable". Encodes where the plain-English docs live, the README-per-folder rule, the 10-year-old readability standard, the hygiene tooling, and the hands-off rule for legacy/ and the vendored toolkits (vendor/).
 metadata:
   tags: mediahub, repo-hygiene, docs, tooling, cleanup, onboarding
 ---
@@ -37,22 +37,23 @@ explain it back. These docs **link to** the engineer docs — they never duplica
 
 1. **Add a package → add its README + a row in `START_HERE.md`'s room table.** If
    the new name is cryptic, add a `GLOSSARY.md` entry rather than renaming code.
-2. **Never edit, lint, reformat, rename or delete `legacy/` or the six `*-main`
-   folders.** `legacy/` is on `sys.path` (`src/mediahub/__init__.py`). The `*-main`
-   folders are downloaded Claude marketplaces kept for reference — NOT MediaHub
-   product. Never commit a *new* downloaded marketplace/ZIP as if it were product.
+2. **Never edit, lint, reformat, rename or delete `legacy/` or anything under
+   `vendor/`.** `legacy/` is on `sys.path` (`src/mediahub/__init__.py`). `vendor/`
+   holds downloaded Claude skill "marketplaces" kept for reference — NOT MediaHub
+   product. Never commit a *new* downloaded marketplace/ZIP into the product tree;
+   reference material belongs under `vendor/`.
 3. **When editing `docs/ROADMAP.md`, keep the hand-written plain-English section
    above the `<!-- ROADMAP:... -->` marker blocks.** A GitHub Action rewrites only
    the marker blocks and heading status badges; prose outside them is safe.
 4. **Run the hygiene tools, don't fight them.** `make tidy` (or
    `pre-commit run --all-files`) handles whitespace, end-of-file, the large-file
    guard and ruff. Ruff is scoped to `src/mediahub/` with a small rule set — don't
-   broaden it onto `legacy/` or `*-main`, and don't reformat the deterministic
+   broaden it onto `legacy/` or `vendor/`, and don't reformat the deterministic
    engine for style alone (see `mediahub-engineering`).
 5. **Keep runtime junk out of git.** Caches, `node_modules`, `*.egg-info`,
    `runs_v4/`, `uploads_v4/`, `motion_cache`, `*.db` are gitignored. If something
    runtime-generated shows up in `git status`, add a `.gitignore` rule — never an
-   ignore for the `*-main` folders (those stay tracked on purpose).
+   ignore for `vendor/` (it stays tracked on purpose).
 6. **Respect the bloat guard.** `.github/workflows/repo-hygiene.yml` fails a PR that
    adds an oversized file or a huge batch of new files. For an intentional big add,
    raise the limit in that workflow — don't delete the guard.

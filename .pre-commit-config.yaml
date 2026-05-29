@@ -1,7 +1,7 @@
 # Pre-commit hygiene hooks for MediaHub.
 #
-# These keep the tree tidy on every commit. The downloaded *-main reference
-# toolkits and the read-only legacy/ tree are excluded everywhere, so hooks
+# These keep the tree tidy on every commit. The vendored reference toolkits
+# (vendor/) and the read-only legacy/ tree are excluded everywhere, so hooks
 # never reformat or churn code we don't own or maintain. Ruff (lint + format)
 # is scoped to the live package, src/mediahub/, only.
 #
@@ -9,7 +9,7 @@
 # Run on demand:    make tidy        (same as: pre-commit run --all-files)
 exclude: |
   (?x)^(
-    .*-main/.*|
+    vendor/.*|
     legacy/.*|
     src/mediahub/remotion/node_modules/.*
   )$

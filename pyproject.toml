@@ -94,11 +94,11 @@ filterwarnings = [
 
 [tool.ruff]
 # Repo-hygiene lint config. Scoped to the live package only: the read-only
-# legacy/ tree and the downloaded *-main reference toolkits are excluded so
+# legacy/ tree and the vendored reference toolkits (vendor/) are excluded so
 # turning ruff on never churns code we don't own or maintain.
 target-version = "py311"
 line-length = 100
-extend-exclude = ["legacy", "*-main", "src/mediahub/remotion/node_modules"]
+extend-exclude = ["legacy", "vendor", "src/mediahub/remotion/node_modules"]
 
 [tool.ruff.lint]
 # Deliberately small starting rule set. Enabling ruff on the existing ~19k-line

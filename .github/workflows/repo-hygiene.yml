@@ -2,16 +2,16 @@
 #
 # Both jobs are scoped to what a PR actually changes — never the whole
 # pre-existing tree — so they don't retroactively flag the legacy monolith or the
-# downloaded *-main toolkits:
+# vendored toolkits under vendor/:
 #   1. pre-commit   — runs the hygiene hooks on the files THIS PR changed.
 #                     Advisory for now (continue-on-error) so the team can adopt
 #                     ruff without it blocking merges; flip it to blocking once
 #                     the back-catalogue is clean.
 #   2. bloat-guard  — fails a PR only if it ADDS a too-large file or an unusually
 #                     large batch of NEW files. It diffs against the PR base and
-#                     looks only at added files, so the existing *-main folders
-#                     are never counted — it just stops the next accidental
-#                     ZIP-dump from landing.
+#                     looks only at newly-added files (renames/moves don't count),
+#                     so the vendored toolkits are never flagged — it just stops
+#                     the next accidental ZIP-dump from landing.
 name: Repo hygiene
 
 on:
@@ -63,10 +63,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MAX_KB: "1500"               # matches check-added-large-files
-          MAX_NEW_FILES: "300"         # *-main folders are pre-existing, never counted
+          MAX_NEW_FILES: "300"         # vendor/ is pre-existing; renames/moves don't count
         run: |
           # Only files this PR ADDS (status=A) versus the base — never pre-existing files.
-          mapfile -t added < <(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA")
+          # Rename detection is forced on (with a high limit) so moving a big folder
+          # registers as renames (R), not as hundreds of new files (A).
+          mapfile -t added < <(git -c diff.renames=true -c diff.renameLimit=20000 diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA")
           echo "PR adds ${#added[@]} new file(s)."
           fail=0
           if [ "${#added[@]}" -gt "$MAX_NEW_FILES" ]; then
