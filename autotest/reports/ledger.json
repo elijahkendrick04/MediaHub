@@ -886,7 +886,8 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "fix_attempts": 1
     },
     "5e0405b2f9bd": {
       "fingerprint": "5e0405b2f9bd",
