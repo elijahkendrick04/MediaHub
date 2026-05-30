@@ -50,7 +50,7 @@ concurrency:
 jobs:
   autopilot:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,9 +100,10 @@ jobs:
           AUTOTEST_CODER: "claude"
           # Bound the Claude coder so a build finishes inside the job's wall clock
           # instead of being hard-killed mid-build (which marks the run red).
-          AUTOTEST_GATE_MAX_ITERS: "2"     # implement + one root-cause retry, then stop
-          AUTOTEST_CODER_TIMEOUT: "900"    # 15 min per coder call — real builds need exploring
-          AUTOTEST_CODER_REVIEW: "0"       # skip the 2nd review call; the green-test gate is the bar
+          AUTOTEST_GATE_MAX_ITERS: "2"       # implement + one root-cause retry, then stop
+          AUTOTEST_CODER_TIMEOUT: "900"      # 15 min per coder call — real builds need exploring
+          AUTOTEST_CODER_REVIEW: "0"         # skip the 2nd review call; the green-test gate is the bar
+          AUTOTEST_BUILD_TEST_TIMEOUT: "900" # cap the pytest gate so 2×(coder+gate) fits the 90-min job
         run: |
           python -m autotest.builder | tee /tmp/build.json
           echo "branch=$(python -c "import json,sys;print(json.load(open('/tmp/build.json')).get('branch',''))")" >> "$GITHUB_OUTPUT"
@@ -124,8 +125,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          crashes=$(python -c "import json;print(json.load(open('autotest/reports/last_run.json'))['hard_crashes'])")
-          blocked=$(python -c "import json;print(json.load(open('autotest/reports/last_run.json'))['roadmap_blocked'])")
+          # Fail-closed: a missing/malformed last_run.json must NOT merge (default crashes=1, blocked=True).
+          crashes=$(python -c "import json,pathlib;p=pathlib.Path('autotest/reports/last_run.json');print((json.loads(p.read_text()) if p.exists() else {}).get('hard_crashes',1))" 2>/dev/null || echo 1)
+          blocked=$(python -c "import json,pathlib;p=pathlib.Path('autotest/reports/last_run.json');print((json.loads(p.read_text()) if p.exists() else {}).get('roadmap_blocked',True))" 2>/dev/null || echo True)
           echo "hard_crashes=$crashes roadmap_blocked=$blocked"
           if [ "$crashes" = "0" ] && [ "$blocked" = "False" ]; then
             gh pr merge "${{ steps.build.outputs.branch }}" --squash --delete-branch --admin \

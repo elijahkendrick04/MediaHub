@@ -58,26 +58,33 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         # preferred; ANTHROPIC_API_KEY (metered) is the fallback. The CI
         # workflows set only the subscription token so billing stays flat.
         #
-        # Permissions: headless `claude -p` STALLS the instant the agent needs a
-        # tool the permission mode hasn't pre-approved — e.g. Bash to grep/read
-        # the monolith — because no approval prompt can be answered without a
-        # TTY, so it burns to the timeout wall every run. --dangerously-skip-
-        # permissions bypasses ALL checks (the standard headless-automation flag)
-        # and fixes that — but the CLI REFUSES it under root/sudo. GitHub runners
-        # are non-root, so use it there; fall back to acceptEdits only when root
-        # (some local/container sandboxes), where the flag is blocked.
+        # Two headless-`claude -p` hazards this guards against:
+        #  1. STDIN — `claude -p` reads stdin as extra prompt input; if it
+        #     inherits a non-EOF pipe (as it does under `timeout …` / `… | tee`
+        #     in CI) it BLOCKS FOREVER with no output. We pass stdin=DEVNULL
+        #     below for an immediate EOF. This was the real cause of the CI hang.
+        #  2. PERMISSIONS — --dangerously-skip-permissions bypasses all approval
+        #     prompts (the standard headless flag) so the agent never stalls on a
+        #     Bash/edit approval. The CLI REFUSES it under root/sudo, so fall back
+        #     to acceptEdits only when root (local/container sandboxes).
+        # --output-format stream-json --verbose makes claude emit each step live,
+        # so a timeout capture shows real progress (plain text buffers to the end,
+        # making "no output" indistinguishable from "still working").
         is_root = hasattr(os, "geteuid") and os.geteuid() == 0
         default_flags = ("--permission-mode acceptEdits" if is_root
                          else "--dangerously-skip-permissions")
         flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE", default_flags).split()
         env = os.environ.copy()
-        cmd = ["claude", "-p", prompt, *flags]
+        cmd = ["claude", "-p", prompt, *flags, "--verbose",
+               "--output-format", "stream-json"]
     else:
         return False, "no coding agent available (install gemini-cli or claude-code)"
 
     try:
+        # stdin=DEVNULL is critical: without it claude inherits a non-EOF pipe in
+        # CI and hangs reading stdin before producing anything.
         p = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True,
-                           timeout=timeout)
+                           stdin=subprocess.DEVNULL, timeout=timeout)
         out = (p.stdout or "")[-2000:] + (p.stderr or "")[-1000:]
         return p.returncode == 0, out
     except subprocess.TimeoutExpired as exc:

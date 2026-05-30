@@ -34,6 +34,7 @@ def ask(system: str, user: str, max_tokens: int = 800) -> str:
         ["claude", "-p", prompt],
         cwd=tempfile.gettempdir(),  # neutral dir → don't load the big repo context
         capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,   # immediate EOF — else claude blocks reading an inherited pipe
         timeout=float(os.environ.get("AUTOTEST_JUDGE_TIMEOUT", "180")))
     if p.returncode != 0:
         raise RuntimeError(((p.stderr or "") + (p.stdout or ""))[-400:] or "claude -p failed")
