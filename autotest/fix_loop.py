@@ -223,16 +223,20 @@ def fix_one(bug: dict) -> dict:
         branch, f"fix: {bug.get('title', '')[:60]}",
         f"Autonomous fix for autotest finding `{fp}` ({bug.get('category')}).")
     merge = builder._merge_to_main(branch, has_pr=bool(pr_url))  # honours AUTOTEST_BUILD_MERGE
-    _mark_fixing(fp, branch, pr_url)
     if pr_err:
-        # Branch is pushed with the fix, but no PR opened → nothing will land.
-        # Report it honestly (not a false "fix-opened") and tell the operator why.
+        # Branch is pushed with the fix, but no PR opened → nothing landed and
+        # nothing is in flight. Leave the bug OPEN so the next cycle retries it
+        # (fix_attempts is already bumped above, so it de-prioritises but is
+        # never skipped). Do NOT _mark_fixing here: the finder never re-opens
+        # fix-owned statuses (report.FIX_OWNED_STATUSES), so a false "fixing"
+        # would strand the bug in limbo forever — even once PRs work again.
         from autotest import notify
         notify.notify(
             f"Autopilot pushed a fix for `{fp}` but could not open a PR",
             f"Branch `{branch}` carries the fix, but no PR opened so it will not land. {pr_err}")
         return {"fp": fp, "result": "fix-pushed-no-pr", "files": len(files),
                 "pr": "", "pr_error": pr_err, "merge": merge, "branch": branch}
+    _mark_fixing(fp, branch, pr_url)
     return {"fp": fp, "result": "fix-opened", "files": len(files), "pr": pr_url, "merge": merge}
 
 
