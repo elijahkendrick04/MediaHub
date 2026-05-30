@@ -100,17 +100,23 @@ def _priority(item: RoadmapItem) -> tuple[int, int]:
     return (kind, num if kind != 9 else status_rank * 1000 + num)
 
 
+def actionable_items(path: Path | None = None) -> list[RoadmapItem]:
+    """Every buildable item, highest priority first. The builder rotates over
+    this list (attempts-first) so one hard item can't starve the rest."""
+    items = [it for it in parse_items(path) if it.actionable]
+    items.sort(key=_priority)
+    return items
+
+
 def next_item(path: Path | None = None) -> RoadmapItem | None:
     """The next thing to build. AUTOTEST_BUILD_ITEM forces a specific id."""
-    items = parse_items(path)
     forced = os.environ.get("AUTOTEST_BUILD_ITEM", "").strip()
     if forced:
-        for it in items:
+        for it in parse_items(path):
             if it.id.lower() == forced.lower():
                 return it
         return None
-    candidates = [it for it in items if it.actionable]
-    candidates.sort(key=_priority)
+    candidates = actionable_items(path)
     return candidates[0] if candidates else None
 
 

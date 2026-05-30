@@ -99,6 +99,43 @@ def _record(ok: bool) -> None:
     _save_state(s)
 
 
+def _bump_item_attempt(item_id: str) -> int:
+    """Count a build attempt for `item_id` (before trying, so a crash still
+    counts). Returns the new total."""
+    s = _state()
+    a = s.setdefault("item_attempts", {})
+    a[item_id] = int(a.get(item_id, 0)) + 1
+    _save_state(s)
+    return a[item_id]
+
+
+def _clear_item_attempt(item_id: str) -> None:
+    """Reset an item's attempt count once it builds — it leaves the queue, so
+    its history shouldn't weigh down future rotations if it ever reappears."""
+    s = _state()
+    a = s.get("item_attempts") or {}
+    if a.pop(item_id, None) is not None:
+        s["item_attempts"] = a
+        _save_state(s)
+
+
+def _select_item() -> "roadmap.RoadmapItem | None":
+    """Pick the next roadmap item to build. A forced id (AUTOTEST_BUILD_ITEM)
+    always wins. Otherwise rotate ATTEMPTS-FIRST across actionable items so a
+    hard item the coder can't one-shot SINKS (retried later) instead of
+    starving every other item every cycle — the never-skip policy, mirrored
+    from the fix loop's ordering. Stable sort keeps roadmap priority order
+    within an equal-attempts tier (fewest-attempts-first, then priority)."""
+    if os.environ.get("AUTOTEST_BUILD_ITEM", "").strip():
+        return roadmap.next_item()
+    cands = roadmap.actionable_items()
+    if not cands:
+        return None
+    attempts = _state().get("item_attempts", {})
+    cands.sort(key=lambda it: int(attempts.get(it.id, 0)))
+    return cands[0]
+
+
 def _touches_protected(files: list[str]) -> list[str]:
     return [f for f in files if any(f.startswith(p) or p in f for p in PROTECTED)]
 
@@ -285,7 +322,7 @@ def build_cycle() -> dict:
             return {"cooling-down": f"circuit breaker: {s.get('consecutive_failures')} recent "
                     f"failures — backing off, auto-retry in ~{mins} min"}
 
-    item = roadmap.next_item()
+    item = _select_item()
     if item is None:
         return {"result": "nothing-to-build (roadmap has no actionable items)"}
     branch = f"autotest/build-{item.id.replace(' ', '-').lower()}"
@@ -296,6 +333,10 @@ def build_cycle() -> dict:
         plan["result"] = "dry-run (set AUTOTEST_BUILD_APPLY=1 to build)"
         plan["prompt_preview"] = prompt[:400]
         return plan
+
+    # Count the attempt up-front (so a crash still de-prioritises this item next
+    # cycle and the loop rotates on to others — never-skip).
+    plan["item_attempt"] = _bump_item_attempt(item.id)
 
     # fresh branch off the latest base
     _git("fetch", "origin", BASE_BRANCH)
@@ -349,6 +390,7 @@ def build_cycle() -> dict:
                                f"end-to-end and no existing flow regressed.",
     })
     _record(True)
+    _clear_item_attempt(item.id)   # built — it leaves the queue
     return {**plan, "result": "built" if pr_url else "built-no-pr",
             "files": len(files), "insertions": insertions,
             "pr": pr_url, "pr_error": pr_err, "merge": merge_status}
