@@ -53,6 +53,22 @@ def _is_meta_finding(bug: dict) -> bool:
     return any(m in blob for m in _META_MARKERS)
 
 
+# The headline "content engine produced nothing" cluster — architectural, not a
+# one-pass autonomous fix (it spans the pipeline / protected engine). We never
+# skip it, but de-prioritise it so the coder lands the tractable fixes first
+# instead of burning every run on the one bug it can't one-shot.
+_HARD_MARKERS = (
+    "0 card", "zero card", "no card", "no content", "empty content", "content pack",
+    "produced no", "produced zero", "review page", "review screen", "review pages",
+    "blank", "content is empty", "cards=0",
+)
+
+
+def _is_hard_cluster(bug: dict) -> bool:
+    blob = f"{bug.get('title', '')} {bug.get('actual', '')}".lower()
+    return any(m in blob for m in _HARD_MARKERS)
+
+
 def _open_bugs(limit: int) -> list[dict]:
     """Open bugs eligible for a fix attempt. NEVER-SKIP policy: every open
     product bug stays eligible forever — we never drop one for having too many
@@ -64,13 +80,15 @@ def _open_bugs(limit: int) -> list[dict]:
     bugs = [b for b in ledger["bugs"].values()
             if b.get("status") == "open" and not b.get("fix_pr")
             and not _is_meta_finding(b)]
-    # NEVER-SKIP ordering (not exclusion): highest severity, then fewest prior
-    # attempts, then reproduced-this-sweep first. A hard bug just sinks in the
-    # queue and is retried later — it is never dropped. With many open bugs the
-    # attempt-count ordering naturally round-robins, so no one bug is hammered.
+    # NEVER-SKIP ordering (not exclusion). Round-robin by attempts FIRST so every
+    # bug gets a fresh shot before any is retried; then tractable bugs before the
+    # architectural content-empty cluster (so the coder lands quick wins instead
+    # of burning every run on the one bug it can't one-shot); then severity; then
+    # reproduced-this-sweep. Nothing is ever dropped — hard bugs just sink.
     bugs.sort(key=lambda b: (
-        SEV_ORDER.get(b.get("severity", "low"), 4),
         int(b.get("fix_attempts", 0)),
+        1 if _is_hard_cluster(b) else 0,
+        SEV_ORDER.get(b.get("severity", "low"), 4),
         0 if b.get("present_last_run", True) else 1,
     ))
     # Collapse near-duplicates: the LLM judge re-files the SAME defect under many
@@ -186,16 +204,18 @@ def fix_one(bug: dict) -> dict:
         _fix_prompt(bug), complex=False, label=f"bug {fp}")
     if not ok:
         builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
-        # A coder TIMEOUT just means this bug needs more time than the budget —
-        # treat it like any other failed attempt: retry next run, and escalate
-        # to a human issue once the attempt cap is hit. Only a genuine coder /
-        # auth error (crash, bad token) raises the "coder error" alarm.
-        if info.startswith("coder-failed") and "timed out" not in info:
+        # The "coder error" alarm is ONLY for true infrastructure failures (CLI
+        # missing, auth/crash). A coder that RAN but didn't land a clean fix
+        # (timed out, hit max-turns, or the gate stayed red) is a normal failed
+        # attempt → retry + de-prioritise (never-skip), no alarm.
+        infra_err = any(m in info for m in
+                        ("CLI not found", "coder error:", "no coding agent"))
+        if infra_err:
             from autotest import notify
             notify.notify(
                 "Autopilot coder error (Claude)",
-                f"The Claude coder errored fixing bug `{fp}` — no fallback. {info}\n\n"
-                "Check CLAUDE_CODE_OAUTH_TOKEN and subscription rate limits.")
+                f"The Claude coder could not run for bug `{fp}`. {info}\n\n"
+                "Check CLAUDE_CODE_OAUTH_TOKEN and that the claude CLI is installed.")
             return {"fp": fp, "result": "coder-failed", "detail": info}
         return _give_up_or_retry(bug, attempts, info)
 

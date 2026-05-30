@@ -188,11 +188,15 @@ def implement_until_green(task: str, *, complex: bool = False,
     for attempt in range(1, max_iters + 1):
         prompt = task if attempt == 1 else feedback
         ok, log = coder.write_code(prompt, complex=(complex and attempt == 1), cwd=REPO_ROOT)
-        if not ok:
-            return False, files, ins, f"coder-failed (iter {attempt}): {log[-300:]}"
         files, ins = _changed_files()
         if not files:
-            return False, files, ins, "no-op (coder made no changes)"
+            # No edits at all → a true infra error (CLI/auth) or the model gave
+            # up without touching anything. Surface the log so fix_one can tell
+            # an infra error from a normal give-up.
+            return False, files, ins, f"coder-failed (iter {attempt}): {log[-300:]}"
+        # The coder MADE edits. Judge them by the TEST GATE, not the CLI exit
+        # code: `claude -p` exits non-zero on max-turns/stream quirks even when it
+        # produced a perfectly good, suite-passing fix — don't throw that away.
         prot = _touches_protected(files)
         if prot:
             return False, files, ins, f"aborted: touched protected engine {prot}"

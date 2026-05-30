@@ -61,6 +61,37 @@ def fingerprint(category: str, route: str, signal: str) -> str:
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
 
+# Coarse, STABLE "what kind of defect is this" buckets. LLM judges phrase the
+# same defect a dozen ways across runs (and vary the route), so hashing their
+# wording explodes one defect into many fingerprints. For LLM findings we hash a
+# defect CLASS instead, collapsing the re-phrasings into one ledger entry.
+_DEFECT_CLASSES = (
+    ("zero_cards", ("0 card", "zero card", "no card", "no content", "empty content",
+                    "content pack", "produced no", "produced zero", "cards=0",
+                    "content is empty", "no content cards")),
+    ("blank_page", ("blank", "empty page", "empty review", "review page",
+                    "review screen", "review pages")),
+    ("data_leak", ("data leak", "cross-operator", "cross operator", "idor",
+                   "another operator", "not belong", "isolation")),
+    ("export_broken", ("export 404", "export fails", "export unreachable", "download fails")),
+    ("http_404", ("404", "not found")),
+    ("http_5xx", ("500", "5xx", "server error", "internal server")),
+    ("traceback", ("traceback", "stack trace", "unhandled exception")),
+    ("missing_feedback", ("no feedback", "actionable feedback", "user feedback",
+                          "unclear status", "raw internal status")),
+)
+
+
+def _defect_class(text: str) -> str:
+    """Map free-text (title/expected/actual) to a stable defect bucket, or '' if
+    none matches (caller then falls back to the normalised title)."""
+    t = (text or "").lower()
+    for name, kws in _DEFECT_CLASSES:
+        if any(k in t for k in kws):
+            return name
+    return ""
+
+
 @dataclasses.dataclass
 class Finding:
     """One thing the tester observed. ``is_bug=False`` means expected/infra
@@ -80,8 +111,15 @@ class Finding:
     is_bug: bool = True
 
     def fingerprint(self) -> str:
-        # The signal that identifies the defect: prefer the suspect frame /
-        # evidence head over the (volatile) full evidence body.
+        # LLM judges (semantic/council) phrase one defect many ways and vary the
+        # route, so for them hash a STABLE defect class — collapsing re-phrasings
+        # of the same defect into a single ledger entry. Deterministic findings
+        # keep their precise suspect/evidence signal.
+        if (self.category or "").startswith(("semantic", "council")):
+            dc = _defect_class(f"{self.title} {self.expected} {self.actual}")
+            if dc:
+                return fingerprint("llm", "", dc)
+            return fingerprint(self.category, self.route, self.title)
         signal = self.suspect or self.evidence[:200] or self.title
         return fingerprint(self.category, self.route, signal)
 
