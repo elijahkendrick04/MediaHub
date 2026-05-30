@@ -14,6 +14,7 @@ Steps:
   7. V5 recognition report (uses context_engine for meet identity).
   8. Trust report.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -21,7 +22,9 @@ from datetime import datetime, timezone
 from typing import Optional, Callable
 
 from swim_content.quals_registry import (
-    load_registry, stale_standards, relevant_standards,
+    load_registry,
+    stale_standards,
+    relevant_standards,
 )
 from swim_content.detector_v3 import detect_v3
 from swim_content.grouper import group_claims_into_cards
@@ -41,12 +44,13 @@ from .interpreter_bridge import (
 )
 from mediahub.web.inference import infer_missing
 from mediahub.web.club_profile import (
-    ClubProfile, load_profile, list_profiles,
-    detect_likely_profile, seed_default_profiles,
+    ClubProfile,
+    load_profile,
+    detect_likely_profile,
+    seed_default_profiles,
 )
 from mediahub.web.v3_shim import canonical_to_v3
 from mediahub.web.trust import build_trust_report, TrustReport
-from .pb_bridge import build_pb_snapshots
 from mediahub.web.club_discovery import record_clubs
 
 
@@ -160,16 +164,18 @@ def _v5_ranked_to_v3_stubs(ranked: list[dict]) -> list[ContentCard]:
                 cap = vc
             if cap:
                 break
-        stubs.append(ContentCard(
-            card_id=swim_id,
-            card_type=ach.get("type") or "standout_swim",
-            headline=ach.get("headline") or "",
-            subhead=ach.get("event") or "",
-            swimmer_names=[swimmer] if swimmer else [],
-            claims=[],
-            bucket="queue",
-            captions=CaptionVariants(clean=cap, team=cap, hype=cap),
-        ))
+        stubs.append(
+            ContentCard(
+                card_id=swim_id,
+                card_type=ach.get("type") or "standout_swim",
+                headline=ach.get("headline") or "",
+                subhead=ach.get("event") or "",
+                swimmer_names=[swimmer] if swimmer else [],
+                claims=[],
+                bucket="queue",
+                captions=CaptionVariants(clean=cap, team=cap, hype=cap),
+            )
+        )
     return stubs
 
 
@@ -209,18 +215,27 @@ def run_pipeline_v4(
 
     # Convert format hint into a synthetic dispatch log so the trust /
     # UI keeps working unchanged.
-    fmt = (interpreted.sources_used[0].split(":", 1)[1]
-           if interpreted.sources_used and ":" in interpreted.sources_used[0]
-           else "unknown")
+    fmt = (
+        interpreted.sources_used[0].split(":", 1)[1]
+        if interpreted.sources_used and ":" in interpreted.sources_used[0]
+        else "unknown"
+    )
     dlog = DispatchLog(
         chosen_adapter=f"interpreter:{fmt}",
         chosen_filename=filename,
         chosen_score=interpreted.overall_confidence,
-        candidates=[{"adapter": "interpreter", "filename": filename,
-                     "score": round(interpreted.overall_confidence, 3)}],
-        notes=[f"Interpreter overall_confidence={interpreted.overall_confidence:.3f}",
-               f"events={len(interpreted.events)}, "
-               f"swims={sum(len(e.swims) for e in interpreted.events)}"],
+        candidates=[
+            {
+                "adapter": "interpreter",
+                "filename": filename,
+                "score": round(interpreted.overall_confidence, 3),
+            }
+        ],
+        notes=[
+            f"Interpreter overall_confidence={interpreted.overall_confidence:.3f}",
+            f"events={len(interpreted.events)}, "
+            f"swims={sum(len(e.swims) for e in interpreted.events)}",
+        ],
     )
     run.dispatch_log = dlog
 
@@ -242,8 +257,10 @@ def run_pipeline_v4(
         step(run.error)
         return run
 
-    step(f"Interpreter parsed {len(meet.results)} swims, "
-         f"{len(meet.swimmers)} swimmers across {len(meet.clubs)} clubs.")
+    step(
+        f"Interpreter parsed {len(meet.results)} swims, "
+        f"{len(meet.swimmers)} swimmers across {len(meet.clubs)} clubs."
+    )
 
     # 3. Infer missing
     infer_missing(meet)
@@ -294,8 +311,10 @@ def run_pipeline_v4(
     run.our_swim_count = len(our_results)
     run.other_swim_count = other
     run.n_swimmers_ours = len(our_keys)
-    step(f"Filtered to '{effective_filter}': {len(our_results)} swims "
-         f"by {len(our_keys)} swimmers, {other} excluded.")
+    step(
+        f"Filtered to '{effective_filter}': {len(our_results)} swims "
+        f"by {len(our_keys)} swimmers, {other} excluded."
+    )
 
     # 7. Bridge to V3 representation
     parsed_v3 = canonical_to_v3(meet)
@@ -318,12 +337,15 @@ def run_pipeline_v4(
     # path can't use anyway).
     try:
         from mediahub.media_ai.llm import active_provider as _active_provider
+
         _llm_provider = _active_provider()
     except Exception:
         _llm_provider = "heuristic"
-    _skip_pb_discovery = (_llm_provider == "heuristic")
+    _skip_pb_discovery = _llm_provider == "heuristic"
     if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
-        step("Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable).")
+        step(
+            "Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable)."
+        )
     if fetch_pbs and our_results and effective_filter and not _skip_pb_discovery:
         try:
             pb_snapshots = _enrich_pbs_via_discovery(
@@ -333,8 +355,7 @@ def run_pipeline_v4(
                 run_id=rid,
                 step=step,
             )
-            run.pb_fetch_ok = sum(1 for s in pb_snapshots.values()
-                                  if getattr(s, "fetch_ok", False))
+            run.pb_fetch_ok = sum(1 for s in pb_snapshots.values() if getattr(s, "fetch_ok", False))
             run.pb_fetch_failed = len(our_keys) - run.pb_fetch_ok
         except Exception as e:
             step(f"PB discovery failed: {e}")
@@ -353,8 +374,10 @@ def run_pipeline_v4(
         "relevant_ids": [s.standard_id for s in relevant],
         "important_ids": list(profile.important_standards) if profile else [],
     }
-    step(f"Loaded {len(standards)} qualification standards "
-         f"({len(stale)} stale, {len(relevant)} relevant).")
+    step(
+        f"Loaded {len(standards)} qualification standards "
+        f"({len(stale)} stale, {len(relevant)} relevant)."
+    )
 
     # 10. V3 detector / cards / ranker / self-check
     det = detect_v3(
@@ -379,8 +402,9 @@ def run_pipeline_v4(
 
     cards = group_claims_into_cards(det.claims, meet_name=meet.name)
     cards = attach_evidence_from_claims(cards)
-    cards = write_captions(cards,
-                           club_short=(profile.display_name if profile else effective_filter))
+    cards = write_captions(
+        cards, club_short=(profile.display_name if profile else effective_filter)
+    )
     cards = rank_cards(cards)
     run.cards = cards
 
@@ -397,9 +421,10 @@ def run_pipeline_v4(
         "pass": sc.pass_count,
         "warn": sc.warn_count,
         "fail": sc.fail_count,
-        "checks": [{"code": ck.code, "title": ck.title,
-                    "status": ck.status, "message": ck.message}
-                   for ck in sc.results],
+        "checks": [
+            {"code": ck.code, "title": ck.title, "status": ck.status, "message": ck.message}
+            for ck in sc.results
+        ],
     }
 
     # 11. Trust report
@@ -416,8 +441,9 @@ def run_pipeline_v4(
     try:
         run._pb_snapshots = pb_snapshots  # type: ignore[attr-defined]
         run._our_swimmer_keys = our_keys  # type: ignore[attr-defined]
-        run._our_results = our_results    # type: ignore[attr-defined]
+        run._our_results = our_results  # type: ignore[attr-defined]
         from swim_content_v5.report import build_recognition_report_for_run
+
         run.recognition_report = build_recognition_report_for_run(run)
         step(f"V5 recognition: {run.recognition_report.get('n_achievements', 0)} achievements.")
     except Exception as exc:
@@ -451,6 +477,7 @@ def run_pipeline_v4(
 
 def _slug_for_filter(name: str) -> str:
     from .interpreter_bridge import _club_code
+
     return _club_code(name)
 
 
@@ -512,24 +539,20 @@ def _enrich_pbs_via_discovery(
         disc = discover_swimmer_pbs(name=full_name, club=club_name, run_id=run_id)
         return key, discovery_to_snapshot(disc, swimmer_key=key)
 
-    parallel = (
-        os.environ.get("MEDIAHUB_PB_DISCOVERY_PARALLEL", "1") != "0"
-        and total > 1
-    )
+    parallel = os.environ.get("MEDIAHUB_PB_DISCOVERY_PARALLEL", "1") != "0" and total > 1
 
     if parallel:
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
         max_workers = int(os.environ.get("MEDIAHUB_PB_DISCOVERY_WORKERS", "6") or "6")
         max_workers = max(1, min(max_workers, total))
         # One up-front line so the page shows activity immediately; the
         # per-completion lines below keep the heartbeat fresh (well inside the
         # stale-run watchdog) and report a monotonic done-count even though
         # lookups finish out of order.
-        step(f"Looking up personal bests for {total} swimmers "
-             f"({max_workers} in parallel)…")
+        step(f"Looking up personal bests for {total} swimmers " f"({max_workers} in parallel)…")
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_lookup, key, name): name
-                       for key, name in targets}
+            futures = {pool.submit(_lookup, key, name): name for key, name in targets}
             done = 0
             # This loop body runs only in the calling thread, so the counter,
             # the step() emissions and the snapshots dict need no extra locking.
