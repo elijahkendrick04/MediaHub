@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-30 · `a903cd200` · ci(autotest): give the test-gate budget slow-runner margin (#170)
+**Last updated:** 2026-05-30 · `a5bb00a07` · fix(autotest): gate-judged fixes, tractable-first ordering, phrasing-stable fingerprints (#174)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,9 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-30 | `a5bb00a07` | fix(autotest): gate-judged fixes, tractable-first ordering, phrasing-stable fingerprints (#174) |
+| 2026-05-30 | `2926a6ac2` | autotest: persist fixer memory [skip ci] |
+| 2026-05-30 | `b3c9f11a7` | autotest: refresh bug report [skip ci] |
 | 2026-05-30 | `a903cd200` | ci(autotest): give the test-gate budget slow-runner margin (#170) |
 | 2026-05-30 | `a9d7b7a61` | fix(autotest): scope build/fix commits + collapse duplicate defects (#169) |
 | 2026-05-30 | `dc00bb188` | autopilot: persist builder state [skip ci] |
@@ -71,9 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-30 | `4794f9bf6` | fix(autotest): unblock the coder (inherited-stdin hang) + un-wedge the autopilot (#166) |
 | 2026-05-30 | `773d9431a` | autotest: persist fixer memory [skip ci] |
 | 2026-05-30 | `91d3f6135` | autotest: refresh bug report [skip ci] |
-| 2026-05-30 | `b487fa069` | fix(autotest): coder hangs headlessly — use skip-permissions on the non-root CI runner (#165) |
-| 2026-05-30 | `beb6a9b10` | autotest: persist fixer memory [skip ci] |
-| 2026-05-30 | `89f909b3d` | autotest: refresh bug report [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
