@@ -380,14 +380,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "fixing",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
-      "fix_pr": null,
-      "fix_branch": null
+      "fix_pr": "autotest/fix-8ee1cbc395d9",
+      "fix_branch": "autotest/fix-8ee1cbc395d9",
+      "fix_attempts": 1
     },
     "f07b0a820cda": {
       "fingerprint": "f07b0a820cda",
