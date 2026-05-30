@@ -13,6 +13,18 @@ import unittest
 from pathlib import Path
 
 
+def _tempdir() -> "tempfile.TemporaryDirectory[str]":
+    """A TemporaryDirectory tolerant of teardown races.
+
+    These tests point DATA_DIR at the temp dir and build the web app, which
+    starts the ``heartbeat-writer`` daemon. That daemon may write the uptime
+    store into DATA_DIR *after* the test body, racing ``rmtree`` →
+    ``OSError: [Errno 39] Directory not empty``. ``ignore_cleanup_errors``
+    (3.10+) makes teardown best-effort instead of flaking the test.
+    """
+    return tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+
+
 def _run_data() -> dict:
     """Build a minimal but realistic run_data shape."""
     return {
@@ -243,7 +255,7 @@ class TestPackStorage(unittest.TestCase):
 
     def test_save_load_roundtrip(self):
         from mediahub.turn_into import turn_meet_into_pack, save_pack, load_pack, list_packs
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.environ["DATA_DIR"] = tmp
             try:
                 pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
@@ -261,7 +273,7 @@ class TestPackStorage(unittest.TestCase):
 
     def test_old_packs_preserved_when_regenerating(self):
         from mediahub.turn_into import turn_meet_into_pack, save_pack, list_packs
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             os.environ["DATA_DIR"] = tmp
             try:
                 p1 = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
@@ -282,7 +294,7 @@ class TestVoiceProfileUsage(unittest.TestCase):
         from mediahub.voice.profile import VoiceProfile
         from mediahub.voice.store import save_voice_profile
         from mediahub.turn_into import turn_meet_into_pack
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             base = Path(tmp)
             vp = VoiceProfile(profile_id="test-profile", sign_off="—Test SC")
             save_voice_profile(vp, base_dir=base)
@@ -318,7 +330,7 @@ class TestWebRoutes(unittest.TestCase):
         return app
 
     def test_post_turn_into_then_view_pack(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             app = self._make_app(tmp)
             Path(tmp + "/runs_v4/run-x.json").write_text(json.dumps({
                 **_run_data(), "run_id": "run-x",
@@ -340,7 +352,7 @@ class TestWebRoutes(unittest.TestCase):
             self.assertIn("X thread", body)
 
     def test_edit_caption_persists(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             app = self._make_app(tmp)
             Path(tmp + "/runs_v4/run-y.json").write_text(json.dumps({
                 **_run_data(), "run_id": "run-y",
@@ -361,7 +373,7 @@ class TestWebRoutes(unittest.TestCase):
                              "My edited recap.")
 
     def test_existing_routes_still_200(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             app = self._make_app(tmp)
             client = app.test_client()
             # /settings now redirects to home (operator-config rewrite);
@@ -377,7 +389,7 @@ class TestWebRoutes(unittest.TestCase):
         of the spurious 'job not found' the user saw in the UI."""
         import time as _time
         import mediahub.web.web as wm
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             app = self._make_app(tmp)
             Path(tmp + "/runs_v4/run-z.json").write_text(json.dumps({
                 **_run_data(), "run_id": "run-z",
@@ -418,7 +430,7 @@ class TestWebRoutes(unittest.TestCase):
         """A job_id created under one run must not resolve via another
         run's status URL — defensive guard on the shared disk record."""
         import mediahub.web.web as wm
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             app = self._make_app(tmp)
             for rid in ("run-a", "run-b"):
                 Path(tmp + f"/runs_v4/{rid}.json").write_text(json.dumps({
