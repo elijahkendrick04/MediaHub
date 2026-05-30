@@ -1,0 +1,315 @@
+"""tests/test_review_body_content.py — /review/<run_id> body-content regression.
+
+Regression guard for the LLM Council finding: a route can return HTTP 200 with
+an empty or skeleton body, making a status-only check meaningless.  These tests
+prove that /review/<run_id> actually renders the achievement card data (swimmer
+names, events, headlines) in its body, not just a 200 shell.
+"""
+from __future__ import annotations
+
+import importlib
+import json
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+# ---------------------------------------------------------------------------
+# Fixture helpers
+# ---------------------------------------------------------------------------
+
+def _seed_run(tmp_path, wm, profile_id, run_payload):
+    """Write run JSON to disk and insert a matching DB row."""
+    run_id = run_payload["run_id"]
+    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_payload))
+    conn = wm._db()
+    conn.execute(
+        "INSERT OR REPLACE INTO runs "
+        "(id, created_at, status, profile_id, meet_name, file_name) "
+        "VALUES (?, datetime('now'), 'done', ?, ?, ?)",
+        (run_id, profile_id, run_payload["meet"]["name"], "test.hy3"),
+    )
+    conn.commit()
+    conn.close()
+    return run_id
+
+
+@pytest.fixture
+def review_env(tmp_path, monkeypatch):
+    """Fresh DATA_DIR with one club profile and a test client."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
+
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+    importlib.reload(cp)
+    importlib.reload(wm)
+
+    from mediahub.web.club_profile import ClubProfile, save_profile
+    save_profile(ClubProfile(
+        profile_id="org-test",
+        display_name="Test Club",
+        brand_voice_summary="Clear and energetic.",
+    ))
+
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    app.config["ENFORCE_ORG_GATE"] = True
+
+    with app.test_client() as client:
+        # Pin the session to org-test
+        r = client.post("/api/organisation/active", data={"profile_id": "org-test"})
+        assert r.status_code == 200, r.get_json()
+        yield {"client": client, "wm": wm, "tmp_path": tmp_path}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_run_payload(profile_id, achievements):
+    """Build a minimal but realistic run payload with the given achievements."""
+    run_id = "run-body-test-" + uuid.uuid4().hex[:8]
+    return {
+        "run_id": run_id,
+        "profile_id": profile_id,
+        "profile_display": "Test Club",
+        "meet": {"name": "BODY CONTENT TEST INVITATIONAL"},
+        "cards": [
+            {
+                "card_id": f"card-{a['swim_id']}",
+                "swim_id": a["swim_id"],
+                "swimmer_name": a["swimmer_name"],
+                "event": a["event"],
+                "headline": a["headline"],
+                "id": f"card-{a['swim_id']}",
+            }
+            for a in achievements
+        ],
+        "trust": {"score": 0.85},
+        "recognition_report": {
+            "ranked_achievements": [
+                {
+                    "rank": i + 1,
+                    "achievement": {
+                        "swim_id": a["swim_id"],
+                        "swimmer_name": a["swimmer_name"],
+                        "event": a["event"],
+                        "headline": a["headline"],
+                        "type": a.get("type", "pb"),
+                        "confidence_label": "high",
+                    },
+                    "quality_band": "elite",
+                    "priority": 0.9,
+                    "suggested_post_type": "story",
+                    "factors": [],
+                }
+                for i, a in enumerate(achievements)
+            ],
+            "n_elite": len(achievements),
+            "n_strong": 0,
+            "n_story": 0,
+            "n_achievements": len(achievements),
+            "n_swims_analysed": len(achievements),
+        },
+        "parse_warnings": [],
+        "self_check": {},
+        "detector_summary": {},
+        "dispatch_log": {},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tests: body actually contains card data
+# ---------------------------------------------------------------------------
+
+class TestReviewBodyContainsCardData:
+    """A 200 from /review/<run_id> must render the achievement content, not a skeleton."""
+
+    def test_body_is_non_empty(self, review_env):
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s1", "swimmer_name": "Jane Smith", "event": "200m Butterfly", "headline": "PB set"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert len(body) > 500, "Response body is suspiciously short — expected rendered HTML"
+
+    def test_swimmer_name_present_in_body(self, review_env):
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s2", "swimmer_name": "Jane Smith", "event": "200m Butterfly", "headline": "PB set"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert "Jane Smith" in body, (
+            "/review body must contain the swimmer name from ranked_achievements; "
+            "a 200 with no card content is indistinguishable from a skeleton response"
+        )
+
+    def test_event_name_present_in_body(self, review_env):
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s3", "swimmer_name": "Tom Jones", "event": "100m Backstroke", "headline": "Club record"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert "100m Backstroke" in body, (
+            "/review body must contain the event name from ranked_achievements"
+        )
+
+    def test_headline_present_in_body(self, review_env):
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s4", "swimmer_name": "Sam Lee", "event": "50m Freestyle", "headline": "UNIQUE_HEADLINE_XYZ"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert "UNIQUE_HEADLINE_XYZ" in body, (
+            "/review body must contain the achievement headline from ranked_achievements"
+        )
+
+    def test_ach_row_element_present(self, review_env):
+        """The .ach-row DOM element is the card container — its presence confirms cards rendered."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s5", "swimmer_name": "Alex Brown", "event": "400m IM", "headline": "Season best"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert 'class="ach-row"' in body, (
+            "/review body must contain .ach-row elements confirming achievement cards rendered"
+        )
+
+    def test_data_swimmer_attribute_matches_payload(self, review_env):
+        """data-swimmer on .ach-row must match the swimmer name from the run payload."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s6", "swimmer_name": "Riley Park", "event": "200m Breaststroke", "headline": "New PB"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert 'data-swimmer="Riley Park"' in body, (
+            "data-swimmer attribute on .ach-row must match the swimmer name from the run"
+        )
+
+    def test_multiple_achievements_all_rendered(self, review_env):
+        """Every achievement in ranked_achievements must appear in the body."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        achievements = [
+            {"swim_id": "s7a", "swimmer_name": "Swimmer Alpha", "event": "100m Free", "headline": "PB Alpha"},
+            {"swim_id": "s7b", "swimmer_name": "Swimmer Beta", "event": "200m Back", "headline": "PB Beta"},
+            {"swim_id": "s7c", "swimmer_name": "Swimmer Gamma", "event": "50m Fly", "headline": "PB Gamma"},
+        ]
+        payload = _make_run_payload("org-test", achievements)
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        for ach in achievements:
+            assert ach["swimmer_name"] in body, (
+                f"Swimmer '{ach['swimmer_name']}' from ranked_achievements missing from /review body"
+            )
+            assert ach["headline"] in body, (
+                f"Headline '{ach['headline']}' from ranked_achievements missing from /review body"
+            )
+
+    def test_meet_name_present_in_body(self, review_env):
+        """Meet name must appear in the page — basic sanity before card assertions."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [
+            {"swim_id": "s8", "swimmer_name": "Any Swimmer", "event": "100m Free", "headline": "PB"},
+        ])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert "BODY CONTENT TEST INVITATIONAL" in body, (
+            "/review body must contain the meet name"
+        )
+
+    def test_run_with_no_achievements_shows_empty_state_not_crash(self, review_env):
+        """A run with an empty ranked_achievements list must render an empty-state page, not crash."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = _make_run_payload("org-test", [])
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        # No swimmer data from the empty list
+        assert 'class="ach-row"' not in body
+        # Empty state should be shown
+        assert len(body) > 200, "Response body must not be blank even for a zero-achievement run"
+
+    def test_unknown_run_returns_recovery_page_not_500(self, review_env):
+        """A non-existent run_id must show a recovery page, not a 500 or blank body."""
+        client = review_env["client"]
+
+        r = client.get("/review/run-does-not-exist-xyz")
+        # Either a redirect to home or a rendered recovery page is acceptable;
+        # a 500 or empty 200 body is not.
+        assert r.status_code in (200, 302, 404)
+        if r.status_code == 200:
+            body = r.get_data(as_text=True)
+            assert len(body) > 100, "Recovery page body must not be blank"
+            # Must not contain a Python traceback
+            assert "Traceback" not in body
+            assert "Internal Server Error" not in body
