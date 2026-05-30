@@ -50,7 +50,7 @@ concurrency:
 jobs:
   autopilot:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,7 +103,7 @@ jobs:
           AUTOTEST_GATE_MAX_ITERS: "2"       # implement + one root-cause retry, then stop
           AUTOTEST_CODER_TIMEOUT: "900"      # 15 min per coder call — real builds need exploring
           AUTOTEST_CODER_REVIEW: "0"         # skip the 2nd review call; the green-test gate is the bar
-          AUTOTEST_BUILD_TEST_TIMEOUT: "900" # cap the pytest gate so 2×(coder+gate) fits the 90-min job
+          AUTOTEST_BUILD_TEST_TIMEOUT: "1200" # pytest gate: full suite is ~9.5m, so 20m gives slow-runner margin
         run: |
           python -m autotest.builder | tee /tmp/build.json
           echo "branch=$(python -c "import json,sys;print(json.load(open('/tmp/build.json')).get('branch',''))")" >> "$GITHUB_OUTPUT"
