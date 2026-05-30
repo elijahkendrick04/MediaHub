@@ -136,8 +136,18 @@ def _test_gate() -> tuple[bool, str]:
     return p.returncode == 0, tail
 
 
+# Runtime/data areas a gate run, the finder, or an over-eager coder may rewrite.
+# They must NEVER ride along in a build/fix commit to main — only source edits do.
+_NO_COMMIT_PATHS = ("autotest/reports", "autotest/screenshots", "autotest/runs",
+                    "autotest/handover", "data")
+
+
 def _changed_files() -> tuple[list[str], int]:
     _git("add", "-A")
+    # Un-stage runtime artifacts so `git add -A` can't sweep a rewritten ledger,
+    # screenshot, or tracked data/ file into the commit (audit H2).
+    for p in _NO_COMMIT_PATHS:
+        _git("reset", "-q", "--", p)
     rc, out = _git("diff", "--cached", "--numstat")
     files, insertions = [], 0
     for line in out.splitlines():

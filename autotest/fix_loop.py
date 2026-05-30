@@ -73,7 +73,20 @@ def _open_bugs(limit: int) -> list[dict]:
         int(b.get("fix_attempts", 0)),
         0 if b.get("present_last_run", True) else 1,
     ))
-    return bugs[:limit]
+    # Collapse near-duplicates: the LLM judge re-files the SAME defect under many
+    # fingerprints (different wording), so the 50+ open bugs are really a handful
+    # of root causes. Keep one bug per (category, normalised route) so we don't
+    # open duplicate PRs or burn attempts on the same defect; the rest resurface
+    # next sweep once this one is fixed/in-flight.
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict] = []
+    for b in bugs:
+        key = (b.get("category", ""), report.normalise(b.get("route", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(b)
+    return unique[:limit]
 
 
 def _update(fingerprint: str, **fields) -> None:
