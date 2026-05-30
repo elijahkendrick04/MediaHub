@@ -57,10 +57,19 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         # (a Pro/Max SUBSCRIPTION token from `claude setup-token` — flat cost) is
         # preferred; ANTHROPIC_API_KEY (metered) is the fallback. The CI
         # workflows set only the subscription token so billing stays flat.
-        # NOTE: --dangerously-skip-permissions is refused under root; acceptEdits
-        # auto-approves file edits headlessly and works as root.
-        flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE",
-                               "--permission-mode acceptEdits").split()
+        #
+        # Permissions: headless `claude -p` STALLS the instant the agent needs a
+        # tool the permission mode hasn't pre-approved — e.g. Bash to grep/read
+        # the monolith — because no approval prompt can be answered without a
+        # TTY, so it burns to the timeout wall every run. --dangerously-skip-
+        # permissions bypasses ALL checks (the standard headless-automation flag)
+        # and fixes that — but the CLI REFUSES it under root/sudo. GitHub runners
+        # are non-root, so use it there; fall back to acceptEdits only when root
+        # (some local/container sandboxes), where the flag is blocked.
+        is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+        default_flags = ("--permission-mode acceptEdits" if is_root
+                         else "--dangerously-skip-permissions")
+        flags = os.environ.get("AUTOTEST_CODER_FLAGS_CLAUDE", default_flags).split()
         env = os.environ.copy()
         cmd = ["claude", "-p", prompt, *flags]
     else:
@@ -71,8 +80,18 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
                            timeout=timeout)
         out = (p.stdout or "")[-2000:] + (p.stderr or "")[-1000:]
         return p.returncode == 0, out
-    except subprocess.TimeoutExpired:
-        return False, f"{be} coder timed out after {timeout:.0f}s"
+    except subprocess.TimeoutExpired as exc:
+        # Surface whatever the coder emitted before we killed it: "produced
+        # nothing" (blocked at startup / on a permission) vs "was mid-edit"
+        # (genuinely slow) is the whole diagnosis.
+        def _tail(x: object) -> str:
+            if not x:
+                return ""
+            return x.decode("utf-8", "replace") if isinstance(x, bytes) else str(x)
+        partial = (_tail(exc.stdout)[-700:] + _tail(exc.stderr)[-400:]).strip()
+        detail = (f"; last output before kill: {partial[-700:]}" if partial
+                  else " (no output captured — blocked before producing anything)")
+        return False, f"{be} coder timed out after {timeout:.0f}s{detail}"
     except Exception as exc:
         return False, f"{be} coder error: {exc}"
 
