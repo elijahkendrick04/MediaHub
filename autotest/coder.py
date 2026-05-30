@@ -127,7 +127,10 @@ def write_code(task: str, *, complex: bool = False, review: bool = True,
     if not ok:
         return False, out
     log = (out or "")[-1200:]
-    if review:
+    # The reviewer/refine pass is a second full coder call. It can be turned off
+    # (AUTOTEST_CODER_REVIEW=0) when the per-bug time budget is tight and the
+    # green-test gate is already the safety bar — e.g. the CI fixer.
+    if review and os.environ.get("AUTOTEST_CODER_REVIEW", "1") != "0":
         ok2, out2 = run_coder(REVIEW_PROMPT, cwd=cwd, timeout=timeout)
         log += "\n\n--- self-review/refine pass ---\n" + (out2 or "")[-1200:]
     return True, log

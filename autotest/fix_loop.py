@@ -168,7 +168,11 @@ def fix_one(bug: dict) -> dict:
         _fix_prompt(bug), complex=False, label=f"bug {fp}")
     if not ok:
         builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
-        if info.startswith("coder-failed"):
+        # A coder TIMEOUT just means this bug needs more time than the budget —
+        # treat it like any other failed attempt: retry next run, and escalate
+        # to a human issue once the attempt cap is hit. Only a genuine coder /
+        # auth error (crash, bad token) raises the "coder error" alarm.
+        if info.startswith("coder-failed") and "timed out" not in info:
             from autotest import notify
             notify.notify(
                 "Autopilot coder error (Claude)",

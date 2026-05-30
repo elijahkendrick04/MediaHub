@@ -101,7 +101,8 @@ jobs:
           # Bound the Claude coder so a build finishes inside the job's wall clock
           # instead of being hard-killed mid-build (which marks the run red).
           AUTOTEST_GATE_MAX_ITERS: "2"     # implement + one root-cause retry, then stop
-          AUTOTEST_CODER_TIMEOUT: "600"    # cap each Claude coder call at 10 min
+          AUTOTEST_CODER_TIMEOUT: "900"    # 15 min per coder call — real builds need exploring
+          AUTOTEST_CODER_REVIEW: "0"       # skip the 2nd review call; the green-test gate is the bar
         run: |
           python -m autotest.builder | tee /tmp/build.json
           echo "branch=$(python -c "import json,sys;print(json.load(open('/tmp/build.json')).get('branch',''))")" >> "$GITHUB_OUTPUT"
