@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-30 · `a5bb00a07` · fix(autotest): gate-judged fixes, tractable-first ordering, phrasing-stable fingerprints (#174)
+**Last updated:** 2026-05-30 · `b33f6fac7` · fix(pipeline): surface V5 achievements as content cards (zero-cards bug) (#175)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,8 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-30 | `b33f6fac7` | fix(pipeline): surface V5 achievements as content cards (zero-cards bug) (#175) |
+| 2026-05-30 | `6a36e0864` | autopilot: persist builder state [skip ci] |
 | 2026-05-30 | `a5bb00a07` | fix(autotest): gate-judged fixes, tractable-first ordering, phrasing-stable fingerprints (#174) |
 | 2026-05-30 | `2926a6ac2` | autotest: persist fixer memory [skip ci] |
 | 2026-05-30 | `b3c9f11a7` | autotest: refresh bug report [skip ci] |
@@ -72,8 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-30 | `567fc05a8` | fix(autotest): make the autopilot able to actually merge a good build (#168) |
 | 2026-05-30 | `2ece931e3` | feat(autotest): never-skip policy — retry-with-backoff, no terminal dead-ends (#167) |
 | 2026-05-30 | `4794f9bf6` | fix(autotest): unblock the coder (inherited-stdin hang) + un-wedge the autopilot (#166) |
-| 2026-05-30 | `773d9431a` | autotest: persist fixer memory [skip ci] |
-| 2026-05-30 | `91d3f6135` | autotest: refresh bug report [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
