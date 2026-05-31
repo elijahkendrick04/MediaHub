@@ -37,6 +37,28 @@ def _git(*args: str) -> tuple[int, str]:
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
+# Council MERGE rule: a CONTENT regression (baseline:regression) only justifies
+# reverting a merge that plausibly CAUSED it -- one that touched content-affecting
+# product code. A docs/test/config-only merge must never be reverted for a content
+# drop (likely a data/LLM drift, not the merge).
+_CONTENT_PREFIXES = ("src/mediahub/", "legacy/")
+# Per-sweep cap on auto-reverts -- never thrash main (the council's #1 blind spot).
+REVERT_CAP = int(os.environ.get("AUTOTEST_ACCEPT_REVERT_CAP", "1"))
+
+
+def _touches_content(sha: str) -> bool:
+    """True if commit `sha` changed content-affecting product code (so a content
+    regression after it is plausibly its fault). Unknown/empty -> True, failing
+    safe toward the existing crash-revert behaviour."""
+    if not sha:
+        return True
+    rc, out = _git("show", "--name-only", "--format=", sha)
+    files = [f.strip() for f in out.splitlines() if f.strip()]
+    if not files:
+        return True
+    return any(f.startswith(_CONTENT_PREFIXES) and not f.startswith("tests/") for f in files)
+
+
 def _judge(record: dict[str, Any], findings: list[Finding], artifacts: dict[str, Any]) -> dict:
     """Decide if the built item satisfies the roadmap intent and didn't regress.
     Returns {passed: True|False|None, reason, via}. ``None`` = INCONCLUSIVE — we
@@ -46,10 +68,17 @@ def _judge(record: dict[str, Any], findings: list[Finding], artifacts: dict[str,
     # block every single build forever.
     crashes = [f for f in findings if f.is_bug and f.category in
                ("server_traceback", "http_5xx", "navigation_error")]
-    if crashes:
+    # Council MERGE: also gate on a SILENT content regression (the FIND baseline
+    # diff) -- a golden-input card/achievement collapse the subagents don't flag.
+    content = [f for f in findings if f.is_bug and f.category.startswith("baseline:regression")]
+    if crashes or content:
+        regs = crashes + content
         return {"passed": False, "via": "regression-gate",
-                "reason": f"{len(crashes)} crash-level finding(s) this sweep: "
-                          + "; ".join(f.title for f in crashes[:3])}
+                "reason": f"{len(regs)} regression(s) this sweep: "
+                          + "; ".join(f.title for f in regs[:3]),
+                # crashes always revert; a content-ONLY regression additionally
+                # requires the merge to have touched content code (checked at revert).
+                "content_only": not crashes}
     try:
         from autotest import cli_llm
         if not cli_llm.available():
@@ -94,9 +123,13 @@ def _emit_directive(item_id: str, status: str, note: str) -> str:
     return f"emitted {roadmap.directive(item_id, status)} (push rc={rc})"
 
 
-def _auto_revert(record: dict[str, Any]) -> str:
+def _auto_revert(record: dict[str, Any], *, content_only: bool = False) -> str:
     """Revert the item's merge on main when a regression is detected. Only when
-    prod auto-merge is armed (else nothing landed) and APPLY is set."""
+    prod auto-merge is armed (else nothing landed) and APPLY is set. A content-ONLY
+    regression is reverted only if the merge plausibly caused it (touched content
+    code); otherwise it's left in place + the operator notified. The revert/push
+    rc is checked and reported HONESTLY -- never a false 'reverted'. Every outcome
+    notifies -- never silent."""
     if os.environ.get("AUTOTEST_BUILD_MERGE") != "1" or os.environ.get("AUTOTEST_ACCEPT_APPLY") != "1":
         return "auto-revert skipped (prod merge not armed, or accept not applied)"
     item_id = record.get("item_id", "")
@@ -108,10 +141,36 @@ def _auto_revert(record: dict[str, Any]) -> str:
     sha = out.strip().splitlines()[0] if out.strip() else ""
     if not sha:
         return f"no build commit found for {item_id} — manual revert needed"
-    rc, _ = _git("revert", "--no-edit", "-m", "1", sha)
+    from autotest import notify
+    if content_only and not _touches_content(sha):
+        notify.notify(
+            f"Content regression NOT auto-reverted -- {item_id} didn't touch content code",
+            f"A content regression followed build {item_id} ({sha[:10]}), but that merge changed "
+            "no content-affecting product code -- likely a data/LLM drift, not this merge. Left in "
+            "place for a human (an auto-revert would remove good work without fixing the metric).")
+        return f"revert skipped: {sha[:10]} touched no content paths (regression likely not its fault)"
+    # The revert ITSELF can fail (conflict, push race). Check both rcs and report
+    # honestly -- a "reverted" message that didn't push is the #177 false-success bug.
+    rc, rout = _git("revert", "--no-edit", "-m", "1", sha)
     if rc != 0:
-        rc, _ = _git("revert", "--no-edit", sha)
-    _git("push", "origin", BASE_BRANCH)
+        rc, rout = _git("revert", "--no-edit", sha)
+    if rc != 0:
+        notify.notify(
+            f"Autopilot FAILED to revert build {item_id} -- needs a human NOW",
+            f"A regression followed {sha[:10]} but the revert did not apply (conflict?). "
+            f"{BASE_BRANCH} is UNCHANGED and still carries the regression. {rout[:300]}")
+        return f"revert FAILED for {sha[:10]} (did not apply; {BASE_BRANCH} still regressed)"
+    prc, pout = _git("push", "origin", BASE_BRANCH)
+    if prc != 0:
+        notify.notify(
+            f"Autopilot reverted build {item_id} locally but PUSH FAILED -- needs a human",
+            f"The revert of {sha[:10]} committed locally but did NOT push to {BASE_BRANCH}, "
+            f"which still carries the regression. {pout[:300]}")
+        return f"revert committed but PUSH FAILED for {sha[:10]} ({BASE_BRANCH} still regressed)"
+    notify.notify(
+        f"Autopilot AUTO-REVERTED build {item_id} after a post-merge regression",
+        f"Reverted {sha[:10]} on {BASE_BRANCH}. Reason: {record.get('title', item_id)}. "
+        "Review before re-attempting -- the item is now marked blocked.")
     return f"reverted {sha[:10]} on {BASE_BRANCH}"
 
 
@@ -120,6 +179,7 @@ def process(findings: list[Finding], artifacts: dict[str, Any]) -> list[Finding]
     if os.environ.get("AUTOTEST_ACCEPT", "1") == "0":
         return []
     out: list[Finding] = []
+    reverts_done = 0   # council MERGE: per-sweep auto-revert cap so we never thrash main
     for path, record in handover.pending():
         verdict = _judge(record, findings, artifacts)
         item_id = record.get("item_id", "?")
@@ -140,7 +200,18 @@ def process(findings: list[Finding], artifacts: dict[str, Any]) -> list[Finding]
                                actual=f"{verdict['reason']} | {action}",
                                evidence=f"via {verdict['via']}"))
         else:
-            revert = _auto_revert(record)
+            if reverts_done >= REVERT_CAP:
+                from autotest import notify
+                notify.notify(
+                    "Autopilot revert cap reached -- NOT reverting further this sweep",
+                    f"{item_id} failed acceptance ({verdict['reason']}), but {reverts_done} "
+                    f"revert(s) already happened this sweep (cap {REVERT_CAP}). Stopping to avoid "
+                    "thrashing main -- left in place, needs a human.")
+                revert = "skipped (per-sweep revert cap reached)"
+            else:
+                revert = _auto_revert(record, content_only=verdict.get("content_only", False))
+                if revert.startswith("reverted"):
+                    reverts_done += 1
             _emit_directive(item_id, "blocked", "reverted by the testing loop")
             handover.resolve(path, "blocked", {**verdict, "revert": revert})
             out.append(Finding(category="roadmap_regression", severity="high",
