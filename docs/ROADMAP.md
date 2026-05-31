@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `c4aa2e880` · docs: ADR 0002 — decline CloakBrowser integration (council verdict) (#189)
+**Last updated:** 2026-05-31 · `02ac71cef` · Deterministic, approval-gated caption voiceover (council verdict on Pixelle-Video) (#195)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,8 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `02ac71cef` | Deterministic, approval-gated caption voiceover (council verdict on Pixelle-Video) (#195) |
+| 2026-05-31 | `872230785` | feat(council): the Council as repo decision authority, wired into Claude Code (#192) |
 | 2026-05-31 | `c4aa2e880` | docs: ADR 0002 — decline CloakBrowser integration (council verdict) (#189) |
 | 2026-05-31 | `9d69cb486` | Vendor a curated subset of mattpocock/skills (reference only) (#190) |
 | 2026-05-31 | `1e1aa8a5c` | docs: reject 9router integration (ADR 0002) after council review (#191) |
@@ -73,8 +75,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `f448dba20` | autopilot: persist builder state [skip ci] |
 | 2026-05-31 | `ecb8d71f7` | autotest: persist fixer memory [skip ci] |
 | 2026-05-31 | `5ab8f22aa` | autotest: refresh bug report [skip ci] |
-| 2026-05-31 | `20b00808e` | harden(MERGE): auto-revert catches silent content regressions, guarded + honest (#187) |
-| 2026-05-31 | `aaab9da2c` | harden(OPEN-PR): carry the council's reasoning into the PR body (#186) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
