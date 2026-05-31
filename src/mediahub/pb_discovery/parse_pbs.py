@@ -13,10 +13,10 @@ or a 'rows' key with table-like data that can be mapped to PBRow objects.
 Falls back to heuristic regex extraction if the interpreter is not available
 or if its output doesn't contain structured PB data.
 """
+
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,9 +26,10 @@ from .fetch_profile import ProfilePage
 @dataclass
 class PBRow:
     """A single personal best entry."""
-    event: str                    # Canonical event name, e.g. "100m Freestyle"
-    course: str                   # "LC" (long course) or "SC" (short course)
-    time_canonical: str           # e.g. "1:02.34"
+
+    event: str  # Canonical event name, e.g. "100m Freestyle"
+    course: str  # "LC" (long course) or "SC" (short course)
+    time_canonical: str  # e.g. "1:02.34"
     date: Optional[str] = None
     meet: Optional[str] = None
     rank: Optional[int] = None
@@ -62,31 +63,29 @@ class PBRow:
 
 # Time pattern: matches formats like 1:02.34, 59.87, 2:01:02.34
 _TIME_RE = re.compile(
-    r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\.\d{1,2}\b'   # MM:SS.ss or HH:MM:SS.ss
-    r'|\b\d{2,3}\.\d{2}\b'                          # SS.ss (e.g. 59.87)
+    r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\.\d{1,2}\b"  # MM:SS.ss or HH:MM:SS.ss
+    r"|\b\d{2,3}\.\d{2}\b"  # SS.ss (e.g. 59.87)
 )
 
 # Event distance patterns
-_DISTANCE_RE = re.compile(
-    r'\b(50|100|200|400|800|1500|1650)\s*m?\b', re.IGNORECASE
-)
+_DISTANCE_RE = re.compile(r"\b(50|100|200|400|800|1500|1650)\s*m?\b", re.IGNORECASE)
 
 # Stroke name patterns (canonical form detection)
 _STROKE_PATTERNS = [
-    (re.compile(r'\b(free(?:style)?)\b', re.IGNORECASE), 'Freestyle'),
-    (re.compile(r'\b(back(?:stroke)?)\b', re.IGNORECASE), 'Backstroke'),
-    (re.compile(r'\b(breast(?:stroke)?)\b', re.IGNORECASE), 'Breaststroke'),
-    (re.compile(r'\b(butt?erfly|fly)\b', re.IGNORECASE), 'Butterfly'),
-    (re.compile(r'\b(i\.?m\.?|individual\s+medley|medley)\b', re.IGNORECASE), 'Individual Medley'),
+    (re.compile(r"\b(free(?:style)?)\b", re.IGNORECASE), "Freestyle"),
+    (re.compile(r"\b(back(?:stroke)?)\b", re.IGNORECASE), "Backstroke"),
+    (re.compile(r"\b(breast(?:stroke)?)\b", re.IGNORECASE), "Breaststroke"),
+    (re.compile(r"\b(butt?erfly|fly)\b", re.IGNORECASE), "Butterfly"),
+    (re.compile(r"\b(i\.?m\.?|individual\s+medley|medley)\b", re.IGNORECASE), "Individual Medley"),
 ]
 
 # Course detection
-_LC_RE = re.compile(r'\b(?:LC|LCM|long\s+course|50\s*m\s+pool)\b', re.IGNORECASE)
-_SC_RE = re.compile(r'\b(?:SC|SCM|short\s+course|25\s*m\s+pool)\b', re.IGNORECASE)
+_LC_RE = re.compile(r"\b(?:LC|LCM|long\s+course|50\s*m\s+pool)\b", re.IGNORECASE)
+_SC_RE = re.compile(r"\b(?:SC|SCM|short\s+course|25\s*m\s+pool)\b", re.IGNORECASE)
 
 # Date pattern
 _DATE_RE = re.compile(
-    r'\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})\b'
+    r"\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{2}[\/\-\.]\d{2})\b"
 )
 
 
@@ -136,17 +135,19 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
             if dist_m and stroke:
                 event = f"{dist_m.group(1)}m {stroke}"
                 date_m = _DATE_RE.search(row_text)
-                rows.append(PBRow(
-                    event=event,
-                    course=course,
-                    time_canonical=_normalise_time(time_matches[0]),
-                    date=date_m.group(1) if date_m else None,
-                    raw={"row": row, "source": "table_heuristic"},
-                ))
+                rows.append(
+                    PBRow(
+                        event=event,
+                        course=course,
+                        time_canonical=_normalise_time(time_matches[0]),
+                        date=date_m.group(1) if date_m else None,
+                        raw={"row": row, "source": "table_heuristic"},
+                    )
+                )
 
     # If no table rows found, try free text extraction
     if not rows:
-        lines = page.text.split('\n')
+        lines = page.text.split("\n")
         for line in lines:
             time_matches = _TIME_RE.findall(line)
             if not time_matches:
@@ -156,13 +157,15 @@ def _heuristic_extract_pbs(page: ProfilePage) -> list[PBRow]:
             if dist_m and stroke:
                 event = f"{dist_m.group(1)}m {stroke}"
                 date_m = _DATE_RE.search(line)
-                rows.append(PBRow(
-                    event=event,
-                    course=course,
-                    time_canonical=_normalise_time(time_matches[0]),
-                    date=date_m.group(1) if date_m else None,
-                    raw={"line": line.strip(), "source": "text_heuristic"},
-                ))
+                rows.append(
+                    PBRow(
+                        event=event,
+                        course=course,
+                        time_canonical=_normalise_time(time_matches[0]),
+                        date=date_m.group(1) if date_m else None,
+                        raw={"line": line.strip(), "source": "text_heuristic"},
+                    )
+                )
 
     return rows
 
@@ -171,35 +174,58 @@ def _interpreter_extract_pbs(page: ProfilePage) -> tuple[list[PBRow], float]:
     """
     Use the interpreter package to extract PBs from a profile page.
 
-    Returns (pb_rows, confidence). Falls back gracefully if interpreter
-    is not available.
+    ``interpret_document`` returns an ``InterpretedMeet`` dataclass (events →
+    swims), not a dict, so we walk that structure and synthesise one ``PBRow``
+    per swim. Event name / course / time follow the same conventions as the
+    heuristic extractor (``"{distance}m {stroke}"``, course "LC"/"SC", time via
+    ``_normalise_time``). Returns ``(pb_rows, confidence)``; raises
+    ``ImportError`` if the interpreter package is unavailable so the caller can
+    fall back to the heuristic path.
     """
     try:
-        import mediahub.interpreter  # lazy import — may not exist yet
-        raw_bytes = page.text.encode("utf-8")
-        result = interpreter.interpret_document(raw_bytes, hint='profile_page')
-
-        pbs_raw = result.get("pbs") or result.get("rows") or []
-        confidence = result.get("confidence", 0.5)
-
-        pb_rows = []
-        for r in pbs_raw:
-            if isinstance(r, dict):
-                pb_rows.append(PBRow(
-                    event=r.get("event", r.get("event_canonical", "")),
-                    course=r.get("course", "LC"),
-                    time_canonical=r.get("time_canonical", r.get("time", "")),
-                    date=r.get("date"),
-                    meet=r.get("meet"),
-                    rank=r.get("rank"),
-                    raw=r,
-                ))
-        return pb_rows, float(confidence)
+        from mediahub.interpreter import interpret_document
     except ImportError:
         raise ImportError(
             "interpreter package not yet built — "
             "provide a stub or wait for the interpreter subagent to complete"
         )
+
+    try:
+        raw_bytes = page.text.encode("utf-8")
+        result = interpret_document(raw_bytes, hint="profile_page")
+
+        # The interpreter doesn't always resolve course from a sparse profile
+        # page; fall back to the page-level course detection the heuristic uses.
+        page_course = _detect_course(page.text)
+
+        pb_rows: list[PBRow] = []
+        for event in result.events:
+            if event.distance_m and event.stroke:
+                event_name = f"{event.distance_m}m {event.stroke}"
+            else:
+                event_name = (event.raw_header or "").strip()
+            if not event_name:
+                continue
+            course = event.course or page_course
+            for swim in event.swims:
+                if not swim.time:
+                    continue
+                pb_rows.append(
+                    PBRow(
+                        event=event_name,
+                        course=course,
+                        time_canonical=_normalise_time(swim.time),
+                        date=None,
+                        meet=result.meet_name,
+                        rank=swim.place,
+                        raw={
+                            "swimmer_name": swim.swimmer_name,
+                            "raw_row": swim.raw_row,
+                            "source": "interpreter",
+                        },
+                    )
+                )
+        return pb_rows, float(result.overall_confidence)
     except Exception:
         return [], 0.0
 

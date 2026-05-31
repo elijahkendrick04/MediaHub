@@ -13,6 +13,7 @@ Algorithm:
 No source domains are hardcoded. The engine discovers sources via web search
 and ranks them by empirical success (trust ledger).
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,7 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from mediahub.context_engine.research import ResearchClient
-from mediahub.context_engine.trust import score_domain, rank_candidates, record_attempt
+from mediahub.context_engine.trust import rank_candidates, record_attempt
 
 from .cache import RunCache, WarmCache, make_swimmer_key
 from .fetch_profile import fetch_profile_page
@@ -38,6 +39,7 @@ from .parse_pbs import PBRow, parse_pbs_from_page
 @dataclass
 class PBSource:
     """A candidate source tried during PB discovery."""
+
     url: str
     domain: str
     fetched_at: str
@@ -67,6 +69,7 @@ class PBSource:
 @dataclass
 class PBDiscovery:
     """Result of discovering a swimmer's personal bests."""
+
     swimmer_query: str
     sources_tried: list[PBSource] = field(default_factory=list)
     chosen_source: Optional[PBSource] = None
@@ -112,9 +115,10 @@ def _build_queries(name: str, club: str, dob_year: Optional[int]) -> list[str]:
 
 def _domain_from_url(url: str) -> str:
     import re
+
     try:
-        s = re.sub(r'^https?://', '', url)
-        return s.split('/')[0].split('?')[0].split(':')[0].lower()
+        s = re.sub(r"^https?://", "", url)
+        return s.split("/")[0].split("?")[0].split(":")[0].lower()
     except Exception:
         return ""
 
@@ -202,13 +206,15 @@ def discover_swimmer_pbs(
         page = fetch_profile_page(url)
 
         if not page.fetch_success:
-            sources_tried.append(PBSource(
-                url=url,
-                domain=domain,
-                fetched_at=fetched_at,
-                parse_confidence=0.0,
-                pbs=[],
-            ))
+            sources_tried.append(
+                PBSource(
+                    url=url,
+                    domain=domain,
+                    fetched_at=fetched_at,
+                    parse_confidence=0.0,
+                    pbs=[],
+                )
+            )
             record_attempt(domain, success=False, purpose="swimmer_pbs")
             continue
 
