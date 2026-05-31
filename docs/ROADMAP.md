@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `f92fe4cd3` · Merge pull request #206 from elijahkendrick04/claude/eloquent-galileo-oiKeY
+**Last updated:** 2026-05-31 · `5306f517b` · Merge pull request #208 from elijahkendrick04/claude/finder-precision-empty-state
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `345ab36c3` | fix(autotest): functional judge mis-flags legitimate empty states as zero-card bugs |
 | 2026-05-31 | `620a08351` | style: ruff-format the three PR-changed modules (clear advisory hygiene check) |
 | 2026-05-31 | `f240f1b99` | proof prereqs: add no-valid-patch + break-point + cascade + n=1 caveats (council) |
 | 2026-05-31 | `2574da021` | proof prereqs: autonomy boundary + independent verifier + #204/#205 note |
@@ -73,8 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `bcacf6d04` | autotest: persist fixer memory [skip ci] |
 | 2026-05-31 | `0e7b3d196` | autotest: refresh bug report [skip ci] |
 | 2026-05-31 | `72855b79a` | fix-c (RULE A): the whole council:blind_spot category is meta + clear residual queue |
-| 2026-05-31 | `83d0e0458` | autopilot: persist builder state [skip ci] |
-| 2026-05-31 | `9b4931693` | governance: human-authored change-classification rule + machine-verifiable proof criterion |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
