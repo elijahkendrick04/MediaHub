@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `6cbebba38` · Merge pull request #204 from elijahkendrick04/autotest/fix-8ee1cbc395d9
+**Last updated:** 2026-05-31 · `0dad3c980` · Merge pull request #205 from elijahkendrick04/autotest/fix-b07572c63c13
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,8 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `bcacf6d04` | autotest: persist fixer memory [skip ci] |
+| 2026-05-31 | `0e7b3d196` | autotest: refresh bug report [skip ci] |
 | 2026-05-31 | `72855b79a` | fix-c (RULE A): the whole council:blind_spot category is meta + clear residual queue |
 | 2026-05-31 | `83d0e0458` | autopilot: persist builder state [skip ci] |
 | 2026-05-31 | `9b4931693` | governance: human-authored change-classification rule + machine-verifiable proof criterion |
@@ -71,7 +73,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `9c36b5654` | fix(pb_discovery): make the interpreter PB-extraction path actually work |
 | 2026-05-31 | `d0e77590d` | decontaminate FIND/adjudicate: provenance guard, council framing, meta-filter, dedup |
 | 2026-05-31 | `abd5592df` | chore(lint): clear ruff F401/F811 debt + format touched files |
-| 2026-05-31 | `5c8670678` | fix(review): explain zero-card runs when no swims match the club (#196) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
