@@ -17,6 +17,11 @@ onnxruntime>=1.16
 anthropic>=0.30
 replicate>=0.25
 
+# Voiceover (optional, operator-gated via MEDIAHUB_VOICEOVER=1): pure-Python,
+# CPU-only text-to-speech of the already-approved caption. When absent the
+# voiceover route honest-errors (503) rather than degrading to a fake voice.
+edge-tts>=6.1
+
 # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
 # materialyoucolor is the maintained Python port of Google's
 # material-color-utilities; it ships HCT, the MD3 TonalSpot scheme

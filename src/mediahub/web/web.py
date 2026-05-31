@@ -86,6 +86,23 @@ try:
 except ImportError:
     _workflow_ok = False
 
+# Voiceover: deterministic TTS of the already-approved caption (verbatim).
+# Off by default — it is an online dependency that sends caption text to a
+# Microsoft endpoint, so the operator opts in with MEDIAHUB_VOICEOVER=1.
+try:
+    from mediahub.visual import voiceover as _voiceover
+    _voiceover_ok = True
+except ImportError:
+    _voiceover_ok = False
+    _voiceover = None
+
+
+def _voiceover_enabled() -> bool:
+    """True only when the module imported AND the operator opted in."""
+    return bool(_voiceover_ok) and os.environ.get(
+        "MEDIAHUB_VOICEOVER", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
 
 # V7.3 imports
 try:
@@ -19228,6 +19245,128 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             }), 500
         return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
                          download_name=f"meet_reel_{run_id}.mp4")
+
+    @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
+    def api_card_voiceover(run_id: str, card_id: str):
+        """Synthesise (or serve cached) a voiceover for a single APPROVED card.
+
+        The spoken text is the human-approved caption, verbatim — there is no AI
+        script here. This route is the *audio approval gate*: it refuses to speak
+        a card that a human has not approved, mirroring the rule that nothing is
+        published until a person signs off.
+
+        Query/format:
+          - default            → serves the MP3 (audio/mpeg)
+          - ?format=srt        → serves the subtitle track (for muted autoplay)
+          - ?format=json       → returns {transcript, voice, duration_ms, ...}
+                                  for the review/playback surface
+        """
+        if not _voiceover_enabled():
+            # Honest, specific 503 — either the backend isn't importable or the
+            # operator hasn't opted in. Never a silent fallback voice.
+            return jsonify({
+                "error": "voiceover_disabled",
+                "kind": "infra_missing",
+                "user_message": (
+                    "Voiceover is turned off. An operator can enable it by "
+                    "installing the speech backend and setting MEDIAHUB_VOICEOVER=1."
+                ),
+            }), 503
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Locate the card (same lookup the motion route uses).
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        card = None
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            if ach.get("swim_id") == card_id or ra.get("id") == card_id:
+                card = {**ach, **ra}
+                break
+        if card is None:
+            for c in (run_data.get("cards") or []):
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    card = c
+                    break
+        if card is None:
+            return jsonify({"error": "card_not_found"}), 404
+
+        # Audio approval gate: only speak a human-approved (or posted) card.
+        ws = _get_wf_store()
+        state = ws.load(run_id).get(card_id) if ws is not None else None
+        approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if not approved:
+            return jsonify({
+                "error": "not_approved",
+                "user_message": (
+                    "This card hasn't been approved yet. Approve the caption "
+                    "first — voiceover only speaks approved content."
+                ),
+            }), 409
+
+        # Derive the verbatim caption text from approved state, server-side.
+        text = ""
+        if state is not None and state.edited_captions:
+            # Honour the human's edits: join the saved slots in a stable order.
+            parts = [state.edited_captions[k] for k in sorted(state.edited_captions) if state.edited_captions.get(k)]
+            text = "\n".join(p for p in parts if p).strip()
+        if not text and _build_caption_text is not None:
+            try:
+                text = _build_caption_text(card, mode="caption_only")
+            except Exception:
+                text = ""
+        if not text:
+            return jsonify({
+                "error": "no_caption",
+                "user_message": "This card has no caption text to speak.",
+            }), 422
+
+        try:
+            voice = os.environ.get("MEDIAHUB_VOICEOVER_VOICE", "").strip() or _voiceover.DEFAULT_VOICE
+            with _render_slot("voiceover", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                result = _voiceover.synthesize(text, voice=voice, run_id=run_id)
+        except _RenderBusy:
+            return _render_busy_response("voiceover")
+        except _voiceover.VoiceoverError as e:
+            return jsonify({
+                "error": "voiceover_unavailable",
+                "kind": "infra_missing",
+                "detail": str(e),
+                "user_message": (
+                    "Voiceover couldn't be generated right now (the speech "
+                    "service is unavailable). Try again shortly."
+                ),
+            }), 503
+        except Exception as e:
+            return jsonify({"error": "voiceover_failed", "detail": str(e)}), 500
+
+        fmt = (request.args.get("format") or "").strip().lower()
+        if fmt == "json":
+            return jsonify({
+                "ok": True,
+                "transcript": result.transcript,
+                "voice": result.voice,
+                "duration_ms": result.duration_ms,
+                "cached": result.cached,
+                "has_subtitles": bool(result.word_boundaries),
+            })
+        if fmt == "srt":
+            return send_file(str(result.srt_path), mimetype="application/x-subrip",
+                             as_attachment=False, download_name=f"{card_id}.srt")
+        return send_file(str(result.audio_path), mimetype="audio/mpeg",
+                         as_attachment=False, download_name=f"{card_id}.mp3")
 
     @app.route("/api/visual/<vid>")
     def api_visual_get(vid: str):
