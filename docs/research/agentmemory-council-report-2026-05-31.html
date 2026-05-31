@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Council Verdict — Integrate agentmemory?</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1d212b; --ink: #e7eaf0;
+    --muted: #98a2b3; --line: #2a2f3a; --accent: #4f8cff; --no: #ff5d5d;
+    --yes: #34d399; --warn: #f4b740;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 20px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 600; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 4px; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 26px;
+  }
+  .question .q { font-size: 17px; font-weight: 600; }
+  .verdict {
+    background: linear-gradient(180deg, #1b1410, #171a21); border: 1px solid #3a2420;
+    border-left: 4px solid var(--no); border-radius: 12px; padding: 22px 24px; margin-bottom: 30px;
+  }
+  .verdict .tag {
+    display: inline-block; background: rgba(255,93,93,.14); color: var(--no);
+    border: 1px solid rgba(255,93,93,.4); border-radius: 999px; padding: 3px 12px;
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  }
+  .verdict h2 { margin: 12px 0 8px; font-size: 22px; }
+  .verdict p { margin: 0 0 4px; color: var(--ink); }
+  .verdict .first { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); color: var(--muted); }
+  .verdict .first b { color: var(--ink); }
+  h3 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 30px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 10px; }
+  .advisor {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  }
+  .advisor .name { font-weight: 700; font-size: 14px; }
+  .advisor .stance { font-size: 12px; font-weight: 700; margin-top: 6px; }
+  .advisor .gist { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .no-dot { color: var(--no); }
+  .mixed-dot { color: var(--warn); }
+  .spectrum {
+    display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 4px; flex-wrap: wrap;
+  }
+  .spectrum .lbl { font-size: 12px; color: var(--muted); }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); }
+  .pill.no { color: var(--no); border-color: rgba(255,93,93,.4); }
+  .pill.mixed { color: var(--warn); border-color: rgba(244,183,64,.4); }
+  details {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 0 16px; margin-bottom: 10px;
+  }
+  details summary {
+    cursor: pointer; padding: 14px 0; font-weight: 600; list-style: none;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::after { content: "+"; color: var(--muted); font-size: 20px; }
+  details[open] summary::after { content: "–"; }
+  details .body { padding: 0 0 16px; color: var(--ink); font-size: 14.5px; border-top: 1px solid var(--line); padding-top: 14px; }
+  details .body p { margin: 0 0 10px; }
+  .clash { border-left: 3px solid var(--warn); }
+  .blind { border-left: 3px solid var(--accent); }
+  footer { color: var(--muted); font-size: 12px; margin-top: 36px; border-top: 1px solid var(--line); padding-top: 16px; }
+  code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">LLM Council · Karpathy methodology</div>
+  <h1>Should MediaHub integrate <code>agentmemory</code>?</h1>
+  <div class="meta">2026-05-31 · 5 advisors → anonymised peer review → chairman synthesis · skill: <code>autotest/skills/llm-council/</code></div>
+
+  <div class="question">
+    <div class="eyebrow">The question</div>
+    <p class="q">Should MediaHub integrate <code>rohitg00/agentmemory</code> — a standalone TypeScript service (Node ≥20, iii-engine binary/Docker, long-lived ports 3111/3112/3113 + WebSocket 49134, Apache-2.0) that provides persistent memory for AI <em>coding</em> agents — into the repo, and if so, as what?</p>
+  </div>
+
+  <div class="verdict">
+    <span class="tag">Verdict · Unanimous</span>
+    <h2>Do not integrate. Nothing goes in the repo.</h2>
+    <p>agentmemory is memory for AI <em>coding</em> agents — it benefits the developer, never the swim club, and touches no step of ingest → detect → rank → brand → generate → approve → export. Bolting a second Node + native-binary runtime with three ports and a WebSocket onto a single-container Flask SaaS is runtime bloat and unrequested multi-tenant attack surface, for a thing customers never invoke.</p>
+    <p>A coding-agent's memory is a contributor's <em>local</em> toolchain choice — like their editor — not a committed, shipped dependency.</p>
+    <p class="first"><b>The one thing to do first:</b> Record the rejection as <code>docs/adr/0002-do-not-integrate-agentmemory.md</code> so it isn't quietly re-litigated.</p>
+  </div>
+
+  <h3>Advisor positions</h3>
+  <div class="spectrum">
+    <span class="lbl">Stance spectrum:</span>
+    <span class="pill no">Contrarian · NO</span>
+    <span class="pill no">First Principles · NO</span>
+    <span class="pill no">Outsider · NO</span>
+    <span class="pill no">Executor · NO</span>
+    <span class="pill mixed">Expansionist · NO (ship) / mine the idea</span>
+  </div>
+
+  <div class="grid">
+    <div class="advisor">
+      <div class="name">The Contrarian</div>
+      <div class="stance no-dot">▻ none in repo</div>
+      <div class="gist">Fatal flaw before purpose: a second runtime + 3 ports + WS in the Render container. Purpose disqualifies it. Local-only is fine; not an integration.</div>
+    </div>
+    <div class="advisor">
+      <div class="name">First Principles</div>
+      <div class="stance no-dot">▻ wrong question</div>
+      <div class="gist">Real question is dev-ergonomics, not architecture. Zero customer value, violates the deploy model, category error. Right artifact: nothing in this repo.</div>
+    </div>
+    <div class="advisor">
+      <div class="name">The Outsider</div>
+      <div class="stance no-dot">▻ label mismatch</div>
+      <div class="gist">"Memory for AI coding agents" — customers never touch a coding agent. Nobody can finish "…and then the swim club gets ____."</div>
+    </div>
+    <div class="advisor">
+      <div class="name">The Executor</div>
+      <div class="stance no-dot">▻ days of plumbing</div>
+      <div class="gist">Second runtime + supervisor + REST shim, for whom? No route/card/caption improves. Don't touch requirements/render/Docker. Run local, gitignore its data.</div>
+    </div>
+    <div class="advisor clash">
+      <div class="name">The Expansionist</div>
+      <div class="stance mixed-dot">▻ mine the idea</div>
+      <div class="gist">Don't ship it — borrow the concept: a Python-native, season-aware club memory layer. (Peer review: category slip; valuable but a separate bet.)</div>
+    </div>
+  </div>
+
+  <h3>Where the council clashes</h3>
+  <details class="clash">
+    <summary>The Expansionist's "mine the idea" dissent</summary>
+    <div class="body">
+      <p>The only divergence wasn't about integrating the tool — everyone said no to that. It was the Expansionist arguing MediaHub should <em>borrow the concept</em> and build a Python-native, season-aware <b>club memory layer</b> (athlete history, recurring sponsors, "already posted this" dedup) that feeds captioning and ranking.</p>
+      <p>Peer review flagged this as a <b>category slip</b>: agentmemory is a coding-agent vector/context store and shares almost nothing architecturally with the relational athlete history such a feature needs — there's no blueprint to borrow from <em>this tool</em>. But the underlying product insight (cross-season narrative memory as an intelligence-layer moat) is genuinely valuable, so it is recorded as a <b>separate roadmap candidate</b>, not a reason to integrate agentmemory.</p>
+    </div>
+  </details>
+
+  <h3>Blind spots peer review caught</h3>
+  <details class="blind">
+    <summary>Three things the first round missed</summary>
+    <div class="body">
+      <p><b>1. Verify the claims.</b> Advisors took the repo description on faith. The framing was checked against the live repository — ports, Apache-2.0, and "no Python library" all hold.</p>
+      <p><b>2. MCP is the clean path.</b> The standard way to give a coding agent memory is an MCP server, needing nothing in <code>requirements.txt</code>/<code>render.yaml</code> — but that's still a personal, local choice, not a committed dependency.</p>
+      <p><b>3. Confidentiality.</b> Even run locally, such a tool would index proprietary client code — worth naming.</p>
+    </div>
+  </details>
+
+  <h3>Full advisor responses</h3>
+  <details>
+    <summary>The Contrarian</summary>
+    <div class="body">
+      <p>No native Python binding. MediaHub is Python/Flask; agentmemory speaks only REST-on-3111 and a WebSocket SDK over 49134. Integrating it means MediaHub now ships and supervises a long-lived Node ≥20 process — plus an iii-engine native binary or nested Docker — inside a Render container that exists to parse swim results and render cards. A second runtime, three listening ports, and a WebSocket daemon next to a stateless web app. That's the fatal flaw before we even reach purpose.</p>
+      <p>And the purpose disqualifies it outright. agentmemory is memory for AI <em>coding</em> agents. It remembers codebase context across dev sessions. Zero relationship to ingest→detect→rank→brand→generate→approve→export. It cannot caption, brand, rank, or detect a PB. No end-user feature here. "Integrate it into the repo" confuses a developer's local tool with a product capability.</p>
+      <p>The only defensible question: whether a contributor runs it on their own machine. Fine — but that's not "integrated into the repo," it's a personal dev-environment choice like your editor. It must never land in render.yaml, the Dockerfile, requirements, or docs/DEVELOPMENT.md. Second-order risk: three open ports + a WebSocket on a deployed SaaS container is new attack surface and a multi-tenant question nobody asked for. Verdict: do not integrate, anywhere.</p>
+    </div>
+  </details>
+  <details>
+    <summary>The First Principles Thinker</summary>
+    <div class="body">
+      <p>The surface question is "integrate this dependency, as what artifact?" Wrong question. The real one: what problem do you have that you're hoping a tool solves? Nothing here touches MediaHub's product, customers, or pipeline. The only honest framing is "would persistent cross-session memory make me/Claude Code more effective in this repo?" — a personal dev-ergonomics question, not architecture.</p>
+      <p>Reframed, the answer is obvious: it doesn't belong in the repo in any form — not a dependency, vendored service, submodule, or feature flag. Zero customer value; violates the deployment model (Render runs the customer product; bundling daemons + a native binary is attack surface and bloat); a category error — your coding assistant's memory is your laptop's concern. If you personally want it, run it as a local tool outside the repo and outside Render. The right artifact is "nothing in this repo."</p>
+    </div>
+  </details>
+  <details>
+    <summary>The Expansionist</summary>
+    <div class="body">
+      <p>Integrating it as a runtime dependency would be a mistake — but the upside is in a different frame. Don't ship it. Mine it.</p>
+      <p>agentmemory is persistent memory for AI agents across sessions — exactly what MediaHub's <em>product</em> will need. A club uploads 30 meets a season; the moat isn't "detect this PB" but "remember Maya has chased this 50-free PB for 8 months." Cross-run, cross-season narrative memory is the most undervalued asset on the roadmap. Study the architecture (Apache-2.0, free to learn from), then build a Python-native, Postgres-backed club memory layer — athlete history, recurring sponsors, tone preferences, "already posted this" dedup — feeding captioning and ranking.</p>
+      <p>As a dev-experience play it's legitimate but smaller: a dev-only, gitignored, never-deployed helper, never touching src/mediahub/. The big bet is recognizing "persistent memory for agents" previews MediaHub's own next moat. Borrow the idea, own the implementation.</p>
+    </div>
+  </details>
+  <details>
+    <summary>The Outsider</summary>
+    <div class="body">
+      <p>This is a no, and I don't need to know swimming or Flask to see why — the mismatch is visible from the labels. You have a Python app that turns swim results into social posts. The thing you'd bolt on is a TypeScript service whose own description is "persistent memory for AI coding agents." It remembers context for Cursor/Copilot while a developer writes code. Your customers — a club's volunteer social media person — never touch a coding agent.</p>
+      <p>At best this is developer tooling, and even then a bad fit for this repo: needs Node 20+, a native binary or Docker, three ports + WebSocket — a second runtime of daemons next to a Flask app whose deploy story is "hosted on Render, no self-host"; no Python library, so you maintain glue for a service producing nothing the user sees. The tell: nobody can finish "and then the swim club gets ____." Want session memory while coding? Run it locally, off the deploy path.</p>
+    </div>
+  </details>
+  <details>
+    <summary>The Executor</summary>
+    <div class="body">
+      <p>No. Monday-morning reality: you'd add a Node ≥20 service needing the iii-engine binary or a Docker sidecar, three long-lived ports plus a WebSocket, into a single-service Render deployment that ships one Flask container. Second runtime, second supervisor, new networking — and zero Python client, so a hand-rolled REST shim too. Days of plumbing before it does anything.</p>
+      <p>Anything for whom? It helps AI coding assistants remember context — a benefit to the developer, not a swim club uploading a PDF. It touches none of the pipeline. So: dev tooling, and dev tooling doesn't belong in the repo. (1) Don't add it to requirements.txt, render.yaml, Dockerfile, or src/mediahub/. (2) If you personally want agent memory while coding, run it locally, pointed at the repo from outside, never committed. (3) Add its data dirs to .gitignore so its state never leaks in.</p>
+    </div>
+  </details>
+
+  <footer>
+    Counciled on 2026-05-31 · Karpathy LLM Council methodology · Decision recorded in
+    <code>docs/adr/0002-do-not-integrate-agentmemory.md</code> · Full transcript:
+    <code>docs/research/agentmemory-council-2026-05-31.md</code>
+  </footer>
+
+</div>
+</body>
+</html>
