@@ -330,7 +330,10 @@ def fix_one(bug: dict) -> dict:
     pr_url, pr_err = builder._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
         _pr_body(bug, fp, reg_status, reg_detail))
-    merge = builder._merge_to_main(branch, has_pr=bool(pr_url))  # honours AUTOTEST_BUILD_MERGE
+    # Governance gate: pass the changed files so _merge_to_main can apply the
+    # human-authored product-vs-harness rule (CHANGE_CLASSIFICATION.md) — a product
+    # fix may auto-merge; a harness/governance change stops for a human merge.
+    merge = builder._merge_to_main(branch, has_pr=bool(pr_url), files=files)
     if pr_err:
         # Branch is pushed with the fix, but no PR opened → nothing landed and
         # nothing is in flight. Leave the bug OPEN so the next cycle retries it
