@@ -103,8 +103,12 @@ def test_merge_refuses_without_a_pr(monkeypatch):
 
 def test_merge_armed_with_pr_enables(monkeypatch, gh_present):
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
-    monkeypatch.setattr(builder.subprocess, "run", lambda *a, **k: _completed(0))
+    calls = []
+    monkeypatch.setattr(builder.subprocess, "run",
+                        lambda cmd, *a, **k: (calls.append(cmd), _completed(0))[1])
     assert "auto-merge to main enabled" in builder._merge_to_main("b", has_pr=True)
+    # The throwaway branch is tidied once the auto-merge lands.
+    assert any("--delete-branch" in c for c in calls), f"merge should delete the branch: {calls}"
 
 
 def test_merge_armed_with_pr_reports_gh_failure(monkeypatch, gh_present):
