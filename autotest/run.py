@@ -1068,6 +1068,22 @@ def _run(run_id: str) -> int:
     except Exception:
         pass
 
+    # FIND baseline-diff (council): catch a SILENT primary-flow regression on the
+    # fixed golden input the subagents don't think to flag (e.g. 12 cards -> 3).
+    # Deterministic, so it bypasses council triage. Never break the sweep over it.
+    try:
+        from autotest import baseline as _baseline
+        _arts = tester.artifacts
+        _fr = str(_arts.get("flow_result", ""))
+        _golden = (not _fr.startswith("live") and not _arts.get("live_run_id")
+                   and str(_arts.get("input_file", "")).endswith(
+                       _baseline.GOLDEN_INPUT.rsplit("/", 1)[-1]))
+        _bf = _baseline.check(_baseline.metrics_from_artifacts(_arts),
+                              completed=_fr.startswith("passed"), golden=_golden)
+        if _bf:
+            tester.findings.append(_bf)
+    except Exception:
+        pass
     stats = report.merge_findings(tester.findings, run_id)
     run_meta = {"run_id": run_id, "base_url": base, "routes_probed": tester.routes_probed,
                 "pages_crawled": tester.pages_crawled, "flow_result": flow_result,

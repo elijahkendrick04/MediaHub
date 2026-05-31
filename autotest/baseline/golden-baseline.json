@@ -1,0 +1,6 @@
+{
+  "_comment": "Human-blessed baseline for the fixed golden input (sample_data/MISM-2024-Results.pdf) on a cold seeded org. Conservative bootstrap: the golden run must produce at least 1 content card and 1 achievement and a working export. Raise these via PR once steady-state golden-run output is observed (the baseline:drift note will prompt this) so larger silent regressions (e.g. 12 cards -> 3) are also caught. Never auto-advanced.",
+  "cards": 1,
+  "achievements": 1,
+  "export_ok": true
+}
