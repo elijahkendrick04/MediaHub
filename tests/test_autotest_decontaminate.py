@@ -304,24 +304,35 @@ def test_user_brain_judge_cannot_author_a_control_token_finding(monkeypatch):
         "into a finding that then reaches the council via issues_txt)")
 
 
-# --- Fix C: meta/diagnostic findings stay out of the product-fix queue ------
+# --- Fix C / RULE A: the whole council:blind_spot category is meta -----------
 def test_council_blindspot_diagnostic_route_is_meta():
     bug = {"category": "council:blind_spot", "route": "diagnostic/functional",
            "title": "Response body of /review never verified"}
     assert fix_loop._is_meta_finding(bug) is True
 
 
-def test_council_blindspot_with_real_route_is_not_meta():
-    # A real product bug the council surfaces with a real route must STILL be fixable.
+def test_council_blindspot_with_product_route_is_STILL_meta():
+    # RULE A (council ruling): the category boundary is the rule. A council:blind_spot
+    # finding is meta REGARDLESS of its route — the route is a council-invented `area`
+    # label, not a crawl-verified product route. (Genuine product concerns are re-filed
+    # as semantic findings before this applies, so none are lost.)
     bug = {"category": "council:blind_spot", "route": "/upload/configure",
-           "title": "Real product issue at a real route"}
-    assert fix_loop._is_meta_finding(bug) is False
+           "title": "Council theory about a product-looking area"}
+    assert fix_loop._is_meta_finding(bug) is True
 
 
-def test_ordinary_product_finding_is_not_meta():
-    bug = {"category": "semantic:functional", "route": "/review",
-           "title": "Zero content cards generated"}
-    assert fix_loop._is_meta_finding(bug) is False
+def test_council_blindspot_invented_area_is_meta():
+    bug = {"category": "council:blind_spot", "route": "data-isolation",
+           "title": "Potential cross-operator leak: 13 pages MAY not belong"}
+    assert fix_loop._is_meta_finding(bug) is True
+
+
+def test_real_semantic_product_finding_is_not_meta():
+    # A genuine product bug surfaces under semantic:* with a real route — STILL fixable.
+    assert fix_loop._is_meta_finding(
+        {"category": "semantic:functional", "route": "/review", "title": "Zero content cards"}) is False
+    assert fix_loop._is_meta_finding(
+        {"category": "semantic:user_brain", "route": "/dash", "title": "jargon label"}) is False
 
 
 # --- Fix D: generation-time dedup collapses reworded LLM findings -----------

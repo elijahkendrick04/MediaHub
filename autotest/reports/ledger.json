@@ -14,14 +14,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T11:41:59+00:00",
       "last_seen": "2026-05-29T11:41:59+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T114007Z-6617",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "e883e6f0bbc7": {
       "fingerprint": "e883e6f0bbc7",
@@ -48,7 +49,7 @@
     },
     "71e02f586c45": {
       "fingerprint": "71e02f586c45",
-      "category": "council:blind_spot",
+      "category": "semantic:user_brain",
       "severity": "high",
       "title": "Implement clear, immediate, and actionable user feedback when no content cards are generated due to insufficient data.",
       "route": "User Experience/Feedback",
@@ -65,7 +66,9 @@
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "refiled_from": "council:blind_spot",
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
     },
     "5cebfcb079da": {
       "fingerprint": "5cebfcb079da",
@@ -79,14 +82,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "55093f7335f8": {
       "fingerprint": "55093f7335f8",
@@ -100,14 +104,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "76196fe6a36b": {
       "fingerprint": "76196fe6a36b",
@@ -197,14 +202,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T13:28:44+00:00",
       "last_seen": "2026-05-29T13:28:44+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "1a292d42c2a2": {
       "fingerprint": "1a292d42c2a2",
@@ -220,14 +227,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "ee92220cff28": {
       "fingerprint": "ee92220cff28",
@@ -266,14 +275,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "510d8919d03e": {
       "fingerprint": "510d8919d03e",
@@ -289,14 +300,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "b07572c63c13": {
       "fingerprint": "b07572c63c13",
@@ -312,13 +325,15 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "3f77367bbf6c": {
       "fingerprint": "3f77367bbf6c",
@@ -378,13 +393,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
-      "fix_attempts": 0
+      "fix_attempts": 0,
+      "invalidated_reason": "invalid: a council:blind_spot finding about the TESTER/adjudication methodology (no real product route), now filtered by _is_meta_finding (PR #197). Not a product bug.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "f07b0a820cda": {
       "fingerprint": "f07b0a820cda",
@@ -398,14 +415,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "1db920390f08": {
       "fingerprint": "1db920390f08",
@@ -421,14 +439,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T19:20:22+00:00",
       "last_seen": "2026-05-29T19:20:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "a95a57febaa6": {
       "fingerprint": "a95a57febaa6",
@@ -444,14 +464,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T19:20:22+00:00",
       "last_seen": "2026-05-29T19:20:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "bfc627098c98": {
       "fingerprint": "bfc627098c98",
@@ -511,14 +533,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T19:20:22+00:00",
       "last_seen": "2026-05-29T19:20:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "e8455cdfdedb": {
       "fingerprint": "e8455cdfdedb",
@@ -580,14 +603,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-30T08:36:18+00:00",
       "seen_count": 2,
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "b47311d05103": {
       "fingerprint": "b47311d05103",
@@ -626,14 +651,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-29T20:35:30+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "7eeacfc2cb14": {
       "fingerprint": "7eeacfc2cb14",
@@ -693,14 +720,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-29T20:35:30+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "7d64d57158d0": {
       "fingerprint": "7d64d57158d0",
@@ -716,14 +744,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T03:43:17+00:00",
       "last_seen": "2026-05-30T03:43:17+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "f39cf22df1f0": {
       "fingerprint": "f39cf22df1f0",
@@ -739,14 +769,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T03:43:17+00:00",
       "last_seen": "2026-05-30T03:43:17+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "0622ce8f5bb6": {
       "fingerprint": "0622ce8f5bb6",
@@ -785,14 +817,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T03:43:17+00:00",
       "last_seen": "2026-05-30T03:43:17+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "1e132430ab96": {
       "fingerprint": "1e132430ab96",
@@ -877,7 +911,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T08:36:18+00:00",
       "last_seen": "2026-05-30T08:36:18+00:00",
       "seen_count": 1,
@@ -885,7 +919,9 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "5e0405b2f9bd": {
       "fingerprint": "5e0405b2f9bd",
@@ -922,14 +958,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T08:36:18+00:00",
       "last_seen": "2026-05-30T08:36:18+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "35ff22e13091": {
       "fingerprint": "35ff22e13091",
@@ -945,7 +982,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
@@ -953,7 +990,9 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "8ab0ccd13904": {
       "fingerprint": "8ab0ccd13904",
@@ -992,14 +1031,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "e79087027f38": {
       "fingerprint": "e79087027f38",
@@ -1082,14 +1123,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "b51047bfbf12": {
       "fingerprint": "b51047bfbf12",
@@ -1103,14 +1145,16 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "83bce121b5f8": {
       "fingerprint": "83bce121b5f8",
@@ -1149,7 +1193,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:24:06+00:00",
       "last_seen": "2026-05-30T14:24:06+00:00",
       "seen_count": 1,
@@ -1157,7 +1201,9 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "e0fa559c5718": {
       "fingerprint": "e0fa559c5718",
@@ -1196,14 +1242,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:24:06+00:00",
       "last_seen": "2026-05-30T14:24:06+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "29a7575d591e": {
       "fingerprint": "29a7575d591e",
@@ -1240,14 +1288,16 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:24:06+00:00",
       "last_seen": "2026-05-30T14:24:06+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "ec9c93777b73": {
       "fingerprint": "ec9c93777b73",
@@ -1261,14 +1311,16 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:24:06+00:00",
       "last_seen": "2026-05-30T14:24:06+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "e38c136559e9": {
       "fingerprint": "e38c136559e9",
@@ -1284,7 +1336,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
@@ -1292,7 +1344,9 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "33868b7dcd6e": {
       "fingerprint": "33868b7dcd6e",
@@ -1308,14 +1362,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "0fa38c738838": {
       "fingerprint": "0fa38c738838",
@@ -1331,14 +1387,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "5e3472d6dbaf": {
       "fingerprint": "5e3472d6dbaf",
@@ -1352,14 +1410,16 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "9625591d5a68": {
       "fingerprint": "9625591d5a68",
@@ -1373,14 +1433,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "a70617621ebf": {
       "fingerprint": "a70617621ebf",
@@ -1396,7 +1457,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
@@ -1404,7 +1465,9 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "3e82b43412ba": {
       "fingerprint": "3e82b43412ba",
@@ -1443,14 +1506,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "02d8cfb3993c": {
       "fingerprint": "02d8cfb3993c",
@@ -1466,14 +1531,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "a5b0c6b6d911": {
       "fingerprint": "a5b0c6b6d911",
@@ -1489,14 +1556,16 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "e3829b484a1f": {
       "fingerprint": "e3829b484a1f",
@@ -1579,18 +1648,19 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "4f1d8d41781e": {
       "fingerprint": "4f1d8d41781e",
-      "category": "council:blind_spot",
+      "category": "semantic:functional",
       "severity": "high",
       "title": "Confidence threshold may be silently filtering all generated cards",
       "route": "semantic:functional",
@@ -1607,7 +1677,9 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "refiled_from": "council:blind_spot",
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
@@ -1623,7 +1695,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
       "last_seen": "2026-05-31T08:55:03+00:00",
       "seen_count": 9,
@@ -1631,7 +1703,9 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Real UX issue; batch cleanup sprint material."
+      "rationale": "Real UX issue; batch cleanup sprint material.",
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "fd111afb7b70": {
       "fingerprint": "fd111afb7b70",
@@ -1647,7 +1721,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
       "last_seen": "2026-05-31T08:55:03+00:00",
       "seen_count": 3,
@@ -1655,7 +1729,9 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Needs one check: if /upload links to /upload/configure it is broken onboarding; if not, it is a stale route. Do not file blind."
+      "rationale": "Needs one check: if /upload links to /upload/configure it is broken onboarding; if not, it is a stale route. Do not file blind.",
+      "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "3dab958fe4dd": {
       "fingerprint": "3dab958fe4dd",
@@ -1671,7 +1747,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
       "last_seen": "2026-05-31T08:55:03+00:00",
       "seen_count": 4,
@@ -1679,7 +1755,9 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Potentially independent defect: review page may fail to fetch or render cards even after the pipeline fix; must be verified separately rather than assumed to self-heal."
+      "rationale": "Potentially independent defect: review page may fail to fetch or render cards even after the pipeline fix; must be verified separately rather than assumed to self-heal.",
+      "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
     },
     "0875b0ed5356": {
       "fingerprint": "0875b0ed5356",
@@ -1788,7 +1866,7 @@
       "rationale": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-31T08:55:03+00:00",
       "last_seen": "2026-05-31T08:55:03+00:00",
       "seen_count": 1,
@@ -1796,7 +1874,8 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     }
   },
   "skipped": {
