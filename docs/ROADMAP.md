@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `78464ea61` · Merge pull request #202 from elijahkendrick04/claude/loop-proof-criterion
+**Last updated:** 2026-05-31 · `6daa56acf` · Merge pull request #203 from elijahkendrick04/claude/fixc-blindspot-meta
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,16 +63,16 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `72855b79a` | fix-c (RULE A): the whole council:blind_spot category is meta + clear residual queue |
 | 2026-05-31 | `83d0e0458` | autopilot: persist builder state [skip ci] |
 | 2026-05-31 | `9b4931693` | governance: human-authored change-classification rule + machine-verifiable proof criterion |
 | 2026-05-31 | `a5acc8242` | refactor(voice): remove the dead shadowed implementation in voice_imitation |
+| 2026-05-31 | `acdde4a34` | autotest(ledger): invalidate 32 code-provably-false open entries (PR #197 follow-up) |
 | 2026-05-31 | `9c36b5654` | fix(pb_discovery): make the interpreter PB-extraction path actually work |
 | 2026-05-31 | `d0e77590d` | decontaminate FIND/adjudicate: provenance guard, council framing, meta-filter, dedup |
 | 2026-05-31 | `abd5592df` | chore(lint): clear ruff F401/F811 debt + format touched files |
 | 2026-05-31 | `5c8670678` | fix(review): explain zero-card runs when no swims match the club (#196) |
 | 2026-05-31 | `8be81920b` | docs(adr): council verdict — do not integrate jcode (#188) |
-| 2026-05-31 | `21af4f990` | autopilot: persist builder state [skip ci] |
-| 2026-05-31 | `02ac71cef` | Deterministic, approval-gated caption voiceover (council verdict on Pixelle-Video) (#195) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
