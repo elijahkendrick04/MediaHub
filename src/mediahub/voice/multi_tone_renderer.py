@@ -16,9 +16,10 @@ It now returns a dict mapping ``voice_id -> {display_name, caption}``
 old ``{tone: {headline, body, cta}}`` shape, the same headline/body/cta
 keys are populated from the rendered caption text).
 """
+
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mediahub.web.club_profile import ClubProfile

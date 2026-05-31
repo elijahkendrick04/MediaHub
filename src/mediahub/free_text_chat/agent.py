@@ -10,10 +10,11 @@ heuristic fallback. The model itself decides when to research, when to
 ask, and when to propose a brief by calling the provided tools. If no
 provider is configured the chat surfaces a clear error message.
 """
+
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Optional
 
 from .session import ChatSession, save_session
 
@@ -50,10 +51,8 @@ _TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "query":  {"type": "string",
-                           "description": "The web search query."},
-                "reason": {"type": "string",
-                           "description": "Why you need this (audit/logging)."},
+                "query": {"type": "string", "description": "The web search query."},
+                "reason": {"type": "string", "description": "Why you need this (audit/logging)."},
             },
             "required": ["query"],
         },
@@ -70,10 +69,11 @@ _TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "brief":   {"type": "object",
-                            "description": "The brief object."},
-                "summary": {"type": "string",
-                            "description": "One-line summary of the brief shown to the user."},
+                "brief": {"type": "object", "description": "The brief object."},
+                "summary": {
+                    "type": "string",
+                    "description": "One-line summary of the brief shown to the user.",
+                },
             },
             "required": ["brief"],
         },
@@ -104,9 +104,9 @@ def _render_history_as_prose(session: ChatSession) -> str:
     return "\n\n".join(lines)
 
 
-def next_assistant_turn(session: ChatSession,
-                        club_brand: Optional[dict] = None,
-                        max_rounds: int = 4) -> dict:
+def next_assistant_turn(
+    session: ChatSession, club_brand: Optional[dict] = None, max_rounds: int = 4
+) -> dict:
     """Drive one assistant turn. Mutates and saves the session.
 
     Returns a dict the UI can render directly:
@@ -116,12 +116,15 @@ def next_assistant_turn(session: ChatSession,
       {"kind": "error",   "text": str}    — provider error or unconfigured
     """
     from mediahub.ai_core import (
-        ask_with_tools, ProviderNotConfigured, ProviderError,
+        ask_with_tools,
+        ProviderNotConfigured,
+        ProviderError,
     )
 
     system = _SYSTEM_PROMPT
     if club_brand:
         from mediahub.ai_core import narrate_brand
+
         brand_prose = narrate_brand(club_brand)
         if brand_prose:
             system = system + "\n\nBrand voice:\n" + brand_prose
@@ -137,6 +140,7 @@ def next_assistant_turn(session: ChatSession,
                 return "(empty query)"
             try:
                 from mediahub.context_engine.research import ResearchClient
+
                 client = ResearchClient(num_results=4)
                 hits = client.search(query, num=4)
             except Exception as e:
@@ -146,17 +150,21 @@ def next_assistant_turn(session: ChatSession,
                 snip = (h.snippet or "").strip()
                 if not snip:
                     continue
-                evidence.append({
-                    "title":   (h.title or "")[:160],
-                    "url":     h.url,
-                    "snippet": snip[:400],
-                    "domain":  h.domain,
-                })
-            session.research_log.append({
-                "query":  query,
-                "reason": inp.get("reason", ""),
-                "hits":   evidence,
-            })
+                evidence.append(
+                    {
+                        "title": (h.title or "")[:160],
+                        "url": h.url,
+                        "snippet": snip[:400],
+                        "domain": h.domain,
+                    }
+                )
+            session.research_log.append(
+                {
+                    "query": query,
+                    "reason": inp.get("reason", ""),
+                    "hits": evidence,
+                }
+            )
             return json.dumps({"hits": evidence}, ensure_ascii=False)
         if name == "propose_brief":
             brief = inp.get("brief") or {}
@@ -191,17 +199,23 @@ def next_assistant_turn(session: ChatSession,
         summary = (getattr(session, "_chat_pending_summary", "") or "").strip()
         if not summary:
             summary = convo.text.strip() or "Here's a draft brief — accept or push back."
-        session.add_assistant_message(summary, meta={
-            "kind":     "brief",
-            "brief":    session.pending_brief,
-            "provider": convo.provider,
-        })
+        session.add_assistant_message(
+            summary,
+            meta={
+                "kind": "brief",
+                "brief": session.pending_brief,
+                "provider": convo.provider,
+            },
+        )
         save_session(session)
-        return {"kind": "brief", "brief": session.pending_brief,
-                "summary": summary, "provider": convo.provider}
+        return {
+            "kind": "brief",
+            "brief": session.pending_brief,
+            "summary": summary,
+            "provider": convo.provider,
+        }
 
     text = convo.text.strip() or "(no reply — try again)"
-    session.add_assistant_message(text, meta={"kind": "message",
-                                                "provider": convo.provider})
+    session.add_assistant_message(text, meta={"kind": "message", "provider": convo.provider})
     save_session(session)
     return {"kind": "message", "text": text, "provider": convo.provider}

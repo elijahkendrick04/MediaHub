@@ -20,13 +20,13 @@ LLM unavailable) returns a dict with brand_capture_status set to a
 clear error string and the other fields populated with whatever could
 be extracted. Never raises.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -42,6 +42,7 @@ _MAX_HTML_BYTES = 2_000_000  # 2 MB cap to avoid runaway pages
 # ---------------------------------------------------------------------------
 # Cache
 # ---------------------------------------------------------------------------
+
 
 def _cache_dir() -> Path:
     """Return the brand-DNA cache directory. DATA_DIR-aware."""
@@ -91,6 +92,7 @@ def _save_cache(url: str, payload: dict) -> None:
 # ---------------------------------------------------------------------------
 # HTTP fetch
 # ---------------------------------------------------------------------------
+
 
 def _fetch(url: str) -> Optional[str]:
     """Fetch a URL with a sane UA, size cap, and timeout. Returns text or None."""
@@ -145,12 +147,14 @@ def _extract_colours_from_html(html: str) -> list[str]:
             counts[norm] = counts.get(norm, 0) + 1
             continue
         counts[norm] = counts.get(norm, 0) + 1
+
     # Sort by frequency, prefer non-greyscale
     def _key(item):
         hexv, n = item
         r, g, b = int(hexv[1:3], 16), int(hexv[3:5], 16), int(hexv[5:7], 16)
         is_greyscale = abs(r - g) < 8 and abs(g - b) < 8
         return (is_greyscale, -n)
+
     return [c for c, _ in sorted(counts.items(), key=_key)]
 
 
@@ -176,6 +180,7 @@ def _extract_signals(html: str, url: str) -> dict:
 
     try:
         from bs4 import BeautifulSoup  # already a project dep
+
         soup = BeautifulSoup(html, "html.parser")
     except Exception:
         soup = None
@@ -184,8 +189,9 @@ def _extract_signals(html: str, url: str) -> dict:
         if soup.title and soup.title.string:
             signals["title"] = soup.title.string.strip()[:300]
 
-        md = soup.find("meta", attrs={"name": "description"}) or \
-             soup.find("meta", attrs={"property": "og:description"})
+        md = soup.find("meta", attrs={"name": "description"}) or soup.find(
+            "meta", attrs={"property": "og:description"}
+        )
         if md and md.get("content"):
             signals["meta_description"] = md["content"].strip()[:600]
 
@@ -285,7 +291,7 @@ def _build_llm_prompt(signals: dict, url: str) -> str:
         "  phrases_to_use: array of 3-5 short phrases that sound like this org\n"
         "  phrases_to_avoid: array of 3-5 short phrases this org would NOT use\n"
         '  palette: object {"primary":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb"}\n'
-        "  typography_hint: one of \"serif\", \"sans\", \"display\", \"mono\"\n"
+        '  typography_hint: one of "serif", "sans", "display", "mono"\n'
         "No prose, no fences, no commentary — only the JSON object."
     )
     return "\n".join(lines)
@@ -293,8 +299,6 @@ def _build_llm_prompt(signals: dict, url: str) -> str:
 
 def _is_valid_hex(c: str) -> bool:
     return isinstance(c, str) and bool(re.match(r"^#[0-9a-fA-F]{6}$", c))
-
-
 
 
 def _call_llm(signals: dict, url: str) -> Optional[dict]:
@@ -308,8 +312,7 @@ def _call_llm(signals: dict, url: str) -> Optional[dict]:
         return None
     prompt = _build_llm_prompt(signals, url)
     try:
-        data = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=900,
-                             fallback={})
+        data = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=900, fallback={})
     except Exception as e:
         log.debug("llm generate_json raised: %s", e)
         return None
@@ -321,6 +324,7 @@ def _call_llm(signals: dict, url: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")

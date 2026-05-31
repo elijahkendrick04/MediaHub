@@ -25,17 +25,18 @@ References:
   - Radix Colors — radix-ui.com/colors/docs/palette-composition/understanding-the-scale.
   - ColorBrewer ΔE floor — Brewer (2003), Cartography & GIS.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 from coloraide import Color
 
-from .palette import DerivedPalette, TonalRamp, TONE_STOPS
+from .palette import DerivedPalette, TONE_STOPS
 from .roles import RoleScheme, ThemeRoles
 from .contrast import apca, wcag2_ratio
-from .cvd import delta_e_under_cvd, CVDPair, CVD_TYPES
+from .cvd import delta_e_under_cvd, CVD_TYPES
 
 
 __all__ = [
@@ -61,12 +62,12 @@ __all__ = [
 # UI elements (outlines, dividers) are intentionally low-contrast in
 # MD3 — the canonical `outline_variant` against `surface` sits around
 # Lc 25-35. We use 30 as the hard floor.
-APCA_BODY_FLOOR = 60.0     # WCAG-equivalent (hard fail < this)
-APCA_BODY_IDEAL = 75.0     # APCA Silver (warning < this)
-APCA_UI_FLOOR = 30.0       # outline / divider visibility (hard fail < this)
-APCA_UI_IDEAL = 45.0       # APCA Bronze non-text (warning < this)
-WCAG2_AA_FLOOR = 4.5       # normal text AA (legal threshold)
-WCAG2_AA_UI_FLOOR = 3.0    # UI components and large text
+APCA_BODY_FLOOR = 60.0  # WCAG-equivalent (hard fail < this)
+APCA_BODY_IDEAL = 75.0  # APCA Silver (warning < this)
+APCA_UI_FLOOR = 30.0  # outline / divider visibility (hard fail < this)
+APCA_UI_IDEAL = 45.0  # APCA Bronze non-text (warning < this)
+WCAG2_AA_FLOOR = 4.5  # normal text AA (legal threshold)
+WCAG2_AA_UI_FLOOR = 3.0  # UI components and large text
 ADJACENT_DELTA_E_FLOOR = 5.0
 STATUS_DELTA_E_HARD = 15.0
 STATUS_DELTA_E_SOFT = 25.0
@@ -98,10 +99,10 @@ CVD_DELTA_E_FLOOR = 10.0
 
 @dataclass
 class ContrastCheck:
-    scheme: str           # "light" | "dark"
-    role_pair: str        # e.g. "primary/on_primary"
-    foreground: str       # hex
-    background: str       # hex
+    scheme: str  # "light" | "dark"
+    role_pair: str  # e.g. "primary/on_primary"
+    foreground: str  # hex
+    background: str  # hex
     apca_lc: float
     wcag2_ratio: float
     floor_apca: float
@@ -128,7 +129,7 @@ class AdjacencyCheck:
 @dataclass
 class StatusDistanceCheck:
     seed_hex: str
-    status_name: str   # "error" | "success" | "warning" | "info"
+    status_name: str  # "error" | "success" | "warning" | "info"
     status_hex: str
     delta_e_2000: float
     passes_hard: bool  # ≥ 15
@@ -178,9 +179,7 @@ class PaletteQualityReport:
             "n_adjacency_checks": len(self.adjacency),
             "n_adjacency_failures": sum(1 for a in self.adjacency if not a.distinguishable),
             "n_status_distance_checks": len(self.status_distance),
-            "n_status_distance_failures": sum(
-                1 for s in self.status_distance if not s.passes_hard
-            ),
+            "n_status_distance_failures": sum(1 for s in self.status_distance if not s.passes_hard),
             "n_cvd_checks": len(self.cvd),
             "n_cvd_failures": sum(1 for c in self.cvd if not c.distinguishable),
             "warnings": list(self.warnings),
@@ -199,6 +198,7 @@ class PaletteQualityReport:
         render without re-running the QA pipeline.
         """
         from dataclasses import asdict
+
         return {
             "passed": self.passed,
             "harmonic_fit": self.harmonic_fit,
@@ -217,26 +217,24 @@ class PaletteQualityReport:
 
 # Role pairs that carry text. Format: (fg_role, bg_role, label).
 _TEXT_ROLE_PAIRS: tuple[tuple[str, str, str], ...] = (
-    ("on_primary",           "primary",            "primary/on_primary"),
-    ("on_primary_container", "primary_container",  "primary_container/on_primary_container"),
-    ("on_secondary",         "secondary",          "secondary/on_secondary"),
-    ("on_secondary_container","secondary_container","secondary_container/on_secondary_container"),
-    ("on_tertiary",          "tertiary",           "tertiary/on_tertiary"),
-    ("on_tertiary_container","tertiary_container", "tertiary_container/on_tertiary_container"),
-    ("on_error",             "error",              "error/on_error"),
-    ("on_error_container",   "error_container",    "error_container/on_error_container"),
-    ("on_background",        "background",         "background/on_background"),
-    ("on_surface",           "surface",            "surface/on_surface"),
-    ("on_surface_variant",   "surface_variant",    "surface_variant/on_surface_variant"),
+    ("on_primary", "primary", "primary/on_primary"),
+    ("on_primary_container", "primary_container", "primary_container/on_primary_container"),
+    ("on_secondary", "secondary", "secondary/on_secondary"),
+    ("on_secondary_container", "secondary_container", "secondary_container/on_secondary_container"),
+    ("on_tertiary", "tertiary", "tertiary/on_tertiary"),
+    ("on_tertiary_container", "tertiary_container", "tertiary_container/on_tertiary_container"),
+    ("on_error", "error", "error/on_error"),
+    ("on_error_container", "error_container", "error_container/on_error_container"),
+    ("on_background", "background", "background/on_background"),
+    ("on_surface", "surface", "surface/on_surface"),
+    ("on_surface_variant", "surface_variant", "surface_variant/on_surface_variant"),
 )
 
 # UI role pairs (lower contrast floor — outline strokes etc.).
 # outline_variant is intentionally decorative-only in MD3 (no contrast
 # guarantee) so we don't check it; outline is the visible-boundary
 # token and gets a 3:1 WCAG floor / APCA Lc 30 floor.
-_UI_ROLE_PAIRS: tuple[tuple[str, str, str], ...] = (
-    ("outline", "surface", "surface/outline"),
-)
+_UI_ROLE_PAIRS: tuple[tuple[str, str, str], ...] = (("outline", "surface", "surface/outline"),)
 
 
 def _contrast_checks(scheme: RoleScheme, scheme_name: str) -> list[ContrastCheck]:
@@ -247,35 +245,39 @@ def _contrast_checks(scheme: RoleScheme, scheme_name: str) -> list[ContrastCheck
         bg = role_lookup[bg_role]
         lc = apca(fg, bg)
         ratio = wcag2_ratio(fg, bg)
-        out.append(ContrastCheck(
-            scheme=scheme_name,
-            role_pair=label,
-            foreground=fg,
-            background=bg,
-            apca_lc=lc,
-            wcag2_ratio=ratio,
-            floor_apca=APCA_BODY_FLOOR,
-            floor_wcag2=WCAG2_AA_FLOOR,
-            passes_apca=abs(lc) >= APCA_BODY_FLOOR,
-            passes_wcag2=ratio >= WCAG2_AA_FLOOR,
-        ))
+        out.append(
+            ContrastCheck(
+                scheme=scheme_name,
+                role_pair=label,
+                foreground=fg,
+                background=bg,
+                apca_lc=lc,
+                wcag2_ratio=ratio,
+                floor_apca=APCA_BODY_FLOOR,
+                floor_wcag2=WCAG2_AA_FLOOR,
+                passes_apca=abs(lc) >= APCA_BODY_FLOOR,
+                passes_wcag2=ratio >= WCAG2_AA_FLOOR,
+            )
+        )
     for fg_role, bg_role, label in _UI_ROLE_PAIRS:
         fg = role_lookup[fg_role]
         bg = role_lookup[bg_role]
         lc = apca(fg, bg)
         ratio = wcag2_ratio(fg, bg)
-        out.append(ContrastCheck(
-            scheme=scheme_name,
-            role_pair=label,
-            foreground=fg,
-            background=bg,
-            apca_lc=lc,
-            wcag2_ratio=ratio,
-            floor_apca=APCA_UI_FLOOR,
-            floor_wcag2=WCAG2_AA_UI_FLOOR,
-            passes_apca=abs(lc) >= APCA_UI_FLOOR,
-            passes_wcag2=ratio >= WCAG2_AA_UI_FLOOR,
-        ))
+        out.append(
+            ContrastCheck(
+                scheme=scheme_name,
+                role_pair=label,
+                foreground=fg,
+                background=bg,
+                apca_lc=lc,
+                wcag2_ratio=ratio,
+                floor_apca=APCA_UI_FLOOR,
+                floor_wcag2=WCAG2_AA_UI_FLOOR,
+                passes_apca=abs(lc) >= APCA_UI_FLOOR,
+                passes_wcag2=ratio >= WCAG2_AA_UI_FLOOR,
+            )
+        )
     return out
 
 
@@ -293,15 +295,17 @@ def _adjacency_checks(palette: DerivedPalette) -> list[AdjacencyCheck]:
             hex_t = ramp.tones[t]
             if prev_tone is not None:
                 de = Color(prev_hex).delta_e(Color(hex_t), method="2000")
-                out.append(AdjacencyCheck(
-                    palette=ramp.name,
-                    tone_a=prev_tone,
-                    tone_b=t,
-                    hex_a=prev_hex,
-                    hex_b=hex_t,
-                    delta_e_2000=round(de, 2),
-                    distinguishable=de >= ADJACENT_DELTA_E_FLOOR,
-                ))
+                out.append(
+                    AdjacencyCheck(
+                        palette=ramp.name,
+                        tone_a=prev_tone,
+                        tone_b=t,
+                        hex_a=prev_hex,
+                        hex_b=hex_t,
+                        delta_e_2000=round(de, 2),
+                        distinguishable=de >= ADJACENT_DELTA_E_FLOOR,
+                    )
+                )
             prev_tone = t
             prev_hex = hex_t
     return out
@@ -320,14 +324,16 @@ def _status_distance_checks(palette: DerivedPalette) -> list[StatusDistanceCheck
         # Compare seed to the *anchor* tone (40 in light scheme) of each status.
         status_hex = ramp.tones[40]
         de = seed_c.delta_e(Color(status_hex), method="2000")
-        out.append(StatusDistanceCheck(
-            seed_hex=seed,
-            status_name=ramp.name,
-            status_hex=status_hex,
-            delta_e_2000=round(de, 2),
-            passes_hard=de >= STATUS_DELTA_E_HARD,
-            passes_soft=de >= STATUS_DELTA_E_SOFT,
-        ))
+        out.append(
+            StatusDistanceCheck(
+                seed_hex=seed,
+                status_name=ramp.name,
+                status_hex=status_hex,
+                delta_e_2000=round(de, 2),
+                passes_hard=de >= STATUS_DELTA_E_HARD,
+                passes_soft=de >= STATUS_DELTA_E_SOFT,
+            )
+        )
     return out
 
 
@@ -340,22 +346,24 @@ def _cvd_checks(palette: DerivedPalette) -> list[CVDCheck]:
     out: list[CVDCheck] = []
     seed = palette.seed_hex
     pairs = [
-        ("seed/error",   seed, palette.error.tones[40]),
+        ("seed/error", seed, palette.error.tones[40]),
         ("seed/success", seed, palette.success.tones[40]),
         ("seed/warning", seed, palette.warning.tones[40]),
-        ("seed/info",    seed, palette.info.tones[40]),
+        ("seed/info", seed, palette.info.tones[40]),
     ]
     for cvd in CVD_TYPES:
         for label, a, b in pairs:
             r = delta_e_under_cvd(a, b, cvd, threshold=CVD_DELTA_E_FLOOR)
-            out.append(CVDCheck(
-                cvd=cvd,
-                pair=label,
-                a_hex=r.a_hex,
-                b_hex=r.b_hex,
-                delta_e_2000=r.delta_e_2000,
-                distinguishable=r.distinguishable,
-            ))
+            out.append(
+                CVDCheck(
+                    cvd=cvd,
+                    pair=label,
+                    a_hex=r.a_hex,
+                    b_hex=r.b_hex,
+                    delta_e_2000=r.delta_e_2000,
+                    distinguishable=r.distinguishable,
+                )
+            )
     return out
 
 
@@ -370,7 +378,7 @@ def audit_palette(palette: DerivedPalette, roles: ThemeRoles) -> PaletteQualityR
 
     # 1+2: contrast (both schemes)
     report.contrast.extend(_contrast_checks(roles.light, "light"))
-    report.contrast.extend(_contrast_checks(roles.dark,  "dark"))
+    report.contrast.extend(_contrast_checks(roles.dark, "dark"))
     for c in report.contrast:
         if not c.passes_apca:
             report.errors.append(
@@ -422,6 +430,7 @@ def audit_palette(palette: DerivedPalette, roles: ThemeRoles) -> PaletteQualityR
     # errors (harmony is aesthetic, not accessibility).
     try:
         from .harmony import fit_harmonic_template
+
         hues: list[float] = []
         for ramp in palette.all_ramps():
             if ramp.hue is not None:

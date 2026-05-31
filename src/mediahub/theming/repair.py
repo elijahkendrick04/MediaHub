@@ -29,6 +29,7 @@ References:
   - Material You hostile-seed fallback: material-color-utilities/
     blob/main/concepts/dynamic_color_scheme.md (uses #1B6EF3).
 """
+
 from __future__ import annotations
 
 import copy
@@ -37,9 +38,7 @@ from .palette import DerivedPalette, TonalRamp, STATUS_ANCHORS, TONE_STOPS
 from .quality import (
     PaletteQualityReport,
     audit_palette,
-    STATUS_DELTA_E_HARD,
     CVD_DELTA_E_HARD,
-    CVD_DELTA_E_FLOOR,
 )
 from .roles import derive_roles
 
@@ -58,45 +57,45 @@ __all__ = ["repair_palette", "CURATED_STATUS_NEIGHBOURS"]
 CURATED_STATUS_NEIGHBOURS: dict[tuple[float, float], dict[str, float]] = {
     # Red brand (0–60°) → push error away to deep magenta-red, success to teal.
     (0.0, 60.0): {
-        "error":   355.0,   # darker red, separable from a red brand
-        "success": 160.0,   # teal-green
-        "warning": 80.0,    # unchanged
-        "info":    220.0,   # cooler blue
+        "error": 355.0,  # darker red, separable from a red brand
+        "success": 160.0,  # teal-green
+        "warning": 80.0,  # unchanged
+        "info": 220.0,  # cooler blue
     },
     # Yellow / amber brand (60–120°) → standard reds/greens work fine.
     (60.0, 120.0): {
-        "error":   15.0,
+        "error": 15.0,
         "success": 142.0,
-        "warning": 30.0,    # warning needs to NOT be the brand yellow
-        "info":    240.0,
+        "warning": 30.0,  # warning needs to NOT be the brand yellow
+        "info": 240.0,
     },
     # Green brand (120–180°) → push success toward teal, keep error.
     (120.0, 180.0): {
-        "error":   15.0,
-        "success": 175.0,   # teal-leaning so it's distinct from a green brand
-        "warning": 35.0,    # warm amber, distinct from green
-        "info":    260.0,
+        "error": 15.0,
+        "success": 175.0,  # teal-leaning so it's distinct from a green brand
+        "warning": 35.0,  # warm amber, distinct from green
+        "info": 260.0,
     },
     # Cyan/teal brand (180–240°) → keep success green-ish, push info to purple.
     (180.0, 240.0): {
-        "error":   15.0,
+        "error": 15.0,
         "success": 142.0,
         "warning": 50.0,
-        "info":    280.0,
+        "info": 280.0,
     },
     # Blue brand (240–300°) → standard semantic hues work.
     (240.0, 300.0): {
-        "error":   15.0,
+        "error": 15.0,
         "success": 142.0,
         "warning": 50.0,
-        "info":    200.0,
+        "info": 200.0,
     },
     # Purple/magenta brand (300–360°) → push error away from the brand magenta.
     (300.0, 360.0): {
-        "error":   5.0,
+        "error": 5.0,
         "success": 142.0,
         "warning": 50.0,
-        "info":    220.0,
+        "info": 220.0,
     },
 }
 
@@ -119,13 +118,13 @@ def _rebuild_status_ramp(name: str, hue: float, chroma: float) -> TonalRamp:
     """Materialise a status ramp at a new hue/chroma. Reuses the
     materialyoucolor TonalPalette for gamut-aware tone resolution."""
     from materialyoucolor.palettes.tonal_palette import TonalPalette
+
     palette = TonalPalette.from_hue_and_chroma(hue, chroma)
     tones = {t: f"#{palette.tone(t) & 0xFFFFFF:06X}" for t in TONE_STOPS}
     return TonalRamp(name=name, hue=hue, chroma=chroma, tones=tones)
 
 
-def _apply_hue_offset(palette: DerivedPalette, status_name: str,
-                     new_hue: float) -> DerivedPalette:
+def _apply_hue_offset(palette: DerivedPalette, status_name: str, new_hue: float) -> DerivedPalette:
     """Return a copy of palette with one status ramp rotated to new_hue."""
     new = copy.deepcopy(palette)
     old_ramp: TonalRamp = getattr(new, status_name)
@@ -134,8 +133,7 @@ def _apply_hue_offset(palette: DerivedPalette, status_name: str,
     return new
 
 
-def _apply_curated_fallback(palette: DerivedPalette,
-                            trace: list[str]) -> DerivedPalette:
+def _apply_curated_fallback(palette: DerivedPalette, trace: list[str]) -> DerivedPalette:
     """Replace ALL status anchors with the curated table for this seed's hue."""
     seed_hue = palette.seed_hct[0]
     key = _sextant_for(seed_hue)
@@ -181,9 +179,9 @@ def _failing_status_pairs(report: PaletteQualityReport) -> set[str]:
     return failing
 
 
-def repair_palette(palette: DerivedPalette,
-                   report: PaletteQualityReport,
-                   *, max_iters: int = 8) -> tuple[DerivedPalette, list[str]]:
+def repair_palette(
+    palette: DerivedPalette, report: PaletteQualityReport, *, max_iters: int = 8
+) -> tuple[DerivedPalette, list[str]]:
     """Attempt to fix the palette by perturbing status anchors.
 
     Returns (repaired_palette, decision_trace). The trace is plain
@@ -213,9 +211,7 @@ def repair_palette(palette: DerivedPalette,
             )
             break
 
-        trace.append(
-            f"repair: iteration {iteration}: failing status pair(s) = {sorted(failing)}"
-        )
+        trace.append(f"repair: iteration {iteration}: failing status pair(s) = {sorted(failing)}")
 
         # Try hue nudges in order; accept the first one that improves the score.
         improved = False
@@ -246,9 +242,7 @@ def repair_palette(palette: DerivedPalette,
                 break
 
         if not improved:
-            trace.append(
-                f"repair: iteration {iteration}: no improving hue nudge found"
-            )
+            trace.append(f"repair: iteration {iteration}: no improving hue nudge found")
             break
 
     # If we still have status-related errors, apply the curated fallback.

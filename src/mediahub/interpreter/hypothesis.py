@@ -11,6 +11,7 @@ on a section, this module:
 
 No swim-vocabulary literals.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,13 +20,10 @@ import re
 from typing import Any
 
 from .patterns import PatternStore
-from .schema_dataclasses import IngestStream
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_CORPUS_DIR = (
-    pathlib.Path(__file__).parent.parent / "data" / "patterns_validation_corpus"
-)
+_DEFAULT_CORPUS_DIR = pathlib.Path(__file__).parent.parent / "data" / "patterns_validation_corpus"
 
 # ---------------------------------------------------------------------------
 # Pattern proposal heuristics
@@ -76,6 +74,7 @@ def _generalise(text: str, max_candidates: int = 5) -> list[str]:
 # Validation against corpus
 # ---------------------------------------------------------------------------
 
+
 def _load_corpus_texts(corpus_dir: pathlib.Path) -> list[str]:
     """Load all text files from the corpus directory."""
     texts: list[str] = []
@@ -117,6 +116,7 @@ def _validate_candidate(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def propose_patterns(
     stream_section: str,
@@ -163,16 +163,12 @@ def propose_patterns(
             description=f"Auto-proposed from failing section: {stream_section[:60]!r}",
             provisional=True,
         )
-        rec = next(
-            (r for r in current_store.all_records() if r["id"] == pid), None
-        )
+        rec = next((r for r in current_store.all_records() if r["id"] == pid), None)
         if rec:
             persisted.append(rec)
 
     if persisted:
-        log.info(
-            "Proposed %d provisional patterns for type %r", len(persisted), pattern_type
-        )
+        log.info("Proposed %d provisional patterns for type %r", len(persisted), pattern_type)
         current_store.flush()
 
     return persisted

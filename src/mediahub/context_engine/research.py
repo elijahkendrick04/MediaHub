@@ -8,6 +8,7 @@ Provides a thin adapter over WebResearcher that adds:
 
 Does NOT hardcode any domain names or sources.
 """
+
 from __future__ import annotations
 
 import html
@@ -15,7 +16,7 @@ import re
 import sys
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,7 @@ from mediahub.web_research.search import WebResearcher, SearchResult
 @dataclass
 class SearchHit:
     """A single search result with enriched metadata."""
+
     url: str
     title: str
     snippet: str
@@ -55,11 +57,11 @@ def _extract_domain(url: str) -> str:
     """Extract the registered domain from a URL without external libs."""
     try:
         # Remove scheme
-        s = re.sub(r'^https?://', '', url)
+        s = re.sub(r"^https?://", "", url)
         # Remove path/query
-        s = s.split('/')[0].split('?')[0].split('#')[0]
+        s = s.split("/")[0].split("?")[0].split("#")[0]
         # Remove port
-        s = s.split(':')[0]
+        s = s.split(":")[0]
         return s.lower()
     except Exception:
         return ""
@@ -73,22 +75,23 @@ def _clean_html(raw: str) -> str:
     # Try BeautifulSoup
     try:
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(raw, "lxml")
         # Remove script and style elements
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = soup.get_text(separator=" ")
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
         return text
     except ImportError:
         pass
 
     # Stdlib fallback
-    text = re.sub(r'<script[^>]*>.*?</script>', ' ', raw, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 

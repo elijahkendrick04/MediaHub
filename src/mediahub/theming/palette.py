@@ -31,11 +31,11 @@ References:
   - material-color-utilities/concepts/dynamic_color_scheme.md
   - HCT vs CAM16 vs OKLCH: facelessuser.github.io/coloraide/colors/hct/
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterable
 
 from materialyoucolor.hct import Hct
 from materialyoucolor.scheme.scheme_tonal_spot import SchemeTonalSpot
@@ -56,10 +56,10 @@ TONE_STOPS: tuple[int, ...] = (0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 10
 # move with the brand seed — they're locked by hue family per
 # cross-cultural-semantics research (Aslam 2006, WCAG 1.4.1).
 STATUS_ANCHORS: dict[str, tuple[float, float]] = {
-    "error":   (25.0, 84.0),   # MD3 default — warm signal red
+    "error": (25.0, 84.0),  # MD3 default — warm signal red
     "success": (142.0, 50.0),  # emerald, safe across CVD
-    "warning": (80.0, 70.0),   # amber, cross-culturally stable per Aslam
-    "info":    (240.0, 45.0),  # blue, complementary to most brand hues
+    "warning": (80.0, 70.0),  # amber, cross-culturally stable per Aslam
+    "info": (240.0, 45.0),  # blue, complementary to most brand hues
 }
 
 
@@ -71,6 +71,7 @@ STATUS_ANCHORS: dict[str, tuple[float, float]] = {
 @dataclass
 class TonalRamp:
     """A single tonal palette — fixed hue/chroma, 13 lightness stops."""
+
     name: str
     hue: float
     chroma: float
@@ -88,6 +89,7 @@ class TonalRamp:
 @dataclass
 class DerivedPalette:
     """Nine tonal ramps + the seed metadata."""
+
     seed_hex: str
     seed_hct: tuple[float, float, float]
     primary: TonalRamp
@@ -104,9 +106,15 @@ class DerivedPalette:
 
     def all_ramps(self) -> list[TonalRamp]:
         return [
-            self.primary, self.secondary, self.tertiary,
-            self.neutral, self.neutral_variant,
-            self.error, self.success, self.warning, self.info,
+            self.primary,
+            self.secondary,
+            self.tertiary,
+            self.neutral,
+            self.neutral_variant,
+            self.error,
+            self.success,
+            self.warning,
+            self.info,
         ]
 
     def ramp_by_name(self, name: str) -> TonalRamp:

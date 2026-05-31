@@ -4,9 +4,10 @@ BrandKit dataclass — everything visual about a club's identity.
 Stored inside the club profile JSON under the key "brand_kit".
 Fields are all optional with sensible defaults so old profiles load cleanly.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 
@@ -14,10 +15,10 @@ from typing import Optional
 class BrandKit:
     profile_id: str
     display_name: str
-    primary_colour: str = "#A30D2D"      # CSS hex colour
+    primary_colour: str = "#A30D2D"  # CSS hex colour
     secondary_colour: str = "#000000"
     accent_colour: Optional[str] = None
-    logo_svg: Optional[str] = None       # inline SVG string (uploaded or pasted)
+    logo_svg: Optional[str] = None  # inline SVG string (uploaded or pasted)
     governing_body: Optional[str] = None
     short_name: Optional[str] = None
 
@@ -42,7 +43,7 @@ class BrandKit:
         return cls(
             profile_id="default",
             display_name="Your Club",
-            primary_colour="#0E2A47",   # neutral navy
+            primary_colour="#0E2A47",  # neutral navy
             secondary_colour="#C9A227",  # neutral gold
             accent_colour=None,
             logo_svg=None,
@@ -63,20 +64,21 @@ class BrandKit:
     def safe_primary(self) -> str:
         """Return primary_colour if it looks like a CSS hex colour, else fallback."""
         import re
+
         if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", self.primary_colour or ""):
             return self.primary_colour
         return "#A30D2D"
 
     def safe_secondary(self) -> str:
         import re
+
         if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", self.secondary_colour or ""):
             return self.secondary_colour
         return "#000000"
 
     # ---- Adaptive Theming Engine ----
 
-    def ensure_derived_palette(self, *, force: bool = False,
-                                source: Optional[str] = None) -> dict:
+    def ensure_derived_palette(self, *, force: bool = False, source: Optional[str] = None) -> dict:
         """Compute (or re-compute) the Adaptive Theming Engine palette.
 
         Cached on ``self.derived_palette`` as a DTCG-format dict. Safe
@@ -95,8 +97,11 @@ class BrandKit:
             return self.derived_palette
         # Local import to avoid circular dep (theming → kit would loop).
         from mediahub.theming import derive_theme
-        seed_source = source if source is not None else (
-            self.logo_svg if self.logo_svg else self.safe_primary()
+
+        seed_source = (
+            source
+            if source is not None
+            else (self.logo_svg if self.logo_svg else self.safe_primary())
         )
         theme = derive_theme(seed_source)
         self.derived_palette = theme.to_json()
@@ -107,6 +112,7 @@ class BrandKit:
         # disk write keeps the in-memory palette authoritative.
         try:
             from mediahub.theming.theme_store import write_theme
+
             write_theme(self.profile_id, self.derived_palette)
         except Exception:
             pass

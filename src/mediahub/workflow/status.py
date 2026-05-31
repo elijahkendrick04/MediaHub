@@ -14,9 +14,10 @@ ScheduleStatus tracks the external-publishing handoff (e.g. Buffer):
   PUBLISHED — scheduler has confirmed the post went live
   FAILED    — last schedule attempt failed (see notes / logs)
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Optional
 
@@ -40,7 +41,7 @@ class ScheduleStatus(str, Enum):
 class CardWorkflowState:
     card_id: str
     status: CardStatus = CardStatus.QUEUE
-    edited_captions: Optional[dict[str, str]] = None   # tone_slot → user override
+    edited_captions: Optional[dict[str, str]] = None  # tone_slot → user override
     notes: Optional[str] = None
     posted_at: Optional[str] = None
     last_changed_at: str = ""
@@ -48,8 +49,8 @@ class CardWorkflowState:
     # workflow sidecars that pre-date publishing still load cleanly.
     schedule_status: ScheduleStatus = ScheduleStatus.QUEUED
     buffer_update_id: Optional[str] = None
-    scheduled_at: Optional[str] = None            # ISO8601 UTC, when set
-    schedule_error: Optional[str] = None          # last failure reason
+    scheduled_at: Optional[str] = None  # ISO8601 UTC, when set
+    schedule_error: Optional[str] = None  # last failure reason
 
     def to_dict(self) -> dict:
         d = asdict(self)
