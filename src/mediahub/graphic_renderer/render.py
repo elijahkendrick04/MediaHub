@@ -1112,7 +1112,7 @@ def _common_replacements(
     try:
         text_led_css = _read_text(_TEXT_LED_FILL_CSS_PATH)
     except Exception:
-        text_led_css = ''
+        text_led_css = ""
     # Poster @font-face declarations from _shared.css (V8.1 Issue 7 §1).
     # SELF-HOSTED (Council audit 2026-05-31): _shared.css carries relative
     # url(fonts/<name>.woff2) for all six poster families (incl. JetBrains
@@ -1123,13 +1123,14 @@ def _common_replacements(
     # version-pinned CDN URLs had also started 404ing). Same families, so
     # autofit text metrics are unchanged.
     try:
-        shared_css = _read_text(_SHARED_CSS_PATH) if _SHARED_CSS_PATH.exists() else ''
+        shared_css = _read_text(_SHARED_CSS_PATH) if _SHARED_CSS_PATH.exists() else ""
     except Exception:
-        shared_css = ''
+        shared_css = ""
     if shared_css:
         shared_css = shared_css.replace(
-            "url(fonts/", f"url({(_SHARED_CSS_PATH.parent / 'fonts').as_uri()}/")
-    base_css = shared_css + '\n' + base_css + '\n' + text_led_css
+            "url(fonts/", f"url({(_SHARED_CSS_PATH.parent / 'fonts').as_uri()}/"
+        )
+    base_css = shared_css + "\n" + base_css + "\n" + text_led_css
 
     layers = brief.text_layers or {}
     full_name = layers.get("athlete_full_name") or ""

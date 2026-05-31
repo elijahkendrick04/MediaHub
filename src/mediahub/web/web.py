@@ -692,7 +692,8 @@ def _render_why_this_card(
     _summary_label = (
         'Why this card? <span class="why-peek">Show reasoning'
         '<span class="why-chev" aria-hidden="true">&#9662;</span></span>'
-        if lazy else "Why this card?"
+        if lazy
+        else "Why this card?"
     )
     shell_open = (
         f'<details{_open_attr} class="why-card" style="margin-top:10px;padding:10px 12px;'
@@ -1318,7 +1319,9 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     # The real engine output is the V5 recognition count, not the legacy V4
     # cards (which the recognition-first pipeline leaves empty). Persist it so
     # Activity can surface "Achievements detected" instead of "Cards: 0".
-    n_achievements = int((getattr(run, "recognition_report", None) or {}).get("n_achievements", 0) or 0)
+    n_achievements = int(
+        (getattr(run, "recognition_report", None) or {}).get("n_achievements", 0) or 0
+    )
     meet_name = run.canonical_meet.name if run.canonical_meet else "(unknown)"
     status = "error" if run.error else "done"
     conn = _db()
@@ -1327,9 +1330,20 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
            (id, created_at, finished_at, status, profile_id, meet_name,
             our_swims, n_cards, n_queue, n_achievements, error, file_name)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (run.run_id, run.started_at, run.finished_at, status,
-         run.profile_id, meet_name, run.our_swim_count, n_cards, n_queue,
-         n_achievements, run.error, file_name),
+        (
+            run.run_id,
+            run.started_at,
+            run.finished_at,
+            status,
+            run.profile_id,
+            meet_name,
+            run.our_swim_count,
+            n_cards,
+            n_queue,
+            n_achievements,
+            run.error,
+            file_name,
+        ),
     )
     conn.commit()
     conn.close()
@@ -7378,12 +7392,16 @@ def create_app() -> Flask:
                         ach_by_id[r["id"]] = int(v or 0)
                 for _rid in _need:
                     _d = _load_run(_rid) or {}
-                    ach_by_id[_rid] = int((_d.get("recognition_report") or {}).get("n_achievements", 0) or 0)
+                    ach_by_id[_rid] = int(
+                        (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
+                    )
                 if _need:
                     try:
                         for _rid in _need:
-                            conn.execute("UPDATE runs SET n_achievements = ? WHERE id = ?",
-                                         (ach_by_id[_rid], _rid))
+                            conn.execute(
+                                "UPDATE runs SET n_achievements = ? WHERE id = ?",
+                                (ach_by_id[_rid], _rid),
+                            )
                         conn.commit()
                     except Exception:
                         pass

@@ -22,6 +22,7 @@ APCA implementation references:
 The constants below come from the v0.1.9 reference. Tested against the
 published reference vectors in tests/test_contrast.py.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -141,9 +142,11 @@ def apca(fg_hex: str, bg_hex: str) -> float:
 
 def _srgb_to_relative_luminance(rgb: tuple[int, int, int]) -> float:
     """WCAG 2.x relative luminance (L)."""
+
     def _ch(c: int) -> float:
         v = c / 255.0
         return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
     r, g, b = rgb
     return 0.2126 * _ch(r) + 0.7152 * _ch(g) + 0.0722 * _ch(b)
 
