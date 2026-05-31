@@ -29,6 +29,8 @@ edge-tts>=6.1
 # Android 12 Monet, and the 50+ dynamic-color role tokens.
 # coloraide is the pure-Python W3C CSS Color 4/5 reference impl
 # (OKLCH conversions, gamut mapping, CIEDE2000).
+# numpy is used by the theming CVD simulator (3×3 Machado matrices),
+# the saliency cropper (energy maps), and variant_metrics (perceptual hashing).
 # See docs/THEMING.md for the architecture.
 materialyoucolor>=3.0
 coloraide>=4.0

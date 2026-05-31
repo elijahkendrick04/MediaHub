@@ -8508,10 +8508,15 @@ def create_app() -> Flask:
 
     if (status === 'done') {{
       stopped = true;
-      if (stage) stage.textContent = 'Complete';
+      var nAch = (j && j.n_achievements != null) ? j.n_achievements : null;
+      var achLabel = (nAch !== null && nAch > 0)
+        ? nAch + ' moment' + (nAch === 1 ? '' : 's') + ' found — ready to review'
+        : 'Processing complete — ready to review';
+      if (stage) stage.textContent = achLabel;
+      if (lede) lede.textContent = achLabel + '. Opening the review queue…';
       fillBar(null);
       if (reviewLink) reviewLink.style.display = 'inline-flex';
-      if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
+      if (window.MH) MH.toast(achLabel, 'success', 2500);
       setTimeout(function() {{ location.replace(REVIEW_URL); }}, 900);
       return;
     }}
@@ -8559,8 +8564,16 @@ def create_app() -> Flask:
     def api_status(run_id):
         # Tenant gate: status polling would otherwise let a foreign org
         # infer when another org's pipeline finishes.
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+        _run_data = _load_run(run_id)
+        if not _can_access_run(run_id, _run_data, _active_profile_id()):
             return jsonify({"status": "unknown", "error": "Run not found"}), 404
+
+        def _n_achievements_from_run(rd):
+            """Extract achievement count from a loaded run dict (or 0)."""
+            if not rd:
+                return 0
+            rr = rd.get("recognition_report") or {}
+            return int(rr.get("n_achievements") or 0)
 
         # In-memory snapshot (the worker that spawned the pipeline). Copy
         # the log list *under the lock* — copy_value only shallow-copies the
@@ -8584,6 +8597,8 @@ def create_app() -> Flask:
                 if hb is not None and (time.time() - hb) > _RUN_STALE_SECS:
                     snap["status"] = "error"
                     snap["error"] = _STALE_ERR
+            if snap.get("status") == "done":
+                snap["n_achievements"] = _n_achievements_from_run(_run_data)
             return jsonify(snap)
 
         # Fallback to persisted status — this is the path every poll takes
@@ -8607,7 +8622,10 @@ def create_app() -> Flask:
             if age is None or age > _RUN_STALE_SECS:
                 status = "error"
                 error = error or _STALE_ERR
-        return jsonify({"status": status, "error": error, "log": plog})
+        payload = {"status": status, "error": error, "log": plog}
+        if status == "done":
+            payload["n_achievements"] = _n_achievements_from_run(_run_data)
+        return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/why/<int:ach_index>")
     def api_why_card(run_id, ach_index):
