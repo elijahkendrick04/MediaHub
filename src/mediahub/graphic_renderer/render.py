@@ -59,10 +59,6 @@ def _flag(name: str, default: str = "1") -> bool:
     return os.environ.get(name, default).lower() not in ("0", "", "false", "no", "off")
 
 
-def _premium_fonts_enabled() -> bool:
-    return _flag("MEDIAHUB_RENDER_PREMIUM_FONTS", "1")
-
-
 def _grain_enabled() -> bool:
     return _flag("MEDIAHUB_RENDER_GRAIN", "1")
 
@@ -1079,30 +1075,23 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         text_led_css = _read_text(_TEXT_LED_FILL_CSS_PATH)
     except Exception:
         text_led_css = ''
-    # Premium @font-face declarations from _shared.css (V8.1 Issue 7 §1).
-    # Feature-flagged via MEDIAHUB_RENDER_PREMIUM_FONTS; falls back to the
-    # legacy @import css2 URL otherwise.
-    if _premium_fonts_enabled() and _SHARED_CSS_PATH.exists():
-        try:
-            shared_css = _read_text(_SHARED_CSS_PATH)
-        except Exception:
-            shared_css = ''
-        # Also keep the @import as a belt-and-braces fallback if the
-        # gstatic .woff2 URLs above shift; @font-face wins in cascade order.
-        fonts_import = (
-            '@import url(\'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton'
-            '&family=Bowlby+One&family=Inter:wght@400;500;600;700;800'
-            '&family=Space+Grotesk:wght@500;600;700'
-            '&family=JetBrains+Mono:wght@500;700&display=swap\');\n'
-        )
-        base_css = fonts_import + shared_css + '\n' + base_css + '\n' + text_led_css
-    else:
-        fonts_import = (
-            '@import url(\'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton'
-            '&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700'
-            '&family=JetBrains+Mono:wght@500;700&display=swap\');\n'
-        )
-        base_css = fonts_import + base_css + '\n' + text_led_css
+    # Poster @font-face declarations from _shared.css (V8.1 Issue 7 §1).
+    # SELF-HOSTED (Council audit 2026-05-31): _shared.css carries relative
+    # url(fonts/<name>.woff2) for all six poster families (incl. JetBrains
+    # Mono). The render page is a file:// in a throwaway out_dir, so the
+    # relatives won't resolve there — rewrite them to absolute file:// URLs
+    # under the layouts dir. No Google Fonts CDN @import: closes the GDPR hole
+    # on the posted graphic and makes renders network-independent (the old
+    # version-pinned CDN URLs had also started 404ing). Same families, so
+    # autofit text metrics are unchanged.
+    try:
+        shared_css = _read_text(_SHARED_CSS_PATH) if _SHARED_CSS_PATH.exists() else ''
+    except Exception:
+        shared_css = ''
+    if shared_css:
+        shared_css = shared_css.replace(
+            "url(fonts/", f"url({(_SHARED_CSS_PATH.parent / 'fonts').as_uri()}/")
+    base_css = shared_css + '\n' + base_css + '\n' + text_led_css
 
     layers = brief.text_layers or {}
     full_name = layers.get("athlete_full_name") or ""
