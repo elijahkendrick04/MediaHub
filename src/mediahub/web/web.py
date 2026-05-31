@@ -9016,14 +9016,49 @@ def create_app() -> Flask:
                     actions=f'<a class="btn" href="{url_for("upload")}">Upload results &rarr;</a>',
                 )
             else:
-                ach_rows_html_wf = _empty_state(
-                    "trophy",
-                    "No standout swims",
-                    'The engine read the file but didn&rsquo;t find PBs, medals, or '
-                    'first-times worth a card. That can happen for heats-only sheets '
-                    'or entry lists.',
-                    actions=f'<a class="btn secondary" href="{url_for("activity_page")}">Back to runs</a>',
+                # Distinguish "engine ranked your swims and none stood out" from
+                # "we never matched any of your swims in the first place". The
+                # second case (file had swims but 0 matched this run's club) is
+                # the common silent dead-end: the engine read the meet but the
+                # club name didn't match, so recognition had nothing to rank.
+                # Saying "no standout swims" there is misleading — name the real
+                # reason and give a re-run path.
+                _parsed_n = data.get("parsed_swim_count") or 0
+                _our_n = data.get("our_swim_count") or 0
+                _run_filter = (data.get("club_filter") or "").strip()
+                _no_filter = any(
+                    isinstance(w, dict) and w.get("code") == "no_club_filter"
+                    for w in (data.get("parse_warnings") or [])
                 )
+                if _parsed_n and _our_n == 0:
+                    if _no_filter or not _run_filter:
+                        _why = (
+                            f'We read <strong>{_parsed_n}</strong> swims from the file, but no club '
+                            'was selected — so none were matched to your swimmers and there was '
+                            'nothing to rank. Re-run this file and pick your club.'
+                        )
+                    else:
+                        _why = (
+                            f'We read <strong>{_parsed_n}</strong> swims from the file, but '
+                            f'<strong>0</strong> matched &ldquo;{_h(_run_filter)}&rdquo;. The club '
+                            'name in the results may be written differently &mdash; re-run and '
+                            'check the club name matches the file.'
+                        )
+                    ach_rows_html_wf = _empty_state(
+                        "search",
+                        "No swims matched your club",
+                        _why,
+                        actions=f'<a class="btn" href="{url_for("upload")}">Re-run with your club &rarr;</a>',
+                    )
+                else:
+                    ach_rows_html_wf = _empty_state(
+                        "trophy",
+                        "No standout swims",
+                        'The engine read the file but didn&rsquo;t find PBs, medals, or '
+                        'first-times worth a card. That can happen for heats-only sheets '
+                        'or entry lists.',
+                        actions=f'<a class="btn secondary" href="{url_for("activity_page")}">Back to runs</a>',
+                    )
 
         # Single global AI-availability banner — replaces the 177 per-card
         # "AI UNAVAILABLE" alerts the previous implementation emitted.
