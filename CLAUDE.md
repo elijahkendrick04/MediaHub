@@ -96,6 +96,7 @@ After any change to the engine (not only removals), remove the clutter and dead 
 ## Explicitly Excluded
 
 - **Google Workspace / GWS** — Do NOT install or use `@googleworkspace/cli`, Gmail, Drive, Calendar, Sheets, Docs, Slides, Chat, or Admin automation. This exclusion is permanent unless the user explicitly requests it.
+- **9router / gray-market LLM proxies** — Do NOT add [9router](https://github.com/decolua/9router) (or any similar AI-coding-tool proxy that routes through unofficial/"free" provider tiers) as a skill, a vendored dependency, a documented dev workflow, or a product component. MediaHub's AI path stays on official env-keyed providers via `ai_core/llm.py` / `media_ai/llm.py`, and customer LLM traffic is never routed through a third-party proxy. Rationale recorded in [`docs/adr/0002-reject-9router-integration.md`](docs/adr/0002-reject-9router-integration.md). This exclusion is permanent unless the user explicitly requests it.
 
 ---
 
