@@ -106,7 +106,9 @@ def test_merge_armed_with_pr_enables(monkeypatch, gh_present):
     calls = []
     monkeypatch.setattr(builder.subprocess, "run",
                         lambda cmd, *a, **k: (calls.append(cmd), _completed(0))[1])
-    assert "auto-merge to main enabled" in builder._merge_to_main("b", has_pr=True)
+    # A PRODUCT change is auto-merge eligible (governance gate: CHANGE_CLASSIFICATION.md).
+    assert "auto-merge to main enabled" in builder._merge_to_main(
+        "b", has_pr=True, files=["src/mediahub/web/web.py"])
     # The throwaway branch is tidied once the auto-merge lands.
     assert any("--delete-branch" in c for c in calls), f"merge should delete the branch: {calls}"
 
@@ -116,6 +118,6 @@ def test_merge_armed_with_pr_reports_gh_failure(monkeypatch, gh_present):
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
     monkeypatch.setattr(builder.subprocess, "run",
                         lambda *a, **k: _completed(1, stderr="required checks missing"))
-    msg = builder._merge_to_main("b", has_pr=True)
+    msg = builder._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
     assert "NOT armed" in msg
     assert "required checks missing" in msg

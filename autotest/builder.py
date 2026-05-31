@@ -50,6 +50,31 @@ PROTECTED = (
     "legacy/swim_content_v5/ranker_v3.py", "src/mediahub/theming/logo_chip.py",
     "src/mediahub/media_library/selector.py",
 )
+
+# Harness / governance paths — a change touching ANY of these is NOT a product
+# change and must NOT auto-merge; it requires a human merge (council Q4). This is
+# the HUMAN-AUTHORED classification rule (autotest/CHANGE_CLASSIFICATION.md) — the
+# loop applies it mechanically, it does NOT classify its own changes. Keep this in
+# sync with that doc.
+HARNESS_GOVERNANCE_PATHS = (
+    "autotest/", ".github/workflows/", "CLAUDE.md", "render.yaml", "Dockerfile",
+    "pyproject.toml", "requirements.txt", "requirements-dev.txt",
+)
+
+
+def classify_change(files: list[str]) -> str:
+    """Apply the human-authored product-vs-harness rule to a changed-file set.
+    Returns 'product' (auto-merge eligible) or 'harness' (human merge required).
+    A mixed diff classifies as 'harness' (the stricter policy wins). An empty set
+    is 'harness' (fail safe — never auto-merge an unknown change)."""
+    if not files:
+        return "harness"
+    for f in files:
+        f = f.strip()
+        if any(f == p or f.startswith(p) or ("CLAUDE.md" in p and f.endswith("CLAUDE.md"))
+               for p in HARNESS_GOVERNANCE_PATHS):
+            return "harness"
+    return "product"
 MAX_FILES = int(os.environ.get("AUTOTEST_BUILD_MAX_FILES", "25"))
 MAX_INSERTIONS = int(os.environ.get("AUTOTEST_BUILD_MAX_INSERTIONS", "2000"))
 BREAKER_LIMIT = int(os.environ.get("AUTOTEST_BUILD_BREAKER", "3"))
@@ -241,16 +266,25 @@ def _open_pr(branch: str, title: str, body: str) -> tuple[str, str]:
     return "", _classify_pr_error(err)
 
 
-def _merge_to_main(branch: str, *, has_pr: bool) -> str:
+def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None) -> str:
     """Arm CI-gated auto-merge for an EXISTING PR (armed by AUTOTEST_BUILD_MERGE=1).
     `gh pr merge --auto` waits for green CI so a red build never lands — but it
     needs a real PR, so this no-ops honestly when none was opened, and verifies
-    the command actually succeeded instead of assuming it did."""
+    the command actually succeeded instead of assuming it did.
+
+    Governance gate (council Q4 + CHANGE_CLASSIFICATION.md): auto-merge is armed
+    ONLY for a PRODUCT change. A harness/governance change opens the PR but stops
+    for a HUMAN merge — the loop never auto-lands a change to its own harness, CI,
+    deploy surface, or these governance rules."""
     import shutil
     if os.environ.get("AUTOTEST_BUILD_MERGE") != "1":
         return "merge not armed (set AUTOTEST_BUILD_MERGE=1 to auto-merge to main on green CI)"
     if not has_pr:
         return "no PR opened — auto-merge NOT armed (nothing will land; see the PR error)"
+    kind = classify_change(files or [])
+    if kind != "product":
+        return ("auto-merge NOT armed: this is a harness/governance change "
+                "(CHANGE_CLASSIFICATION.md) — it requires a HUMAN merge. PR opened; left for review.")
     if not shutil.which("gh"):
         return "gh CLI not found — cannot enable CI-gated auto-merge"
     # --delete-branch tidies the loop-owned branch once the auto-merge lands, so
@@ -458,7 +492,7 @@ def build_cycle() -> dict:
     pr_url, pr_err = _open_pr(
         branch, f"build({item.id}): {item.title[:60]}",
         f"Autonomous build of roadmap {item.id}. {roadmap.directive(item.id, 'wip')}")
-    merge_status = _merge_to_main(branch, has_pr=bool(pr_url))
+    merge_status = _merge_to_main(branch, has_pr=bool(pr_url), files=files)
     if pr_err:
         try:
             from autotest import notify
