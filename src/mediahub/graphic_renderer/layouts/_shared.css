@@ -2,56 +2,56 @@
  *
  * V8.1 Issue 7 — premium fonts + grain overlay (feature-flagged via env).
  *
- * @font-face declarations point at the Google Fonts CDN .woff2 files.
- * The Playwright renderer waits for `document.fonts.ready` before
- * screenshotting (see graphic_renderer/render.py::render_html_to_png).
+ * @font-face declarations point at SELF-HOSTED .woff2 in ./fonts/
+ * (Council audit 2026-05-31: no Google Fonts CDN — closes the GDPR hole on the
+ * posted graphic, makes renders network-independent, and fixes the stale pinned
+ * CDN URLs that had started 404ing). The render context is a file:// page
+ * in a throwaway dir, so render.py rewrites the relative url(fonts/...) to an
+ * absolute file:// URL before inlining; the Playwright renderer still waits for
+ * `document.fonts.ready` before screenshotting. The woff2 are the same families
+ * as before, so autofit text-fit metrics are unchanged.
  *
- * If the network is unavailable at render time, the browser falls back to
- * the next family in the stack — the page still renders, just with less
- * editorial type.
+ * Fonts: Bebas Neue, Anton, Bowlby One, Space Grotesk, Inter, JetBrains Mono.
+ * Refresh with: python scripts/fetch_renderer_fonts.py
  */
 
-/* Bebas Neue — condensed display, used for surnames + giant labels.
- * Source: https://fonts.googleapis.com/css2?family=Bebas+Neue */
+/* Bebas Neue — condensed display, used for surnames + giant labels. */
 @font-face {
   font-family: 'Bebas Neue';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/bebasneue/v14/JTUSjIg69CK48gW7PXoo9Wlhyw.woff2) format('woff2');
+  src: url(fonts/bebas-neue.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Anton — heavy condensed sans, used for stat numbers + headlines.
- * Source: https://fonts.googleapis.com/css2?family=Anton */
+/* Anton — heavy condensed sans, used for stat numbers + headlines. */
 @font-face {
   font-family: 'Anton';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/anton/v25/1Ptgg87LROyAm0K08i4gS7lu.woff2) format('woff2');
+  src: url(fonts/anton.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Bowlby One — open Druk Wide-style alternative, used for poster headlines.
- * Source: https://fonts.googleapis.com/css2?family=Bowlby+One */
+/* Bowlby One — open Druk Wide-style alternative, used for poster headlines. */
 @font-face {
   font-family: 'Bowlby One';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/bowlbyone/v23/taiPGmVuC4y96PFeqp8sqomI_DLF.woff2) format('woff2');
+  src: url(fonts/bowlby-one.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Space Grotesk — geometric humanist, used for kickers + small caps.
- * Source: https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700 */
+/* Space Grotesk — geometric humanist, used for kickers + small caps. */
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/spacegrotesk/v16/V8mDoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7aUUM.woff2) format('woff2');
+  src: url(fonts/space-grotesk.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
@@ -59,24 +59,23 @@
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/spacegrotesk/v16/V8mDoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7aUUM.woff2) format('woff2');
+  src: url(fonts/space-grotesk.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/spacegrotesk/v16/V8mDoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7aUUM.woff2) format('woff2');
+  src: url(fonts/space-grotesk.woff2) format('woff2');
 }
 
-/* Inter — body + UI text. Multiple weights from one variable file.
- * Source: https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800 */
+/* Inter — body + UI text. Multiple weights from one variable file. */
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50ojIw2boKoduKmMEVuLyfMZhrib2Bg-4.woff2) format('woff2');
+  src: url(fonts/inter.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
@@ -84,28 +83,28 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50ojIw2boKoduKmMEVuLyfMZhrib2Bg-4.woff2) format('woff2');
+  src: url(fonts/inter.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50ojIw2boKoduKmMEVuLyfMZhrib2Bg-4.woff2) format('woff2');
+  src: url(fonts/inter.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50ojIw2boKoduKmMEVuLyfMZhrib2Bg-4.woff2) format('woff2');
+  src: url(fonts/inter.woff2) format('woff2');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 800;
   font-display: swap;
-  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50ojIw2boKoduKmMEVuLyfMZhrib2Bg-4.woff2) format('woff2');
+  src: url(fonts/inter.woff2) format('woff2');
 }
 
 /* ------------------------------------------------------------------
@@ -148,4 +147,21 @@
 .grain-overlay.texture-grain {
   /* Stronger fallback if SVG data URI fails: tinted noise tile. */
   background-color: transparent;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/jetbrains-mono.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(fonts/jetbrains-mono.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }

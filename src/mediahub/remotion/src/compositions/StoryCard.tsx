@@ -123,24 +123,25 @@ function bgPatternFor(style: string, roles: Roles): string {
   }
 }
 
-// Map brief.typography_pair → a CSS font-family stack. The static
-// graphic uses real @font-face declarations; in motion we approximate
-// with the closest system-available stack to avoid the bundling cost
-// of loading webfonts into the headless Chromium.
+// Map brief.typography_pair → a CSS font-family stack. The reel now loads the
+// SAME self-hosted brand woff2 as the still graphic (see src/fonts.ts; Council
+// 2026-05-31), so each stack LEADS with the real brand face and matches the
+// posted card. The system fonts are kept only as a safety net behind it.
 function fontStackFor(pair: string): string {
   switch (pair) {
     case "anton-inter":
-    case "bebas-grotesk":
     case "druk-inter":
     case "oswald-inter":
-      // Condensed display stack — fall through to Impact-like.
-      return "'Oswald', 'Bebas Neue', 'Impact', 'Helvetica Neue Condensed', 'Arial Narrow', sans-serif";
+      // Heavy condensed display → Anton (the still renderer's default headline).
+      return "'Anton', 'Oswald', 'Impact', 'Helvetica Neue Condensed', 'Arial Narrow', sans-serif";
+    case "bebas-grotesk":
+      return "'Bebas Neue', 'Oswald', 'Impact', 'Arial Narrow', sans-serif";
     case "bowlby-inter":
       return "'Bowlby One', 'Archivo Black', 'Impact', sans-serif";
     case "archivo-inter":
-      return "'Archivo', 'Inter', 'Helvetica Neue', Arial, sans-serif";
+      return "'Space Grotesk', 'Archivo', 'Inter', 'Helvetica Neue', Arial, sans-serif";
     default:
-      return "-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif";
+      return "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
   }
 }
 

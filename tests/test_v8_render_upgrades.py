@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -26,7 +27,6 @@ from mediahub.graphic_renderer.render import (
     _common_replacements,
     _dpr_render,
     _grain_enabled,
-    _premium_fonts_enabled,
 )
 
 
@@ -34,15 +34,10 @@ from mediahub.graphic_renderer.render import (
 # Feature-flag plumbing (no Playwright needed)
 # ---------------------------------------------------------------------------
 
-def test_premium_fonts_flag_default_on(monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_RENDER_PREMIUM_FONTS", raising=False)
-    assert _premium_fonts_enabled() is True
-
-
-def test_premium_fonts_flag_off(monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_RENDER_PREMIUM_FONTS", "0")
-    assert _premium_fonts_enabled() is False
-
+# Council audit 2026-05-31: the poster fonts are now SELF-HOSTED and always
+# inlined (no MEDIAHUB_RENDER_PREMIUM_FONTS kill-switch, no Google CDN @import).
+# The flag-plumbing tests are replaced by the self-hosting guarantees below and
+# in tests/test_self_hosted_fonts.py.
 
 def test_grain_flag_default_on(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_RENDER_GRAIN", raising=False)
@@ -79,17 +74,19 @@ def test_dpr_invalid_falls_back(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_shared_css_exists_and_declares_premium_fonts():
-    p = Path(__file__).resolve().parent.parent / "src" / "mediahub" / "graphic_renderer" / "layouts" / "_shared.css"
+    base = Path(__file__).resolve().parent.parent / "src" / "mediahub" / "graphic_renderer" / "layouts"
+    p = base / "_shared.css"
     assert p.exists(), "V8.1 §1: _shared.css must exist"
     css = p.read_text("utf-8")
-    # @font-face declarations
     assert "@font-face" in css
-    # Premium families called out by the spec
     for family in ("Bebas Neue", "Anton", "Bowlby One", "Inter", "Space Grotesk"):
         assert family in css, f"missing @font-face for {family}"
-    # WOFF2 sources from gstatic (so renders are deterministic)
-    assert "fonts.gstatic.com" in css
+    # Council audit 2026-05-31: WOFF2 sources are SELF-HOSTED (./fonts/), not the
+    # Google CDN — deterministic renders, GDPR-clean, no stale-pinned-URL 404s.
+    assert "fonts.gstatic.com" not in css and "googleapis" not in css
     assert ".woff2" in css
+    for fn in re.findall(r"url\(fonts/([^)]+\.woff2)\)", css):
+        assert (base / "fonts" / fn).is_file(), f"missing local {fn}"
 
 
 def test_grain_svg_block_uses_turbulence_filter():
@@ -130,31 +127,20 @@ class _FakeBrand:
     accent_colour = "#FFFFFF"
 
 
-def test_common_replacements_inlines_shared_css_when_flag_on(monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_RENDER_PREMIUM_FONTS", "1")
+def test_common_replacements_inlines_self_hosted_shared_css(monkeypatch):
+    # Council audit 2026-05-31: fonts are always inlined from _shared.css and
+    # always self-hosted (no flag, no Google CDN @import).
     repl = _common_replacements(
         _FakeBrief(), 1080, 1350, _FakeBrand(),
         athlete_data_uri=None, logo_block="", result_chip="", sponsor_block="",
     )
     assert "BASE_CSS" in repl
     css = repl["BASE_CSS"]
-    # The shared.css content is concatenated in
     assert "@font-face" in css
     assert "Bebas Neue" in css
-    # Belt-and-braces @import is still present as a fallback
-    assert "fonts.googleapis.com/css2" in css
-
-
-def test_common_replacements_omits_shared_css_when_flag_off(monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_RENDER_PREMIUM_FONTS", "0")
-    repl = _common_replacements(
-        _FakeBrief(), 1080, 1350, _FakeBrand(),
-        athlete_data_uri=None, logo_block="", result_chip="", sponsor_block="",
-    )
-    css = repl["BASE_CSS"]
-    # @import line still there, but no @font-face block from _shared.css
-    assert "fonts.googleapis.com/css2" in css
-    assert "@font-face" not in css
+    # No Google CDN anywhere; the font src is a local/absolute file:// path.
+    assert "fonts.googleapis.com" not in css and "fonts.gstatic.com" not in css
+    assert "fonts/" in css  # rewritten to file://.../layouts/fonts/<name>.woff2
 
 
 # ---------------------------------------------------------------------------
@@ -268,11 +254,12 @@ def test_premium_fonts_appear_in_rendered_html(tmp_path, monkeypatch):
     from mediahub.graphic_renderer.render import render_brief
     brief, bk = _render_brief_for_test()
 
-    monkeypatch.setenv("MEDIAHUB_RENDER_PREMIUM_FONTS", "1")
     res = render_brief(brief, output_dir=tmp_path, size=(1080, 1350),
                        format_name="feed_portrait", brand_kit=bk)
 
-    # _shared.css declarations must be inlined into the page <style>
+    # _shared.css declarations must be inlined into the page <style>...
     assert "@font-face" in res.html
     assert "Bebas Neue" in res.html
-    assert "fonts.gstatic.com" in res.html
+    # ...with self-hosted file:// font URLs, not the Google CDN (Council audit).
+    assert "fonts.gstatic.com" not in res.html and "fonts.googleapis.com" not in res.html
+    assert "file://" in res.html and "fonts/bebas-neue.woff2" in res.html

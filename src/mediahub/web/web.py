@@ -680,12 +680,27 @@ def _render_why_this_card(
     just streams in. Eager mode (the default) is preserved for callers
     and tests that want the fully-rendered block.
     """
+    # The explainer is visible-by-default (the Phase 1.4 "visible intelligence"
+    # invariant) on focused / eager single-card surfaces. On the LAZY review
+    # list, though, every one of a meet's 150-250 cards rendering its full
+    # reasoning open produced a ~70,000px wall the reviewer had to scroll past
+    # (Council UI verdict, 2026-05-31). There we collapse-by-default for scroll
+    # relief, keeping the reasoning exactly one click away with a clear "show
+    # reasoning" affordance — deferred, never hidden. Eager callers (and the
+    # test_visible_intelligence invariant) keep <details open>.
+    _open_attr = "" if lazy else " open"
+    _summary_label = (
+        'Why this card? <span class="why-peek">Show reasoning'
+        '<span class="why-chev" aria-hidden="true">&#9662;</span></span>'
+        if lazy
+        else "Why this card?"
+    )
     shell_open = (
-        '<details open class="why-card" style="margin-top:10px;padding:10px 12px;'
+        f'<details{_open_attr} class="why-card" style="margin-top:10px;padding:10px 12px;'
         'background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.25);border-radius:8px">'
         '<summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--lane);'
         'user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
-        '<span aria-hidden="true">&#9432;</span> Why this card?</summary>'
+        f'<span aria-hidden="true">&#9432;</span> {_summary_label}</summary>'
     )
     if lazy and ach_index is not None and run_id:
         why_url = url_for("api_why_card", run_id=run_id, ach_index=int(ach_index))
@@ -1133,20 +1148,25 @@ def _init_db():
             profile_id TEXT,
             meet_name TEXT,
             our_swims INTEGER,
-            n_cards INTEGER,
+            n_cards INTEGER,         -- legacy V4 content-card count (≈0 in the V5 recognition-first flow)
             n_queue INTEGER,
+            n_achievements INTEGER,  -- V5 recognition output: the REAL engine output a run produced
             error TEXT,
             file_name TEXT,
             progress_log TEXT,       -- JSON array, streamed for cross-worker polls
             heartbeat_at TEXT        -- ISO ts, advanced while the pipeline runs
         );
     """)
-    # Additive migration for DBs created before progress_log / heartbeat_at.
+    # Additive migration for DBs created before progress_log / heartbeat_at /
+    # n_achievements. Old rows keep NULL n_achievements until they are listed
+    # (the Activity page lazily backfills from the run JSON) or re-run.
     cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
     if "progress_log" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN progress_log TEXT")
     if "heartbeat_at" not in cols:
         conn.execute("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT")
+    if "n_achievements" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN n_achievements INTEGER")
     conn.commit()
     conn.close()
 
@@ -1296,14 +1316,20 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
 
     n_cards = len(run.cards)
     n_queue = sum(1 for c in run.cards if c.bucket == "queue")
+    # The real engine output is the V5 recognition count, not the legacy V4
+    # cards (which the recognition-first pipeline leaves empty). Persist it so
+    # Activity can surface "Achievements detected" instead of "Cards: 0".
+    n_achievements = int(
+        (getattr(run, "recognition_report", None) or {}).get("n_achievements", 0) or 0
+    )
     meet_name = run.canonical_meet.name if run.canonical_meet else "(unknown)"
     status = "error" if run.error else "done"
     conn = _db()
     conn.execute(
         """INSERT OR REPLACE INTO runs
            (id, created_at, finished_at, status, profile_id, meet_name,
-            our_swims, n_cards, n_queue, error, file_name)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            our_swims, n_cards, n_queue, n_achievements, error, file_name)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             run.run_id,
             run.started_at,
@@ -1314,6 +1340,7 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
             run.our_swim_count,
             n_cards,
             n_queue,
+            n_achievements,
             run.error,
             file_name,
         ),
@@ -2878,9 +2905,12 @@ BASE_CSS = """
    - Hanken Grotesk: humanist body / UI (not Inter, not Roboto)
    - JetBrains Mono: scoreboard data, mono labels, slashed-zero
 */
-/* Font @imports moved to _layout's <head> as a single preconnect + non-
-   blocking <link> pair. CSS @import is fully render-blocking and was
-   costing ~500-700ms of FCP per the round-6 performance audit. */
+/* Fonts are SELF-HOSTED (Council verdict 2026-05-31): _layout's <head> links
+   the first-party static/theme/fonts.css (@font-face -> static/fonts/*.woff2)
+   and preloads the two universal above-the-fold faces. No Google Fonts CDN —
+   that fixes the intermittent Impact/Oswald fallback users saw and the EU/UK
+   GDPR exposure of the CDN. The --font-body stack carries a metric-tuned
+   'Hanken Grotesk Fallback' so the load swap produces no layout shift. */
 
 :root {
   /* PHASE 1.6 STAGE A — every colour token below now resolves through the
@@ -2960,7 +2990,7 @@ BASE_CSS = """
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
   --font-serif:   'Fraunces', 'Source Serif Pro', Georgia, serif;
-  --font-body:    'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body:    'Hanken Grotesk', 'Hanken Grotesk Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Spacing scale (4px base) */
@@ -5365,11 +5395,31 @@ def _theme_seed_style_block() -> str:
         return ""
 
     overrides = [f"--mh-brand-seed: {seed_hex};"]
+    # Re-derive the on-colour (button/label ink) from the LIVE seed so the
+    # recoloured chrome stays legible whatever the club's brand lightness.
+    # --lane-ink aliases --mh-on-primary, and --mh-primary resolves to the
+    # raw seed (brand tone 400) — so without this, a dark brand seed (the
+    # signed-out navy default, a maroon/navy club) keeps the static near-
+    # black ink and the primary CTA renders dark-on-dark (~1.3:1, a WCAG
+    # fail). brand_on_color reuses the deterministic contrast science to
+    # pick paper-cream vs paper-black; for the lane-yellow default it
+    # returns the existing near-black, so nothing changes there.
+    try:
+        from mediahub.theming.contrast import brand_on_color as _brand_on_color
+    except Exception:
+        _brand_on_color = None
+    if _brand_on_color is not None:
+        overrides.append(f"--mh-on-primary: {_brand_on_color(seed_hex[:7])};")
     # Secondary → tertiary ramp (the "medal gold" slot). Honouring the
     # user's secondary here means a navy+gold org sees navy chrome AND
     # gold medal/accent ribbons instead of the MediaHub default cream.
     if secondary_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", secondary_hex):
         overrides.append(f"--mh-tertiary-seed: {secondary_hex};")
+        # On-tertiary (--medal-ink) must track a custom secondary too, so a
+        # dark secondary doesn't break medal/achievement text. The default
+        # medal-gold keeps its themed ink (this branch is simply skipped).
+        if _brand_on_color is not None:
+            overrides.append(f"--mh-on-tertiary: {_brand_on_color(secondary_hex[:7])};")
     # Accent is a third brand colour with no dedicated seed in
     # theme-base.css yet; expose it as a custom property so component
     # code that wants it can opt in via var(--mh-brand-accent).
@@ -5719,12 +5769,16 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <meta name="format-detection" content="telephone=no" />
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,500;1,9..144,700&amp;family=Hanken+Grotesk:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap"
-      media="print" onload="this.media='all'" />
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&amp;family=Hanken+Grotesk:wght@400;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" /></noscript>
+<!-- Self-hosted typefaces (Council verdict 2026-05-31): first-party woff2, no
+     Google Fonts CDN. Fixes the intermittent Impact/Oswald fallback users saw
+     when gstatic was blocked/slow, and removes the EU/UK GDPR exposure of the
+     Google CDN (Munich ruling). Preload the two universal above-the-fold faces
+     (body + display); the rest load on demand via @font-face in fonts.css. -->
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{{ url_for('static', filename='fonts/hanken-latin-normal-400.woff2') }}" />
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{{ url_for('static', filename='fonts/bigshoulders-latin-normal-800.woff2') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='theme/fonts.css') }}" />
 <style>{{ css | safe }}</style>
 {{ theme_seed_style | safe }}
 <script>
@@ -7282,7 +7336,8 @@ def create_app() -> Flask:
         rows = []
         unfiltered_counts: dict[str, int] = {}
         total_unfiltered = 0
-        cards_unfiltered = 0
+        ach_unfiltered = 0
+        ach_by_id: dict[str, int] = {}
         db_failed = False
         try:
             conn = _db()
@@ -7290,7 +7345,7 @@ def create_app() -> Flask:
                 if status_q:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
                         "FROM runs WHERE profile_id = ? AND status = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id, status_q),
@@ -7304,15 +7359,10 @@ def create_app() -> Flask:
                     ).fetchall()
                     unfiltered_counts = {r["status"]: r["n"] for r in counts_row}
                     total_unfiltered = sum(unfiltered_counts.values())
-                    _cards_row = conn.execute(
-                        "SELECT COALESCE(SUM(n_cards), 0) AS s FROM runs WHERE profile_id = ?",
-                        (prof.profile_id,),
-                    ).fetchone()
-                    cards_unfiltered = int(_cards_row["s"] if _cards_row else 0)
                 else:
                     rows = conn.execute(
                         "SELECT id, created_at, finished_at, status, profile_id, "
-                        "meet_name, our_swims, n_cards, n_queue, error, file_name "
+                        "meet_name, our_swims, n_cards, n_queue, n_achievements, error, file_name "
                         "FROM runs WHERE profile_id = ? "
                         "ORDER BY created_at DESC LIMIT 100",
                         (prof.profile_id,),
@@ -7320,7 +7370,42 @@ def create_app() -> Flask:
                     for r in rows:
                         unfiltered_counts[r["status"]] = unfiltered_counts.get(r["status"], 0) + 1
                     total_unfiltered = len(rows)
-                    cards_unfiltered = sum(int(r["n_cards"] or 0) for r in rows)
+
+                # Council STEP 3 — surface the REAL engine output (V5
+                # recognition achievements), not the legacy n_cards which the
+                # recognition-first pipeline leaves at 0 and a user reads as
+                # "nothing was produced". Read each run's count from the column,
+                # or its run JSON for rows written before the column existed.
+                #
+                # Audit-round hardening: the DISPLAY never depends on a DB
+                # write. We compute the counts in memory (column or JSON), then
+                # best-effort cache-warm the column so old rows don't re-read
+                # JSON next time — but that write is purely an optimisation,
+                # wrapped so a locked / read-only DB is a silent no-op, never a
+                # 500 and never an undercount.
+                _need = []
+                for r in rows:
+                    v = r["n_achievements"] if "n_achievements" in r.keys() else None
+                    if v is None:
+                        _need.append(r["id"])
+                    else:
+                        ach_by_id[r["id"]] = int(v or 0)
+                for _rid in _need:
+                    _d = _load_run(_rid) or {}
+                    ach_by_id[_rid] = int(
+                        (_d.get("recognition_report") or {}).get("n_achievements", 0) or 0
+                    )
+                if _need:
+                    try:
+                        for _rid in _need:
+                            conn.execute(
+                                "UPDATE runs SET n_achievements = ? WHERE id = ?",
+                                (ach_by_id[_rid], _rid),
+                            )
+                        conn.commit()
+                    except Exception:
+                        pass
+                ach_unfiltered = sum(ach_by_id.values())
             finally:
                 conn.close()
         except Exception as e:
@@ -7462,13 +7547,11 @@ def create_app() -> Flask:
         }
         bucket_order = ["today", "yesterday", "this_week", "this_month", "earlier"]
         grouped: dict[str, list] = {b: [] for b in bucket_order}
-        # Also keep a flat count of total cards / failures for the top stats.
-        n_cards_total = 0
+        # Flat status counts for the top stats / failure callout.
         n_done = 0
         n_running = 0
         n_errored = 0
         for r in rows:
-            n_cards_total += int(r["n_cards"] or 0)
             if r["status"] == "done":
                 n_done += 1
             if r["status"] == "running":
@@ -7502,7 +7585,7 @@ def create_app() -> Flask:
                     f'<td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
                     f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                     f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
-                    f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
+                    f'<td data-label="Achievements">{_h(ach_by_id.get(r["id"], 0))}</td>'
                     f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                     f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                     f'<td><form method="post" action="{delete_href}" '
@@ -7589,7 +7672,7 @@ def create_app() -> Flask:
         summary_html = (
             '<div class="mh-activity-summary mh-reveal">'
             f'<div class="stat live"><div class="l">Total runs</div><div class="v" data-mh-count="{total_unfiltered}">{total_unfiltered:02d}</div></div>'
-            f'<div class="stat medal"><div class="l">Cards generated</div><div class="v" data-mh-count="{cards_unfiltered}">{cards_unfiltered:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Achievements detected</div><div class="v" data-mh-count="{ach_unfiltered}">{ach_unfiltered:,}</div></div>'
             f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):02d}</div></div>'
         )
         if unfiltered_counts.get("error", 0):
@@ -7687,7 +7770,7 @@ def create_app() -> Flask:
             f'{toolbar_html}'
             '<div class="card"><table class="mh-table-stack">'
             '<thead><tr><th>Input</th><th>Status</th>'
-            '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
+            '<th>Matched</th><th>Achievements</th><th>Schedule</th>'
             '<th>Started</th><th></th></tr></thead>'
             f'<tbody>{rows_html}</tbody>'
             '</table></div>'
@@ -9367,6 +9450,21 @@ def create_app() -> Flask:
 .filters-bar {{ display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);position:sticky;top:56px;z-index:50; }}
 .filters-bar select {{ width:auto;min-width:120px;font-size:13px;padding:6px 10px; }}
 .ach-row.hidden {{ display:none; }}
+/* Council UI verdict (2026-05-31) — the review list collapses each card's
+   reasoning by default for scroll relief (a 249-card meet was a ~70,000px
+   wall). These rules keep the reasoning one click away with a clear "show
+   reasoning" affordance; the "Expand all reasoning" control lives in the
+   already-sticky .filters-bar above the list (a second sticky bar collided
+   with it — caught in the Council audit round). */
+details.why-card > summary .why-peek {{
+  color: var(--ink-dim); font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--lane) 50%, transparent);
+  text-underline-offset: 3px;
+  display: inline-flex; align-items: center; gap: 4px;
+}}
+details.why-card > summary .why-peek .why-chev {{ font-size: 9px; text-decoration: none; }}
+details.why-card[open] > summary .why-peek {{ display: none; }}
 @keyframes spin {{ from {{ transform:rotate(0deg) }} to {{ transform:rotate(360deg) }} }}
 </style>
 
@@ -9425,6 +9523,9 @@ def create_app() -> Flask:
     <select id="f-post" onchange="applyFilters()">{opts(post_types_set, 'post types')}</select>
     <button class="btn secondary" style="font-size:13px;padding:6px 12px" onclick="clearFilters()">Clear</button>
     <span id="f-count" class="muted" style="font-size:12px;align-self:center"></span>
+    <button type="button" class="btn secondary" id="mh-expand-all-why" aria-pressed="false"
+            style="margin-left:auto;font-size:12px;padding:6px 12px"
+            title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
   <div id="ach-list">{ach_rows_html_wf}</div>
 </div>
@@ -9556,16 +9657,36 @@ function copyWhyCard(btn, taId) {{
     if (body) {{ body.dataset.whyLoaded = ''; queue.push(body); pump(); }}
     return false;
   }};
+  function loadBody(b) {{
+    if (!b || b.dataset.whyLoaded) {{ return; }}
+    queue.push(b); pump();
+  }}
+  function markSeen(d) {{
+    var row = d.closest ? d.closest('.ach-row') : null;
+    if (row) row.setAttribute('data-why-seen', '1');
+  }}
   function init() {{
     var bodies = Array.prototype.slice.call(document.querySelectorAll('.why-body[data-why-url]'));
     if (!bodies.length) {{ return; }}
+    // The review list collapses each card's reasoning by default (Council UI
+    // verdict): a collapsed <details> hides its .why-body (display:none), so
+    // the IntersectionObserver never fires for it. Load on expand instead, and
+    // remember the reviewer has now actually seen that card's reasoning.
+    Array.prototype.slice.call(document.querySelectorAll('details.why-card')).forEach(function(d){{
+      d.addEventListener('toggle', function(){{
+        if (d.open) {{ loadBody(d.querySelector('.why-body[data-why-url]')); markSeen(d); }}
+      }});
+      if (d.open) {{ loadBody(d.querySelector('.why-body[data-why-url]')); markSeen(d); }}
+    }});
     if ('IntersectionObserver' in window) {{
       var obs = new IntersectionObserver(function(entries) {{
         entries.forEach(function(e) {{
           if (e.isIntersecting) {{ obs.unobserve(e.target); queue.push(e.target); pump(); }}
         }});
       }}, {{rootMargin: '600px 0px'}});
-      bodies.forEach(function(b) {{ obs.observe(b); }});
+      // Only observe bodies already visible (inside an open card); collapsed
+      // ones are handled by the toggle listener above.
+      bodies.forEach(function(b) {{ if (b.offsetParent !== null) obs.observe(b); }});
     }} else {{
       bodies.forEach(function(b) {{ queue.push(b); }});
       pump();
@@ -9665,13 +9786,33 @@ function copyWhyCard(btn, taId) {{
         if (window.MH) MH.toast('No cards in the queue to approve.', 'info');
         return;
       }}
-      if (!window.confirm('Approve all ' + queued.length + ' queued card' + (queued.length === 1 ? '' : 's') + '?')) return;
+      var unseen = queued.filter(function(el){{ return !el.getAttribute('data-why-seen'); }}).length;
+      var msg = 'Approve all ' + queued.length + ' queued card' + (queued.length === 1 ? '' : 's') + '?';
+      if (unseen > 0) {{
+        msg += '  (' + unseen + " not yet opened — you haven't read their reasoning; approving accepts them as-is.)";
+      }}
+      if (!window.confirm(msg)) return;
       var n = 0;
       queued.forEach(function(row){{
         var btn = row.querySelector('[data-mh-wf="approved"]');
         if (btn) {{ btn.click(); n++; }}
       }});
       if (window.MH) MH.toast('Approving ' + n + ' card' + (n === 1 ? '' : 's') + '…', 'success');
+    }});
+  }}
+
+  // ----- Expand / collapse all reasoning -----
+  // Reviewers who want the old "everything visible" experience get it in one
+  // click; opening a card fires its toggle handler, which lazy-loads the
+  // reasoning and marks it seen.
+  var expandBtn = document.getElementById('mh-expand-all-why');
+  if (expandBtn) {{
+    expandBtn.addEventListener('click', function(){{
+      var next = expandBtn.getAttribute('aria-pressed') !== 'true';
+      Array.prototype.slice.call(document.querySelectorAll('details.why-card'))
+        .forEach(function(d){{ d.open = next; }});
+      expandBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+      expandBtn.textContent = next ? 'Collapse all reasoning' : 'Expand all reasoning';
     }});
   }}
 }})();
