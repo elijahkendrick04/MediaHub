@@ -319,6 +319,16 @@ class Tester:
             self._shoot(f)
         self.findings.append(f)
 
+    # full-page screenshot of a primary surface, for the vision judge to look at
+    def _capture_surface(self, name: str) -> None:
+        try:
+            SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            path = SCREENSHOT_DIR / f"surface-{name}.png"
+            self.page.screenshot(path=str(path), full_page=True)
+            self.artifacts[f"{name}_screenshot"] = os.path.relpath(path, REPO_ROOT)
+        except Exception:
+            pass
+
     def ensure_signed_in(self, profile_id: str) -> bool:
         """Pin the seeded org into the browser session (gate-exempt API), so
         the gated content routes are reachable. A failure here is a real bug —
@@ -781,6 +791,7 @@ class Tester:
             self.artifacts["review_text"] = self.page.inner_text("body")[:6000]
         except Exception:
             pass
+        self._capture_surface("review")  # for the vision judge to look at
         # export is JSON; check via the context request (carries session cookie)
         try:
             r = self.page.context.request.get(self.base + f"/api/runs/{run_id}/export")
@@ -985,6 +996,7 @@ def _run(run_id: str) -> int:
             try:
                 page.goto(base + "/", wait_until="domcontentloaded", timeout=20000)
                 tester.artifacts["home_text"] = page.inner_text("body")[:6000]
+                tester._capture_surface("home")  # for the vision judge to look at
             except Exception:
                 pass
 
@@ -1027,21 +1039,31 @@ def _run(run_id: str) -> int:
             # a content pack, the home page, the sign-up text, or a review page —
             # not only a full content pack. (Without this, a content-less live
             # site left the AI brain off and found nothing.)
+            #    The VISION judge (5) looks at the rendered screenshots for visual
+            #    defects neither the deterministic finder nor the text-only
+            #    semantic judges can see (broken images, clipped captions, error
+            #    banners). It runs on the existing media_ai.llm vision capability
+            #    (Gemini/Anthropic) — no GPU, honest-skip with no key. Both feed
+            #    the SAME council adjudication so there's one verdict per sweep.
             _judgeable = any(tester.artifacts.get(k) for k in
                              ("export_json", "home_text", "signup_text", "review_text"))
-            if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
-                try:
+            try:
+                ai_findings: list[Finding] = []
+                if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
                     from autotest import semantic
-                    sem = semantic.evaluate(tester.artifacts)
-                    candidates = [f for f in sem if f.is_bug]
-                    passthrough = [f for f in sem if not f.is_bug]
-                    if candidates and os.environ.get("AUTOTEST_COUNCIL", "1") != "0":
-                        from autotest import council
-                        candidates, council_verdict = council.adjudicate(
-                            candidates, tester.artifacts)
-                    tester.findings.extend(passthrough + candidates)
-                except Exception:
-                    pass
+                    ai_findings += semantic.evaluate(tester.artifacts)
+                if os.environ.get("AUTOTEST_VISION", "1") != "0":
+                    from autotest import vision
+                    ai_findings += vision.evaluate(tester.artifacts)
+                candidates = [f for f in ai_findings if f.is_bug]
+                passthrough = [f for f in ai_findings if not f.is_bug]
+                if candidates and os.environ.get("AUTOTEST_COUNCIL", "1") != "0":
+                    from autotest import council
+                    candidates, council_verdict = council.adjudicate(
+                        candidates, tester.artifacts)
+                tester.findings.extend(passthrough + candidates)
+            except Exception:
+                pass
             browser.close()
     finally:
         if server:
