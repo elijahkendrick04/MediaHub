@@ -1,5 +1,5 @@
 {
-  "consecutive_failures": 3,
-  "last_failure_at": 1780229335.294597,
+  "consecutive_failures": 4,
+  "last_failure_at": 1780257707.599683,
   "breaker_notified": true
 }
