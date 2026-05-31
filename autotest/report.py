@@ -29,7 +29,12 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 # Statuses the fix loop owns. The finder (run.py) must never downgrade these
 # back to "open" — once a fix is in flight or merged we stop re-filing it.
-FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix"}
+# ``verified-fixed`` is a TERMINAL audit state (council): a finding confirmed
+# already-resolved by external evidence (a prior commit and/or a finder-precision
+# fix that eliminates a false-positive) and retired with a commit/test/signature
+# record — NOT a loop-authored fix. It is fix-owned so a re-detection cannot
+# reopen it.
+FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix", "verified-fixed"}
 
 
 def _now_iso() -> str:
@@ -229,9 +234,34 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
         "new": new_bugs,
         "fixing": sum(1 for b in ledger["bugs"].values() if b.get("status") == "fixing"),
         "fixed": sum(1 for b in ledger["bugs"].values() if b.get("status") == "fixed"),
+        "verified_fixed": sum(1 for b in ledger["bugs"].values()
+                              if b.get("status") == "verified-fixed"),
         "skipped": len(ledger["skipped"]),
         "total_bugs": len(ledger["bugs"]),
     }
+
+
+def retire_verified_fixed(fingerprint: str, *, commit: str, tests: str, note: str,
+                          verified_by: str) -> bool:
+    """Retire a finding to the TERMINAL ``verified-fixed`` state with an evidence
+    record (council Q3). Use for a finding confirmed already-resolved by external
+    evidence — a prior commit and/or a finder-precision fix that eliminates a
+    false-positive — rather than by a loop-authored fix. Records the council's
+    required fields (commit hash, test evidence, human signature, note) as a
+    permanent audit trail. The change itself ships as a harness PR, so the human
+    who merges it is the signing gate. Returns False for an unknown fingerprint.
+    """
+    ledger = load_ledger()
+    entry = ledger["bugs"].get(fingerprint)
+    if not entry:
+        return False
+    entry["status"] = "verified-fixed"
+    entry["verified_fixed"] = {
+        "commit": commit, "tests": tests, "note": note,
+        "verified_by": verified_by, "at": _now_iso(),
+    }
+    save_ledger(ledger)
+    return True
 
 
 # --- Markdown rendering ------------------------------------------------------
@@ -274,6 +304,8 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
     fixing = sorted((b for b in bugs if b.get("status") == "fixing"), key=_sev_rank)
     fixed = sorted((b for b in bugs if b.get("status") == "fixed"),
                    key=lambda b: b.get("last_seen", ""), reverse=True)
+    verified = sorted((b for b in bugs if b.get("status") == "verified-fixed"),
+                      key=lambda b: (b.get("verified_fixed") or {}).get("at", ""), reverse=True)
     skipped = sorted(ledger["skipped"].values(), key=_sev_rank)
 
     by_sev: dict[str, int] = {}
@@ -297,6 +329,7 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                             sorted(by_sev.items(), key=lambda kv: SEVERITY_ORDER.get(kv[0], 9))) or "none"
     out.append(f"- **Open bugs:** {len(open_bugs)} ({sev_summary}) · "
                f"**In progress:** {len(fixing)} · **Fixed:** {len(fixed)} · "
+               f"**Verified-fixed (retired):** {len(verified)} · "
                f"**Skipped (expected/infra):** {len(skipped)}")
     if run_meta.get("council_verdict"):
         out.append(f"- **🏛️ {run_meta['council_verdict']}** "
@@ -326,6 +359,20 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
         for b in fixed[:50]:
             pr = b.get("fix_pr") or "?"
             out.append(f"- {b['title']} · `{b['fingerprint']}` → PR {pr} (fixed {b.get('last_seen', '?')})")
+        out.append("")
+        out.append("</details>")
+        out.append("")
+
+    if verified:
+        out.append("<details><summary>🗂️ Verified-fixed — retired with evidence "
+                   f"({len(verified)})</summary>")
+        out.append("")
+        for b in verified:
+            vf = b.get("verified_fixed") or {}
+            out.append(f"- {b['title']} · `{b['fingerprint']}` — verified via "
+                       f"`{vf.get('commit', '?')}` ({vf.get('tests', '?')}); "
+                       f"{vf.get('note', '')} — by {vf.get('verified_by', '?')} "
+                       f"at {vf.get('at', '?')}")
         out.append("")
         out.append("</details>")
         out.append("")
