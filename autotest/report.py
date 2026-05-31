@@ -139,7 +139,9 @@ def load_ledger() -> dict[str, Any]:
 
 def save_ledger(ledger: dict[str, Any]) -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    LEDGER_PATH.write_text(json.dumps(ledger, indent=2, sort_keys=False), encoding="utf-8")
+    # Trailing newline so the ledger is POSIX-clean and passes the end-of-file
+    # hygiene hook if it ever rides in a PR (the loop's own pushes skip CI).
+    LEDGER_PATH.write_text(json.dumps(ledger, indent=2, sort_keys=False) + "\n", encoding="utf-8")
 
 
 def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
