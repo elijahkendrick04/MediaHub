@@ -45,9 +45,26 @@ def _max_attempts() -> int:
     return int(os.environ.get("AUTOTEST_FIX_MAX_ATTEMPTS", "2"))
 
 
+# Routes that name the TESTER/adjudication itself rather than a product surface.
+# A council:blind_spot finding on one of these is a critique of how the tester
+# checked things (e.g. "no advisor fetched a response body"), not a MediaHub
+# product defect the coder can fix — so it must not enter the product-fix queue.
+_META_ROUTES = {"diagnostic/functional", "(council)", "(semantic)", "diagnostic", "server"}
+
+
 def _is_meta_finding(bug: dict) -> bool:
     blob = f"{bug.get('route', '')} {bug.get('title', '')}".lower()
-    return any(m in blob for m in _META_MARKERS)
+    if any(m in blob for m in _META_MARKERS):
+        return True
+    # A council/blind-spot finding with NO real product route is about the
+    # tester/adjudication, not the product. Require BOTH (category AND a non-product
+    # route) so a real product bug the council surfaces with a real route still flows
+    # to the fixer.
+    category = str(bug.get("category", "")).lower()
+    route = str(bug.get("route", "")).strip().lower()
+    if category.startswith("council:blind_spot") and route in _META_ROUTES:
+        return True
+    return False
 
 
 # The headline "content engine produced nothing" cluster — architectural, not a

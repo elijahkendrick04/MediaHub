@@ -120,7 +120,11 @@ class Finding:
             dc = _defect_class(f"{self.title} {self.expected} {self.actual}")
             if dc:
                 return fingerprint("llm", "", dc)
-            return fingerprint(self.category, self.route, self.title)
+            # No defect-class match: DON'T hash the LLM's exact title (it rewords it
+            # every run, exploding one defect into many entries). Hash (category,
+            # normalised route) so the same kind of finding at the same surface
+            # collapses to one entry regardless of wording (generation-time dedup).
+            return fingerprint(self.category, self.route, "")
         signal = self.suspect or self.evidence[:200] or self.title
         return fingerprint(self.category, self.route, signal)
 
