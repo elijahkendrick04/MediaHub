@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `6daa56acf` · Merge pull request #203 from elijahkendrick04/claude/fixc-blindspot-meta
+**Last updated:** 2026-05-31 · `6cbebba38` · Merge pull request #204 from elijahkendrick04/autotest/fix-8ee1cbc395d9
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -72,7 +72,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `d0e77590d` | decontaminate FIND/adjudicate: provenance guard, council framing, meta-filter, dedup |
 | 2026-05-31 | `abd5592df` | chore(lint): clear ruff F401/F811 debt + format touched files |
 | 2026-05-31 | `5c8670678` | fix(review): explain zero-card runs when no swims match the club (#196) |
-| 2026-05-31 | `8be81920b` | docs(adr): council verdict — do not integrate jcode (#188) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
