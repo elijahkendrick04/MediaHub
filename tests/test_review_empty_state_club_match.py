@@ -41,12 +41,19 @@ def _review_body(client, run_id):
     return resp.get_data(as_text=True)
 
 
+# A truthy recognition report with no ranked achievements: the run WAS judged
+# (so the route reaches the "engine produced no cards" empty state) but nothing
+# was ranked. An empty {} would be falsy and hit the earlier "No report yet"
+# branch instead, so it must be a non-empty dict.
+_JUDGED_EMPTY = {"ranked_achievements": [], "n_achievements": 0, "n_swims_analysed": 0}
+
+
 def test_zero_matched_club_explains_mismatch(client):
     _write_run("nomatch", {
         "file_name": "meet.hy3",
         "meet": {"name": "West Wales Regional LC"},
         "cards": [],
-        "recognition_report": {},
+        "recognition_report": dict(_JUDGED_EMPTY),
         "parsed_swim_count": 120,
         "our_swim_count": 0,
         "club_filter": "Swansea University Swimming Team",
@@ -64,7 +71,7 @@ def test_no_club_selected_prompts_to_pick_one(client):
         "file_name": "meet.hy3",
         "meet": {"name": "Spring Meet"},
         "cards": [],
-        "recognition_report": {},
+        "recognition_report": dict(_JUDGED_EMPTY),
         "parsed_swim_count": 80,
         "our_swim_count": 0,
         "club_filter": "",
@@ -84,7 +91,7 @@ def test_matched_but_nothing_ranked_keeps_standout_message(client):
         "file_name": "meet.hy3",
         "meet": {"name": "Spring Meet"},
         "cards": [],
-        "recognition_report": {},
+        "recognition_report": dict(_JUDGED_EMPTY),
         "parsed_swim_count": 80,
         "our_swim_count": 40,
         "club_filter": "Swansea",
