@@ -32,6 +32,7 @@ nicety. (Burning the SRT into the MP4 is a separate, deferred step; see the repo
 CLAUDE.md / council plan. This module produces the grounded audio + subtitle primitive
 everything else hangs off.)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -88,6 +89,7 @@ class VoiceoverResult:
 # Availability + cache plumbing
 # ---------------------------------------------------------------------------
 
+
 def is_available() -> bool:
     """True when the synthesis backend is importable.
 
@@ -125,6 +127,7 @@ def cache_key(text: str, voice: str) -> str:
 # ---------------------------------------------------------------------------
 # SRT building (pure, deterministic)
 # ---------------------------------------------------------------------------
+
 
 def _fmt_ts(ms: int) -> str:
     ms = max(0, int(ms))
@@ -180,6 +183,7 @@ def build_srt(boundaries: list[WordBoundary]) -> str:
 # Synthesis
 # ---------------------------------------------------------------------------
 
+
 def _synthesize_raw(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
     """Call edge-tts and return (mp3_bytes, word_boundaries).
 
@@ -190,9 +194,7 @@ def _synthesize_raw(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
     try:
         import edge_tts
     except Exception as exc:  # pragma: no cover - exercised via is_available()
-        raise VoiceoverError(
-            "Text-to-speech backend (edge-tts) is not installed."
-        ) from exc
+        raise VoiceoverError("Text-to-speech backend (edge-tts) is not installed.") from exc
 
     async def _run() -> tuple[bytes, list[WordBoundary]]:
         communicate = edge_tts.Communicate(text, voice)
@@ -249,6 +251,7 @@ def synthesize(
 
     if apply_pronunciation:
         from . import pronunciation
+
         spoken = pronunciation.pronounce(spoken, run_id)
 
     key = cache_key(spoken, voice)
@@ -278,9 +281,7 @@ def synthesize(
             pass
 
     audio_bytes, boundaries = _synthesize_raw(spoken, voice)
-    duration_ms = (
-        boundaries[-1].offset_ms + boundaries[-1].duration_ms if boundaries else 0
-    )
+    duration_ms = boundaries[-1].offset_ms + boundaries[-1].duration_ms if boundaries else 0
     srt = build_srt(boundaries)
 
     mp3_path.write_bytes(audio_bytes)

@@ -19,6 +19,7 @@ Substitution rules (deliberately boring and predictable):
   - longest key first, so a multi-word key ("Mary Anne") wins over its parts;
   - the original text is otherwise passed through unchanged (verbatim guarantee).
 """
+
 from __future__ import annotations
 
 import json

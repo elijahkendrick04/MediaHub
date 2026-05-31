@@ -19261,8 +19261,6 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
           - ?format=json       → returns {transcript, voice, duration_ms, ...}
                                   for the review/playback surface
         """
-        from flask import send_file
-
         if not _voiceover_enabled():
             # Honest, specific 503 — either the backend isn't importable or the
             # operator hasn't opted in. Never a silent fallback voice.
