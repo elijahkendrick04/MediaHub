@@ -32,12 +32,96 @@ from autotest.report import Finding
 _MAX_TEXT = 4500
 _MAX_CARDS = 12
 
+# --- artifact provenance (the single source of truth) ------------------------
+# Every artifact a judge can see is one of three KINDS. This is the one mechanism
+# the de-contamination depends on (council mandate): a control variable the TESTER
+# assembles (e.g. flow_result = "live:judged-6-runs") must never reach a judge that
+# is told "you ARE the user", or the judge flags the tester's own internal token as
+# if it were on-screen product text — which is exactly how the false bug
+# b07572c63c13 was fabricated. Enforce on the KIND, not the key name, so a control
+# token leaking into a different bag (or a key being renamed) is still dropped.
+RENDERED_PAGE = "rendered_page"      # page.inner_text(body) — genuinely user-visible
+TESTER_CONTROL = "tester_control"    # a tester control/flow token — NEVER user-visible
+TESTER_SUMMARY = "tester_summary"    # derived from internal state / the export JSON
+
+# The complete set — a charter that may see EVERYTHING declares this explicitly,
+# so "fully permissive" is a deliberate choice in the source, not an accident a
+# future charter author falls into by listing all three kinds by hand.
+ALL_PROVENANCE = frozenset({RENDERED_PAGE, TESTER_CONTROL, TESTER_SUMMARY})
+
+PROVENANCE: dict[str, str] = {
+    "home_text": RENDERED_PAGE,
+    "signup_text": RENDERED_PAGE,
+    "review_text": RENDERED_PAGE,
+    "flow_result": TESTER_CONTROL,
+    "pages": TESTER_SUMMARY,
+    "content_summary": TESTER_SUMMARY,
+    "content_pack": TESTER_SUMMARY,
+    "meet_summary": TESTER_SUMMARY,
+    # The raw export the content_summary/content_pack/meet_summary are derived from;
+    # tester-side data (the product's export JSON as the tester captured it), so it
+    # is adjudication context, never user-visible page text.
+    "export_json": TESTER_SUMMARY,
+}
+
+
+def filter_artifacts(artifacts: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any]:
+    """Return only the artifacts whose provenance KIND is in ``allowed``.
+
+    The single guard called by BOTH the judge (``_run_charter``) and the council
+    framing (``adjudicate``), so there is one implementation, not several that drift.
+
+    An artifact with no known provenance is treated as TESTER_CONTROL. Note the
+    asymmetry this creates, by design: for a caller whose ``allowed`` excludes
+    TESTER_CONTROL (e.g. the user_brain judge, allowed={RENDERED_PAGE}) an unknown
+    key is FAIL-CLOSED (dropped — never shown to a user-perspective judge). For a
+    caller whose ``allowed`` includes TESTER_CONTROL (e.g. the council, which is
+    meant to see tester context) an unknown key is FAIL-OPEN (passed through as
+    internal context). That is correct: a stray unknown value must never reach the
+    "you ARE the user" judge, but it is harmless as tester-side adjudication context."""
+    return {k: v for k, v in artifacts.items()
+            if PROVENANCE.get(k, TESTER_CONTROL) in allowed}
+
+
+def scrub_control_tokens(text: str, artifacts: dict[str, Any]) -> str:
+    """Redact the literal VALUES of tester_control artifacts from ``text``.
+
+    The council's ``issues_txt`` is the legitimate evidence channel — it must keep
+    every real page quote a judge cites. But a judge that legitimately SEES a
+    control token (e.g. the QA charter sees flow_result) can author a finding whose
+    text contains the token's value, which then reaches the council framing as if it
+    were product evidence (the b07572c63c13 class, via a different judge). This scrubs
+    only the exact control-token VALUES — keyed on the PROVENANCE map, so it covers
+    every tester_control artifact PRESENT IN THIS RUN's ``artifacts`` dict (not a
+    hardcoded list, and not limited to the current judge roster) — while leaving all
+    genuine page quotes intact.
+
+    Boundary conditions (declared, not silently assumed):
+      * Value gate, NOT existence gate: the literal value is replaced with
+        ``<redacted KEY>``; the council still learns a control artifact was present.
+      * It redacts the literal STRING only — a judge that PARAPHRASES a control
+        signal's meaning ("confirmed a live run with 6 judged sources") is NOT
+        caught. Judges are trusted not to summarise control semantics as product
+        evidence; if that holds, the gate is sufficient; if violated, it fails open.
+      * Short/common values are skipped (``len >= 4`` after strip) to avoid redacting
+        substrings of genuine page quotes — a deliberate false-positive guard."""
+    if not text:
+        return text
+    for key, kind in PROVENANCE.items():
+        if kind != TESTER_CONTROL:
+            continue
+        val = artifacts.get(key)
+        if isinstance(val, str) and len(val.strip()) >= 4:   # >=4: don't redact trivial tokens
+            text = text.replace(val, f"<redacted {key}>")
+    return text
+
 
 @dataclasses.dataclass
 class Charter:
     name: str
     persona: str          # the "brain" — who is judging and how
     rubric: str           # what to check
+    allowed_provenance: frozenset[str]   # which artifact KINDS this charter may see
     artifact_keys: tuple[str, ...]
 
 
@@ -54,6 +138,8 @@ CHARTERS = (
                 "placeholder output. Do NOT flag missing AI captions when no AI key "
                 "is configured — that is expected."),
         artifact_keys=("flow_result", "pages", "content_summary"),
+        # A QA persona checking flow STATUS is *meant* to inspect internal state.
+        allowed_provenance=ALL_PROVENANCE,
     ),
     Charter(
         name="output",
@@ -67,6 +153,8 @@ CHARTERS = (
                 "major ones. Quote the exact card text you object to as evidence. If a "
                 "field is just absent because AI is unconfigured, that is NOT a bug."),
         artifact_keys=("content_pack", "meet_summary"),
+        # An editor fact-checking cards is meant to see the produced content/export.
+        allowed_provenance=ALL_PROVENANCE,
     ),
     Charter(
         name="user_brain",
@@ -81,6 +169,11 @@ CHARTERS = (
                 "next step, primary actions that don't obviously work, jargon, or a review "
                 "screen with nothing to approve/export. Be concrete about what blocked you."),
         artifact_keys=("home_text", "signup_text", "review_text", "flow_result"),
+        # "You ARE the user" => may see ONLY genuinely-rendered page text. The
+        # provenance guard drops flow_result (a tester control token) here, which
+        # is what fabricated b07572c63c13. flow_result stays declared in
+        # artifact_keys for documentation but is filtered out before the prompt.
+        allowed_provenance=frozenset({RENDERED_PAGE}),
     ),
 )
 
@@ -158,7 +251,11 @@ def _parse_verdict(text: str) -> list[dict]:
 def _run_charter(charter: Charter, arts: dict[str, str]) -> list[Finding]:
     from autotest import cli_llm  # judges run on the Claude CLI (subscription, no API key)
 
-    body = "\n\n".join(f"## {k}\n{arts.get(k, '(none)')}" for k in charter.artifact_keys)
+    # Provenance guard: drop any artifact whose KIND this charter may not see, so a
+    # tester-internal control token never reaches a user-perspective judge.
+    safe = filter_artifacts(arts, charter.allowed_provenance)
+    body = "\n\n".join(f"## {k}\n{safe.get(k, '(none)')}"
+                       for k in charter.artifact_keys if k in safe)
     system = f"{charter.persona}\n\n{charter.rubric}\n\n{_VERDICT_CONTRACT}"
     try:
         answer = cli_llm.ask(system=system, user=body, max_tokens=1100)

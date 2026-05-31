@@ -8,6 +8,7 @@ Domains are scored using Laplace-smoothed success rate:
 The ledger starts empty; the engine populates it as it processes pages.
 No domains are hardcoded — trust is earned through empirical parse success.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,6 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 
 # Serialises the ledger's read-modify-write so concurrent PB lookups (the
@@ -111,6 +111,7 @@ def rank_candidates(urls: list[str]) -> list[str]:
 
     Higher-trust domains float to the top so the engine tries them first.
     """
+
     def _key(url: str) -> float:
         domain = _domain_from_url(url)
         return -score_domain(domain)  # negative so sort ascending = highest first
@@ -128,14 +129,17 @@ def record_attempt(domain: str, success: bool, purpose: str = "") -> None:
     """
     with _LEDGER_LOCK:
         ledger = _load_ledger()
-        record = ledger.get(domain, {
-            "domain": domain,
-            "first_seen": _now(),
-            "last_used": _now(),
-            "parse_attempts": 0,
-            "parse_successes": 0,
-            "domains_observed_for": [],
-        })
+        record = ledger.get(
+            domain,
+            {
+                "domain": domain,
+                "first_seen": _now(),
+                "last_used": _now(),
+                "parse_attempts": 0,
+                "parse_successes": 0,
+                "domains_observed_for": [],
+            },
+        )
         record["parse_attempts"] = record.get("parse_attempts", 0) + 1
         if success:
             record["parse_successes"] = record.get("parse_successes", 0) + 1
@@ -149,9 +153,10 @@ def record_attempt(domain: str, success: bool, purpose: str = "") -> None:
 
 def _domain_from_url(url: str) -> str:
     import re
+
     try:
-        s = re.sub(r'^https?://', '', url)
-        s = s.split('/')[0].split('?')[0].split('#')[0].split(':')[0]
+        s = re.sub(r"^https?://", "", url)
+        s = s.split("/")[0].split("?")[0].split("#")[0].split(":")[0]
         return s.lower()
     except Exception:
         return url

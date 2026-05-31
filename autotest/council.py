@@ -174,11 +174,23 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
     if not candidates or not available():
         return candidates, ""
 
+    from autotest.semantic import (TESTER_CONTROL, TESTER_SUMMARY,
+                                   filter_artifacts, scrub_control_tokens)
+
+    _COUNCIL_ALLOWED = frozenset({TESTER_CONTROL, TESTER_SUMMARY})
     listed = candidates[:10]
     issues_txt = "\n".join(
         f"[{i}] ({c.category}/{c.severity}) {c.title} — expected: {c.expected[:160]} | "
         f"actual: {c.actual[:160]} | evidence: {c.evidence[:300]}"
         for i, c in enumerate(listed))
+    # issues_txt is the legitimate evidence channel (real page quotes MUST survive),
+    # but a judge that legitimately sees a control token (e.g. the QA charter sees
+    # flow_result) can author a finding whose text contains the token's VALUE — which
+    # would then reach the council as if it were product evidence. Scrub only the exact
+    # control-token values (provenance-keyed, covers any judge incl. future ones); all
+    # genuine page quotes are untouched. This is the code gate the council required in
+    # place of the functional/QA "honor system".
+    issues_txt = scrub_control_tokens(issues_txt, artifacts)
     live = (str(artifacts.get("flow_result", "")).startswith("live")
             or bool(artifacts.get("live_run_id")))
     if live:
@@ -198,6 +210,16 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
             "'captions absent when no AI key' can be EXPECTED artifacts of this setup, "
             "not product bugs. Distinguish genuine defects (crashes, broken UX, "
             "fabricated/incorrect output) from test-setup artifacts.")
+    # De-contaminate the adjudication MECHANICALLY (one filter_artifacts, both
+    # callers — the judge and the council). The council adjudicates findings and
+    # legitimately needs TESTER context, but must NEVER be handed a rendered page
+    # as raw text it could mistake for product UI; and a control token like
+    # flow_result must be labelled as internal, not presented as product evidence.
+    # Passing allowed={TESTER_CONTROL, TESTER_SUMMARY} structurally excludes
+    # rendered_page artifacts and makes the token's provenance explicit in code —
+    # not via a hand-written label the model could override (the b07572c63c13 class).
+    safe = filter_artifacts(artifacts, _COUNCIL_ALLOWED)
+    flow_token = safe.get("flow_result", "(none)")
     framed = (
         "An automated tester swept MediaHub — a tool that turns swimming-meet result "
         "files into post-ready social content (cards, captions, confidence scores). "
@@ -206,8 +228,11 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
         "problems worth fixing versus over-flagged noise, and what single fix matters "
         "most. Be skeptical of over-flagging — a false bug wastes the team's time.\n\n"
         f"{context}\n\n"
-        f"Flow result: {artifacts.get('flow_result')}\n"
-        f"Content summary: {_content_summary(artifacts)}\n\n"
+        # The fields below are TESTER-INTERNAL (filtered to tester provenance), never
+        # product UI. A 'user sees X' finding is only sound if X was quoted from a
+        # rendered page by the judge — never from this control token.
+        f"Tester-internal flow token (NOT shown to any user): {flow_token}\n"
+        f"Content summary (tester-derived, not product UI): {_content_summary(safe)}\n\n"
         f"Candidate issues:\n{issues_txt}")
 
     session = deliberate(framed)
@@ -265,7 +290,10 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
 def _content_summary(artifacts: dict[str, Any]) -> str:
     export = artifacts.get("export_json") or {}
     cards = export.get("cards") or []
-    return f"{len(cards)} cards produced; flow={artifacts.get('flow_result')}"
+    # Do NOT append flow_result here — it is a tester-internal control token and is
+    # already shown once, explicitly labelled, in the framing. Repeating it as a bare
+    # "flow=..." re-leaks it as if it were product evidence (the b07572c63c13 class).
+    return f"{len(cards)} cards produced"
 
 
 def _verdict_summary(verdict: str) -> str:

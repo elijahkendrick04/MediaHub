@@ -4,11 +4,11 @@ Pure-Pillow heuristics so it works in published sandbox. `has_face` is a
 best-effort signal; it relies on aspect ratio / luminance variance and is
 intended to be overridden by user metadata when present.
 """
+
 from __future__ import annotations
 
 import logging
 from collections import Counter
-from pathlib import Path
 from typing import Optional
 
 from PIL import Image
@@ -23,8 +23,11 @@ def measure_image(path: str) -> dict:
     except Exception as e:
         log.debug("measure_image open failed for %s: %s", path, e)
         return {
-            "width": 0, "height": 0, "orientation": "unknown",
-            "dominant_colours": [], "has_face_hint": None,
+            "width": 0,
+            "height": 0,
+            "orientation": "unknown",
+            "dominant_colours": [],
+            "has_face_hint": None,
         }
     img = img.convert("RGB")
     w, h = img.size
@@ -36,8 +39,11 @@ def measure_image(path: str) -> dict:
     dominant = _dominant_colours(img, n=4)
     has_face_hint = _face_hint(img)
     return {
-        "width": w, "height": h, "orientation": orientation,
-        "dominant_colours": dominant, "has_face_hint": has_face_hint,
+        "width": w,
+        "height": h,
+        "orientation": orientation,
+        "dominant_colours": dominant,
+        "has_face_hint": has_face_hint,
     }
 
 

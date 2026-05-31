@@ -12,12 +12,12 @@ The DuckDuckGo HTML endpoint is:
   https://html.duckduckgo.com/html/?q=<query>
 It returns an HTML page with result links that can be parsed with stdlib only.
 """
+
 from __future__ import annotations
 
 import hashlib
 import html
 import json
-import os
 import re
 import subprocess
 import time
@@ -46,6 +46,7 @@ def _get_cache_dir() -> Path:
         except Exception:
             # Fall back to temp dir
             import tempfile
+
             _CACHE_DIR = Path(tempfile.gettempdir()) / "swim_research_cache"
             _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     return _CACHE_DIR
@@ -115,7 +116,8 @@ class WebResearcher:
         try:
             result = subprocess.run(
                 ["pplx", "search", "web", "--help"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             self._pplx_available = result.returncode == 0 or len(result.stdout) > 0
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -171,14 +173,14 @@ class WebResearcher:
                     ),
                     "Accept": "text/html,application/xhtml+xml,application/xml",
                     "Accept-Language": "en-GB,en;q=0.9",
-                }
+                },
             )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             # Strip HTML tags
-            text = re.sub(r'<[^>]+>', ' ', raw)
+            text = re.sub(r"<[^>]+>", " ", raw)
             text = html.unescape(text)
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"\s+", " ", text).strip()
             return text[:8000]  # Limit length
         except Exception:
             return None
@@ -201,12 +203,14 @@ class WebResearcher:
             hits = data.get("hits", [])
             out = []
             for h in hits[:num]:
-                out.append(SearchResult(
-                    url=h.get("url", ""),
-                    title=h.get("title", ""),
-                    snippet=h.get("snippet", "") or h.get("summary", ""),
-                    source="pplx",
-                ))
+                out.append(
+                    SearchResult(
+                        url=h.get("url", ""),
+                        title=h.get("title", ""),
+                        snippet=h.get("snippet", "") or h.get("summary", ""),
+                        source="pplx",
+                    )
+                )
             return out
         except (json.JSONDecodeError, KeyError):
             return []
@@ -228,26 +232,20 @@ class WebResearcher:
                 ),
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "en-GB,en;q=0.9",
-            }
+            },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
 
         # Extract result__a links (DDG redirects via uddg= param)
-        links = re.findall(
-            r'class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-            raw, re.DOTALL
-        )
-        snippets_raw = re.findall(
-            r'class="result__snippet"[^>]*>(.*?)</a>',
-            raw, re.DOTALL
-        )
+        links = re.findall(r'class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', raw, re.DOTALL)
+        snippets_raw = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', raw, re.DOTALL)
 
         results = []
         for i, (href_raw, title_raw) in enumerate(links[:num]):
             href_decoded = html.unescape(href_raw).strip()
             # Extract real URL from DDG redirect
-            m_uddg = re.search(r'uddg=([^&]+)', href_decoded)
+            m_uddg = re.search(r"uddg=([^&]+)", href_decoded)
             if m_uddg:
                 url_clean = urllib.parse.unquote(m_uddg.group(1))
             else:
@@ -256,19 +254,19 @@ class WebResearcher:
                     url_clean = "https:" + url_clean
             if not url_clean.startswith("http"):
                 continue
-            title_clean = html.unescape(re.sub(r'<[^>]+>', '', title_raw)).strip()
+            title_clean = html.unescape(re.sub(r"<[^>]+>", "", title_raw)).strip()
             snippet_clean = ""
             if i < len(snippets_raw):
-                snippet_clean = html.unescape(
-                    re.sub(r'<[^>]+>', '', snippets_raw[i])
-                ).strip()
+                snippet_clean = html.unescape(re.sub(r"<[^>]+>", "", snippets_raw[i])).strip()
             if url_clean and title_clean:
-                results.append(SearchResult(
-                    url=url_clean,
-                    title=title_clean,
-                    snippet=snippet_clean,
-                    source="duckduckgo",
-                ))
+                results.append(
+                    SearchResult(
+                        url=url_clean,
+                        title=title_clean,
+                        snippet=snippet_clean,
+                        source="duckduckgo",
+                    )
+                )
         return results[:num]
 
     def _parse_ddg_fallback(self, html_text: str, num: int) -> list[SearchResult]:
@@ -276,26 +274,24 @@ class WebResearcher:
         results = []
         # Extract all result__a links with their text
         links = re.findall(
-            r'<a\s+class="result__a"[^>]+href="([^"]*)"[^>]*>(.*?)</a>',
-            html_text, re.DOTALL
+            r'<a\s+class="result__a"[^>]+href="([^"]*)"[^>]*>(.*?)</a>', html_text, re.DOTALL
         )
-        snippets = re.findall(
-            r'<a\s+class="result__snippet"[^>]*>(.*?)</a>',
-            html_text, re.DOTALL
-        )
+        snippets = re.findall(r'<a\s+class="result__snippet"[^>]*>(.*?)</a>', html_text, re.DOTALL)
         for i, (href, title_html) in enumerate(links[:num]):
             url_clean = html.unescape(href).strip()
-            title_clean = html.unescape(re.sub(r'<[^>]+>', '', title_html)).strip()
+            title_clean = html.unescape(re.sub(r"<[^>]+>", "", title_html)).strip()
             snippet_clean = ""
             if i < len(snippets):
-                snippet_clean = html.unescape(re.sub(r'<[^>]+>', '', snippets[i])).strip()
+                snippet_clean = html.unescape(re.sub(r"<[^>]+>", "", snippets[i])).strip()
             if url_clean.startswith("//"):
                 url_clean = "https:" + url_clean
             if url_clean and title_clean and not url_clean.startswith("/?"):
-                results.append(SearchResult(
-                    url=url_clean,
-                    title=title_clean,
-                    snippet=snippet_clean,
-                    source="duckduckgo",
-                ))
+                results.append(
+                    SearchResult(
+                        url=url_clean,
+                        title=title_clean,
+                        snippet=snippet_clean,
+                        source="duckduckgo",
+                    )
+                )
         return results

@@ -22,6 +22,7 @@ Routes:
 State: SQLite at data.db (so publish_website snapshots it across deploys)
        + uploads_v4/ (transient HY3) + runs/<id>.json (full run)
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -31,57 +32,72 @@ import logging
 import os
 import queue
 import re
-import shutil
 import sqlite3
 import threading
 import time
 import uuid
 
 log = logging.getLogger(__name__)
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from flask import (
-    Flask, request, redirect, url_for, render_template_string,
-    jsonify, abort, send_file, send_from_directory, Response, session, make_response,
+    Flask,
+    request,
+    redirect,
+    url_for,
+    render_template_string,
+    jsonify,
+    send_file,
+    send_from_directory,
+    Response,
+    session,
+    make_response,
 )
 from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
-from .humanise import humanise as _humanise, format_post_angle as _format_angle, humanise_status as _humanise_status
+from .humanise import humanise as _humanise
 from .club_profile import (
-    ClubProfile, list_profiles, load_profile, save_profile,
+    ClubProfile,
+    list_profiles,
+    load_profile,
+    save_profile,
     seed_default_profiles,
 )
-from .ground_truth import evaluate as gt_evaluate
-from .canonical import Meet
 from .bounded_cache import BoundedCache
 
-# V7 imports
-try:
-    from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY, ContentType as _ContentType
-    from mediahub.club_platform.athlete_spotlight import build_spotlight_pack, list_swimmers_in_run
-    from mediahub.club_platform.stubs import WeekendPreviewStub, SponsorPostStub, SessionUpdateStub, FreeTextStub
-    _club_platform_ok = True
-except ImportError:
-    _club_platform_ok = False
+# V7 / brand feature flags. These packages are only ever imported lazily at
+# the call sites that use them (see e.g. build_spotlight_pack, BrandKit), so
+# here we just probe that they're importable to set the flag — find_spec keeps
+# the availability check without binding names the module never references.
+import importlib.util as _importlib_util
 
-try:
-    from mediahub.brand.kit import BrandKit
-    from mediahub.brand.tone import Tone, TONE_META, tone_from_str
-    from mediahub.brand.templates import get_default_templates, render_template as _render_brand_template
-    from mediahub.brand.store import load_brand, save_brand
-    from mediahub.brand.apply import apply_brand
-    _brand_ok = True
-except ImportError:
-    _brand_ok = False
+_club_platform_ok = all(
+    _importlib_util.find_spec(_m) is not None
+    for _m in (
+        "mediahub.club_platform.content_types",
+        "mediahub.club_platform.athlete_spotlight",
+        "mediahub.club_platform.stubs",
+    )
+)
+
+_brand_ok = all(
+    _importlib_util.find_spec(_m) is not None
+    for _m in (
+        "mediahub.brand.kit",
+        "mediahub.brand.tone",
+        "mediahub.brand.templates",
+        "mediahub.brand.store",
+        "mediahub.brand.apply",
+    )
+)
 
 try:
     from mediahub.workflow.status import CardStatus
     from mediahub.workflow.store import WorkflowStore
-    from mediahub.workflow.pack import build_content_pack
+
     _workflow_ok = True
 except ImportError:
     _workflow_ok = False
@@ -91,6 +107,7 @@ except ImportError:
 # Microsoft endpoint, so the operator opts in with MEDIAHUB_VOICEOVER=1.
 try:
     from mediahub.visual import voiceover as _voiceover
+
     _voiceover_ok = True
 except ImportError:
     _voiceover_ok = False
@@ -99,9 +116,12 @@ except ImportError:
 
 def _voiceover_enabled() -> bool:
     """True only when the module imported AND the operator opted in."""
-    return bool(_voiceover_ok) and os.environ.get(
-        "MEDIAHUB_VOICEOVER", ""
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    return bool(_voiceover_ok) and os.environ.get("MEDIAHUB_VOICEOVER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 # V7.3 imports
@@ -109,10 +129,13 @@ try:
     from mediahub.content_pack.builder import build_grouped_pack as _build_grouped_pack
     from mediahub.recognition.copy_text import build_caption_text as _build_caption_text
     from mediahub.recognition.weekend_in_numbers import build_weekend_in_numbers as _build_win
-    from mediahub.voice.store import load_voice_profile as _load_voice_profile, save_voice_profile as _save_voice_profile
-    from mediahub.voice.profile import VoiceProfile as _VoiceProfile, VoiceExemplar as _VoiceExemplar
+    from mediahub.voice.store import (
+        load_voice_profile as _load_voice_profile,
+        save_voice_profile as _save_voice_profile,
+    )
+
     _v73_ok = True
-except ImportError as _v73_err:
+except ImportError:
     _v73_ok = False
     _build_grouped_pack = None
     _build_caption_text = None
@@ -143,8 +166,11 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     """
     try:
         from mediahub.ai_core import (
-            ask_with_tools, narrate_achievement, narrate_meet,
-            ProviderNotConfigured, ProviderError,
+            ask_with_tools,
+            narrate_achievement,
+            narrate_meet,
+            ProviderNotConfigured,
+            ProviderError,
         )
     except Exception:
         return ""
@@ -156,10 +182,15 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         return ""
 
     meet = meet_context or {}
-    cache_key = "|".join([
-        swimmer.lower(), event.lower(), time_s,
-        str(meet.get("level", "")), str(meet.get("governing_body", "")),
-    ])
+    cache_key = "|".join(
+        [
+            swimmer.lower(),
+            event.lower(),
+            time_s,
+            str(meet.get("level", "")),
+            str(meet.get("governing_body", "")),
+        ]
+    )
     cached = _perf_context_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -185,20 +216,22 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         "domain in parentheses, e.g. '(swimmingresults.org)'."
     )
 
-    research_tool = [{
-        "name": "research_web",
-        "description": (
-            "Search the web for evidence about this swimmer (elite "
-            "recognition, PB history). Returns title/url/snippet/domain."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string"},
+    research_tool = [
+        {
+            "name": "research_web",
+            "description": (
+                "Search the web for evidence about this swimmer (elite "
+                "recognition, PB history). Returns title/url/snippet/domain."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+                "required": ["query"],
             },
-            "required": ["query"],
-        },
-    }]
+        }
+    ]
 
     def _tool(name, inp):
         if name != "research_web":
@@ -208,6 +241,7 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
             return "(empty query)"
         try:
             from mediahub.context_engine.research import ResearchClient
+
             client = ResearchClient(num_results=4)
             hits = client.search(q, num=4)
         except Exception as e:
@@ -217,20 +251,25 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
             snip = (h.snippet or "").strip()
             if not snip:
                 continue
-            evidence.append({
-                "title": (h.title or "")[:160],
-                "url":   h.url,
-                "snippet": snip[:300],
-                "domain":  h.domain,
-            })
+            evidence.append(
+                {
+                    "title": (h.title or "")[:160],
+                    "url": h.url,
+                    "snippet": snip[:300],
+                    "domain": h.domain,
+                }
+            )
         return json.dumps({"hits": evidence}, ensure_ascii=False)
 
     out = ""
     try:
         convo = ask_with_tools(
-            system=system, user=user,
-            tools=research_tool, on_tool_call=_tool,
-            max_tokens=200, max_rounds=3,
+            system=system,
+            user=user,
+            tools=research_tool,
+            on_tool_call=_tool,
+            max_tokens=200,
+            max_rounds=3,
         )
         out = (convo.text or "").strip()
     except (ProviderNotConfigured, ProviderError):
@@ -243,9 +282,9 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
             if ln:
                 out = ln
                 break
-    if out.lower().startswith(("i need", "i'd need", "please provide",
-                                "can you provide", "could you",
-                                "i don't have")):
+    if out.lower().startswith(
+        ("i need", "i'd need", "please provide", "can you provide", "could you", "i don't have")
+    ):
         out = ""
     _perf_context_cache[cache_key] = out
     return out
@@ -256,10 +295,12 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
 _explanation_cache: BoundedCache = BoundedCache(max_size=512)
 
 
-def _llm_build_explanation(achievement: dict, factors: list,
-                            rank: Optional[int] = None,
-                            meet_context: Optional[dict] = None
-                            ) -> tuple[Optional[dict], Optional[str]]:
+def _llm_build_explanation(
+    achievement: dict,
+    factors: list,
+    rank: Optional[int] = None,
+    meet_context: Optional[dict] = None,
+) -> tuple[Optional[dict], Optional[str]]:
     """Have the LLM write the headline + bullets for "Why this card?"
     based on the achievement and the ranker's factors.
 
@@ -271,8 +312,11 @@ def _llm_build_explanation(achievement: dict, factors: list,
     """
     try:
         from mediahub.ai_core import (
-            ask_with_tools, narrate_achievement, narrate_meet,
-            ProviderNotConfigured, ProviderError,
+            ask_with_tools,
+            narrate_achievement,
+            narrate_meet,
+            ProviderNotConfigured,
+            ProviderError,
         )
     except Exception as e:
         return None, f"ai_core import failed: {e}"
@@ -283,7 +327,7 @@ def _llm_build_explanation(achievement: dict, factors: list,
 
     # English summary of the factors — no JSON dump.
     factor_lines: list[str] = []
-    for f in (factors or []):
+    for f in factors or []:
         if hasattr(f, "to_dict"):
             try:
                 f = f.to_dict()
@@ -307,12 +351,13 @@ def _llm_build_explanation(achievement: dict, factors: list,
     user_prose = (
         swim_prose
         + (("\n\nMeet context: " + meet_prose) if meet_prose else "")
-        + "\n\nRanker factors that contributed (highest first):\n" + factors_prose
+        + "\n\nRanker factors that contributed (highest first):\n"
+        + factors_prose
         + (f"\n\nThis swim ranked #{int(rank)} overall." if isinstance(rank, int) else "")
         + "\n\nPlease emit one `submit_explanation` call with a "
-          "15-25 word headline plus 3-5 short bullets covering the "
-          "reasons. Use ONLY the facts above — never invent ranker "
-          "factors that aren't listed."
+        "15-25 word headline plus 3-5 short bullets covering the "
+        "reasons. Use ONLY the facts above — never invent ranker "
+        "factors that aren't listed."
     )
 
     system = (
@@ -322,22 +367,23 @@ def _llm_build_explanation(achievement: dict, factors: list,
         "Never invent achievements or factors. Always emit exactly one "
         "`submit_explanation` tool call."
     )
-    tool = [{
-        "name": "submit_explanation",
-        "description": (
-            "Submit the final explanation: a one-sentence headline plus "
-            "3-5 short factor bullets."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "headline": {"type": "string"},
-                "bullets":  {"type": "array",
-                              "items": {"type": "string"}},
+    tool = [
+        {
+            "name": "submit_explanation",
+            "description": (
+                "Submit the final explanation: a one-sentence headline plus "
+                "3-5 short factor bullets."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "headline": {"type": "string"},
+                    "bullets": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["headline", "bullets"],
             },
-            "required": ["headline", "bullets"],
-        },
-    }]
+        }
+    ]
 
     captured: dict[str, Any] = {}
 
@@ -355,9 +401,12 @@ def _llm_build_explanation(achievement: dict, factors: list,
 
     try:
         ask_with_tools(
-            system=system, user=user_prose,
-            tools=tool, on_tool_call=_tool,
-            max_tokens=500, max_rounds=2,
+            system=system,
+            user=user_prose,
+            tools=tool,
+            on_tool_call=_tool,
+            max_tokens=500,
+            max_rounds=2,
         )
     except ProviderNotConfigured as e:
         return None, str(e)
@@ -367,10 +416,13 @@ def _llm_build_explanation(achievement: dict, factors: list,
         return None, f"AI call failed: {e}"
     if not captured.get("headline"):
         return None, "AI returned no explanation."
-    return ({
-        "headline": captured["headline"],
-        "bullets":  captured.get("bullets") or [],
-    }, None)
+    return (
+        {
+            "headline": captured["headline"],
+            "bullets": captured.get("bullets") or [],
+        },
+        None,
+    )
 
 
 def _build_source_lines_from_evidence(achievement: dict) -> list[dict]:
@@ -395,11 +447,13 @@ def _build_source_lines_from_evidence(achievement: dict) -> list[dict]:
             label = source_type.replace("_", " ")
         else:
             label = "source"
-        out.append({
-            "file_offset": ev.get("file_offset"),
-            "raw_text":    statement,
-            "label":       label,
-        })
+        out.append(
+            {
+                "file_offset": ev.get("file_offset"),
+                "raw_text": statement,
+                "label": label,
+            }
+        )
     return out
 
 
@@ -443,8 +497,8 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
     llm_exp, llm_error = _llm_build_explanation(achievement, factors, rank, meet_context)
     if llm_exp is not None:
         exp = {
-            "headline":     llm_exp["headline"],
-            "bullets":      llm_exp["bullets"],
+            "headline": llm_exp["headline"],
+            "bullets": llm_exp["bullets"],
             "source_lines": _build_source_lines_from_evidence(achievement),
         }
     else:
@@ -452,10 +506,10 @@ def _build_card_explanation(ra: dict, meet_context: Optional[dict] = None) -> di
         # to do the reasoning, full stop. If no provider can answer we
         # tell them why and how to fix it.
         exp = {
-            "headline":     "AI explanation unavailable.",
-            "bullets":      [],
+            "headline": "AI explanation unavailable.",
+            "bullets": [],
             "source_lines": _build_source_lines_from_evidence(achievement),
-            "ai_error":     llm_error or "No AI provider is configured.",
+            "ai_error": llm_error or "No AI provider is configured.",
         }
     _explanation_cache[cache_key] = exp
 
@@ -501,22 +555,23 @@ def _render_why_inner(
         offset = sl.get("file_offset")
         offset_tag = (
             f'<span class="muted" style="font-size:10px;margin-left:6px">#{int(offset)}</span>'
-            if isinstance(offset, int) else ""
+            if isinstance(offset, int)
+            else ""
         )
         src_html += (
             f'<li style="margin-bottom:6px">'
             f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px">'
-            f'{label}{offset_tag}</div>'
+            f"{label}{offset_tag}</div>"
             f'<blockquote style="margin:2px 0 0 0;padding:6px 10px;border-left:2px solid var(--accent);'
-            f'background:rgba(212,255,58,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;'
+            f"background:rgba(212,255,58,0.05);font-family:ui-monospace,Menlo,monospace;font-size:12px;"
             f'color:var(--ink)">{raw}</blockquote>'
-            f'</li>'
+            f"</li>"
         )
     if not src_html:
         src_html = (
             '<li class="muted" style="font-size:12px">'
-            'No source lines available &mdash; explanation is based on the ranker only.'
-            '</li>'
+            "No source lines available &mdash; explanation is based on the ranker only."
+            "</li>"
         )
 
     # Plain-text payload for the "Copy reasoning" button (kept in a hidden textarea
@@ -533,7 +588,8 @@ def _render_why_inner(
 
     bullets_block = (
         f'<ul style="margin:6px 0 10px 0;padding-left:20px;font-size:12px;color:var(--ink-dim)">{bullets_html}</ul>'
-        if bullets_html else ""
+        if bullets_html
+        else ""
     )
 
     # LLM-derived performance context (Olympic-level vs county-level
@@ -548,7 +604,7 @@ def _render_why_inner(
             '<div style="font-size:10px;text-transform:uppercase;color:var(--lane);letter-spacing:0.5px;'
             'margin-bottom:2px">Performance context (AI)</div>'
             f'<div style="font-size:12px;color:var(--ink);line-height:1.4">{_h(perf_ctx)}</div>'
-            '</div>'
+            "</div>"
         )
 
     # AI-unavailable callout — round-3 cleanup. When the LLM provider is
@@ -572,7 +628,9 @@ def _render_why_inner(
     except Exception:
         _swim_id_for_btn = ""
     use_in_caption_btn, use_in_caption_panel = _use_in_caption_html(
-        run_id, _swim_id_for_btn, card_uuid,
+        run_id,
+        _swim_id_for_btn,
+        card_uuid,
     )
 
     return f"""
@@ -597,9 +655,7 @@ def _render_why_inner(
 def _why_card_cuid(card_uuid: str) -> str:
     """DOM-id-safe slug for a card_uuid (shared by the lazy shell and the
     api_why_card endpoint so the rendered element ids line up)."""
-    return "".join(
-        ch if (ch.isalnum() or ch in "_-") else "_" for ch in str(card_uuid)
-    )[:80]
+    return "".join(ch if (ch.isalnum() or ch in "_-") else "_" for ch in str(card_uuid))[:80]
 
 
 def _render_why_this_card(
@@ -648,17 +704,17 @@ def _render_why_this_card(
     if lazy and ach_index is not None and run_id:
         why_url = url_for("api_why_card", run_id=run_id, ach_index=int(ach_index))
         return (
-            f'{shell_open}'
+            f"{shell_open}"
             f'<div class="why-body" data-why-url="{_h(why_url)}" '
             f'data-why-cuid="{_h(_why_card_cuid(card_uuid))}">'
             f'<div class="muted" style="margin-top:8px;font-size:12px;color:var(--ink-muted)">'
-            f'Loading reasoning&hellip;</div></div></details>'
+            f"Loading reasoning&hellip;</div></div></details>"
         )
     exp = _build_card_explanation(ra)
     return (
-        f'{shell_open}'
-        f'{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}'
-        f'</details>'
+        f"{shell_open}"
+        f"{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}"
+        f"</details>"
     )
 
 
@@ -682,19 +738,23 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
         f'style="font-size:11px;padding:4px 10px;'
         f'background:rgba(212,255,58,0.15);border-color:rgba(212,255,58,0.40);color:var(--lane)" '
         f'onclick="mhUseWhyInCaption(this, {json.dumps(cap_url)}, {json.dumps(panel_id)})">'
-        f'Use in next caption</button>'
+        f"Use in next caption</button>"
     )
     panel = (
         f'<div id="{panel_id}" data-mh-why-caption '
         f'style="display:none;margin-top:8px;padding:8px 10px;'
-        f'background:rgba(212,255,58,0.04);border:1px dashed rgba(212,255,58,0.30);'
+        f"background:rgba(212,255,58,0.04);border:1px dashed rgba(212,255,58,0.30);"
         f'border-radius:6px;font-size:12px;color:var(--ink);line-height:1.45"></div>'
     )
     return btn, panel
 
+
 # V8: media generation engine
 try:
-    from mediahub.media_library.store import MediaLibraryStore as _V8MediaStore, get_store as _v8_get_media_store
+    from mediahub.media_library.store import (
+        MediaLibraryStore as _V8MediaStore,
+        get_store as _v8_get_media_store,
+    )
     from mediahub.media_library.describe import parse_description as _v8_parse_description
     from mediahub.content_pack_visual.integration import (
         attach_visuals_to_pack as _v8_attach_visuals,
@@ -702,6 +762,7 @@ try:
         visuals_dir_for_run as _v8_visuals_dir,
     )
     from mediahub.venue_search.search import search as _v8_search_venue
+
     _v8_ok = True
 except ImportError as _v8_err:
     _v8_ok = False
@@ -714,11 +775,11 @@ except ImportError as _v8_err:
     _v8_search_venue = None
 
 
-_SRC_ROOT = Path(__file__).resolve().parents[1]   # src/mediahub/ &mdash; local dev default
-DATA_DIR   = Path(os.environ.get("DATA_DIR",   str(_SRC_ROOT)))
-RUNS_DIR   = Path(os.environ.get("RUNS_DIR",   str(DATA_DIR / "runs_v4")))
+_SRC_ROOT = Path(__file__).resolve().parents[1]  # src/mediahub/ &mdash; local dev default
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(_SRC_ROOT)))
+RUNS_DIR = Path(os.environ.get("RUNS_DIR", str(DATA_DIR / "runs_v4")))
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(DATA_DIR / "uploads_v4")))
-DB_PATH    = DATA_DIR / "data.db"               # MUST be data.db for publish snapshot
+DB_PATH = DATA_DIR / "data.db"  # MUST be data.db for publish snapshot
 RESEARCH_DIR = DATA_DIR / "research"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
@@ -728,11 +789,13 @@ RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
 # V7: workflow store (sidecar JSON per run)
 _wf_store = None  # initialised after imports complete
 
-def _get_wf_store() -> Optional['WorkflowStore']:
+
+def _get_wf_store() -> Optional["WorkflowStore"]:
     global _wf_store
     if _wf_store is None:
         try:
             from mediahub.workflow.store import WorkflowStore as _WS
+
             _wf_store = _WS(RUNS_DIR)
         except ImportError:
             pass
@@ -815,19 +878,19 @@ _HEARTBEAT_SLOW_WARN_MS = 1000.0
 def _heartbeat_drain_loop() -> None:
     """Drain queued heartbeats to the uptime store, off the request path."""
     from mediahub.observability import uptime as _uptime
+
     while True:
         ok, source, response_ms, error = _HEARTBEAT_QUEUE.get()
         try:
             t0 = time.monotonic()
-            _uptime.record_heartbeat(
-                ok=ok, source=source, response_ms=response_ms, error=error
-            )
+            _uptime.record_heartbeat(ok=ok, source=source, response_ms=response_ms, error=error)
             write_ms = (time.monotonic() - t0) * 1000.0
             if write_ms >= _HEARTBEAT_SLOW_WARN_MS:
                 log.warning(
                     "healthz: heartbeat DB write slow (%.0fms, source=%s) — "
                     "persistent disk contended, likely a concurrent render",
-                    write_ms, source,
+                    write_ms,
+                    source,
                 )
         except Exception:
             pass
@@ -843,9 +906,7 @@ def _ensure_heartbeat_thread() -> None:
     with _heartbeat_thread_lock:
         if _heartbeat_thread_started:
             return
-        threading.Thread(
-            target=_heartbeat_drain_loop, name="heartbeat-writer", daemon=True
-        ).start()
+        threading.Thread(target=_heartbeat_drain_loop, name="heartbeat-writer", daemon=True).start()
         _heartbeat_thread_started = True
 
 
@@ -889,7 +950,10 @@ def _render_slot(kind: str, label: str = "", *, timeout: float):
     if not _render_semaphore.acquire(timeout=timeout):
         log.warning(
             "render gate: %s rejected (no slot after %.2fs, limit=%d) label=%s",
-            kind, timeout, _RENDER_LIMIT, label,
+            kind,
+            timeout,
+            _RENDER_LIMIT,
+            label,
         )
         raise _RenderBusy(kind)
     t0 = time.monotonic()
@@ -899,23 +963,23 @@ def _render_slot(kind: str, label: str = "", *, timeout: float):
         dur_ms = (time.monotonic() - t0) * 1000.0
         _render_semaphore.release()
         if dur_ms >= _RENDER_SLOW_WARN_MS:
-            log.warning("render gate: %s finished SLOW (%.0fms) label=%s",
-                        kind, dur_ms, label)
+            log.warning("render gate: %s finished SLOW (%.0fms) label=%s", kind, dur_ms, label)
         else:
-            log.info("render gate: %s finished (%.0fms) label=%s",
-                     kind, dur_ms, label)
+            log.info("render gate: %s finished (%.0fms) label=%s", kind, dur_ms, label)
 
 
 def _render_busy_response(kind: str):
     """Standard 429 payload returned when the render gate is saturated."""
-    resp = jsonify({
-        "error": "renderer_busy",
-        "kind": "busy",
-        "user_message": (
-            "The renderer is busy finishing another graphic or video. "
-            "Give it a few seconds and try again."
-        ),
-    })
+    resp = jsonify(
+        {
+            "error": "renderer_busy",
+            "kind": "busy",
+            "user_message": (
+                "The renderer is busy finishing another graphic or video. "
+                "Give it a few seconds and try again."
+            ),
+        }
+    )
     resp.status_code = 429
     resp.headers["Retry-After"] = "5"
     return resp
@@ -949,8 +1013,7 @@ def _maybe_evict_turn_into_jobs() -> None:
     if len(_turn_into_jobs) <= _TURN_INTO_LIMIT:
         return
     finished = [
-        jid for jid, info in _turn_into_jobs.items()
-        if info.get("status") in ("done", "error")
+        jid for jid, info in _turn_into_jobs.items() if info.get("status") in ("done", "error")
     ]
     to_remove = max(0, len(_turn_into_jobs) - _TURN_INTO_TARGET)
     for jid in finished[:to_remove]:
@@ -968,6 +1031,7 @@ def _maybe_evict_turn_into_jobs() -> None:
 # per job on the shared DATA_DIR disk. Records are small (status +
 # pack_url + a few counts) and short-lived, so a flat directory of
 # <job_id>.json files is enough — no schema, no migration.
+
 
 def _ti_jobs_dir() -> Path:
     d = DATA_DIR / "turn_into_jobs"
@@ -1045,8 +1109,9 @@ def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
         return None
 
 
-def _persist_run_progress(run_id: str, status: str, log_list: list,
-                          error: Optional[str] = None) -> None:
+def _persist_run_progress(
+    run_id: str, status: str, log_list: list, error: Optional[str] = None
+) -> None:
     """Best-effort stream of a run's status + progress log + heartbeat to
     the DB. Polls that land on the gunicorn worker NOT running the
     pipeline read this (the in-memory log lives only in the worker that
@@ -1057,10 +1122,13 @@ def _persist_run_progress(run_id: str, status: str, log_list: list,
         conn.execute(
             "UPDATE runs SET status=?, progress_log=?, heartbeat_at=?, "
             "error=COALESCE(?, error) WHERE id=?",
-            (status,
-             json.dumps((log_list or [])[-_RUN_LOG_LIMIT:]),
-             datetime.now(timezone.utc).isoformat(),
-             error, run_id),
+            (
+                status,
+                json.dumps((log_list or [])[-_RUN_LOG_LIMIT:]),
+                datetime.now(timezone.utc).isoformat(),
+                error,
+                run_id,
+            ),
         )
         conn.commit()
         conn.close()
@@ -1117,8 +1185,7 @@ def _reconcile_interrupted_runs():
     try:
         conn = _db()
         rows = conn.execute(
-            "SELECT id, heartbeat_at, created_at FROM runs "
-            "WHERE status IN ('queued','running')"
+            "SELECT id, heartbeat_at, created_at FROM runs " "WHERE status IN ('queued','running')"
         ).fetchall()
         dead = []
         for r in rows:
@@ -1128,9 +1195,14 @@ def _reconcile_interrupted_runs():
         if dead:
             conn.executemany(
                 "UPDATE runs SET status='error', error=? WHERE id=?",
-                [("Processing was interrupted before it finished (the server "
-                  "restarted mid-run). Please upload the file again.", d)
-                 for d in dead],
+                [
+                    (
+                        "Processing was interrupted before it finished (the server "
+                        "restarted mid-run). Please upload the file again.",
+                        d,
+                    )
+                    for d in dead
+                ],
             )
             conn.commit()
         conn.close()
@@ -1181,6 +1253,7 @@ seed_default_profiles()
 # V6 PB audit serialisation helper
 # ---------------------------------------------------------------------
 
+
 def _serialise_pb_audit(pb_audit) -> Optional[dict]:
     """Serialise a V6 RunPBAudit to a JSON-safe dict.
     Returns None if pb_audit is None or serialisation fails.
@@ -1189,6 +1262,7 @@ def _serialise_pb_audit(pb_audit) -> Optional[dict]:
         return None
     try:
         from swim_content_pb.audit import run_audit_to_dict
+
         return run_audit_to_dict(pb_audit)
     except Exception:
         return None
@@ -1202,6 +1276,7 @@ def _deserialise_pb_audit(data: dict) -> Optional[dict]:
 # ---------------------------------------------------------------------
 # Run persistence helpers
 # ---------------------------------------------------------------------
+
 
 def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     """Persist a finished run to runs_v4/<id>.json + DB row."""
@@ -1295,9 +1370,7 @@ def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
             return pid
     try:
         conn = _db()
-        row = conn.execute(
-            "SELECT profile_id FROM runs WHERE id = ?", (run_id,)
-        ).fetchone()
+        row = conn.execute("SELECT profile_id FROM runs WHERE id = ?", (run_id,)).fetchone()
         conn.close()
     except Exception:
         return ""
@@ -1306,8 +1379,7 @@ def _run_owner_id(run_id: str, run_data: Optional[dict]) -> str:
     return (row["profile_id"] or "").strip()
 
 
-def _can_access_run(run_id: str, run_data: Optional[dict],
-                     active_pid: Optional[str]) -> bool:
+def _can_access_run(run_id: str, run_data: Optional[dict], active_pid: Optional[str]) -> bool:
     """Tenant isolation guard for run-scoped routes.
 
     A run that records an owning ``profile_id`` is only accessible to
@@ -1391,11 +1463,11 @@ def _run_state(run_id: str) -> str:
 
 
 _WF_STATUS_LABEL = {
-    "queue":    "In queue",
+    "queue": "In queue",
     "approved": "Approved",
     "rejected": "Rejected",
-    "posted":   "Posted",
-    "edited":   "Edited",
+    "posted": "Posted",
+    "edited": "Edited",
 }
 
 
@@ -1409,11 +1481,19 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     `[data-mh-wf]` click handler in _layout.
     """
     status_key = (wf_status or "queue").lower()
-    label = _WF_STATUS_LABEL.get(status_key, status_key.replace("_", " ").capitalize() or "In queue")
+    label = _WF_STATUS_LABEL.get(
+        status_key, status_key.replace("_", " ").capitalize() or "In queue"
+    )
+
     # Visually de-emphasise the action that matches the current state
     # so the user sees "I'm already in this state".
     def _disabled_attrs(target: str) -> str:
-        return ' aria-pressed="true" style="opacity:0.55;cursor:default"' if status_key == target else ''
+        return (
+            ' aria-pressed="true" style="opacity:0.55;cursor:default"'
+            if status_key == target
+            else ""
+        )
+
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
@@ -1469,6 +1549,7 @@ def _delete_run(run_id: str) -> bool:
     if side_dir.is_dir():
         try:
             import shutil  # noqa: PLC0415
+
             shutil.rmtree(side_dir, ignore_errors=True)
         except Exception:  # noqa: BLE001
             log.warning("could not remove run sidecar dir for %s", run_id)
@@ -1488,9 +1569,7 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
     """
     try:
         conn = _db()
-        row = conn.execute(
-            "SELECT profile_id FROM runs WHERE id = ?", (run_id,)
-        ).fetchone()
+        row = conn.execute("SELECT profile_id FROM runs WHERE id = ?", (run_id,)).fetchone()
         conn.close()
     except Exception:  # noqa: BLE001
         return None
@@ -1503,6 +1582,7 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
 # ---------------------------------------------------------------------
 # Schedule (Buffer) modal &mdash; shared between classic + grouped pack pages
 # ---------------------------------------------------------------------
+
 
 def _schedule_modal_html() -> str:
     """Return the hidden Buffer schedule modal markup.
@@ -1893,6 +1973,7 @@ def _schedule_modal_js() -> str:
 })();
 </script>
 """
+
 
 def _card_creative_js() -> str:
     """Shared client JS for the per-card creative toolbar: live caption
@@ -2454,18 +2535,42 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     _motion_url = url_for("api_card_motion", run_id=run_id, card_id=card_id_raw)
 
     _STD_TONES = [
-        ("ai",        "✦ AI", True,  "tone-tab-ai",
-         "rgba(212,255,58,0.15)", "var(--lane)",
-         "Live AI caption. Generates fresh each time."),
-        ("warm-club", "Warm",    False, "",
-         "rgba(212,255,58,0.15)", "var(--accent)",
-         "Warm & community — friendly, first-name, inclusive."),
-        ("hype",      "Hype",    False, "",
-         "rgba(212,255,58,0.15)", "var(--accent)",
-         "Energetic & hype — race-day language, high energy."),
-        ("data-led",  "Precise", False, "",
-         "rgba(212,255,58,0.15)", "var(--accent)",
-         "Data-led — numbers first, sponsor-friendly, no fluff."),
+        (
+            "ai",
+            "✦ AI",
+            True,
+            "tone-tab-ai",
+            "rgba(212,255,58,0.15)",
+            "var(--lane)",
+            "Live AI caption. Generates fresh each time.",
+        ),
+        (
+            "warm-club",
+            "Warm",
+            False,
+            "",
+            "rgba(212,255,58,0.15)",
+            "var(--accent)",
+            "Warm & community — friendly, first-name, inclusive.",
+        ),
+        (
+            "hype",
+            "Hype",
+            False,
+            "",
+            "rgba(212,255,58,0.15)",
+            "var(--accent)",
+            "Energetic & hype — race-day language, high energy.",
+        ),
+        (
+            "data-led",
+            "Precise",
+            False,
+            "",
+            "rgba(212,255,58,0.15)",
+            "var(--accent)",
+            "Data-led — numbers first, sponsor-friendly, no fluff.",
+        ),
     ]
     tabs_html = ""
     panels_html = ""
@@ -2477,7 +2582,8 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         status_dot = (
             '<span class="ai-status-dot" style="display:inline-block;width:7px;height:7px;'
             'border-radius:50%;background:#ffae3b" aria-hidden="true"></span>'
-            if t_key == "ai" else ""
+            if t_key == "ai"
+            else ""
         )
         tabs_html += (
             f'<button class="tone-tab {extra_cls} {active_attr}" '
@@ -2494,17 +2600,21 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
             f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
             f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
-            f'Click to generate&hellip;</span></div>'
+            f"Click to generate&hellip;</span></div>"
             f'<textarea class="caption-textarea" style="display:none"></textarea>'
-            f'</div>'
+            f"</div>"
         )
 
     _wf_card_el_id = f"wf-{card_uuid}"
     schedule_btn = (
-        f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
-        f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
-        f'Schedule&hellip;</button>'
-    ) if card_id_raw else ""
+        (
+            f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
+            f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
+            f"Schedule&hellip;</button>"
+        )
+        if card_id_raw
+        else ""
+    )
 
     return (
         f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
@@ -2516,12 +2626,12 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
-        f'{schedule_btn}'
+        f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
-        f'</div>'
+        f"</div>"
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -2532,6 +2642,7 @@ def _render_turn_into_card(run_id: str) -> str:
     after approval, never on the Review triage page."""
     try:
         from mediahub.turn_into import list_packs as _list_ti_packs
+
         _ti_packs = _list_ti_packs(run_id, base_dir=DATA_DIR / "turn_into_packs")
     except Exception:
         _ti_packs = []
@@ -2554,7 +2665,7 @@ def _render_turn_into_card(run_id: str) -> str:
                 f'<a href="{_view}">{_h(_gen)}</a> '
                 f'<span class="muted">&mdash; {_n} artefacts'
                 + (f", {_skipped} skipped" if _skipped else "")
-                + '</span></li>'
+                + "</span></li>"
             )
         _ti_prior_html = (
             '<div style="margin-top:14px">'
@@ -2644,9 +2755,15 @@ function turnMeetIntoPack() {{
 # Background pipeline worker
 # ---------------------------------------------------------------------
 
-def _start_run(file_bytes: bytes, file_name: str,
-               profile_id: Optional[str], use_pb_cache: bool,
-               fetch_pbs: bool, club_filter: Optional[str] = None) -> str:
+
+def _start_run(
+    file_bytes: bytes,
+    file_name: str,
+    profile_id: Optional[str],
+    use_pb_cache: bool,
+    fetch_pbs: bool,
+    club_filter: Optional[str] = None,
+) -> str:
     run_id = uuid.uuid4().hex[:12]
     started_at = datetime.now(timezone.utc).isoformat()
     with _active_lock:
@@ -2667,8 +2784,15 @@ def _start_run(file_bytes: bytes, file_name: str,
         """INSERT INTO runs (id, created_at, status, file_name, profile_id,
                              progress_log, heartbeat_at)
            VALUES (?,?,?,?,?,?,?)""",
-        (run_id, started_at, "queued", file_name, profile_id or "",
-         json.dumps(["Run queued"]), started_at),
+        (
+            run_id,
+            started_at,
+            "queued",
+            file_name,
+            profile_id or "",
+            json.dumps(["Run queued"]),
+            started_at,
+        ),
     )
     conn.commit()
     conn.close()
@@ -2703,9 +2827,7 @@ def _start_run(file_bytes: bytes, file_name: str,
                 # and the most recent N-5 of the tail.
                 if len(log_list) > _RUN_LOG_LIMIT:
                     keep_tail = _RUN_LOG_LIMIT - 5
-                    entry["log"] = (
-                        log_list[:5] + log_list[-keep_tail:]
-                    )
+                    entry["log"] = log_list[:5] + log_list[-keep_tail:]
                 snapshot = list(entry["log"])
             # Stream to the DB outside the lock (SQLite write is slow-ish).
             if now - _last_db[0] >= _RUN_DB_HEARTBEAT_SECS:
@@ -2729,9 +2851,13 @@ def _start_run(file_bytes: bytes, file_name: str,
 
         try:
             run = run_pipeline_v4(
-                file_bytes=file_bytes, filename=file_name,
-                profile_id=profile_id, use_pb_cache=use_pb_cache,
-                fetch_pbs=fetch_pbs, progress_cb=cb, run_id=run_id,
+                file_bytes=file_bytes,
+                filename=file_name,
+                profile_id=profile_id,
+                use_pb_cache=use_pb_cache,
+                fetch_pbs=fetch_pbs,
+                progress_cb=cb,
+                run_id=run_id,
                 club_filter=club_filter,
             )
             _persist_run(run, file_name)
@@ -2741,12 +2867,13 @@ def _start_run(file_bytes: bytes, file_name: str,
             )
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             _record_terminal("error", str(e))
             conn = _db()
-            conn.execute("UPDATE runs SET status='error', error=? WHERE id=?",
-                         (str(e), run_id))
-            conn.commit(); conn.close()
+            conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
+            conn.commit()
+            conn.close()
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -4620,6 +4747,7 @@ from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
+
 BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_RG_CSS
 
 
@@ -4630,8 +4758,11 @@ def _render_markdown(text: str) -> str:
 
     def _inline(s: str) -> str:
         s = _html.escape(s)
-        s = _re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
-                    lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>', s)
+        s = _re.sub(
+            r"\[([^\]]+)\]\(([^)]+)\)",
+            lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
+            s,
+        )
         s = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
         s = _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
         return s
@@ -4647,7 +4778,9 @@ def _render_markdown(text: str) -> str:
         head, *rest = table_rows
         rest = [r for r in rest if not all(_re.fullmatch(r":?-+:?", c.strip() or "-") for c in r)]
         out.append('<div style="overflow-x:auto"><table>')
-        out.append("<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in head) + "</tr></thead>")
+        out.append(
+            "<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in head) + "</tr></thead>"
+        )
         out.append("<tbody>")
         for r in rest:
             out.append("<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in r) + "</tr>")
@@ -4661,7 +4794,7 @@ def _render_markdown(text: str) -> str:
             if in_code:
                 out.append("</code></pre>")
             else:
-                out.append('<pre><code>')
+                out.append("<pre><code>")
             in_code = not in_code
             continue
         if in_code:
@@ -4675,17 +4808,21 @@ def _render_markdown(text: str) -> str:
             flush_table()
         m = _re.match(r"^(#{1,4})\s+(.*)$", ln)
         if m:
-            if in_list: out.append("</ul>"); in_list = False
+            if in_list:
+                out.append("</ul>")
+                in_list = False
             level = len(m.group(1))
             out.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
             continue
         if ln.startswith("- ") or ln.startswith("* "):
             if not in_list:
-                out.append('<ul style="margin-top:6px">'); in_list = True
+                out.append('<ul style="margin-top:6px">')
+                in_list = True
             out.append(f"<li>{_inline(ln[2:])}</li>")
             continue
         if in_list and not ln.strip():
-            out.append("</ul>"); in_list = False
+            out.append("</ul>")
+            in_list = False
             continue
         if not ln.strip():
             continue
@@ -4763,6 +4900,7 @@ def _logo_chip_html(
             surface_hex = _active_surface_hex()
         try:
             from mediahub.theming.logo_chip import decide_logo_chip
+
             decision = decide_logo_chip(dominant_hex, surface_hex)
             decision_mode = decision.mode
         except Exception:
@@ -4788,6 +4926,7 @@ def _active_surface_hex() -> str:
     design ships."""
     try:
         from flask import current_app
+
         get_active = getattr(current_app, "active_profile", None)
         if not get_active:
             return "#0A0B11"
@@ -4884,12 +5023,12 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         return (
             f'<span title="{esc(name)}: {esc(hex_value)}" '
             f'style="display:inline-flex;align-items:center;gap:6px;'
-            f'margin-right:14px;margin-bottom:6px;font-size:11px;'
+            f"margin-right:14px;margin-bottom:6px;font-size:11px;"
             f'color:var(--mh-on-surface-variant)">'
             f'<span style="display:inline-block;width:22px;height:22px;'
-            f'border-radius:4px;background:{esc(hex_value)};'
+            f"border-radius:4px;background:{esc(hex_value)};"
             f'border:1px solid var(--mh-outline-variant)"></span>'
-            f'{esc(name)}</span>'
+            f"{esc(name)}</span>"
         )
 
     swatches_html = ""
@@ -4974,64 +5113,57 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
     else:
         harmonic_html = (
             '<p class="dim" style="margin:0;font-size:12px">'
-            'No harmonic fit recorded (older derivation).</p>'
+            "No harmonic fit recorded (older derivation).</p>"
         )
 
     # Decision trace as <pre>
     trace_text = "\n".join(decision_trace) if decision_trace else "(no trace recorded)"
     trace_html = (
         '<pre style="margin:0;padding:10px 12px;background:var(--mh-surface);'
-        'border:1px solid var(--mh-outline-variant);border-radius:6px;'
-        'font-family:var(--font-mono);font-size:11px;line-height:1.45;'
-        'color:var(--mh-on-surface-variant);max-height:240px;overflow:auto;'
-        'white-space:pre-wrap;word-break:break-word">'
-        + esc(trace_text) + '</pre>'
+        "border:1px solid var(--mh-outline-variant);border-radius:6px;"
+        "font-family:var(--font-mono);font-size:11px;line-height:1.45;"
+        "color:var(--mh-on-surface-variant);max-height:240px;overflow:auto;"
+        'white-space:pre-wrap;word-break:break-word">' + esc(trace_text) + "</pre>"
     )
 
     seed_hct_str = ""
     if isinstance(seed_hct, (list, tuple)) and len(seed_hct) >= 3:
-        seed_hct_str = (
-            f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, "
-            f"T={seed_hct[2]:.1f})"
-        )
+        seed_hct_str = f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, " f"T={seed_hct[2]:.1f})"
 
     repaired_note = ""
     if was_repaired:
         repaired_note = (
             '<p class="dim" style="margin:6px 0 0;font-size:11px">'
-            '⚙ This palette went through the repair loop — see the '
-            'callout above for the plain-English summary, or the '
-            'decision trace below for the full sequence.</p>'
+            "⚙ This palette went through the repair loop — see the "
+            "callout above for the plain-English summary, or the "
+            "decision trace below for the full sequence.</p>"
         )
 
     return (
         '<details class="mh-theme-audit" style="margin:18px 0 0;'
-        'border:1px solid var(--mh-outline-variant);border-radius:8px;'
+        "border:1px solid var(--mh-outline-variant);border-radius:8px;"
         'background:var(--mh-surface-variant);overflow:hidden">'
         '<summary style="cursor:pointer;padding:12px 16px;font-size:13px;'
         'font-weight:600;color:var(--mh-on-surface);user-select:none">'
-        'Why does my theme look like this?'
+        "Why does my theme look like this?"
         '<span class="muted" style="font-weight:400;font-size:12px;'
         'margin-left:8px">Engine decisions, contrast checks, '
-        'accessibility audit</span>'
-        '</summary>'
+        "accessibility audit</span>"
+        "</summary>"
         '<div style="padding:0 16px 16px 16px;'
         'border-top:1px solid var(--mh-outline-variant)">'
-
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Captured seed</h4>'
         f'<p style="margin:0;font-size:13px;color:var(--mh-on-surface)">'
-        f'Seed <code>{esc(seed_hex)}</code> from '
-        f'<code>{esc(seed_source)}</code>; {seed_hct_str}.</p>'
-        f'{repaired_note}'
-
+        f"Seed <code>{esc(seed_hex)}</code> from "
+        f"<code>{esc(seed_source)}</code>; {seed_hct_str}.</p>"
+        f"{repaired_note}"
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Derived palette</h4>'
         f'<div style="margin-top:4px">{swatches_html}</div>'
-
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
-        'Contrast checks (APCA Lc · WCAG 2.x)</h4>'
+        "Contrast checks (APCA Lc · WCAG 2.x)</h4>"
         '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
         'font-size:11.5px">'
         '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
@@ -5040,13 +5172,10 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         '<th style="padding:4px 8px;text-align:right">Lc</th>'
         '<th style="padding:4px 8px;text-align:right">ratio</th>'
         '<th style="padding:4px 8px;text-align:center">ok</th>'
-        '</tr></thead><tbody>'
-        + "".join(contrast_rows) +
-        '</tbody></table></div>'
-
+        "</tr></thead><tbody>" + "".join(contrast_rows) + "</tbody></table></div>"
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
-        'Brand seed vs status anchors (CIEDE2000)</h4>'
+        "Brand seed vs status anchors (CIEDE2000)</h4>"
         '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
         'font-size:11.5px">'
         '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
@@ -5054,13 +5183,10 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         '<th style="padding:4px 8px;text-align:left">hex</th>'
         '<th style="padding:4px 8px;text-align:right">ΔE2000</th>'
         '<th style="padding:4px 8px;text-align:center">ok</th>'
-        '</tr></thead><tbody>'
-        + "".join(status_rows) +
-        '</tbody></table></div>'
-
+        "</tr></thead><tbody>" + "".join(status_rows) + "</tbody></table></div>"
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
-        'Colour-vision-deficiency simulation (Machado 2009)</h4>'
+        "Colour-vision-deficiency simulation (Machado 2009)</h4>"
         '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;'
         'font-size:11.5px">'
         '<thead><tr style="border-bottom:1px solid var(--mh-outline-variant)">'
@@ -5068,20 +5194,15 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         '<th style="padding:4px 8px;text-align:left">pair</th>'
         '<th style="padding:4px 8px;text-align:right">sim ΔE2000</th>'
         '<th style="padding:4px 8px;text-align:center">ok</th>'
-        '</tr></thead><tbody>'
-        + "".join(cvd_rows) +
-        '</tbody></table></div>'
-
+        "</tr></thead><tbody>" + "".join(cvd_rows) + "</tbody></table></div>"
         '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">'
-        'Harmonic fit (Cohen-Or 2006)</h4>'
-        + harmonic_html +
-
-        '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
+        "Harmonic fit (Cohen-Or 2006)</h4>"
+        + harmonic_html
+        + '<h4 style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;'
         'letter-spacing:0.12em;color:var(--mh-on-surface-muted)">Decision trace</h4>'
-        + trace_html +
-
-        '</div></details>'
+        + trace_html
+        + "</div></details>"
     )
 
 
@@ -5099,15 +5220,15 @@ def _theme_repair_callout_html(theme_json: Optional[dict]) -> str:
     return (
         f'<div class="mh-theme-warning" role="status" '
         f'style="margin:14px 0 0;padding:12px 16px;'
-        f'border-radius:6px;border:1px solid var(--mh-warning);'
-        f'background:rgba(255,180,84,0.10);font-size:13px;'
+        f"border-radius:6px;border:1px solid var(--mh-warning);"
+        f"background:rgba(255,180,84,0.10);font-size:13px;"
         f'color:var(--mh-on-surface)">'
         f'<strong style="display:block;margin-bottom:4px;'
         f'color:var(--mh-warning)">'
-        f'Theme adjusted for accessibility'
-        f'</strong>'
-        f'{safe_text}'
-        f'</div>'
+        f"Theme adjusted for accessibility"
+        f"</strong>"
+        f"{safe_text}"
+        f"</div>"
     )
 
 
@@ -5128,6 +5249,7 @@ def _adaptive_theme_enabled() -> bool:
     because they're independent of the CSS override.
     """
     import os as _os
+
     value = _os.environ.get("MEDIAHUB_ADAPTIVE_THEME", "")
     return value.strip().lower() not in ("0", "false", "off", "no")
 
@@ -5156,6 +5278,7 @@ def _default_theme_json() -> Optional[dict]:
 def _default_theme_json_cached() -> Optional[dict]:
     try:
         from mediahub.brand.kit import BrandKit
+
         kit = BrandKit.generic_default()
         return kit.ensure_derived_palette()
     except Exception:
@@ -5194,12 +5317,14 @@ def _theme_seed_style_block() -> str:
     accent_hex = ""
     try:
         from flask import current_app
+
         get_active = getattr(current_app, "active_profile", None)
         if get_active:
             prof = get_active()
             if prof:
                 try:
                     from mediahub.brand.palette import effective_palette
+
                     eff = effective_palette(
                         manual=getattr(prof, "brand_palette_manual", {}) or {},
                         extracted=getattr(prof, "brand_palette_extracted", {}) or {},
@@ -5222,9 +5347,8 @@ def _theme_seed_style_block() -> str:
                 bk_dict = dict(getattr(prof, "brand_kit", {}) or {})
                 _CLUB_PROFILE_DEFAULT_PRIMARY = "#A30D2D"
                 explicit_legacy_primary = (
-                    (getattr(prof, "brand_primary", "") or "").strip()
-                    not in ("", _CLUB_PROFILE_DEFAULT_PRIMARY)
-                )
+                    getattr(prof, "brand_primary", "") or ""
+                ).strip() not in ("", _CLUB_PROFILE_DEFAULT_PRIMARY)
                 has_confirmed_primary = bool(
                     eff.get("primary")
                     or eff.get("secondary")
@@ -5288,11 +5412,7 @@ def _theme_seed_style_block() -> str:
     if accent_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", accent_hex):
         overrides.append(f"--mh-brand-accent: {accent_hex};")
 
-    return (
-        f'<style id="mh-theme-seed">'
-        f':root {{ {" ".join(overrides)} }}'
-        f'</style>'
-    )
+    return f'<style id="mh-theme-seed">' f':root {{ {" ".join(overrides)} }}' f'</style>'
 
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
@@ -5463,10 +5583,29 @@ def _wrap_two_lines(text: str, limit: int = 18) -> tuple[str, str]:
     return line1, line2
 
 
-_HOOK_STOPWORDS = frozenset({
-    "a", "an", "the", "of", "to", "for", "and", "at", "in", "on",
-    "with", "is", "are", "was", "were", "this", "that", "our", "we",
-})
+_HOOK_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "of",
+        "to",
+        "for",
+        "and",
+        "at",
+        "in",
+        "on",
+        "with",
+        "is",
+        "are",
+        "was",
+        "were",
+        "this",
+        "that",
+        "our",
+        "we",
+    }
+)
 
 
 def _short_hook(text: str, max_words: int = 3, max_chars: int = 22) -> str:
@@ -5503,6 +5642,7 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     — not content generation — so it stays deterministic.
     """
     import re as _re
+
     caption = str(card.get("caption") or "").strip()
     fd = form_data or {}
     meet = str(fd.get("meet_name") or "").strip()
@@ -5558,6 +5698,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
         from flask import session as _sess
+
         signed_in_pid = (_sess.get("active_profile_id") or "").strip()
     except Exception:
         signed_in_pid = ""
@@ -5572,6 +5713,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
             if _p is not None:
                 try:
                     from mediahub.brand.palette import effective_palette as _eff
+
                     _eff_pal = _eff(
                         manual=getattr(_p, "brand_palette_manual", {}) or {},
                         extracted=getattr(_p, "brand_palette_extracted", {}) or {},
@@ -5590,7 +5732,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                     _lid = (_first or {}).get("logo_id") if isinstance(_first, dict) else ""
                     if _lid:
                         signed_in_logo = url_for(
-                            "organisation_setup_logo_serve", logo_id=_lid,
+                            "organisation_setup_logo_serve",
+                            logo_id=_lid,
                         )
                     else:
                         _cap = (getattr(_p, "brand_logo_url", "") or "").strip()
@@ -5600,7 +5743,8 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                     signed_in_logo = ""
         except Exception:
             signed_in_name = ""
-    return render_template_string("""
+    return render_template_string(
+        """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6440,14 +6584,19 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </script>
 </body>
 </html>
-""", title=title, css=BASE_CSS, body=body, active=active,
-               health_url=url_for("healthz"),
-               signed_in=bool(signed_in_pid),
-               signed_in_name=signed_in_name,
-               signed_in_primary=signed_in_primary,
-               signed_in_secondary=signed_in_secondary,
-               signed_in_logo=signed_in_logo,
-               theme_seed_style=_theme_seed_style_block())
+""",
+        title=title,
+        css=BASE_CSS,
+        body=body,
+        active=active,
+        health_url=url_for("healthz"),
+        signed_in=bool(signed_in_pid),
+        signed_in_name=signed_in_name,
+        signed_in_primary=signed_in_primary,
+        signed_in_secondary=signed_in_secondary,
+        signed_in_logo=signed_in_logo,
+        theme_seed_style=_theme_seed_style_block(),
+    )
 
 
 # Inline line-art for empty states (24×24 stroked SVGs, currentColor).
@@ -6476,15 +6625,13 @@ def _empty_state(
     art_svg = _EMPTY_ART.get(art, _EMPTY_ART["inbox"])
     kind_cls = " error" if kind == "error" else ""
     sub_html = f'<p class="mh-emptystate-sub">{sub}</p>' if sub else ""
-    actions_html = (
-        f'<div class="mh-emptystate-actions">{actions}</div>' if actions else ""
-    )
+    actions_html = f'<div class="mh-emptystate-actions">{actions}</div>' if actions else ""
     return (
         f'<div class="mh-emptystate{kind_cls}">'
         f'<div class="mh-emptystate-art" aria-hidden="true">{art_svg}</div>'
         f'<h3 class="mh-emptystate-title">{headline}</h3>'
-        f'{sub_html}{actions_html}'
-        '</div>'
+        f"{sub_html}{actions_html}"
+        "</div>"
     )
 
 
@@ -6518,16 +6665,20 @@ def _recovery_page(
     if lane is None:
         lane = str(code)
     sects: list[str] = []
-    sects.append(f'<section class="mh-hero" data-lane="{_h(lane)}" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">')
+    sects.append(
+        f'<section class="mh-hero" data-lane="{_h(lane)}" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
+    )
     sects.append(f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>')
-    sects.append(f'<h1>{_h(headline)}</h1>')
+    sects.append(f"<h1>{_h(headline)}</h1>")
     sects.append(f'<p class="lede">{_h(detail)}</p>')
     sects.append('<div class="mh-hero-actions">')
     sects.append(f'<a class="mh-cta-primary" href="{pcta[1]}">{_h(pcta[0])} &rarr;</a>')
     if secondary_cta:
-        sects.append(f'<a class="mh-cta-secondary" href="{secondary_cta[1]}">{_h(secondary_cta[0])}</a>')
-    sects.append('</div>')
-    sects.append('</section>')
+        sects.append(
+            f'<a class="mh-cta-secondary" href="{secondary_cta[1]}">{_h(secondary_cta[0])}</a>'
+        )
+    sects.append("</div>")
+    sects.append("</section>")
     return _layout(headline, "".join(sects)), code
 
 
@@ -6568,9 +6719,10 @@ _PALETTE_PICKER_JS = """
 # Flask app
 # ---------------------------------------------------------------------
 
+
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024   # 50 MB
+    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
     app.url_map.strict_slashes = False
 
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
@@ -6620,7 +6772,7 @@ def create_app() -> Flask:
             environ["SCRIPT_NAME"] = _script_name
             path_info = environ.get("PATH_INFO", "")
             if path_info.startswith(_script_name):
-                environ["PATH_INFO"] = path_info[len(_script_name):] or "/"
+                environ["PATH_INFO"] = path_info[len(_script_name) :] or "/"
             return _real_wsgi(environ, start_response)
 
         app.wsgi_app = _script_name_middleware  # type: ignore[assignment]
@@ -6636,48 +6788,50 @@ def create_app() -> Flask:
     # restarts.
 
     # Routes that are always reachable even when no organisation is set up.
-    _SETUP_EXEMPT_ENDPOINTS = frozenset({
-        "home",
-        "organisation_page",
-        "organisation_setup",
-        "organisation_setup_capture",
-        # Setup-page side-routes — the user is still pre-ready when
-        # they click "re-read" or "delete logo" or view a logo
-        # thumbnail, so these must bypass the gate just like the
-        # capture POST does.
-        "organisation_setup_reread",
-        "organisation_setup_logo_serve",
-        "organisation_setup_logo_delete",
-        "organisation_set_active",
-        # Phase 1.5 — the profile-picker page must be reachable without
-        # an active org (it's how the user PICKS one). Same for the POST
-        # endpoints that switch / delete.
-        "sign_in_page",
-        "sign_in_post",
-        "sign_in_delete",
-        "sign_out",
-        # /settings now redirects to / so doesn't actually need exempting,
-        # but we keep the endpoint name in the allow-list so a directly-
-        # hit /settings URL doesn't get caught by the gate before reaching
-        # the redirect.
-        "settings_page",
-        "healthz",
-        "healthz_deps",
-        "healthz_memory",
-        # /health is the deep dep-checking probe; it must also be
-        # reachable without an active org (and outside the API prefix
-        # allowlist below — it returns HTML/JSON, not JSON-only).
-        "health",
-        # Phase 1.5 — public status page, JSON twin, and operator usage
-        # dashboard must be reachable without an active org. The first
-        # two are public trust signals; the last is operator-only by
-        # virtue of living under /healthz/* alongside /healthz/deps.
-        "status_page",
-        "api_status_json",
-        "healthz_usage",
-        "healthz_ping",
-        "static",
-    })
+    _SETUP_EXEMPT_ENDPOINTS = frozenset(
+        {
+            "home",
+            "organisation_page",
+            "organisation_setup",
+            "organisation_setup_capture",
+            # Setup-page side-routes — the user is still pre-ready when
+            # they click "re-read" or "delete logo" or view a logo
+            # thumbnail, so these must bypass the gate just like the
+            # capture POST does.
+            "organisation_setup_reread",
+            "organisation_setup_logo_serve",
+            "organisation_setup_logo_delete",
+            "organisation_set_active",
+            # Phase 1.5 — the profile-picker page must be reachable without
+            # an active org (it's how the user PICKS one). Same for the POST
+            # endpoints that switch / delete.
+            "sign_in_page",
+            "sign_in_post",
+            "sign_in_delete",
+            "sign_out",
+            # /settings now redirects to / so doesn't actually need exempting,
+            # but we keep the endpoint name in the allow-list so a directly-
+            # hit /settings URL doesn't get caught by the gate before reaching
+            # the redirect.
+            "settings_page",
+            "healthz",
+            "healthz_deps",
+            "healthz_memory",
+            # /health is the deep dep-checking probe; it must also be
+            # reachable without an active org (and outside the API prefix
+            # allowlist below — it returns HTML/JSON, not JSON-only).
+            "health",
+            # Phase 1.5 — public status page, JSON twin, and operator usage
+            # dashboard must be reachable without an active org. The first
+            # two are public trust signals; the last is operator-only by
+            # virtue of living under /healthz/* alongside /healthz/deps.
+            "status_page",
+            "api_status_json",
+            "healthz_usage",
+            "healthz_ping",
+            "static",
+        }
+    )
     # API endpoints that should return a JSON 409 instead of redirecting.
     _SETUP_EXEMPT_API_PREFIXES = (
         "/api/llm",
@@ -6763,7 +6917,7 @@ def create_app() -> Flask:
     # them without re-implementing the lookup. (Routes defined later in
     # create_app() close over these via the enclosing scope.)
     app.active_profile_id = _active_profile_id  # type: ignore[attr-defined]
-    app.active_profile = _active_profile        # type: ignore[attr-defined]
+    app.active_profile = _active_profile  # type: ignore[attr-defined]
 
     @app.before_request
     def _gate_until_org_ready():
@@ -6789,15 +6943,17 @@ def create_app() -> Flask:
             return None
         if is_api:
             return (
-                jsonify({
-                    "ok": False,
-                    "error": "organisation_not_ready",
-                    "message": (
-                        "Set up your organisation before producing content. "
-                        "MediaHub needs to know who you are first."
-                    ),
-                    "setup_url": url_for("organisation_setup"),
-                }),
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "organisation_not_ready",
+                        "message": (
+                            "Set up your organisation before producing content. "
+                            "MediaHub needs to know who you are first."
+                        ),
+                        "setup_url": url_for("organisation_setup"),
+                    }
+                ),
                 409,
             )
         # Browser request. If the visitor simply isn't signed in but
@@ -6842,14 +6998,11 @@ def create_app() -> Flask:
         # is the live dot + the CTA. Editorial italic does the emphasis work.
         if prof and prof.is_ready():
             # Returning user with a pinned org.
-            hero_h1 = (
-                f'{_h(prof.display_name)}.<br>'
-                '<em class="editorial">Ready</em> to file.'
-            )
+            hero_h1 = f"{_h(prof.display_name)}.<br>" '<em class="editorial">Ready</em> to file.'
             hero_lede = (
-                'Your brand voice, palette, and logo are loaded. Captions, '
-                'graphics, and motion videos will arrive on-brand. Nothing '
-                'leaves this deployment without your approval.'
+                "Your brand voice, palette, and logo are loaded. Captions, "
+                "graphics, and motion videos will arrive on-brand. Nothing "
+                "leaves this deployment without your approval."
             )
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
@@ -6859,19 +7012,16 @@ def create_app() -> Flask:
                 f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
                 'Edit profile</a>'
             )
-            eyebrow = 'Pinned organisation'
-            lane_no = '04'
+            eyebrow = "Pinned organisation"
+            lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = (
-                'Results in.<br>'
-                '<em class="editorial">On-brand</em> stories out.'
-            )
+            hero_h1 = "Results in.<br>" '<em class="editorial">On-brand</em> stories out.'
             hero_lede = (
-                'MediaHub reads your club website, social profiles, and brand '
-                'guidelines, then writes captions, builds graphics, and renders '
-                'motion videos in your voice. Set up once. Reuse forever. '
-                'Nothing posts without you.'
+                "MediaHub reads your club website, social profiles, and brand "
+                "guidelines, then writes captions, builds graphics, and renders "
+                "motion videos in your voice. Set up once. Reuse forever. "
+                "Nothing posts without you."
             )
             if n_orgs > 0:
                 # Signed-out session with organisations on this
@@ -6895,8 +7045,8 @@ def create_app() -> Flask:
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
                     'Sign in</a>'
                 )
-            eyebrow = 'Sport content automation'
-            lane_no = '01'
+            eyebrow = "Sport content automation"
+            lane_no = "01"
 
         # Meta line under the CTAs — bracketed mono strap, scoreboard voice.
         meta_parts = []
@@ -6909,11 +7059,11 @@ def create_app() -> Flask:
                 f'<span><b>{n_runs:03d}</b> total {"run" if n_runs == 1 else "runs"}</span>'
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
-            meta_parts.append('<span>Brand voice <b>captured</b></span>')
+            meta_parts.append("<span>Brand voice <b>captured</b></span>")
         meta_html = ""
         if meta_parts:
             sep = '<span class="dot">/</span>'
-            meta_html = '<div class="mh-hero-meta">' + sep.join(meta_parts) + '</div>'
+            meta_html = '<div class="mh-hero-meta">' + sep.join(meta_parts) + "</div>"
 
         # Demo line for first-time visitors — small tertiary CTA below the
         # primary buttons. Links to /upload which the org gate will steer
@@ -6923,19 +7073,19 @@ def create_app() -> Flask:
             demo_line_html = (
                 '<p class="mh-demo-line">Just looking? '
                 f'<a href="{url_for("research_page")}">See what the engine does</a> '
-                'or <a href="' + url_for('sign_in_page') + '">browse pinned organisations</a>.'
-                '</p>'
+                'or <a href="' + url_for("sign_in_page") + '">browse pinned organisations</a>.'
+                "</p>"
             )
 
         hero_html = (
             f'<section class="mh-hero" data-lane="{lane_no}">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
-            f'<h1>{hero_h1}</h1>'
+            f"<h1>{hero_h1}</h1>"
             f'<p class="lede">{_h(hero_lede)}</p>'
             f'<div class="mh-hero-actions">{hero_actions}</div>'
-            f'{demo_line_html}'
-            f'{meta_html}'
-            '</section>'
+            f"{demo_line_html}"
+            f"{meta_html}"
+            "</section>"
         )
 
         # --- Trust strip — "what we read / what we make" pipeline glance.
@@ -6946,56 +7096,68 @@ def create_app() -> Flask:
             '<div class="mh-trust-cell" tabindex="0" data-mh-tip="HY3, SD3, Sportsystems PDF — parsed deterministically, never guessed." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
             '<div><span class="label">We read</span><span class="value">Hytek .hy3, .zip, PDF</span></div>'
-            '</div>'
+            "</div>"
             '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Your site and socials feed brand voice, palette, and tone." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>'
             '<div><span class="label">We crawl</span><span class="value">Club site &amp; socials</span></div>'
-            '</div>'
+            "</div>"
             '<div class="mh-trust-cell" tabindex="0" data-mh-tip="A deterministic ranker scores content-worthiness with confidence." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 9 8.5 12 2"/></svg>'
             '<div><span class="label">We rank</span><span class="value">PBs, medals, first-times</span></div>'
-            '</div>'
+            "</div>"
             '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Captions via Gemini; graphics + reels rendered server-side." data-mh-tip-pos="bottom">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>'
             '<div><span class="label">We render</span><span class="value">Captions, graphics, reels</span></div>'
-            '</div>'
-            '</div>'
+            "</div>"
+            "</div>"
         )
 
         # --- Four-step explainer — sport newsroom workflow ---
         # Each step now carries an SVG icon and a "time-to" footnote so the
         # block reads as a real product walkthrough, not a paragraph wall.
         step_specs = [
-            ('01', 'Add an input',
-             '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-             'Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.',
-             '~ 30s'),
-            ('02', 'We find the moments',
-             '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v3M11 14v.01"/></svg>',
-             'The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.',
-             '~ 45s'),
-            ('03', 'On-brand drafts appear',
-             '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19l7-7-3-3-7 7v3z"/><path d="M14 6l3 3"/><path d="M5 21h14"/></svg>',
-             "Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.",
-             '~ 60s'),
-            ('04', 'Approve. Then post.',
-             '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
-             'You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.',
-             'Human in the loop'),
+            (
+                "01",
+                "Add an input",
+                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+                "Upload a Hytek results file, paste a sponsor brief, or describe a moment in your own words. Any sport. Any club.",
+                "~ 30s",
+            ),
+            (
+                "02",
+                "We find the moments",
+                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v3M11 14v.01"/></svg>',
+                "The engine spots PBs, medals, first-times, comebacks and standout swims, then ranks them by content-worthiness.",
+                "~ 45s",
+            ),
+            (
+                "03",
+                "On-brand drafts appear",
+                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19l7-7-3-3-7 7v3z"/><path d="M14 6l3 3"/><path d="M5 21h14"/></svg>',
+                "Captions are written in your club&rsquo;s voice, using your tone, sponsor rules, and example posts you&rsquo;ve shared.",
+                "~ 60s",
+            ),
+            (
+                "04",
+                "Approve. Then post.",
+                '<svg class="mh-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+                "You review, edit, approve. Nothing goes out without you. Export as text, copy to Stories, or download a pack.",
+                "Human in the loop",
+            ),
         ]
         steps_html = (
             '<section class="mh-section">'
             '<div class="mh-section-eyebrow-strip"><span class="label">The workflow</span></div>'
             '<h2 class="mh-section-title">From the results sheet to <em class="editorial">posting-ready</em></h2>'
             '<div class="mh-steps mh-reveal-group">'
-            + ''.join(
+            + "".join(
                 f'<div class="mh-step">{icon}'
                 f'<div class="mh-step-num">{num}</div>'
-                f'<h3>{title}</h3><p>{body}</p>'
+                f"<h3>{title}</h3><p>{body}</p>"
                 f'<div class="mh-step-foot">{foot}</div></div>'
                 for num, title, icon, body, foot in step_specs
             )
-            + '</div></section>'
+            + "</div></section>"
         )
 
         # --- Sample output preview — three mock cards showing the three
@@ -7012,23 +7174,23 @@ def create_app() -> Flask:
             '<div class="mh-sample-time">52.41<span class="mh-sample-delta">−0.74s</span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">A clean, vertical story graphic with the swimmer’s name, event and split — branded with your club’s palette.</p>'
             '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
-            '</div>'
+            "</div>"
             '<div class="mh-sample feed">'
             '<span class="mh-sample-eyebrow">Feed graphic · 1080×1350</span>'
             '<div class="mh-sample-title">Top three <em>finals</em></div>'
             '<div class="mh-sample-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Podium-bar chart of the night’s finals — names, times and lanes from your meet file, dropped into your colour palette.</p>'
             '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
-            '</div>'
+            "</div>"
             '<div class="mh-sample reel">'
             '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
             '<div class="mh-sample-title">Aquatica <em>highlights</em></div>'
             '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
             '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
-            '</div>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</div>"
+            "</section>"
         )
 
         # --- Made for — three audience cards. Shown to everyone since the
@@ -7044,21 +7206,21 @@ def create_app() -> Flask:
             '<span class="mh-audience-role">Committee · Volunteer · Comms</span>'
             '<h3 class="mh-audience-title">Club committees</h3>'
             '<p class="mh-audience-body">Whoever runs the socials gets back two evenings every meet week. The engine writes the captions; the committee approves.</p>'
-            '</div>'
+            "</div>"
             '<div class="mh-audience">'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></span>'
             '<span class="mh-audience-role">Coach · Performance · Selection</span>'
             '<h3 class="mh-audience-title">Coaches</h3>'
             '<p class="mh-audience-body">Personal bests, qualifying-time misses, ranked swims and standout debuts — surfaced before you finish your coffee.</p>'
-            '</div>'
+            "</div>"
             '<div class="mh-audience">'
             '<span class="mh-audience-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg></span>'
             '<span class="mh-audience-role">Society · University · Team</span>'
             '<h3 class="mh-audience-title">University teams</h3>'
             '<p class="mh-audience-body">BUCS results, varsity wins, intra-society fixtures — all in your colours, with the right tone for an Instagram feed.</p>'
-            '</div>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</div>"
+            "</section>"
         )
 
         # --- Promise / what we don't do. Lane-yellow left-stripe trust
@@ -7069,25 +7231,25 @@ def create_app() -> Flask:
             '<div class="mh-promise">'
             '<h2 class="mh-promise-title">Human in the loop, <em>by design</em>.</h2>'
             '<p class="mh-promise-lede">'
-            'MediaHub is an intelligence layer, not an auto-poster. Every '
-            'piece of content stops at a review queue you control.'
-            '</p>'
+            "MediaHub is an intelligence layer, not an auto-poster. Every "
+            "piece of content stops at a review queue you control."
+            "</p>"
             '<ul class="mh-promise-list">'
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            '<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>'
+            "<div><b>Approval gate, every time</b><span>No card publishes without an explicit click. Even bulk approvals are a deliberate action.</span></div></li>"
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            '<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>'
+            "<div><b>Source-grounded captions</b><span>Every claim links back to the parsed result. No invented times, no invented places.</span></div></li>"
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
-            '<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>'
+            "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            '<div><b>We don\'t auto-post</b><span>No scheduled feed pushes without you saying so. The Buffer connection is opt-in per-card.</span></div></li>'
+            "<div><b>We don't auto-post</b><span>No scheduled feed pushes without you saying so. The Buffer connection is opt-in per-card.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            '<div><b>We don\'t invent results</b><span>If the file doesn\'t contain a time, the caption doesn\'t claim one. Heuristic fills are forbidden.</span></div></li>'
+            "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            '<div><b>We don\'t sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>'
-            '</ul>'
-            '</div>'
-            '</section>'
+            "<div><b>We don't sell your roster</b><span>Athlete and result data stays on the deployment you control. Inventory you can audit on the privacy page.</span></div></li>"
+            "</ul>"
+            "</div>"
+            "</section>"
         )
 
         # --- Final CTA strip before the footer. Two variants based on
@@ -7237,6 +7399,7 @@ def create_app() -> Flask:
         # or the DB lookup errors, the rest of the page still renders.
         try:
             from mediahub.publishing import posting_log as _plog
+
             recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
         except Exception:
             recent_attempts = []
@@ -7316,20 +7479,25 @@ def create_app() -> Flask:
                 return '<span class="muted" style="font-size:11px">&mdash;</span>'
             parts = []
             if s.get("scheduled"):
-                parts.append(f'<span class="tag info" style="font-size:11px">'
-                             f'{s["scheduled"]} scheduled</span>')
+                parts.append(
+                    f'<span class="tag info" style="font-size:11px">'
+                    f'{s["scheduled"]} scheduled</span>'
+                )
             if s.get("published"):
-                parts.append(f'<span class="tag good" style="font-size:11px">'
-                             f'{s["published"]} published</span>')
+                parts.append(
+                    f'<span class="tag good" style="font-size:11px">'
+                    f'{s["published"]} published</span>'
+                )
             if s.get("failed"):
-                parts.append(f'<span class="tag bad" style="font-size:11px">'
-                             f'{s["failed"]} failed</span>')
+                parts.append(
+                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                )
             return " ".join(parts)
 
         # Phase 5 — group rows by date bucket so the table reads as a
         # newsroom log instead of an undifferentiated 100-row dump.
         from datetime import datetime as _dt
-        import datetime as _dtmod
+
         def _bucket(iso_str: str) -> str:
             if not iso_str:
                 return "earlier"
@@ -7351,12 +7519,13 @@ def create_app() -> Flask:
             if days < 30:
                 return "this_month"
             return "earlier"
+
         bucket_labels = {
-            "today":      "Today",
-            "yesterday":  "Yesterday",
-            "this_week":  "Earlier this week",
+            "today": "Today",
+            "yesterday": "Yesterday",
+            "this_week": "Earlier this week",
             "this_month": "Earlier this month",
-            "earlier":    "Earlier",
+            "earlier": "Earlier",
         }
         bucket_order = ["today", "yesterday", "this_week", "this_month", "earlier"]
         grouped: dict[str, list] = {b: [] for b in bucket_order}
@@ -7365,9 +7534,12 @@ def create_app() -> Flask:
         n_running = 0
         n_errored = 0
         for r in rows:
-            if r["status"] == "done":     n_done += 1
-            if r["status"] == "running":  n_running += 1
-            if r["status"] == "error":    n_errored += 1
+            if r["status"] == "done":
+                n_done += 1
+            if r["status"] == "running":
+                n_running += 1
+            if r["status"] == "error":
+                n_errored += 1
             grouped[_bucket((r["created_at"] or "")[:19])].append(r)
 
         rows_html = ""
@@ -7379,13 +7551,14 @@ def create_app() -> Flask:
                 '<tr class="mh-date-group-row">'
                 f'<td colspan="7"><span class="label">{bucket_labels[bucket]} '
                 f'<span style="color:var(--ink-faint)">&middot; {len(bucket_rows):02d}</span></span></td>'
-                '</tr>'
+                "</tr>"
             )
             for r in bucket_rows:
-                badge = {"done": "good", "running": "info", "queued": "info",
-                         "error": "bad"}.get(r["status"], "")
-                review_href = url_for('review', run_id=r['id'])
-                delete_href = url_for('privacy_delete_run', run_id=r['id'])
+                badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                    r["status"], ""
+                )
+                review_href = url_for("review", run_id=r["id"])
+                delete_href = url_for("privacy_delete_run", run_id=r["id"])
                 started = (r["created_at"] or "")[:19]
                 started_iso = started.replace(" ", "T") + "Z" if started else ""
                 search_haystack = (r["meet_name"] or r["file_name"] or r["id"] or "").lower()
@@ -7410,15 +7583,15 @@ def create_app() -> Flask:
                         '<tr class="run-error-row">'
                         '<td colspan="7" style="padding:6px 14px 14px 14px;'
                         'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                        '<details>'
+                        "<details>"
                         '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
                         'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
                         '<pre style="margin:8px 0 0;padding:10px 12px;'
-                        'background:rgba(0,0,0,0.25);border-radius:6px;'
+                        "background:rgba(0,0,0,0.25);border-radius:6px;"
                         'font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                        f'{_h(truncated)}</pre>'
-                        '</details>'
-                        '</td></tr>'
+                        f"{_h(truncated)}</pre>"
+                        "</details>"
+                        "</td></tr>"
                     )
 
         # Recent posting activity panel — bottom-of-page, collapsed by
@@ -7442,23 +7615,23 @@ def create_app() -> Flask:
                 attempts_rows += (
                     f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
                     f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f'<td>{badge_html}</td>'
+                    f"<td>{badge_html}</td>"
                     f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
                     f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f'</tr>'
+                    f"</tr>"
                 )
             posting_panel_html = (
                 '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
-                'Recent posting activity</h2>'
+                "Recent posting activity</h2>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f'Last {len(recent_attempts)} Buffer attempts for this organisation. '
-                'Failures stay listed here so you can see what went wrong without '
-                'digging through individual runs.</p>'
+                f"Last {len(recent_attempts)} Buffer attempts for this organisation. "
+                "Failures stay listed here so you can see what went wrong without "
+                "digging through individual runs.</p>"
                 '<div class="card"><table>'
-                '<thead><tr><th>When</th><th>Channel</th><th>Status</th>'
-                '<th>Caption excerpt</th><th>Error</th></tr></thead>'
-                f'<tbody>{attempts_rows}</tbody>'
-                '</table></div>'
+                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
+                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
+                f"<tbody>{attempts_rows}</tbody>"
+                "</table></div>"
             )
 
         # Phase 1.5 — surface the number of failed runs at the top of the
@@ -7470,9 +7643,9 @@ def create_app() -> Flask:
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
                 'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f'<b>{_h(label)}</b> in the last 100 runs. '
-                'Expand <i>Why did this run fail?</i> on each row below to '
-                'see the pipeline error.</div>'
+                f"<b>{_h(label)}</b> in the last 100 runs. "
+                "Expand <i>Why did this run fail?</i> on each row below to "
+                "see the pipeline error.</div>"
             )
 
         # Top stat strip — always shows the UNFILTERED picture so it's a
@@ -7485,10 +7658,8 @@ def create_app() -> Flask:
             f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):02d}</div></div>'
         )
         if unfiltered_counts.get("error", 0):
-            summary_html += (
-                f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):02d}</div></div>'
-            )
-        summary_html += '</div>'
+            summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):02d}</div></div>'
+        summary_html += "</div>"
 
         # Toolbar — search input + status segment filter.
         # Filter buttons use ?status= for server-side filtering plus the
@@ -7496,10 +7667,14 @@ def create_app() -> Flask:
         # so the chips always show the full picture.
         seg_buttons = ""
         seg_specs = [
-            ("",        "All",       total_unfiltered),
-            ("done",    "Completed", unfiltered_counts.get("done", 0)),
-            ("running", "Running",   unfiltered_counts.get("running", 0) + unfiltered_counts.get("queued", 0)),
-            ("error",   "Failed",    unfiltered_counts.get("error", 0)),
+            ("", "All", total_unfiltered),
+            ("done", "Completed", unfiltered_counts.get("done", 0)),
+            (
+                "running",
+                "Running",
+                unfiltered_counts.get("running", 0) + unfiltered_counts.get("queued", 0),
+            ),
+            ("error", "Failed", unfiltered_counts.get("error", 0)),
         ]
         for val, label, count in seg_specs:
             active_cls = " is-active" if status_q == val else ""
@@ -7513,18 +7688,18 @@ def create_app() -> Flask:
             '<div class="grow mh-search">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
             '<input id="mh-activity-search" type="search" placeholder="Search meet name, file or run id…" autocomplete="off" />'
-            '</div>'
+            "</div>"
             '<nav class="mh-segmented" role="tablist" aria-label="Filter by run status">'
-            f'{seg_buttons}'
-            '</nav>'
-            '</div>'
+            f"{seg_buttons}"
+            "</nav>"
+            "</div>"
             '<div id="mh-activity-empty" class="mh-empty-inline" style="display:none">'
-            '<b>Nothing matches.</b><br>Try clearing the search box or picking a different status.'
-            '</div>'
+            "<b>Nothing matches.</b><br>Try clearing the search box or picking a different status."
+            "</div>"
         )
 
         # Inline JS — client-side filter on the table rows.
-        filter_js = '''
+        filter_js = """
 <script>
 (function(){
   var search = document.getElementById('mh-activity-search');
@@ -7561,7 +7736,7 @@ def create_app() -> Flask:
   }
   search.addEventListener('input', apply);
 })();
-</script>'''
+</script>"""
 
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
@@ -7586,7 +7761,6 @@ def create_app() -> Flask:
         )
         return _layout("Activity", body, active="activity")
 
-
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
     def upload():
@@ -7596,10 +7770,18 @@ def create_app() -> Flask:
         if request.method == "POST":
             f = request.files.get("file")
             if not f or not f.filename:
-                return _layout("Upload", '<div class="card"><p class="tag bad">No file selected.</p></div>', active="create")
+                return _layout(
+                    "Upload",
+                    '<div class="card"><p class="tag bad">No file selected.</p></div>',
+                    active="create",
+                )
             data = f.read()
             if not data:
-                return _layout("Upload", '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>', active="create")
+                return _layout(
+                    "Upload",
+                    '<div class="card"><p class="tag bad">Uploaded file was empty.</p></div>',
+                    active="create",
+                )
 
             temp_run_id = uuid.uuid4().hex[:12]
             tmp_dir = RUNS_DIR / temp_run_id
@@ -7616,6 +7798,7 @@ def create_app() -> Flask:
             # actually appear in this meet are listed on configure.
             try:
                 from mediahub.interpreter import interpret_document
+
                 interpreted = interpret_document(data, hint=None)
                 clubs: list[str] = []
                 seen: set[str] = set()
@@ -7633,9 +7816,7 @@ def create_app() -> Flask:
                 meta["clubs"] = []
                 meta["parse_error"] = str(exc)
                 meta["file_byte_size"] = len(data)
-            (tmp_dir / "upload_meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            (tmp_dir / "upload_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
             return redirect(url_for("upload_configure", run_id=temp_run_id))
 
         # Recent files for this profile — lets the user re-run an already-
@@ -7681,11 +7862,11 @@ def create_app() -> Flask:
                     recent_html = (
                         '<div class="card mh-recent-card">'
                         '<h3 style="margin-top:0;font-family:var(--font-mono);'
-                        'font-size:var(--fs-10);letter-spacing:0.18em;'
-                        'text-transform:uppercase;color:var(--ink-muted);'
+                        "font-size:var(--fs-10);letter-spacing:0.18em;"
+                        "text-transform:uppercase;color:var(--ink-muted);"
                         'margin-bottom:var(--sp-3)">Re-run a recent meet</h3>'
                         f'<ul class="mh-recent-list">{items_html}</ul>'
-                        '</div>'
+                        "</div>"
                     )
         except Exception:
             recent_html = ""
@@ -7783,8 +7964,9 @@ def create_app() -> Flask:
         return _layout("Upload", body, active="create")
 
     # ---- UPLOAD CONFIGURE (V8.1 issue 6: two-step; V8.2 issue 6: photos) ---
-    def _render_configure(run_id: str, meta: dict, *, error: str = "",
-                          selected_club: str = "") -> str:
+    def _render_configure(
+        run_id: str, meta: dict, *, error: str = "", selected_club: str = ""
+    ) -> str:
         clubs = meta.get("clubs") or []
         meet_name = meta.get("meet_name") or ""
         parse_err = meta.get("parse_error") or ""
@@ -7831,8 +8013,9 @@ def create_app() -> Flask:
                 )
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
-                f'Parser error: <code>{_h(parse_err)}</code></p>'
-                if parse_err else ""
+                f"Parser error: <code>{_h(parse_err)}</code></p>"
+                if parse_err
+                else ""
             )
             body = f"""
 <h1>{_h(headline)}</h1>
@@ -7853,9 +8036,7 @@ def create_app() -> Flask:
             f'<option value="{_h(c)}"{" selected" if c == selected_club else ""}>{_h(c)}</option>'
             for c in clubs
         )
-        err_html = (
-            f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>' if error else ""
-        )
+        err_html = f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>' if error else ""
 
         # Pre-fill the brand fields from the active organisation so the
         # user never re-enters logo / colours they already gave us at
@@ -7880,7 +8061,7 @@ def create_app() -> Flask:
                 prof_logo_html = (
                     f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
                     f'Logo: <code style="font-size:11px">'
-                    f'{_h(_logo_disp)}</code></p>'
+                    f"{_h(_logo_disp)}</code></p>"
                 )
             else:
                 prof_logo_html = (
@@ -8070,7 +8251,11 @@ def create_app() -> Flask:
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
             if not club_filter:
-                return _layout("Configure", '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>', active="create")
+                return _layout(
+                    "Configure",
+                    '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>',
+                    active="create",
+                )
 
             # Phase 1.5 logo consolidation: logos now live on the active
             # organisation profile, not on individual runs. The configure
@@ -8097,18 +8282,18 @@ def create_app() -> Flask:
             # meta only if it carries a profile_id (older flows); modern
             # flows always come through the org-gated Create tab,
             # so the session pin is the authoritative source.
-            profile_id = (
-                meta.get("profile_id")
-                or _active_profile_id()
-                or None
-            )
+            profile_id = meta.get("profile_id") or _active_profile_id() or None
             use_cache = bool(meta.get("use_cache", True))
             fetch_pbs = bool(meta.get("fetch_pbs", True))
             filename = meta.get("filename") or "upload.bin"
 
             # Kick off the real run; reuse the temp run_id.
             new_run_id = _start_run(
-                data, filename, profile_id, use_cache, fetch_pbs,
+                data,
+                filename,
+                profile_id,
+                use_cache,
+                fetch_pbs,
                 club_filter=club_filter,
             )
 
@@ -8121,6 +8306,7 @@ def create_app() -> Flask:
             # a local path doesn't trip.
             try:
                 from .brand_kit_upload import process_upload as _bk_process
+
                 profile_logo_bytes = None
                 profile_logo_name = None
                 if active_prof_for_run is not None:
@@ -8128,6 +8314,7 @@ def create_app() -> Flask:
                     if url and (url.startswith("http://") or url.startswith("https://")):
                         try:
                             import requests as _rq
+
                             r = _rq.get(url, timeout=10)
                             if r.ok and len(r.content) < 5_000_000:
                                 profile_logo_bytes = r.content
@@ -8135,6 +8322,7 @@ def create_app() -> Flask:
                                 # path so the on-disk save uses the right
                                 # extension. Default to .png if unknown.
                                 from urllib.parse import urlparse
+
                                 path = urlparse(url).path or ""
                                 tail = path.rsplit("/", 1)[-1] or "logo.png"
                                 if "." not in tail:
@@ -8167,10 +8355,12 @@ def create_app() -> Flask:
             if photo_files:
                 from datetime import datetime
                 import mimetypes as _mt
+
                 media_dir = RUNS_DIR / new_run_id / "media"
                 media_dir.mkdir(parents=True, exist_ok=True)
                 run_profile_id = re.sub(
-                    r"[^a-z0-9_-]", "-",
+                    r"[^a-z0-9_-]",
+                    "-",
                     (club_filter or ("_run_" + new_run_id)).lower(),
                 ).strip("-") or ("_run_" + new_run_id)
                 for pf in photo_files:
@@ -8196,6 +8386,7 @@ def create_app() -> Flask:
                         try:
                             from mediahub.media_library.store import get_store as _ml_get
                             from mediahub.media_library.models import MediaAsset as _MA
+
                             ml = _ml_get()
                             asset = _MA(
                                 id="",
@@ -8228,8 +8419,8 @@ def create_app() -> Flask:
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
     def run_status(run_id):
-        _status_url = url_for('api_status', run_id=run_id)
-        _review_url = url_for('review', run_id=run_id)
+        _status_url = url_for("api_status", run_id=run_id)
+        _review_url = url_for("review", run_id=run_id)
         # Tenant gate: prevent the progress page from acting as an
         # existence oracle for runs owned by a different org.
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
@@ -8252,9 +8443,7 @@ def create_app() -> Flask:
                 _row_error = _cur.get("error")
             if _row_status is None:
                 _c = _db()
-                _r = _c.execute(
-                    "SELECT status, error FROM runs WHERE id = ?", (run_id,)
-                ).fetchone()
+                _r = _c.execute("SELECT status, error FROM runs WHERE id = ?", (run_id,)).fetchone()
                 _c.close()
                 if _r:
                     _row_status = _r["status"]
@@ -8265,7 +8454,7 @@ def create_app() -> Flask:
                 # Server-side render a real error page rather than waiting for
                 # the JS poller — gives the user immediate context, a clear
                 # path back to the upload step, and the raw error text.
-                _err_msg = (_row_error or "Pipeline failed without leaving an error message.")
+                _err_msg = _row_error or "Pipeline failed without leaving an error message."
                 _err_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
                     '<span class="mh-hero-eyebrow">Pipeline failed</span>'
@@ -8384,10 +8573,15 @@ def create_app() -> Flask:
 
     if (status === 'done') {{
       stopped = true;
-      if (stage) stage.textContent = 'Complete';
+      var nAch = (j && j.n_achievements != null) ? j.n_achievements : null;
+      var achLabel = (nAch !== null && nAch > 0)
+        ? nAch + ' moment' + (nAch === 1 ? '' : 's') + ' found — ready to review'
+        : 'Processing complete — ready to review';
+      if (stage) stage.textContent = achLabel;
+      if (lede) lede.textContent = achLabel + '. Opening the review queue…';
       fillBar(null);
       if (reviewLink) reviewLink.style.display = 'inline-flex';
-      if (window.MH) MH.toast('Run complete — opening review queue', 'success', 2500);
+      if (window.MH) MH.toast(achLabel, 'success', 2500);
       setTimeout(function() {{ location.replace(REVIEW_URL); }}, 900);
       return;
     }}
@@ -8425,16 +8619,26 @@ def create_app() -> Flask:
     # is dead (its worker was recycled or it wedged past every per-call
     # timeout). Surface it as a terminal error so the poller stops instead
     # of spinning forever.
-    _STALE_ERR = ("Processing stopped responding — the server worker was "
-                  "recycled mid-run or a step timed out. Please upload the "
-                  "file again.")
+    _STALE_ERR = (
+        "Processing stopped responding — the server worker was "
+        "recycled mid-run or a step timed out. Please upload the "
+        "file again."
+    )
 
     @app.route("/api/runs/<run_id>/status")
     def api_status(run_id):
         # Tenant gate: status polling would otherwise let a foreign org
         # infer when another org's pipeline finishes.
-        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+        _run_data = _load_run(run_id)
+        if not _can_access_run(run_id, _run_data, _active_profile_id()):
             return jsonify({"status": "unknown", "error": "Run not found"}), 404
+
+        def _n_achievements_from_run(rd):
+            """Extract achievement count from a loaded run dict (or 0)."""
+            if not rd:
+                return 0
+            rr = rd.get("recognition_report") or {}
+            return int(rr.get("n_achievements") or 0)
 
         # In-memory snapshot (the worker that spawned the pipeline). Copy
         # the log list *under the lock* — copy_value only shallow-copies the
@@ -8458,6 +8662,8 @@ def create_app() -> Flask:
                 if hb is not None and (time.time() - hb) > _RUN_STALE_SECS:
                     snap["status"] = "error"
                     snap["error"] = _STALE_ERR
+            if snap.get("status") == "done":
+                snap["n_achievements"] = _n_achievements_from_run(_run_data)
             return jsonify(snap)
 
         # Fallback to persisted status — this is the path every poll takes
@@ -8465,8 +8671,7 @@ def create_app() -> Flask:
         # streamed progress log (not an empty one) and honour staleness.
         conn = _db()
         row = conn.execute(
-            "SELECT status, error, progress_log, heartbeat_at "
-            "FROM runs WHERE id = ?", (run_id,)
+            "SELECT status, error, progress_log, heartbeat_at " "FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
         conn.close()
         if not row:
@@ -8482,7 +8687,10 @@ def create_app() -> Flask:
             if age is None or age > _RUN_STALE_SECS:
                 status = "error"
                 error = error or _STALE_ERR
-        return jsonify({"status": status, "error": error, "log": plog})
+        payload = {"status": status, "error": error, "log": plog}
+        if status == "done":
+            payload["n_achievements"] = _n_achievements_from_run(_run_data)
+        return jsonify(payload)
 
     @app.route("/api/runs/<run_id>/why/<int:ach_index>")
     def api_why_card(run_id, ach_index):
@@ -8509,8 +8717,7 @@ def create_app() -> Flask:
             exp = {
                 "headline": "AI explanation unavailable.",
                 "bullets": [],
-                "source_lines": _build_source_lines_from_evidence(
-                    ra.get("achievement") or {}),
+                "source_lines": _build_source_lines_from_evidence(ra.get("achievement") or {}),
                 "ai_error": str(e),
             }
         html = _render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=cuid)
@@ -8541,12 +8748,12 @@ def create_app() -> Flask:
         recognition_error = data.get("recognition_error") or ""
 
         # --- Header
-        _gt_url = url_for('ground_truth', run_id=run_id)
-        _export_url = url_for('api_export', run_id=run_id)
-        _rec_json_url = url_for('api_recognition', run_id=run_id)
-        _delete_url = url_for('privacy_delete_run', run_id=run_id)
-        _status_url = url_for('api_status', run_id=run_id)
-        _pack_url = url_for('content_pack', run_id=run_id)
+        _gt_url = url_for("ground_truth", run_id=run_id)
+        _export_url = url_for("api_export", run_id=run_id)
+        _rec_json_url = url_for("api_recognition", run_id=run_id)
+        _delete_url = url_for("privacy_delete_run", run_id=run_id)
+        _status_url = url_for("api_status", run_id=run_id)
+        _pack_url = url_for("content_pack", run_id=run_id)
         # Reel + Turn-Into generation now live on the Content builder (they are
         # content creation, which happens after approval). Review = triage only.
 
@@ -8560,42 +8767,44 @@ def create_app() -> Flask:
 
         # Workflow filter from query param. Triage states only — a malformed
         # or retired (`posted`) ``?wf=`` value falls back to "show all".
-        _wf_filter = (request.args.get('wf', '') or '').strip().lower()
-        if _wf_filter not in ('', 'queue', 'approved', 'rejected'):
-            _wf_filter = ''
+        _wf_filter = (request.args.get("wf", "") or "").strip().lower()
+        if _wf_filter not in ("", "queue", "approved", "rejected"):
+            _wf_filter = ""
 
         # --- Recognition summary band
-        n_elite = rr.get('n_elite', 0)
-        n_strong = rr.get('n_strong', 0)
-        n_story = rr.get('n_story', 0)
-        n_total = rr.get('n_achievements', 0)
-        n_analysed = rr.get('n_swims_analysed', data.get('our_swim_count', 0))
+        n_elite = rr.get("n_elite", 0)
+        n_strong = rr.get("n_strong", 0)
+        n_story = rr.get("n_story", 0)
+        n_total = rr.get("n_achievements", 0)
+        n_analysed = rr.get("n_swims_analysed", data.get("our_swim_count", 0))
         n_cards = len(cards)
 
         # Recognition stats — semantic .stat variants tell the story:
         # medal = elite (rare achievements), live = strong (the working set),
         # plain = story / context counts.
-        rec_stats_html = "".join([
-            f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
-            f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
-            f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
-            f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
-            f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
-            f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
-        ])
+        rec_stats_html = "".join(
+            [
+                f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
+                f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
+                f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
+                f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
+                f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
+                f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
+            ]
+        )
 
         # --- Meet context card
-        mctx = rr.get('meet_context') or {}
-        ctx_sources = mctx.get('research_sources') or []
+        mctx = rr.get("meet_context") or {}
+        ctx_sources = mctx.get("research_sources") or []
         ctx_sources_html = ""
         if ctx_sources:
             ctx_sources_html = '<ul style="margin-top:6px;">'
             for s in ctx_sources[:5]:
-                u = _h(s.get('url',''))
-                n = _h(s.get('name', s.get('url','')))
+                u = _h(s.get("url", ""))
+                n = _h(s.get("name", s.get("url", "")))
                 ctx_sources_html += f'<li><a href="{u}" target="_blank" rel="noopener">{n}</a></li>'
-            ctx_sources_html += '</ul>'
-        elif not mctx.get('research_available'):
+            ctx_sources_html += "</ul>"
+        elif not mctx.get("research_available"):
             ctx_sources_html = '<p class="muted" style="font-size:12px">No external sources retrieved for this meet. Context derived from results file only.</p>'
 
         def ctx_badge(val):
@@ -8618,57 +8827,63 @@ def create_app() -> Flask:
 </div>"""
 
         # --- Top achievements panel
-        ranked_achs = rr.get('ranked_achievements') or []
+        ranked_achs = rr.get("ranked_achievements") or []
         top_achs = ranked_achs[:10]
 
         def band_cls(band):
             return {
-                'elite': 'warn',
-                'strong': 'info',
-                'story': '',
-                'nice': '',
-                'not_worthy': 'bad',
-            }.get(band, '')
+                "elite": "warn",
+                "strong": "info",
+                "story": "",
+                "nice": "",
+                "not_worthy": "bad",
+            }.get(band, "")
 
         ach_rows_html = ""
         for _why_idx, ra in enumerate(top_achs):
-            a = ra.get('achievement', {})
-            band = ra.get('quality_band', 'nice')
-            prio = ra.get('priority', 0.0)
-            rank = ra.get('rank', 0)
-            conf_label = a.get('confidence_label', 'medium')
-            conf_cls = {'high': 'good', 'medium': 'warn', 'low': 'bad'}.get(conf_label, '')
-            swimmer = _h(a.get('swimmer_name', ''))
-            event = _h(a.get('event', ''))
-            headline = _h(a.get('headline', ''))
-            atype = _h(_humanise(a.get('type', '')))
-            swim_id = _h(a.get('swim_id', ''))
-            post_type = _h(ra.get('suggested_post_type', ''))
+            a = ra.get("achievement", {})
+            band = ra.get("quality_band", "nice")
+            prio = ra.get("priority", 0.0)
+            rank = ra.get("rank", 0)
+            conf_label = a.get("confidence_label", "medium")
+            conf_cls = {"high": "good", "medium": "warn", "low": "bad"}.get(conf_label, "")
+            swimmer = _h(a.get("swimmer_name", ""))
+            event = _h(a.get("event", ""))
+            headline = _h(a.get("headline", ""))
+            atype = _h(_humanise(a.get("type", "")))
+            swim_id = _h(a.get("swim_id", ""))
+            post_type = _h(ra.get("suggested_post_type", ""))
             prio_bar_pct = int(prio * 100)
-            _trace_url = url_for('api_swim_trace', run_id=run_id, swim_id=a.get('swim_id','x'))
+            _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
 
             # Evidence list
             ev_html = ""
-            for ev in (a.get('evidence') or [])[:3]:
-                ev_url = ev.get('source_url') or ''
-                ev_src = _h(ev.get('source_name', ''))
-                ev_stmt = _h(ev.get('statement', ''))
+            for ev in (a.get("evidence") or [])[:3]:
+                ev_url = ev.get("source_url") or ""
+                ev_src = _h(ev.get("source_name", ""))
+                ev_stmt = _h(ev.get("statement", ""))
                 if ev_url:
                     ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
                 else:
-                    ev_html += f'<li><strong>{ev_src}</strong>: {ev_stmt}</li>'
+                    ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
 
             # Factor list
             factors_html = ""
-            for f in (ra.get('factors') or [])[:6]:
-                fname = _h(f.get('name',''))
-                fval = f.get('value', 0.0)
-                freason = _h(f.get('reason',''))
+            for f in (ra.get("factors") or [])[:6]:
+                fname = _h(f.get("name", ""))
+                fval = f.get("value", 0.0)
+                freason = _h(f.get("reason", ""))
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
-            _why_uuid = str(a.get('swim_id', f'top-{rank}')).replace(':', '_').replace(',', '_').replace('/', '_')
-            why_html = _render_why_this_card(ra, card_uuid=f"top-{_why_uuid}", run_id=run_id,
-                                             ach_index=_why_idx, lazy=True)
+            _why_uuid = (
+                str(a.get("swim_id", f"top-{rank}"))
+                .replace(":", "_")
+                .replace(",", "_")
+                .replace("/", "_")
+            )
+            why_html = _render_why_this_card(
+                ra, card_uuid=f"top-{_why_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
+            )
             ach_rows_html += f"""
 <div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
@@ -8703,19 +8918,21 @@ def create_app() -> Flask:
 
         if not ach_rows_html:
             if recognition_error:
-                ach_rows_html = f'<div class="empty">Recognition engine error: {_h(recognition_error)}</div>'
+                ach_rows_html = (
+                    f'<div class="empty">Recognition engine error: {_h(recognition_error)}</div>'
+                )
             elif not rr:
                 ach_rows_html = '<div class="empty">No recognition report available. Re-upload the file to generate achievements.</div>'
             else:
                 ach_rows_html = '<div class="empty">No achievements detected.</div>'
 
         # --- Not generated panel
-        swim_traces_raw = rr.get('swim_traces') or []
-        no_ach_traces = [t for t in swim_traces_raw if t.get('achievement_count', 0) == 0]
+        swim_traces_raw = rr.get("swim_traces") or []
+        no_ach_traces = [t for t in swim_traces_raw if t.get("achievement_count", 0) == 0]
         not_gen_rows = ""
         for t in no_ach_traces[:30]:
             not_gen_rows += (
-                f'<tr data-swimmer="{t.get("swimmer_name","")}" data-event="{t.get("event","")}">'  
+                f'<tr data-swimmer="{t.get("swimmer_name","")}" data-event="{t.get("event","")}">'
                 f'<td>{_h(t.get("swimmer_name",""))}</td>'
                 f'<td>{_h(t.get("event",""))}</td>'
                 f'<td style="font-family:monospace">{_h(t.get("time_str",""))}</td>'
@@ -8768,54 +8985,59 @@ def create_app() -> Flask:
             items = []
             for w in warnings[:10]:
                 cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
-                items.append(f'<li><span class="tag {cls}">{_h(w.get("severity",""))}</span> '
-                             f'<strong>{_h(w.get("code",""))}</strong> &mdash; {_h(w.get("message",""))}</li>')
-            warn_html = ('<div class="card"><h2>Parse notes</h2>'
-                         '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
-                         f'<ul>{"".join(items)}</ul></div>')
+                items.append(
+                    f'<li><span class="tag {cls}">{_h(w.get("severity",""))}</span> '
+                    f'<strong>{_h(w.get("code",""))}</strong> &mdash; {_h(w.get("message",""))}</li>'
+                )
+            warn_html = (
+                '<div class="card"><h2>Parse notes</h2>'
+                '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
+                f'<ul>{"".join(items)}</ul></div>'
+            )
 
         # --- V6 PB Audit panel
-        pb_audit_data = data.get('pb_audit') or {}
+        pb_audit_data = data.get("pb_audit") or {}
         pb_audit_html = ""
         if pb_audit_data:
-            _audit_url = url_for('pb_audit_page', run_id=run_id)
-            _n_swimmers = pb_audit_data.get('swimmers_total', 0)
-            _n_verified = pb_audit_data.get('swimmers_matched_verified', 0)
-            _n_needs = pb_audit_data.get('swimmers_needs_verification', 0)
-            _n_fetch_fail = pb_audit_data.get('swimmers_fetch_failed', 0)
-            _n_decisions = pb_audit_data.get('pb_decisions_count', 0)
-            _n_confirmed = pb_audit_data.get('pb_confirmed_count', 0)
-            _n_official = pb_audit_data.get('pb_confirmed_official_count', 0)
-            _n_matched = pb_audit_data.get('pb_matched_count', 0)
-            _n_likely = pb_audit_data.get('pb_likely_count', 0)
-            _n_not_pb = pb_audit_data.get('pb_not_pb_count', 0)
-            _n_unverified = pb_audit_data.get('pb_unverified_count', 0)
-            _n_suppressed = pb_audit_data.get('pb_suppressed_count', 0)
-            _fetch_secs = pb_audit_data.get('fetch_total_seconds', 0)
-            _cache_hits = pb_audit_data.get('cache_hits', 0)
-            _cache_misses = pb_audit_data.get('cache_misses', 0)
-            _budget_exceeded = pb_audit_data.get('fetch_budget_exceeded', False)
+            _audit_url = url_for("pb_audit_page", run_id=run_id)
+            _n_swimmers = pb_audit_data.get("swimmers_total", 0)
+            _n_verified = pb_audit_data.get("swimmers_matched_verified", 0)
+            _n_needs = pb_audit_data.get("swimmers_needs_verification", 0)
+            _n_fetch_fail = pb_audit_data.get("swimmers_fetch_failed", 0)
+            _n_decisions = pb_audit_data.get("pb_decisions_count", 0)
+            _n_confirmed = pb_audit_data.get("pb_confirmed_count", 0)
+            _n_official = pb_audit_data.get("pb_confirmed_official_count", 0)
+            _n_matched = pb_audit_data.get("pb_matched_count", 0)
+            _n_likely = pb_audit_data.get("pb_likely_count", 0)
+            _n_not_pb = pb_audit_data.get("pb_not_pb_count", 0)
+            _n_unverified = pb_audit_data.get("pb_unverified_count", 0)
+            _n_suppressed = pb_audit_data.get("pb_suppressed_count", 0)
+            _fetch_secs = pb_audit_data.get("fetch_total_seconds", 0)
+            _cache_hits = pb_audit_data.get("cache_hits", 0)
+            _cache_misses = pb_audit_data.get("cache_misses", 0)
+            _budget_exceeded = pb_audit_data.get("fetch_budget_exceeded", False)
 
             # Needs-verification swimmers list
             _needs_verif_html = ""
             _needs_verif_swimmers = [
-                sa for sa in (pb_audit_data.get('per_swimmer') or [])
-                if (sa.get('identity') or {}).get('method') == 'needs_verification'
+                sa
+                for sa in (pb_audit_data.get("per_swimmer") or [])
+                if (sa.get("identity") or {}).get("method") == "needs_verification"
             ]
             if _needs_verif_swimmers:
                 rows = ""
                 for sa in _needs_verif_swimmers[:10]:
-                    _sw_key = _h(sa.get('asa_id') or f"name:{sa.get('hy3_name','')}")
-                    _hy3 = _h(sa.get('hy3_name', ''))
-                    _sr = _h(sa.get('sr_name') or '—')
-                    _asa = _h(sa.get('asa_id') or '?')
-                    _verify_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=_sw_key)
+                    _sw_key = _h(sa.get("asa_id") or f"name:{sa.get('hy3_name','')}")
+                    _hy3 = _h(sa.get("hy3_name", ""))
+                    _sr = _h(sa.get("sr_name") or "—")
+                    _asa = _h(sa.get("asa_id") or "?")
+                    _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
                     rows += (
                         f'<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
                         f'<a class="btn secondary" style="font-size:11px;padding:4px 8px;margin-right:8px" href="{_verify_url}">Verify</a>'
                         f'<strong>{_hy3}</strong> <span class="muted">(id {_asa})</span>'
                         f'<div class="muted" style="font-size:12px;margin-top:2px">SR returned: "{_sr}" &rarr; canonical mismatch</div>'
-                        f'</div>'
+                        f"</div>"
                     )
                 _needs_verif_html = (
                     f'<div class="divider"></div>'
@@ -8823,7 +9045,9 @@ def create_app() -> Flask:
                     f'{rows}</div>'
                 )
 
-            _budget_note = ' <span class="tag warn">budget exceeded</span>' if _budget_exceeded else ''
+            _budget_note = (
+                ' <span class="tag warn">budget exceeded</span>' if _budget_exceeded else ""
+            )
             pb_audit_html = f"""
 <div class="card">
   <h2>PB Audit</h2>
@@ -8846,33 +9070,51 @@ def create_app() -> Flask:
   <div class="divider"></div>
   <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits &#x25BE;</a>
 </div>"""
-        elif data.get('pb_fetch_ok') and data.get('pb_fetch_ok') > 0 and not data.get('pb_audit'):
+        elif data.get("pb_fetch_ok") and data.get("pb_fetch_ok") > 0 and not data.get("pb_audit"):
             # Run did some PB fetching but produced no audit
             pb_audit_html = (
                 '<div class="card"><p class="muted">'
-                'PB fetching used legacy mode. Re-run to see the full audit.'
-                '</p></div>'
+                "PB fetching used legacy mode. Re-run to see the full audit."
+                "</p></div>"
             )
 
         # Sources panel
-        all_sources = rr.get('all_sources') or []
+        all_sources = rr.get("all_sources") or []
         sources_rows = ""
         for s in all_sources[:20]:
-            u = _h(s.get('url', ''))
-            n = _h(s.get('name', s.get('url','')))
-            uf = _h(s.get('used_for', ''))
-            fa = _h((s.get('fetched_at') or '')[:16])
+            u = _h(s.get("url", ""))
+            n = _h(s.get("name", s.get("url", "")))
+            uf = _h(s.get("used_for", ""))
+            fa = _h((s.get("fetched_at") or "")[:16])
             sources_rows += f'<tr><td><a href="{u}" target="_blank" rel="noopener">{n}</a></td><td class="muted" style="font-size:12px">{uf}</td><td class="muted" style="font-size:12px">{fa}</td></tr>'
 
         if not sources_rows:
             sources_rows = '<tr><td colspan="3" class="muted">No external sources used (research unavailable or not yet run).</td></tr>'
 
         # Build filter dropdowns from unique values
-        swimmers_set = sorted(set(ra.get('achievement',{}).get('swimmer_name','') for ra in ranked_achs if ra.get('achievement')))
-        events_set = sorted(set(ra.get('achievement',{}).get('event','') for ra in ranked_achs if ra.get('achievement')))
-        types_set = sorted(set(ra.get('achievement',{}).get('type','') for ra in ranked_achs if ra.get('achievement')))
-        bands_set = ['elite','strong','story','nice','not_worthy']
-        post_types_set = sorted(set(ra.get('suggested_post_type','') for ra in ranked_achs))
+        swimmers_set = sorted(
+            set(
+                ra.get("achievement", {}).get("swimmer_name", "")
+                for ra in ranked_achs
+                if ra.get("achievement")
+            )
+        )
+        events_set = sorted(
+            set(
+                ra.get("achievement", {}).get("event", "")
+                for ra in ranked_achs
+                if ra.get("achievement")
+            )
+        )
+        types_set = sorted(
+            set(
+                ra.get("achievement", {}).get("type", "")
+                for ra in ranked_achs
+                if ra.get("achievement")
+            )
+        )
+        bands_set = ["elite", "strong", "story", "nice", "not_worthy"]
+        post_types_set = sorted(set(ra.get("suggested_post_type", "") for ra in ranked_achs))
 
         def opts(items, label):
             o = f'<option value="">All {label}</option>'
@@ -8892,18 +9134,25 @@ def create_app() -> Flask:
             _review_base = url_for("review", run_id=run_id)
             _wf_filter_buttons = ""
             _wf_counts = {
-                "":         _wf_n_total or len(ranked_achs),
-                "queue":    _wf_n_queue if _wf_summary else len(ranked_achs),
+                "": _wf_n_total or len(ranked_achs),
+                "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
                 "approved": _wf_n_approved,
                 "rejected": _wf_n_rejected,
             }
-            for _wf_opt in [("", "All"), ("queue", "Queue"), ("approved", "Approved"), ("rejected", "Rejected")]:
+            for _wf_opt in [
+                ("", "All"),
+                ("queue", "Queue"),
+                ("approved", "Approved"),
+                ("rejected", "Rejected"),
+            ]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
                 _wf_filter_opts += f'<option value="{_wf_opt_url}" {_wf_sel}>{_wf_opt[1]}</option>'
                 _wf_btn_cls = " is-active" if _wf_filter == _wf_opt[0] else ""
                 _wf_count_for_opt = _wf_counts.get(_wf_opt[0], 0)
-                _wf_count_html = f'<span class="count">{_wf_count_for_opt}</span>' if _wf_count_for_opt else ""
+                _wf_count_html = (
+                    f'<span class="count">{_wf_count_for_opt}</span>' if _wf_count_for_opt else ""
+                )
                 _wf_filter_buttons += (
                     f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
                     f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
@@ -8911,7 +9160,7 @@ def create_app() -> Flask:
                 )
             # Progress maths — how much of the queue has the user actioned?
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
-            _wf_grand_total = (_wf_n_total or len(ranked_achs) or 0)
+            _wf_grand_total = _wf_n_total or len(ranked_achs) or 0
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
 
             workflow_summary_card = f"""
@@ -8980,7 +9229,7 @@ def create_app() -> Flask:
             atype = _h(_humanise(a.get("type", "")))
             post_type = _h(ra.get("suggested_post_type", ""))
             prio_bar_pct = int(prio * 100)
-            _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id","x"))
+            _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
 
             # V7: workflow state for this card
             card_id_raw = a.get("swim_id", "")
@@ -8991,7 +9240,13 @@ def create_app() -> Flask:
             if _wf_filter and wf_status != _wf_filter:
                 continue
 
-            band_cls = {"elite": "warn", "strong": "info", "story": "", "nice": "", "not_worthy": "bad"}.get(band, "")
+            band_cls = {
+                "elite": "warn",
+                "strong": "info",
+                "story": "",
+                "nice": "",
+                "not_worthy": "bad",
+            }.get(band, "")
 
             # Evidence list
             ev_html = ""
@@ -9002,14 +9257,14 @@ def create_app() -> Flask:
                 if ev_url:
                     ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
                 else:
-                    ev_html += f'<li><strong>{ev_src}</strong>: {ev_stmt}</li>'
+                    ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
 
             # Factor list
             factors_html = ""
             for f in (ra.get("factors") or [])[:7]:
-                fname = _h(f.get("name",""))
+                fname = _h(f.get("name", ""))
                 fval = f.get("value", 0.0)
-                freason = _h(f.get("reason",""))
+                freason = _h(f.get("reason", ""))
                 factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
             # Caption tone, graphics, motion + scheduling all move to the
@@ -9022,8 +9277,9 @@ def create_app() -> Flask:
             # Lazy: a 150+ card meet would otherwise fire 300+ blocking LLM
             # calls during this render. Each card's reasoning streams in via
             # api_why_card once it scrolls into view.
-            why_html = _render_why_this_card(ra, card_uuid=f"wf-{card_uuid}", run_id=run_id,
-                                             ach_index=_why_idx, lazy=True)
+            why_html = _render_why_this_card(
+                ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
+            )
 
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
@@ -9067,18 +9323,18 @@ def create_app() -> Flask:
                 _all_url = url_for("review", run_id=run_id)
                 ach_rows_html_wf = _empty_state(
                     "search",
-                    f'No <em>{_h(_wf_filter)}</em> cards',
-                    f'Nothing is in the &ldquo;{_h(_wf_filter)}&rdquo; state right now. '
-                    'Switch the filter to see the rest of the queue.',
+                    f"No <em>{_h(_wf_filter)}</em> cards",
+                    f"Nothing is in the &ldquo;{_h(_wf_filter)}&rdquo; state right now. "
+                    "Switch the filter to see the rest of the queue.",
                     actions=f'<a class="btn secondary" href="{_all_url}">Show all cards</a>',
                 )
             elif recognition_error:
                 ach_rows_html_wf = _empty_state(
                     "alert",
                     "Recognition hit a snag",
-                    f'The engine returned an error while ranking this run: '
+                    f"The engine returned an error while ranking this run: "
                     f'<code style="font-size:12px">{_h(recognition_error)}</code>. '
-                    'Re-uploading the file usually clears a transient parse error.',
+                    "Re-uploading the file usually clears a transient parse error.",
                     actions=f'<a class="btn" href="{url_for("upload")}">Try another file &rarr;</a>',
                     kind="error",
                 )
@@ -9086,37 +9342,77 @@ def create_app() -> Flask:
                 ach_rows_html_wf = _empty_state(
                     "inbox",
                     "No report <em>yet</em>",
-                    'We don&rsquo;t have a recognition report for this run. '
-                    'Re-upload the results file and the engine will rank the moments.',
+                    "We don&rsquo;t have a recognition report for this run. "
+                    "Re-upload the results file and the engine will rank the moments.",
                     actions=f'<a class="btn" href="{url_for("upload")}">Upload results &rarr;</a>',
                 )
             else:
-                ach_rows_html_wf = _empty_state(
-                    "trophy",
-                    "No standout swims",
-                    'The engine read the file but didn&rsquo;t find PBs, medals, or '
-                    'first-times worth a card. That can happen for heats-only sheets '
-                    'or entry lists.',
-                    actions=f'<a class="btn secondary" href="{url_for("activity_page")}">Back to runs</a>',
+                # Distinguish "engine ranked your swims and none stood out" from
+                # "we never matched any of your swims in the first place". The
+                # second case (file had swims but 0 matched this run's club) is
+                # the common silent dead-end: the engine read the meet but the
+                # club name didn't match, so recognition had nothing to rank.
+                # Saying "no standout swims" there is misleading — name the real
+                # reason and give a re-run path.
+                _parsed_n = data.get("parsed_swim_count") or 0
+                _our_n = data.get("our_swim_count") or 0
+                _run_filter = (data.get("club_filter") or "").strip()
+                _no_filter = any(
+                    isinstance(w, dict) and w.get("code") == "no_club_filter"
+                    for w in (data.get("parse_warnings") or [])
                 )
+                if _parsed_n and _our_n == 0:
+                    if _no_filter or not _run_filter:
+                        _why = (
+                            f"We read <strong>{_parsed_n}</strong> swims from the file, but no club "
+                            "was selected — so none were matched to your swimmers and there was "
+                            "nothing to rank. Re-run this file and pick your club."
+                        )
+                    else:
+                        _why = (
+                            f"We read <strong>{_parsed_n}</strong> swims from the file, but "
+                            f"<strong>0</strong> matched &ldquo;{_h(_run_filter)}&rdquo;. The club "
+                            "name in the results may be written differently &mdash; re-run and "
+                            "check the club name matches the file."
+                        )
+                    ach_rows_html_wf = _empty_state(
+                        "search",
+                        "No swims matched your club",
+                        _why,
+                        actions=f'<a class="btn" href="{url_for("upload")}">Re-run with your club &rarr;</a>',
+                    )
+                else:
+                    ach_rows_html_wf = _empty_state(
+                        "trophy",
+                        "No standout swims",
+                        "The engine read the file but didn&rsquo;t find PBs, medals, or "
+                        "first-times worth a card. That can happen for heats-only sheets "
+                        "or entry lists.",
+                        actions=f'<a class="btn secondary" href="{url_for("activity_page")}">Back to runs</a>',
+                    )
 
         # Single global AI-availability banner — replaces the 177 per-card
         # "AI UNAVAILABLE" alerts the previous implementation emitted.
         try:
             from mediahub.media_ai.llm import is_available as _llm_available
-            _ai_banner_html = "" if _llm_available() else (
-                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
-                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
-                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
-                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                '<span style="color:var(--ink-dim)">'
-                'Cards show ranker reasoning and grounded source lines only. '
-                'Captions, &ldquo;why this card&rdquo; explanations and performance '
-                'context need a Gemini or Anthropic key set by the deployment operator.'
-                '</span>'
-                '</div>'
+
+            _ai_banner_html = (
+                ""
+                if _llm_available()
+                else (
+                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                    '<span style="color:var(--ink-dim)">'
+                    "Cards show ranker reasoning and grounded source lines only. "
+                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
+                    "context need a Gemini or Anthropic key set by the deployment operator."
+                    "</span>"
+                    "</div>"
+                )
             )
         except Exception:
             _ai_banner_html = ""
@@ -9516,7 +9812,12 @@ function copyWhyCard(btn, taId) {{
             return jsonify({"error": "not found"}), 404
         rr = data.get("recognition_report")
         if rr is None:
-            return jsonify({"error": "no recognition report", "recognition_error": data.get("recognition_error")}), 404
+            return jsonify(
+                {
+                    "error": "no recognition report",
+                    "recognition_error": data.get("recognition_error"),
+                }
+            ), 404
         return jsonify(rr)
 
     @app.route("/api/runs/<run_id>/swim/<swim_id>/trace")
@@ -9530,6 +9831,7 @@ function copyWhyCard(btn, taId) {{
         traces = rr.get("swim_traces") or []
         # swim_id may have special chars; do substring match
         import urllib.parse as _urlparse
+
         swim_id_dec = _urlparse.unquote(swim_id)
         for t in traces:
             if t.get("swim_id") == swim_id_dec:
@@ -9539,7 +9841,6 @@ function copyWhyCard(btn, taId) {{
             if swim_id_dec in (t.get("swim_id") or ""):
                 return jsonify(t)
         return jsonify({"error": "trace not found", "swim_id": swim_id_dec}), 404
-
 
     # ---- V8 LIVE CAPTION ENDPOINT -----------------------------------
 
@@ -9595,8 +9896,12 @@ function copyWhyCard(btn, taId) {{
 
         # Build achievement dict suitable for caption generation
         ach_dict = {
-            "swimmer_first": achievement.get("swimmer_name", "").split()[0] if achievement.get("swimmer_name") else "",
-            "swimmer_last": " ".join(achievement.get("swimmer_name", "").split()[1:]) if achievement.get("swimmer_name") else "",
+            "swimmer_first": achievement.get("swimmer_name", "").split()[0]
+            if achievement.get("swimmer_name")
+            else "",
+            "swimmer_last": " ".join(achievement.get("swimmer_name", "").split()[1:])
+            if achievement.get("swimmer_name")
+            else "",
             "swimmer_name": achievement.get("swimmer_name", ""),
             "event": achievement.get("event", ""),
             "time": achievement.get("time", ""),
@@ -9630,7 +9935,8 @@ function copyWhyCard(btn, taId) {{
                 _why_bullets = _why.get("bullets") or []
                 _why_bullets_text = (
                     "; ".join(b for b in _why_bullets if b)
-                    if isinstance(_why_bullets, list) else ""
+                    if isinstance(_why_bullets, list)
+                    else ""
                 )
                 _is_fallback_headline = (
                     "unavailable" in _why_headline.lower()
@@ -9689,6 +9995,7 @@ function copyWhyCard(btn, taId) {{
         explanation = _build_card_explanation(matched_ra or {"achievement": achievement})
 
         from mediahub.media_ai.llm import is_available as _llm_available
+
         # Route the meet-recap caption through the unified content engine's
         # single-caption front door (it delegates to the shared
         # ai_caption.generate_caption_for_tone writer, preserving behaviour).
@@ -9702,18 +10009,20 @@ function copyWhyCard(btn, taId) {{
             # LIVE generation &mdash; fresh every call, nonce injected for uniqueness.
             # Works with Gemini (free) or Anthropic API key.
             if not _llm_available():
-                return jsonify({
-                    "caption": "",
-                    "tone": tone,
-                    "live": False,
-                    "generated_at": now_iso,
-                    "error": "no_key",
-                    "message": (
-                        "AI captions are unavailable on this deployment. "
-                        "Contact your administrator to enable them."
-                    ),
-                    "explanation": explanation,
-                }), 200
+                return jsonify(
+                    {
+                        "caption": "",
+                        "tone": tone,
+                        "live": False,
+                        "generated_at": now_iso,
+                        "error": "no_key",
+                        "message": (
+                            "AI captions are unavailable on this deployment. "
+                            "Contact your administrator to enable them."
+                        ),
+                        "explanation": explanation,
+                    }
+                ), 200
             try:
                 # Generate 3 variants in parallel so the user can pick one
                 # (Holo/Blaze pattern). The first is returned as `caption`
@@ -9730,6 +10039,7 @@ function copyWhyCard(btn, taId) {{
                 # with individual error capture so one failure doesn't
                 # poison the others.
                 from concurrent.futures import ThreadPoolExecutor
+
                 # Defend against ``?n_variants=abc`` — a bare int()
                 # would 500 the whole caption endpoint. Anything that
                 # doesn't parse as a positive integer falls back to 1.
@@ -9746,7 +10056,9 @@ function copyWhyCard(btn, taId) {{
                 def _gen_one():
                     try:
                         return _gen_tone(
-                            ach_dict, club_brand, tone=tone,
+                            ach_dict,
+                            club_brand,
+                            tone=tone,
                             voice_profile=_run_voice_profile,
                             club_profile=club_profile_obj,
                             recent_captions=_recent_captions,
@@ -9785,35 +10097,39 @@ function copyWhyCard(btn, taId) {{
                 # is transient — the user should be told to retry, not
                 # told the deployment doesn't have AI.
                 if not caption_text:
-                    return jsonify({
-                        "caption": "",
-                        "tone": tone,
-                        "live": True,
-                        "generated_at": now_iso,
-                        "error": "transient",
-                        "message": (
-                            "The AI is briefly busy or rate-limited. "
-                            "Wait a few seconds and click regenerate "
-                            "again — your key is fine."
-                        ),
-                        "explanation": explanation,
-                    }), 200
+                    return jsonify(
+                        {
+                            "caption": "",
+                            "tone": tone,
+                            "live": True,
+                            "generated_at": now_iso,
+                            "error": "transient",
+                            "message": (
+                                "The AI is briefly busy or rate-limited. "
+                                "Wait a few seconds and click regenerate "
+                                "again — your key is fine."
+                            ),
+                            "explanation": explanation,
+                        }
+                    ), 200
                 # Persist the new caption(s) so the next regenerate can
                 # ask the AI to differ. We store ALL produced variants
                 # to widen the "avoid" window in one go.
                 for v in variants:
                     _v9_save_caption_history(run_id, swim_id_dec, v)
-                return jsonify({
-                    "caption": caption_text,
-                    "variants": variants,
-                    "n_variants": len(variants),
-                    "tone": tone,
-                    "live": True,
-                    "generated_at": now_iso,
-                    "fallback": False,
-                    "fallback_voice": None,
-                    "explanation": explanation,
-                })
+                return jsonify(
+                    {
+                        "caption": caption_text,
+                        "variants": variants,
+                        "n_variants": len(variants),
+                        "tone": tone,
+                        "live": True,
+                        "generated_at": now_iso,
+                        "fallback": False,
+                        "fallback_voice": None,
+                        "explanation": explanation,
+                    }
+                )
             except _ClaudeUE as e:
                 # Distinguish "no key" from "transient error". The
                 # ClaudeUnavailableError message is checked for hints:
@@ -9828,30 +10144,34 @@ function copyWhyCard(btn, taId) {{
                     or "no provider" in msg
                 )
                 if terminal:
-                    return jsonify({
+                    return jsonify(
+                        {
+                            "caption": "",
+                            "tone": tone,
+                            "live": False,
+                            "generated_at": now_iso,
+                            "error": "no_key",
+                            "message": (
+                                "AI captions are unavailable on this deployment. "
+                                "Contact your administrator to enable them."
+                            ),
+                            "explanation": explanation,
+                        }
+                    ), 200
+                return jsonify(
+                    {
                         "caption": "",
                         "tone": tone,
-                        "live": False,
+                        "live": True,
                         "generated_at": now_iso,
-                        "error": "no_key",
+                        "error": "transient",
                         "message": (
-                            "AI captions are unavailable on this deployment. "
-                            "Contact your administrator to enable them."
+                            "The AI provider returned a transient error. "
+                            "Wait a few seconds and try again."
                         ),
                         "explanation": explanation,
-                    }), 200
-                return jsonify({
-                    "caption": "",
-                    "tone": tone,
-                    "live": True,
-                    "generated_at": now_iso,
-                    "error": "transient",
-                    "message": (
-                        "The AI provider returned a transient error. "
-                        "Wait a few seconds and try again."
-                    ),
-                    "explanation": explanation,
-                }), 200
+                    }
+                ), 200
         else:
             # Voice render &mdash; deterministic template, may be cached by client
             try:
@@ -9878,14 +10198,16 @@ function copyWhyCard(btn, taId) {{
 
             captions = _rc(ach_dict, profile, n_variants=1)
             caption_text = captions[0] if captions else ""
-            return jsonify({
-                "caption": caption_text,
-                "tone": tone,
-                "generated_at": now_iso,
-                "fallback": False,
-                "fallback_voice": None,
-                "explanation": explanation,
-            })
+            return jsonify(
+                {
+                    "caption": caption_text,
+                    "tone": tone,
+                    "generated_at": now_iso,
+                    "fallback": False,
+                    "fallback_voice": None,
+                    "explanation": explanation,
+                }
+            )
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
 
@@ -9931,18 +10253,20 @@ function copyWhyCard(btn, taId) {{
             method = identity.get("method", "")
             # Map internal `method` enum to a human label + semantic tag class.
             method_meta = {
-                "asa_id_verified":    ("Verified", "good"),
+                "asa_id_verified": ("Verified", "good"),
                 "needs_verification": ("Needs check", "warn"),
-                "asa_id_unverified":  ("Unverified", ""),
-                "no_id":              ("Not linked", ""),
-                "manual_override":    ("Override", "info"),
+                "asa_id_unverified": ("Unverified", ""),
+                "no_id": ("Not linked", ""),
+                "manual_override": ("Override", "info"),
             }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
             method_label, method_cls = method_meta
-            _sw_key = sa.get('asa_id') or f"name:{sa.get('hy3_name','')}"
-            _verify_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=_sw_key)
-            _ignore_url = url_for('pb_ignore', run_id=run_id, swimmer_key=_sw_key)
-            n_dec = len(sa.get('pb_decisions') or [])
-            n_conf = sum(1 for d in (sa.get('pb_decisions') or []) if d.get('status') == 'CONFIRMED_PB')
+            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name','')}"
+            _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
+            _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
+            n_dec = len(sa.get("pb_decisions") or [])
+            n_conf = sum(
+                1 for d in (sa.get("pb_decisions") or []) if d.get("status") == "CONFIRMED_PB"
+            )
             rows += (
                 f'<tr>'
                 f'<td>{_h(sa.get("hy3_name",""))}</td>'
@@ -10010,12 +10334,13 @@ function copyWhyCard(btn, taId) {{
             note = request.form.get("note", "").strip()
             if new_asa:
                 from swim_content_pb.corrections import CorrectionsStore
+
                 cs = CorrectionsStore()
                 cs.set_override_asa_id(run_id, swimmer_key, new_asa, note=note)
             return redirect(_audit_url)
 
         _sw_key_h = _h(swimmer_key)
-        _action_url = url_for('pb_verify_form', run_id=run_id, swimmer_key=swimmer_key)
+        _action_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=swimmer_key)
 
         # Pull this swimmer's audit details so the user can see WHY this needs
         # verification &mdash; not just an opaque key.
@@ -10023,7 +10348,11 @@ function copyWhyCard(btn, taId) {{
         per_sw = pb_audit.get("per_swimmer") or []
         target = None
         for sw in per_sw:
-            if str(sw.get("asa_id") or "") == swimmer_key or sw.get("hy3_name", "").replace(",", "").replace(" ", "").lower() == swimmer_key.replace(",", "").replace(" ", "").lower():
+            if (
+                str(sw.get("asa_id") or "") == swimmer_key
+                or sw.get("hy3_name", "").replace(",", "").replace(" ", "").lower()
+                == swimmer_key.replace(",", "").replace(" ", "").lower()
+            ):
                 target = sw
                 break
 
@@ -10033,12 +10362,19 @@ function copyWhyCard(btn, taId) {{
             hy3_name = _h(target.get("hy3_name") or "—")
             sr_name = _h(target.get("sr_name") or "— (no record returned)")
             method = _h(ident.get("method") or "—")
-            method_pill = {"asa_id_verified": "good", "needs_verification": "warn",
-                          "asa_id_unverified": "warn", "no_id": "bad",
-                          "manual_override": "info"}.get(ident.get("method", ""), "")
+            method_pill = {
+                "asa_id_verified": "good",
+                "needs_verification": "warn",
+                "asa_id_unverified": "warn",
+                "no_id": "bad",
+                "manual_override": "info",
+            }.get(ident.get("method", ""), "")
             cur_asa = _h(target.get("asa_id") or "—")
             notes_list = ident.get("notes") or []
-            notes_html = "".join(f"<li>{_h(n)}</li>" for n in notes_list) or "<li class='muted'>No notes</li>"
+            notes_html = (
+                "".join(f"<li>{_h(n)}</li>" for n in notes_list)
+                or "<li class='muted'>No notes</li>"
+            )
             context_html = f"""
 <div class="card" style="margin-bottom:18px">
   <h2 style="font-size:16px;margin-bottom:14px">What we know about this swimmer</h2>
@@ -10098,9 +10434,10 @@ function copyWhyCard(btn, taId) {{
             return redirect(url_for("home"))
         reason = request.form.get("reason", "User requested ignore")
         from swim_content_pb.corrections import CorrectionsStore
+
         cs = CorrectionsStore()
         cs.set_ignore_pb(run_id, swimmer_key, reason=reason)
-        return redirect(url_for('pb_audit_page', run_id=run_id))
+        return redirect(url_for("pb_audit_page", run_id=run_id))
 
     @app.route("/audit/<run_id>/ground-truth", methods=["GET", "POST"])
     def pb_ground_truth(run_id):
@@ -10115,8 +10452,8 @@ function copyWhyCard(btn, taId) {{
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
-        _audit_url = url_for('pb_audit_page', run_id=run_id)
-        _action_url = url_for('pb_ground_truth', run_id=run_id)
+        _audit_url = url_for("pb_audit_page", run_id=run_id)
+        _action_url = url_for("pb_ground_truth", run_id=run_id)
 
         report_html = ""
         if request.method == "POST":
@@ -10125,6 +10462,7 @@ function copyWhyCard(btn, taId) {{
                 import tempfile
                 from pathlib import Path as _Path
                 from swim_content_pb.ground_truth import run_ground_truth
+
                 with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                     f.save(tmp.name)
                     csv_path = _Path(tmp.name)
@@ -10132,7 +10470,7 @@ function copyWhyCard(btn, taId) {{
                     report = run_ground_truth(
                         run_id=run_id,
                         truth_csv_path=csv_path,
-                        run_pb_audit_dict=data.get('pb_audit'),
+                        run_pb_audit_dict=data.get("pb_audit"),
                     )
                     report_html = (
                         f'<div class="card"><h2>Ground Truth Results</h2>'
@@ -10147,7 +10485,9 @@ function copyWhyCard(btn, taId) {{
                         f'</div></div>'
                     )
                 except Exception as e:
-                    report_html = f'<div class="card"><p class="tag bad">Error: {_h(str(e))}</p></div>'
+                    report_html = (
+                        f'<div class="card"><p class="tag bad">Error: {_h(str(e))}</p></div>'
+                    )
                 finally:
                     try:
                         csv_path.unlink()
@@ -10171,7 +10511,7 @@ function copyWhyCard(btn, taId) {{
     @app.route("/recognition/<run_id>")
     def recognition_page(run_id):
         """Standalone recognition page (redirect to review for now)."""
-        return redirect(url_for('review', run_id=run_id))
+        return redirect(url_for("review", run_id=run_id))
 
     @app.route("/api/runs/<run_id>/cards")
     def api_cards(run_id):
@@ -10224,9 +10564,11 @@ function copyWhyCard(btn, taId) {{
         if request.method == "POST":
             text = request.form.get("moments", "")
             from .ground_truth import evaluate
+
             # Need ContentCard objects: re-hydrate basic shape from saved dicts
             class _Stub:
                 pass
+
             cards = []
             for d in data.get("cards") or []:
                 s = _Stub()
@@ -10237,7 +10579,8 @@ function copyWhyCard(btn, taId) {{
                 claims = []
                 for cl in d.get("claims") or []:
                     cs = _Stub()
-                    cs.distance = cl.get("distance"); cs.stroke = cl.get("stroke")
+                    cs.distance = cl.get("distance")
+                    cs.stroke = cl.get("stroke")
                     claims.append(cs)
                 s.claims = claims
                 cards.append(s)
@@ -10248,11 +10591,13 @@ function copyWhyCard(btn, taId) {{
             rows = ""
             for m in rep.matches:
                 badge = "good" if m.get("matched_card") else "bad"
-                rows += (f'<tr><td>{_h(m.get("moment",""))}</td>'
-                         f'<td><span class="tag {badge}">'
-                         f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
-                         f'<td>{_h(m.get("matched_headline") or "—")}</td>'
-                         f'<td>{_h(m.get("score",""))}</td></tr>')
+                rows += (
+                    f'<tr><td>{_h(m.get("moment",""))}</td>'
+                    f'<td><span class="tag {badge}">'
+                    f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
+                    f'<td>{_h(m.get("matched_headline") or "—")}</td>'
+                    f'<td>{_h(m.get("score",""))}</td></tr>'
+                )
             rep_html = f"""
 <div class="card">
   <h2>Result</h2>
@@ -10323,7 +10668,7 @@ Relay team broke club record"></textarea>
             '<span class="mh-hero-eyebrow">Roadmap</span>'
             '<h1>Adapter <em class="editorial">research</em></h1>'
             '<p class="lede">What MediaHub can read today and what\'s coming next. Every new format becomes a single adapter — no detector or caption-engine rewrite.</p>'
-            '</section>'
+            "</section>"
             f'<div class="card">{html}</div>'
         )
         return _layout("Research", body, active="research")
@@ -10355,9 +10700,8 @@ Relay team broke club record"></textarea>
         cache_dir = DATA_DIR / ".cache" / "pb_lookup"
         legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
         try:
-            n_cache = (
-                (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
-                + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
+            n_cache = (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0) + (
+                sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0
             )
         except Exception:
             n_cache = 0
@@ -10409,7 +10753,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Delete blocked",
                 '<div class="card"><p class="tag bad">That run id has an unexpected '
-                'shape and was not deleted.</p></div>',
+                "shape and was not deleted.</p></div>",
                 active="privacy",
             ), 400
         # Multi-tenant guard: a run can only be deleted by the
@@ -10429,7 +10773,9 @@ Relay team broke club record"></textarea>
         if owner and active and owner != active:
             log.warning(
                 "privacy_delete_run: cross-tenant attempt active=%r owner=%r run=%r",
-                active, owner, run_id,
+                active,
+                owner,
+                run_id,
             )
             return _layout(
                 "Run not found",
@@ -10444,8 +10790,10 @@ Relay team broke club record"></textarea>
         for d in [DATA_DIR / ".cache" / "pb_lookup", DATA_DIR / ".cache" / "swimmingresults"]:
             if d.exists():
                 for f in d.glob("*.json"):
-                    try: f.unlink()
-                    except Exception: pass
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
         return redirect(url_for("privacy_page"))
 
     # ---- HEALTH --------------------------------------------------------
@@ -10468,8 +10816,11 @@ Relay team broke club record"></textarea>
         except Exception as e:
             checks["database"] = {"ok": False, "error": str(e)}
         # writable dirs
-        for label, p in [("uploads", UPLOADS_DIR), ("runs", RUNS_DIR),
-                         ("pb_cache", DATA_DIR / ".cache" / "pb_lookup")]:
+        for label, p in [
+            ("uploads", UPLOADS_DIR),
+            ("runs", RUNS_DIR),
+            ("pb_cache", DATA_DIR / ".cache" / "pb_lookup"),
+        ]:
             try:
                 p.mkdir(parents=True, exist_ok=True)
                 test = p / ".write_test"
@@ -10488,8 +10839,11 @@ Relay team broke club record"></textarea>
         # V8.2: profiles UI removed; health check no longer requires any profiles.
         try:
             profs = list_profiles()
-            checks["profiles"] = {"ok": True, "count": len(profs),
-                                  "ids": [p.profile_id for p in profs]}
+            checks["profiles"] = {
+                "ok": True,
+                "count": len(profs),
+                "ids": [p.profile_id for p in profs],
+            }
         except Exception as e:
             checks["profiles"] = {"ok": True, "count": 0, "error": str(e)}
         ok_all = all(v.get("ok") for v in checks.values())
@@ -10500,8 +10854,9 @@ Relay team broke club record"></textarea>
             "checks": checks,
         }
 
-    def _record_heartbeat_safe(source: str, ok: bool, started_at: float,
-                               error: Optional[str] = None) -> None:
+    def _record_heartbeat_safe(
+        source: str, ok: bool, started_at: float, error: Optional[str] = None
+    ) -> None:
         """Queue a heartbeat write OFF the request path.
 
         The liveness probe must never block on disk I/O: a synchronous
@@ -10515,9 +10870,7 @@ Relay team broke club record"></textarea>
             response_ms = (time.monotonic() - started_at) * 1000.0
             _ensure_heartbeat_thread()
             try:
-                _HEARTBEAT_QUEUE.put_nowait(
-                    (bool(ok), str(source), response_ms, error)
-                )
+                _HEARTBEAT_QUEUE.put_nowait((bool(ok), str(source), response_ms, error))
             except queue.Full:
                 pass
         except Exception:
@@ -10526,6 +10879,7 @@ Relay team broke club record"></textarea>
     @app.route("/health")
     def health():
         import time as _time
+
         started = _time.monotonic()
         payload = _health_payload()
         # Surface the deep health result into the heartbeat log so /status
@@ -10546,7 +10900,7 @@ Relay team broke club record"></textarea>
         '<rect x="13.5" y="9" width="5" height="18" rx="1" fill="#D4FF3A"/>'
         '<rect x="21" y="14" width="5" height="13" rx="1" fill="#F4D58D"/>'
         '<line x1="4" y1="28.5" x2="28" y2="28.5" stroke="#D4FF3A" stroke-width="1.5"/>'
-        '</svg>'
+        "</svg>"
     )
 
     @app.route("/favicon.svg")
@@ -10569,9 +10923,9 @@ Relay team broke club record"></textarea>
         # heartbeat row so external monitors and Render's own platform
         # probe contribute to /status's uptime number.
         import time as _time
+
         started = _time.monotonic()
-        payload = {"ok": True, "version": APP_VERSION,
-                   "ts": datetime.now(timezone.utc).isoformat()}
+        payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         return jsonify(payload)
 
@@ -10592,27 +10946,28 @@ Relay team broke club record"></textarea>
         platform action, etc.) and the user can stop blaming the app.
         """
         import resource
+
         rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         # On Linux ru_maxrss is in KB; on macOS it's bytes. Render
         # is always Linux so KB is correct.
         rss_mb = rss_kb / 1024.0
         with _active_lock:
             active_n = len(_active_runs)
-            active_running = sum(
-                1 for v in _active_runs.values() if v.get("status") == "running"
-            )
+            active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
             ti_n = len(_turn_into_jobs)
-        return jsonify({
-            "ok": True,
-            "rss_mb": round(rss_mb, 1),
-            "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
-            "active_runs": active_n,
-            "active_runs_running": active_running,
-            "active_runs_limit": _ACTIVE_RUNS_LIMIT,
-            "turn_into_jobs": ti_n,
-            "turn_into_jobs_limit": _TURN_INTO_LIMIT,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "rss_mb": round(rss_mb, 1),
+                "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
+                "active_runs": active_n,
+                "active_runs_running": active_running,
+                "active_runs_limit": _ACTIVE_RUNS_LIMIT,
+                "turn_into_jobs": ti_n,
+                "turn_into_jobs_limit": _TURN_INTO_LIMIT,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     @app.route("/healthz/deps")
     def healthz_deps():
@@ -10626,6 +10981,7 @@ Relay team broke club record"></textarea>
         """
         import shutil
         import subprocess
+
         deps: dict[str, dict] = {}
         # Playwright + chromium browser.
         #
@@ -10637,6 +10993,7 @@ Relay team broke club record"></textarea>
         # browser by checking the cache directory directly instead.
         try:
             import playwright  # noqa: F401
+
             browser_path = ""
             chromium_ok = False
             pw_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(
@@ -10656,21 +11013,27 @@ Relay team broke club record"></textarea>
                     chromium_ok = Path(browser_path).exists()
             except Exception:
                 pass
-            deps["playwright"] = {"available": True, "chromium": chromium_ok,
-                                  "executable": browser_path}
+            deps["playwright"] = {
+                "available": True,
+                "chromium": chromium_ok,
+                "executable": browser_path,
+            }
         except Exception as e:
             deps["playwright"] = {"available": False, "error": str(e)[:200]}
         # Node binary
         node_path = shutil.which("node")
         if node_path:
             try:
-                v = subprocess.run([node_path, "--version"],
-                                   capture_output=True, text=True, timeout=5)
-                deps["node"] = {"available": True, "path": node_path,
-                                "version": (v.stdout or "").strip()}
+                v = subprocess.run(
+                    [node_path, "--version"], capture_output=True, text=True, timeout=5
+                )
+                deps["node"] = {
+                    "available": True,
+                    "path": node_path,
+                    "version": (v.stdout or "").strip(),
+                }
             except Exception as e:
-                deps["node"] = {"available": True, "path": node_path,
-                                "error": str(e)[:200]}
+                deps["node"] = {"available": True, "path": node_path, "error": str(e)[:200]}
         else:
             deps["node"] = {"available": False}
         # Remotion node_modules
@@ -10680,8 +11043,11 @@ Relay team broke club record"></textarea>
             "available": node_modules.exists(),
             "dir": str(remotion_dir),
         }
-        ok = (deps["playwright"].get("chromium") and deps["node"].get("available")
-              and deps["remotion"].get("available"))
+        ok = (
+            deps["playwright"].get("chromium")
+            and deps["node"].get("available")
+            and deps["remotion"].get("available")
+        )
         return jsonify({"ok": bool(ok), "deps": deps})
 
     # ---- /status -------------------------------------------------------
@@ -10734,6 +11100,7 @@ Relay team broke club record"></textarea>
             if parsed.endswith("Z"):
                 parsed = parsed[:-1] + "+00:00"
             from datetime import datetime as _dt
+
             then = _dt.fromisoformat(parsed)
             delta = datetime.now(timezone.utc) - then
             secs = int(delta.total_seconds())
@@ -10771,6 +11138,7 @@ Relay team broke club record"></textarea>
                 if ts_raw.endswith("Z"):
                     ts_raw = ts_raw[:-1] + "+00:00"
                 from datetime import datetime as _dt
+
                 last_ts = _dt.fromisoformat(ts_raw)
                 age_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
             except (ValueError, TypeError):
@@ -10818,13 +11186,13 @@ Relay team broke club record"></textarea>
                 )
             incidents_html = (
                 '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-                'Recent incidents</h2>'
+                "Recent incidents</h2>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                'Gaps longer than 5 minutes between heartbeats. The 5-minute '
-                'grace window matches the platform ping cadence.</p>'
+                "Gaps longer than 5 minutes between heartbeats. The 5-minute "
+                "grace window matches the platform ping cadence.</p>"
                 '<div class="card"><table>'
-                '<thead><tr><th>Resolved</th><th>Duration</th><th>Window</th></tr></thead>'
-                f'<tbody>{gap_rows}</tbody></table></div>'
+                "<thead><tr><th>Resolved</th><th>Duration</th><th>Window</th></tr></thead>"
+                f"<tbody>{gap_rows}</tbody></table></div>"
             )
         else:
             incidents_html = ""
@@ -10837,21 +11205,22 @@ Relay team broke club record"></textarea>
             '<span class="mh-hero-eyebrow">System status</span>'
             '<h1>Live <em class="editorial">health</em>.</h1>'
             '<p class="lede">Operational health of this MediaHub deployment. Auto-refreshes every 60 seconds.</p>'
-            '</section>'
-
+            "</section>"
             '<div class="card" style="display:flex;align-items:center;gap:14px;'
             'padding:18px 22px;margin-bottom:20px">'
             f'<span style="display:inline-block;width:14px;height:14px;'
             f'border-radius:50%;background:{pill_color};flex:0 0 auto"></span>'
             f'<div style="flex:1"><div style="font-size:18px;font-weight:600">'
-            f'Backend &mdash; {_h(pill_label)}</div>'
+            f"Backend &mdash; {_h(pill_label)}</div>"
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
-            f'Version <code>{_h(version_label)}</code>'
-            + (f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-               f'({_h((latest.get("source") or "").lower())})'
-               if latest else "")
+            f"Version <code>{_h(version_label)}</code>"
+            + (
+                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
+                f'({_h((latest.get("source") or "").lower())})'
+                if latest
+                else ""
+            )
             + '</div></div></div>'
-
             '<div class="card" style="padding:18px 22px;margin-bottom:20px">'
             '<table style="width:100%"><thead>'
             '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
@@ -10869,12 +11238,9 @@ Relay team broke club record"></textarea>
             f'<td>{_h(s30.get("samples", 0))}</td>'
             f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
             '</tbody></table></div>'
-
             f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
             f'{last_incident_html}</div>'
-
             f'{incidents_html}'
-
             '<p class="dim" style="margin-top:30px;font-size:12px">'
             'Uptime is derived from heartbeat density: each platform ping or '
             'health check inserts one row, and gaps over 5 minutes are counted '
@@ -10895,17 +11261,20 @@ Relay team broke club record"></textarea>
         """JSON shape of the public status page — for external monitors
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
-        return jsonify({
-            "ok": True,
-            "version": APP_VERSION,
-            "latest_heartbeat": _uptime.latest_heartbeat(),
-            "windows": {
-                "24h":  _uptime.uptime_stats(window_hours=24),
-                "7d":   _uptime.uptime_stats(window_hours=24 * 7),
-                "30d":  _uptime.uptime_stats(window_hours=24 * 30),
-            },
-            "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
-        })
+
+        return jsonify(
+            {
+                "ok": True,
+                "version": APP_VERSION,
+                "latest_heartbeat": _uptime.latest_heartbeat(),
+                "windows": {
+                    "24h": _uptime.uptime_stats(window_hours=24),
+                    "7d": _uptime.uptime_stats(window_hours=24 * 7),
+                    "30d": _uptime.uptime_stats(window_hours=24 * 30),
+                },
+                "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
+            }
+        )
 
     # ---- /healthz/usage ------------------------------------------------
     #
@@ -10939,33 +11308,38 @@ Relay team broke club record"></textarea>
         """
         try:
             from mediahub.media_ai.llm import gemini_breaker_snapshot
+
             snap = gemini_breaker_snapshot()
         except Exception as e:
             return jsonify({"error": f"breaker_unavailable: {e}"}), 500
         try:
             from mediahub.ai_core.llm import _key_for as _key
+
             providers_configured = {
                 "gemini": bool(_key("gemini")),
                 "claude": bool(_key("claude")),
             }
         except Exception:
             providers_configured = {}
-        return jsonify({
-            "ok": True,
-            "gemini_breaker": snap,
-            "providers_configured": providers_configured,
-            "fallback_available": providers_configured.get("claude", False),
-            "note": (
-                "Per-worker state. If your deployment runs multiple "
-                "gunicorn workers, refresh this endpoint to sample each "
-                "worker. A high 'consecutive_failures' on a worker with "
-                "'open': false means a few errors but no trip yet."
-            ),
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "gemini_breaker": snap,
+                "providers_configured": providers_configured,
+                "fallback_available": providers_configured.get("claude", False),
+                "note": (
+                    "Per-worker state. If your deployment runs multiple "
+                    "gunicorn workers, refresh this endpoint to sample each "
+                    "worker. A high 'consecutive_failures' on a worker with "
+                    "'open': false means a few errors but no trip yet."
+                ),
+            }
+        )
 
     @app.route("/healthz/usage")
     def healthz_usage():
         from mediahub.observability import llm_usage as _u
+
         today = _u.usage_for_window(window_hours=24)
         seven_d = _u.usage_for_window(window_hours=24 * 7)
         thirty_d = _u.daily_usage(days=30)
@@ -10989,19 +11363,18 @@ Relay team broke club record"></textarea>
                 )
             providers_html = (
                 '<div class="card"><table style="width:100%">'
-                '<thead><tr><th>Provider</th><th>Calls</th><th>OK</th>'
-                '<th>Failed</th><th>Tokens in</th><th>Tokens out</th>'
-                '<th>Est. cost</th></tr></thead>'
-                f'<tbody>{prov_rows}</tbody></table></div>'
+                "<thead><tr><th>Provider</th><th>Calls</th><th>OK</th>"
+                "<th>Failed</th><th>Tokens in</th><th>Tokens out</th>"
+                "<th>Est. cost</th></tr></thead>"
+                f"<tbody>{prov_rows}</tbody></table></div>"
             )
         else:
-            providers_html = (
-                '<div class="card empty">No LLM calls in the last 24 hours.</div>'
-            )
+            providers_html = '<div class="card empty">No LLM calls in the last 24 hours.</div>'
 
         # Gemini free-tier headroom callout.
         if today["gemini_free_tier_headroom"] is not None:
             from mediahub.observability.llm_usage import GEMINI_FREE_TIER_DAILY_REQ
+
             headroom = today["gemini_free_tier_headroom"]
             used = GEMINI_FREE_TIER_DAILY_REQ - headroom
             pct = (used / GEMINI_FREE_TIER_DAILY_REQ) * 100.0 if GEMINI_FREE_TIER_DAILY_REQ else 0
@@ -11014,15 +11387,15 @@ Relay team broke club record"></textarea>
                 '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
                 '<div style="display:flex;justify-content:space-between;'
                 'align-items:baseline;margin-bottom:6px">'
-                f'<div><b>Gemini free-tier today</b> &mdash; '
-                f'{_h(used)} / {GEMINI_FREE_TIER_DAILY_REQ} calls</div>'
+                f"<div><b>Gemini free-tier today</b> &mdash; "
+                f"{_h(used)} / {GEMINI_FREE_TIER_DAILY_REQ} calls</div>"
                 f'<div class="dim" style="font-size:12px">{_h(headroom)} remaining</div>'
-                '</div>'
+                "</div>"
                 '<div style="height:10px;background:rgba(255,255,255,0.08);'
                 'border-radius:6px;overflow:hidden">'
                 f'<div style="height:100%;width:{min(pct,100):.1f}%;'
                 f'background:{bar_color}"></div></div>'
-                '</div>'
+                "</div>"
             )
         else:
             headroom_html = ""
@@ -11036,7 +11409,11 @@ Relay team broke club record"></textarea>
                 f'Last LLM error &mdash; {_h(last_err.get("provider", "unknown"))}</div>'
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
                 f'{_h(last_err.get("ts", "")[:19])} UTC'
-                + (f' &middot; {_h(last_err.get("error_kind"))}' if last_err.get("error_kind") else "")
+                + (
+                    f' &middot; {_h(last_err.get("error_kind"))}'
+                    if last_err.get("error_kind")
+                    else ""
+                )
                 + '</div>'
                 f'<code style="font-size:12px">'
                 f'{_h(last_err.get("error_message", "")[:300])}</code>'
@@ -11048,6 +11425,7 @@ Relay team broke club record"></textarea>
         # 7-day posting log roll-up.
         try:
             from mediahub.publishing import posting_log as _plog
+
             # We don't have a profile-scoped count here because /healthz/usage
             # is operator-facing across all tenants on this instance. For a
             # single-org deploy that's the right answer. For a future
@@ -11068,11 +11446,11 @@ Relay team broke club record"></textarea>
         post_html = (
             '<div class="card" style="padding:16px 22px;margin-bottom:18px">'
             f'<div style="font-weight:600;margin-bottom:6px">'
-            f'Publishing (7d) &mdash; {post_total} attempts</div>'
+            f"Publishing (7d) &mdash; {post_total} attempts</div>"
             f'<div style="display:flex;gap:18px;font-size:13px">'
             f'<span><span class="tag good" style="font-size:11px">{post_ok} ok</span></span>'
             f'<span><span class="tag bad" style="font-size:11px">{post_fail} failed</span></span>'
-            '</div></div>'
+            "</div></div>"
         )
 
         # 30-day daily breakdown.
@@ -11089,14 +11467,14 @@ Relay team broke club record"></textarea>
                 )
             thirty_html = (
                 '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
-                'Last 30 days</h2>'
+                "Last 30 days</h2>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                'Per-day LLM call counts. Estimated cost uses public list '
-                'pricing &mdash; not a billing source of truth.</p>'
+                "Per-day LLM call counts. Estimated cost uses public list "
+                "pricing &mdash; not a billing source of truth.</p>"
                 '<div class="card"><table style="width:100%">'
-                '<thead><tr><th>Date (UTC)</th><th>Calls</th><th>OK</th>'
-                '<th>Failed</th><th>Est. cost</th></tr></thead>'
-                f'<tbody>{day_rows}</tbody></table></div>'
+                "<thead><tr><th>Date (UTC)</th><th>Calls</th><th>OK</th>"
+                "<th>Failed</th><th>Est. cost</th></tr></thead>"
+                f"<tbody>{day_rows}</tbody></table></div>"
             )
         else:
             thirty_html = ""
@@ -11109,11 +11487,9 @@ Relay team broke club record"></textarea>
             '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
             'LLM call counts, free-tier headroom, recent provider errors, '
             'and publishing roll-up for this MediaHub deployment.</p>'
-
             f'{err_html}'
             f'{headroom_html}'
             f'{post_html}'
-
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
             'Today (last 24h)</h2>'
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
@@ -11122,15 +11498,12 @@ Relay team broke club record"></textarea>
             f'{_h(today["failed_count"])} failed'
             '</p>'
             f'{providers_html}'
-
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
             'Last 7 days</h2>'
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
             f'{_h(seven_total)} calls &middot; '
             f'<b>${seven_cost:.4f}</b> estimated cost.</p>'
-
             f'{thirty_html}'
-
             '<p class="dim" style="margin-top:30px;font-size:12px">'
             'Estimated cost is derived from published list pricing for each '
             'provider and is not a substitute for a real billing source. '
@@ -11138,6 +11511,7 @@ Relay team broke club record"></textarea>
             'as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>'
         )
         return _layout("Usage", body, active="usage")
+
     #
     # Settings — consolidated operations surface.
     #
@@ -11173,14 +11547,14 @@ Relay team broke club record"></textarea>
             '<span class="mh-hero-eyebrow">Settings</span>'
             '<h1>Operations &amp; <em class="editorial">data</em></h1>'
             '<p class="lede">Activity, deployment health, the data this system keeps, '
-            'and how to delete it &mdash; all in one place.</p>'
-            '</section>'
+            "and how to delete it &mdash; all in one place.</p>"
+            "</section>"
             '<nav class="mh-tabnav" id="mh-settings-tabs" aria-label="Settings sections">'
             '<a href="#activity" class="is-active">Activity</a>'
             '<a href="#status">Status</a>'
             '<a href="#privacy">Privacy &amp; data</a>'
             '<a href="#deployment">Deployment</a>'
-            '</nav>'
+            "</nav>"
         )
 
         activity_html = _render_settings_activity_section(prof)
@@ -11189,7 +11563,7 @@ Relay team broke club record"></textarea>
         deployment_html = _render_settings_deployment_section()
 
         # Scroll-spy: highlight the tab whose section is in view.
-        spy_js = '''
+        spy_js = """
 <script>
 (function(){
   var nav = document.getElementById('mh-settings-tabs');
@@ -11211,16 +11585,9 @@ Relay team broke club record"></textarea>
   }, {rootMargin: '-30% 0px -60% 0px', threshold: 0});
   targets.forEach(function(t){ if (t) io.observe(t); });
 })();
-</script>'''
+</script>"""
 
-        body = (
-            toc_html
-            + activity_html
-            + status_html
-            + privacy_html
-            + deployment_html
-            + spy_js
-        )
+        body = toc_html + activity_html + status_html + privacy_html + deployment_html + spy_js
         return _layout("Settings", body, active="settings")
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
@@ -11259,6 +11626,7 @@ Relay team broke club record"></textarea>
 
         try:
             from mediahub.publishing import posting_log as _plog
+
             recent_attempts = _plog.recent_attempts(prof.profile_id, limit=20)
         except Exception:
             recent_attempts = []
@@ -11289,7 +11657,7 @@ Relay team broke club record"></textarea>
 
         section_intro = (
             f'<p class="dim" style="margin-bottom:14px">Recent runs for '
-            f'<b>{_h(prof.display_name)}</b>.</p>'
+            f"<b>{_h(prof.display_name)}</b>.</p>"
         )
 
         if not rows:
@@ -11307,23 +11675,29 @@ Relay team broke club record"></textarea>
                 return '<span class="muted" style="font-size:11px">&mdash;</span>'
             parts = []
             if s.get("scheduled"):
-                parts.append(f'<span class="tag info" style="font-size:11px">'
-                             f'{s["scheduled"]} scheduled</span>')
+                parts.append(
+                    f'<span class="tag info" style="font-size:11px">'
+                    f'{s["scheduled"]} scheduled</span>'
+                )
             if s.get("published"):
-                parts.append(f'<span class="tag good" style="font-size:11px">'
-                             f'{s["published"]} published</span>')
+                parts.append(
+                    f'<span class="tag good" style="font-size:11px">'
+                    f'{s["published"]} published</span>'
+                )
             if s.get("failed"):
-                parts.append(f'<span class="tag bad" style="font-size:11px">'
-                             f'{s["failed"]} failed</span>')
+                parts.append(
+                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                )
             return " ".join(parts)
 
         rows_html = ""
         n_errored = 0
         for r in rows:
-            badge = {"done": "good", "running": "info", "queued": "info",
-                     "error": "bad"}.get(r["status"], "")
-            review_href = url_for('review', run_id=r['id'])
-            delete_href = url_for('privacy_delete_run', run_id=r['id'])
+            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                r["status"], ""
+            )
+            review_href = url_for("review", run_id=r["id"])
+            delete_href = url_for("privacy_delete_run", run_id=r["id"])
             started = (r["created_at"] or "")[:19]
             started_iso = started.replace(" ", "T") + "Z" if started else ""
             rows_html += (
@@ -11347,15 +11721,15 @@ Relay team broke club record"></textarea>
                     '<tr class="run-error-row">'
                     '<td colspan="7" style="padding:6px 14px 14px 14px;'
                     'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                    '<details>'
+                    "<details>"
                     '<summary style="cursor:pointer;font-size:13px;font-weight:600;'
                     'color:var(--mh-prim-error-300)">Why did this run fail?</summary>'
                     '<pre style="margin:8px 0 0;padding:10px 12px;'
-                    'background:rgba(0,0,0,0.25);border-radius:6px;'
+                    "background:rgba(0,0,0,0.25);border-radius:6px;"
                     'font-size:12px;white-space:pre-wrap;word-break:break-word">'
-                    f'{_h(truncated)}</pre>'
-                    '</details>'
-                    '</td></tr>'
+                    f"{_h(truncated)}</pre>"
+                    "</details>"
+                    "</td></tr>"
                 )
 
         failure_callout = ""
@@ -11364,9 +11738,9 @@ Relay team broke club record"></textarea>
             failure_callout = (
                 '<div class="card" style="padding:12px 18px;margin-bottom:20px;'
                 'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
-                f'<b>{_h(label)}</b> in the last 100 runs. '
-                'Expand <i>Why did this run fail?</i> on each row below to '
-                'see the pipeline error.</div>'
+                f"<b>{_h(label)}</b> in the last 100 runs. "
+                "Expand <i>Why did this run fail?</i> on each row below to "
+                "see the pipeline error.</div>"
             )
 
         posting_panel_html = ""
@@ -11387,34 +11761,34 @@ Relay team broke club record"></textarea>
                 attempts_rows += (
                     f'<tr><td class="muted" style="font-size:12px">{_h(when)}</td>'
                     f'<td style="font-size:12px">{_h(channel)}</td>'
-                    f'<td>{badge_html}</td>'
+                    f"<td>{badge_html}</td>"
                     f'<td style="font-size:12px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_h(excerpt)}">{_h(excerpt)}</td>'
                     f'<td style="font-size:12px;color:var(--mh-prim-error-600)" title="{_h(err)}">{_h(err[:80])}</td>'
-                    f'</tr>'
+                    f"</tr>"
                 )
             posting_panel_html = (
                 '<h3 style="margin-top:24px;margin-bottom:6px;font-size:16px">'
-                'Recent posting activity</h3>'
+                "Recent posting activity</h3>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f'Last {len(recent_attempts)} Buffer attempts for this organisation.</p>'
+                f"Last {len(recent_attempts)} Buffer attempts for this organisation.</p>"
                 '<div class="card"><table>'
-                '<thead><tr><th>When</th><th>Channel</th><th>Status</th>'
-                '<th>Caption excerpt</th><th>Error</th></tr></thead>'
-                f'<tbody>{attempts_rows}</tbody>'
-                '</table></div>'
+                "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
+                "<th>Caption excerpt</th><th>Error</th></tr></thead>"
+                f"<tbody>{attempts_rows}</tbody>"
+                "</table></div>"
             )
 
         return (
-            f'{section_header}'
-            f'{section_intro}'
-            f'{failure_callout}'
+            f"{section_header}"
+            f"{section_intro}"
+            f"{failure_callout}"
             '<div class="card"><table class="mh-table-stack">'
-            '<thead><tr><th>Input</th><th>Status</th>'
-            '<th>Matched</th><th>Queue / Total</th><th>Schedule</th>'
-            '<th>Started</th><th></th></tr></thead>'
-            f'<tbody>{rows_html}</tbody>'
-            '</table></div>'
-            f'{posting_panel_html}'
+            "<thead><tr><th>Input</th><th>Status</th>"
+            "<th>Matched</th><th>Queue / Total</th><th>Schedule</th>"
+            "<th>Started</th><th></th></tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            "</table></div>"
+            f"{posting_panel_html}"
         )
 
     def _render_settings_status_section() -> str:
@@ -11425,16 +11799,14 @@ Relay team broke club record"></textarea>
         )
         try:
             from mediahub.observability import uptime as _uptime
+
             s24 = _uptime.uptime_stats(window_hours=24)
             s7d = _uptime.uptime_stats(window_hours=24 * 7)
             s30 = _uptime.uptime_stats(window_hours=24 * 30)
             latest = _uptime.latest_heartbeat()
             gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
         except Exception:
-            return (
-                f'{section_header}'
-                '<div class="card empty">Status data not available.</div>'
-            )
+            return f"{section_header}" '<div class="card empty">Status data not available.</div>'
 
         pill_label = "no data yet"
         pill_color = "#7a7a7a"
@@ -11444,6 +11816,7 @@ Relay team broke club record"></textarea>
                 if ts_raw.endswith("Z"):
                     ts_raw = ts_raw[:-1] + "+00:00"
                 from datetime import datetime as _dt
+
                 last_ts = _dt.fromisoformat(ts_raw)
                 age_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
             except (ValueError, TypeError):
@@ -11478,23 +11851,24 @@ Relay team broke club record"></textarea>
 
         version_label = APP_VERSION
         return (
-            f'{section_header}'
+            f"{section_header}"
             '<p class="dim" style="margin-bottom:14px">Live operational health '
-            'of this MediaHub deployment.</p>'
-
+            "of this MediaHub deployment.</p>"
             '<div class="card" style="display:flex;align-items:center;gap:14px;'
             'padding:18px 22px;margin-bottom:14px">'
             f'<span style="display:inline-block;width:14px;height:14px;'
             f'border-radius:50%;background:{pill_color};flex:0 0 auto"></span>'
             f'<div style="flex:1"><div style="font-size:18px;font-weight:600">'
-            f'Backend &mdash; {_h(pill_label)}</div>'
+            f"Backend &mdash; {_h(pill_label)}</div>"
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
-            f'Version <code>{_h(version_label)}</code>'
-            + (f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-               f'({_h((latest.get("source") or "").lower())})'
-               if latest else "")
+            f"Version <code>{_h(version_label)}</code>"
+            + (
+                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
+                f'({_h((latest.get("source") or "").lower())})'
+                if latest
+                else ""
+            )
             + '</div></div></div>'
-
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<table style="width:100%"><thead>'
             '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
@@ -11512,7 +11886,6 @@ Relay team broke club record"></textarea>
             f'<td>{_h(s30.get("samples", 0))}</td>'
             f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
             '</tbody></table></div>'
-
             f'<div class="card" style="padding:14px 22px">'
             f'{last_incident_html}</div>'
         )
@@ -11540,9 +11913,8 @@ Relay team broke club record"></textarea>
         cache_dir = DATA_DIR / ".cache" / "pb_lookup"
         legacy_cache = DATA_DIR / ".cache" / "swimmingresults"
         try:
-            n_cache = (
-                (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0)
-                + (sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0)
+            n_cache = (sum(1 for _ in cache_dir.glob("*.json")) if cache_dir.exists() else 0) + (
+                sum(1 for _ in legacy_cache.glob("*.json")) if legacy_cache.exists() else 0
             )
         except Exception:
             n_cache = 0
@@ -11598,11 +11970,11 @@ Relay team broke club record"></textarea>
 
         ok_pill = (
             '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
-            'background:rgba(44,201,127,0.12);color:#2cc97f;font-size:12px;'
+            "background:rgba(44,201,127,0.12);color:#2cc97f;font-size:12px;"
             'font-weight:600;border:1px solid rgba(44,201,127,0.30)">healthy</span>'
-            if health_ok else
-            '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
-            'background:rgba(255,93,108,0.12);color:var(--mh-prim-error-500);font-size:12px;'
+            if health_ok
+            else '<span style="display:inline-block;padding:3px 12px;border-radius:999px;'
+            "background:rgba(255,93,108,0.12);color:var(--mh-prim-error-500);font-size:12px;"
             'font-weight:600;border:1px solid rgba(255,93,108,0.30)">degraded</span>'
         )
 
@@ -11617,45 +11989,41 @@ Relay team broke club record"></textarea>
                 if isinstance(detail, int):
                     detail = str(detail)
                 check_rows += (
-                    f'<tr><td><b>{_h(name)}</b></td>'
-                    f'<td>{badge}</td>'
+                    f"<tr><td><b>{_h(name)}</b></td>"
+                    f"<td>{badge}</td>"
                     f'<td class="muted" style="font-size:12px">{_h(str(detail))}</td></tr>'
                 )
             else:
                 badge = '<span class="tag bad" style="font-size:11px">fail</span>'
                 err = str(check.get("error") or "")[:200]
                 check_rows += (
-                    f'<tr><td><b>{_h(name)}</b></td>'
-                    f'<td>{badge}</td>'
+                    f"<tr><td><b>{_h(name)}</b></td>"
+                    f"<td>{badge}</td>"
                     f'<td style="font-size:12px;color:var(--mh-prim-error-600)">{_h(err)}</td></tr>'
                 )
 
         if not check_rows:
-            check_rows = (
-                '<tr><td colspan="3" class="muted">No health data available.</td></tr>'
-            )
+            check_rows = '<tr><td colspan="3" class="muted">No health data available.</td></tr>'
 
         return (
-            f'{section_header}'
+            f"{section_header}"
             '<p class="dim" style="margin-bottom:14px">Backend version, health checks, '
-            'and links to deeper operator dashboards.</p>'
-
+            "and links to deeper operator dashboards.</p>"
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             f'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
             f'<div style="font-size:18px;font-weight:600">Version <code>{_h(version_label)}</code></div>'
-            f'{ok_pill}'
-            '</div>'
+            f"{ok_pill}"
+            "</div>"
             '<p class="dim" style="margin:8px 0 0;font-size:12px">'
-            'Auto-refresh disabled here. Open the live <a href="' + url_for('status_page')
+            'Auto-refresh disabled here. Open the live <a href="'
+            + url_for("status_page")
             + '">/status page</a> for the auto-refreshing version.</p>'
             '</div>'
-
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Health checks</h3>'
             '<table style="width:100%">'
             '<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>'
             f'<tbody>{check_rows}</tbody></table></div>'
-
             '<div class="card" style="padding:18px 22px">'
             '<h3 style="margin-top:0;font-size:16px">Operator dashboards</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">'
@@ -11691,19 +12059,29 @@ Relay team broke club record"></textarea>
         live = _llm_available()
         # Public, stable provider names — gemini (default/free) and
         # anthropic (paid, operator-set). Anything else returns None.
-        public_provider = {
-            "gemini-api":    "gemini",
-            "anthropic-api": "anthropic",
-        }.get(provider) if live else None
-        provider_label = {
-            "gemini-api":    "Google Gemini",
-            "anthropic-api": "Anthropic (Claude)",
-        }.get(provider) if live else None
-        return jsonify({
-            "live": live,
-            "provider": public_provider,
-            "provider_label": provider_label,
-        })
+        public_provider = (
+            {
+                "gemini-api": "gemini",
+                "anthropic-api": "anthropic",
+            }.get(provider)
+            if live
+            else None
+        )
+        provider_label = (
+            {
+                "gemini-api": "Google Gemini",
+                "anthropic-api": "Anthropic (Claude)",
+            }.get(provider)
+            if live
+            else None
+        )
+        return jsonify(
+            {
+                "live": live,
+                "provider": public_provider,
+                "provider_label": provider_label,
+            }
+        )
 
     # ---- Buffer publishing -------------------------------------------
     #
@@ -11738,6 +12116,7 @@ Relay team broke club record"></textarea>
                 return tok
         # Env fallback for single-tenant self-hosted operators.
         from mediahub.web.secrets_store import get_buffer_access_token
+
         return (get_buffer_access_token() or "").strip()
 
     @app.route("/api/buffer/channels")
@@ -11750,42 +12129,52 @@ Relay team broke club record"></textarea>
         """
         from mediahub.publishing.buffer import (
             list_channels as _buf_list,
-            BufferAuthError, BufferAPIError,
+            BufferAuthError,
+            BufferAPIError,
         )
+
         token = _resolve_buffer_token()
         if not token:
-            return jsonify({
-                "connected": False,
-                "channels": [],
-                "error": "no_token",
-                "message": (
-                    "Buffer isn't connected for this organisation. Paste "
-                    "your Buffer access token to enable scheduling, or "
-                    "use the download option to post manually."
-                ),
-                "connect_url": url_for("api_connect_buffer"),
-            }), 401
+            return jsonify(
+                {
+                    "connected": False,
+                    "channels": [],
+                    "error": "no_token",
+                    "message": (
+                        "Buffer isn't connected for this organisation. Paste "
+                        "your Buffer access token to enable scheduling, or "
+                        "use the download option to post manually."
+                    ),
+                    "connect_url": url_for("api_connect_buffer"),
+                }
+            ), 401
         try:
             channels = _buf_list(token)
         except BufferAuthError as exc:
-            return jsonify({
-                "connected": False,
-                "channels": [],
-                "error": "auth",
-                "message": str(exc),
-            }), 401
+            return jsonify(
+                {
+                    "connected": False,
+                    "channels": [],
+                    "error": "auth",
+                    "message": str(exc),
+                }
+            ), 401
         except BufferAPIError as exc:
-            return jsonify({
+            return jsonify(
+                {
+                    "connected": True,
+                    "channels": [],
+                    "error": "api",
+                    "message": str(exc),
+                }
+            ), 502
+        return jsonify(
+            {
                 "connected": True,
-                "channels": [],
-                "error": "api",
-                "message": str(exc),
-            }), 502
-        return jsonify({
-            "connected": True,
-            "channels": channels,
-            "count": len(channels),
-        })
+                "channels": channels,
+                "count": len(channels),
+            }
+        )
 
     @app.route("/api/organisation/connect-buffer", methods=["POST"])
     def api_connect_buffer():
@@ -11810,11 +12199,13 @@ Relay team broke club record"></textarea>
         """
         prof = _active_profile()
         if prof is None:
-            return jsonify({
-                "ok": False,
-                "error": "no_active_profile",
-                "message": "Set up your organisation before connecting Buffer.",
-            }), 409
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_active_profile",
+                    "message": "Set up your organisation before connecting Buffer.",
+                }
+            ), 409
         # Accept both form-data and JSON for browser-form + fetch use.
         token = ""
         if request.is_json:
@@ -11823,47 +12214,59 @@ Relay team broke club record"></textarea>
         if not token:
             token = (request.form.get("buffer_access_token") or "").strip()
         if not token:
-            return jsonify({
-                "ok": False,
-                "error": "missing_token",
-                "message": "Paste your Buffer access token to connect.",
-            }), 400
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "missing_token",
+                    "message": "Paste your Buffer access token to connect.",
+                }
+            ), 400
         if len(token) < 10:
-            return jsonify({
-                "ok": False,
-                "error": "short_token",
-                "message": "That doesn't look like a Buffer access token (too short).",
-            }), 400
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "short_token",
+                    "message": "That doesn't look like a Buffer access token (too short).",
+                }
+            ), 400
 
         # Validate by probing Buffer for the connected channels. If Buffer
         # rejects the token we never persist it.
         from mediahub.publishing.buffer import (
             list_channels as _buf_list,
-            BufferAuthError, BufferAPIError,
+            BufferAuthError,
+            BufferAPIError,
         )
+
         try:
             channels = _buf_list(token)
         except BufferAuthError as exc:
-            return jsonify({
-                "ok": False,
-                "error": "auth",
-                "message": str(exc),
-            }), 401
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "auth",
+                    "message": str(exc),
+                }
+            ), 401
         except BufferAPIError as exc:
-            return jsonify({
-                "ok": False,
-                "error": "api",
-                "message": str(exc),
-            }), 502
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "api",
+                    "message": str(exc),
+                }
+            ), 502
 
         # Persist on the profile.
         prof.buffer_access_token = token
         save_profile(prof)
-        return jsonify({
-            "ok": True,
-            "channel_count": len(channels),
-            "profile_id": prof.profile_id,
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "channel_count": len(channels),
+                "profile_id": prof.profile_id,
+            }
+        )
 
     @app.route("/api/organisation/disconnect-buffer", methods=["POST"])
     def api_disconnect_buffer():
@@ -11909,7 +12312,7 @@ Relay team broke club record"></textarea>
                 target = ra
                 break
         if target is None:
-            for c in (run_data.get("cards") or []):
+            for c in run_data.get("cards") or []:
                 if c.get("swim_id") == card_id or c.get("id") == card_id:
                     target = {"achievement": c}
                     break
@@ -11919,22 +12322,24 @@ Relay team broke club record"></textarea>
         ach = target.get("achievement") or {}
         swimmer = (ach.get("swimmer_name") or "swimmer").strip()
         event = (ach.get("event") or "").strip()
-        slug = re.sub(r"[^A-Za-z0-9]+", "-",
-                      f"{swimmer} {event}").strip("-").lower() or "card"
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", f"{swimmer} {event}").strip("-").lower() or "card"
 
         # Caption text from the caller (preferred — preserves edits)
         # or fall back to the achievement headline.
-        caption = (request.args.get("caption") or
-                   ach.get("headline") or
-                   f"{swimmer} — {event}").strip()
+        caption = (
+            request.args.get("caption") or ach.get("headline") or f"{swimmer} — {event}"
+        ).strip()
 
         # Try to locate the rendered PNG for this card. Best-effort:
         # not every card has a generated visual yet.
         png_bytes: Optional[bytes] = None
         png_name = ""
         try:
-            visuals = (target.get("visuals") or
-                       (ach.get("visuals") if isinstance(ach, dict) else None) or [])
+            visuals = (
+                target.get("visuals")
+                or (ach.get("visuals") if isinstance(ach, dict) else None)
+                or []
+            )
             for v in visuals:
                 fp = v.get("file_path") or v.get("path") or ""
                 if fp and Path(fp).exists():
@@ -11950,18 +12355,22 @@ Relay team broke club record"></textarea>
             zf.writestr(f"{slug}-caption.txt", caption)
             if png_bytes:
                 zf.writestr(png_name or f"{slug}.png", png_bytes)
-            zf.writestr("README.txt", (
-                "MediaHub card export.\n\n"
-                "- The .txt file contains the ready-to-post caption.\n"
-                "- The .png (if present) is the branded visual; if not,\n"
-                "  open the card in the content builder and click 'Create\n"
-                "  graphic' first.\n\n"
-                "Post the visual + caption to your chosen platform\n"
-                "manually. No Buffer / third-party scheduler required.\n"
-            ))
+            zf.writestr(
+                "README.txt",
+                (
+                    "MediaHub card export.\n\n"
+                    "- The .txt file contains the ready-to-post caption.\n"
+                    "- The .png (if present) is the branded visual; if not,\n"
+                    "  open the card in the content builder and click 'Create\n"
+                    "  graphic' first.\n\n"
+                    "Post the visual + caption to your chosen platform\n"
+                    "manually. No Buffer / third-party scheduler required.\n"
+                ),
+            )
         buf.seek(0)
         return send_file(
-            buf, mimetype="application/zip",
+            buf,
+            mimetype="application/zip",
             as_attachment=True,
             download_name=f"{slug}.zip",
         )
@@ -11988,28 +12397,34 @@ Relay team broke club record"></textarea>
         """
         from mediahub.publishing.buffer import (
             schedule_post as _buf_schedule,
-            BufferAuthError, BufferAPIError, BufferRateLimitError,
+            BufferAuthError,
+            BufferAPIError,
+            BufferRateLimitError,
         )
         from mediahub.publishing import posting_log as _plog
 
         payload = request.get_json(silent=True) or {}
         channel_ids = payload.get("channel_ids") or []
         if not isinstance(channel_ids, list) or not channel_ids:
-            return jsonify({
-                "ok": False,
-                "error": "no_channels",
-                "message": "Pick at least one Buffer channel.",
-                "caption": payload.get("caption", ""),
-            }), 400
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_channels",
+                    "message": "Pick at least one Buffer channel.",
+                    "caption": payload.get("caption", ""),
+                }
+            ), 400
 
         caption = (payload.get("caption") or "").strip()
         if not caption:
-            return jsonify({
-                "ok": False,
-                "error": "no_caption",
-                "message": "Caption is required.",
-                "caption": "",
-            }), 400
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_caption",
+                    "message": "Caption is required.",
+                    "caption": "",
+                }
+            ), 400
 
         media_url = (payload.get("media_url") or "").strip()
         if media_url:
@@ -12019,6 +12434,7 @@ Relay team broke club record"></textarea>
             # malicious or accidental relative-href can't reach the
             # upstream API.
             from urllib.parse import urlparse as _urlparse
+
             try:
                 parsed = _urlparse(media_url)
             except Exception:
@@ -12026,12 +12442,14 @@ Relay team broke club record"></textarea>
             scheme_ok = bool(parsed) and parsed.scheme.lower() in ("http", "https")
             netloc_ok = bool(parsed) and bool((parsed.netloc or "").strip())
             if not (scheme_ok and netloc_ok):
-                return jsonify({
-                    "ok": False,
-                    "error": "bad_media_url",
-                    "message": "Media URL must be a full http/https URL.",
-                    "caption": caption,
-                }), 400
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "bad_media_url",
+                        "message": "Media URL must be a full http/https URL.",
+                        "caption": caption,
+                    }
+                ), 400
         media_urls = [media_url] if media_url else None
 
         scheduled_at_iso = (payload.get("scheduled_at") or "").strip()
@@ -12043,26 +12461,30 @@ Relay team broke club record"></textarea>
                 if scheduled_at_dt.tzinfo is None:
                     scheduled_at_dt = scheduled_at_dt.replace(tzinfo=timezone.utc)
             except ValueError:
-                return jsonify({
-                    "ok": False,
-                    "error": "bad_time",
-                    "message": "Scheduled time was not a valid ISO 8601 datetime.",
-                    "caption": caption,
-                }), 400
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "bad_time",
+                        "message": "Scheduled time was not a valid ISO 8601 datetime.",
+                        "caption": caption,
+                    }
+                ), 400
 
         token = _resolve_buffer_token()
         if not token:
-            return jsonify({
-                "ok": False,
-                "error": "no_token",
-                "message": (
-                    "Buffer isn't connected for this organisation. Paste "
-                    "your Buffer access token to enable scheduling, or "
-                    "use the download option to post manually."
-                ),
-                "caption": caption,
-                "connect_url": url_for("api_connect_buffer"),
-            }), 401
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_token",
+                    "message": (
+                        "Buffer isn't connected for this organisation. Paste "
+                        "your Buffer access token to enable scheduling, or "
+                        "use the download option to post manually."
+                    ),
+                    "caption": caption,
+                    "connect_url": url_for("api_connect_buffer"),
+                }
+            ), 401
 
         ws = _get_wf_store()
         results: list[dict] = []
@@ -12086,9 +12508,7 @@ Relay team broke club record"></textarea>
             # record_attempt rejects empty profile_id.
             or "_orphaned"
         )
-        scheduled_at_iso_for_log = (
-            scheduled_at_dt.isoformat() if scheduled_at_dt else None
-        )
+        scheduled_at_iso_for_log = scheduled_at_dt.isoformat() if scheduled_at_dt else None
 
         # Pre-filter empty channel ids so they don't reach _buf_schedule
         # and produce a per-channel "channel id is required" failure.
@@ -12104,16 +12524,19 @@ Relay team broke club record"></textarea>
                     media_urls=media_urls,
                     scheduled_at=scheduled_at_dt,
                 )
-                results.append({
-                    "channel_id": str(cid),
-                    "ok": True,
-                    "update_id": res.get("update_id", ""),
-                })
+                results.append(
+                    {
+                        "channel_id": str(cid),
+                        "ok": True,
+                        "update_id": res.get("update_id", ""),
+                    }
+                )
                 if res.get("update_id"):
                     update_ids.append(res["update_id"])
                 _plog.record_attempt(
                     profile_id=profile_id_for_log,
-                    run_id=run_id, card_id=card_id,
+                    run_id=run_id,
+                    card_id=card_id,
                     channel_id=str(cid),
                     status="ok",
                     update_id=res.get("update_id", ""),
@@ -12123,17 +12546,21 @@ Relay team broke club record"></textarea>
                 )
             except BufferAuthError as exc:
                 failure = str(exc)
-                results.append({
-                    "channel_id": str(cid),
-                    "ok": False,
-                    "error": "auth",
-                    "message": str(exc),
-                })
+                results.append(
+                    {
+                        "channel_id": str(cid),
+                        "ok": False,
+                        "error": "auth",
+                        "message": str(exc),
+                    }
+                )
                 _plog.record_attempt(
                     profile_id=profile_id_for_log,
-                    run_id=run_id, card_id=card_id,
+                    run_id=run_id,
+                    card_id=card_id,
                     channel_id=str(cid),
-                    status="failed", error_kind="auth",
+                    status="failed",
+                    error_kind="auth",
                     error_message=str(exc),
                     caption=caption,
                     media_url=media_url or None,
@@ -12146,18 +12573,22 @@ Relay team broke club record"></textarea>
                 # subsequent one in the loop. Surface the retry hint
                 # to the user and stop early.
                 failure = str(exc)
-                results.append({
-                    "channel_id": str(cid),
-                    "ok": False,
-                    "error": "rate_limited",
-                    "message": str(exc),
-                    "retry_after": exc.retry_after,
-                })
+                results.append(
+                    {
+                        "channel_id": str(cid),
+                        "ok": False,
+                        "error": "rate_limited",
+                        "message": str(exc),
+                        "retry_after": exc.retry_after,
+                    }
+                )
                 _plog.record_attempt(
                     profile_id=profile_id_for_log,
-                    run_id=run_id, card_id=card_id,
+                    run_id=run_id,
+                    card_id=card_id,
                     channel_id=str(cid),
-                    status="failed", error_kind="rate_limited",
+                    status="failed",
+                    error_kind="rate_limited",
                     error_message=str(exc),
                     caption=caption,
                     media_url=media_url or None,
@@ -12166,17 +12597,21 @@ Relay team broke club record"></textarea>
                 break
             except BufferAPIError as exc:
                 failure = str(exc)
-                results.append({
-                    "channel_id": str(cid),
-                    "ok": False,
-                    "error": "api",
-                    "message": str(exc),
-                })
+                results.append(
+                    {
+                        "channel_id": str(cid),
+                        "ok": False,
+                        "error": "api",
+                        "message": str(exc),
+                    }
+                )
                 _plog.record_attempt(
                     profile_id=profile_id_for_log,
-                    run_id=run_id, card_id=card_id,
+                    run_id=run_id,
+                    card_id=card_id,
                     channel_id=str(cid),
-                    status="failed", error_kind="api",
+                    status="failed",
+                    error_kind="api",
                     error_message=str(exc),
                     caption=caption,
                     media_url=media_url or None,
@@ -12192,7 +12627,8 @@ Relay team broke club record"></textarea>
         if ws is not None and ScheduleStatus is not None:
             if any_ok and not failure:
                 ws.set_schedule(
-                    run_id, card_id,
+                    run_id,
+                    card_id,
                     schedule_status=ScheduleStatus.SCHEDULED,
                     buffer_update_id=";".join(update_ids) or None,
                     scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
@@ -12203,7 +12639,8 @@ Relay team broke club record"></textarea>
                 # another failed. Record the success and surface the
                 # failure to the user.
                 ws.set_schedule(
-                    run_id, card_id,
+                    run_id,
+                    card_id,
                     schedule_status=ScheduleStatus.SCHEDULED,
                     buffer_update_id=";".join(update_ids) or None,
                     scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
@@ -12211,7 +12648,8 @@ Relay team broke club record"></textarea>
                 )
             else:
                 ws.set_schedule(
-                    run_id, card_id,
+                    run_id,
+                    card_id,
                     schedule_status=ScheduleStatus.FAILED,
                     buffer_update_id=None,
                     scheduled_at=None,
@@ -12219,23 +12657,27 @@ Relay team broke club record"></textarea>
                 )
 
         if not any_ok:
-            return jsonify({
-                "ok": False,
-                "error": "buffer_failed",
-                "message": failure or "Buffer rejected the request.",
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "buffer_failed",
+                    "message": failure or "Buffer rejected the request.",
+                    "results": results,
+                    "caption": caption,
+                }
+            ), 502
+
+        return jsonify(
+            {
+                "ok": True,
+                "schedule_status": "scheduled",
+                "buffer_update_ids": update_ids,
+                "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
                 "results": results,
                 "caption": caption,
-            }), 502
-
-        return jsonify({
-            "ok": True,
-            "schedule_status": "scheduled",
-            "buffer_update_ids": update_ids,
-            "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
-            "results": results,
-            "caption": caption,
-            "warning": failure,  # non-empty if a partial failure occurred
-        })
+                "warning": failure,  # non-empty if a partial failure occurred
+            }
+        )
 
     # ------------------------------------------------------------------
     # Posting log — Phase 1.3 observability
@@ -12248,13 +12690,16 @@ Relay team broke club record"></textarea>
     @app.route("/api/posting/log", methods=["GET"])
     def api_posting_log():
         from mediahub.publishing import posting_log as _plog
+
         prof = _active_profile()
         if prof is None:
-            return jsonify({
-                "ok": False,
-                "error": "no_active_profile",
-                "attempts": [],
-            }), 409
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "no_active_profile",
+                    "attempts": [],
+                }
+            ), 409
         try:
             limit_raw = (request.args.get("limit") or "20").strip()
             limit = max(1, min(200, int(limit_raw)))
@@ -12264,22 +12709,28 @@ Relay team broke club record"></textarea>
         card_id = (request.args.get("card_id") or "").strip() or None
         try:
             attempts = _plog.recent_attempts(
-                prof.profile_id, limit=limit,
-                run_id=run_id, card_id=card_id,
+                prof.profile_id,
+                limit=limit,
+                run_id=run_id,
+                card_id=card_id,
             )
         except Exception as exc:
-            return jsonify({
-                "ok": False,
-                "error": "log_unavailable",
-                "message": str(exc),
-                "attempts": [],
-            }), 500
-        return jsonify({
-            "ok": True,
-            "profile_id": prof.profile_id,
-            "count": len(attempts),
-            "attempts": attempts,
-        })
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "log_unavailable",
+                    "message": str(exc),
+                    "attempts": [],
+                }
+            ), 500
+        return jsonify(
+            {
+                "ok": True,
+                "profile_id": prof.profile_id,
+                "count": len(attempts),
+                "attempts": attempts,
+            }
+        )
 
     # ====================================================================
     # V7 NEW ROUTES
@@ -12302,12 +12753,12 @@ Relay team broke club record"></textarea>
         # registry dataclass, so adding/removing keys here can never affect
         # the engine. Unknown types fall back to a generic format chip.
         _ct_presentation = {
-            "meet_recap":        (["Caption", "Graphic", "Reel"], "~ 60s"),
+            "meet_recap": (["Caption", "Graphic", "Reel"], "~ 60s"),
             "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
-            "weekend_preview":   (["Caption", "Graphic"],          "~ 40s"),
-            "sponsor_post":      (["Caption", "Graphic"],          "~ 30s"),
-            "session_update":    (["Caption", "Graphic"],          "~ 20s"),
-            "free_text":         (["Caption", "Graphic"],          "~ 15s"),
+            "weekend_preview": (["Caption", "Graphic"], "~ 40s"),
+            "sponsor_post": (["Caption", "Graphic"], "~ 30s"),
+            "session_update": (["Caption", "Graphic"], "~ 20s"),
+            "free_text": (["Caption", "Graphic"], "~ 15s"),
         }
 
         tiles_html = ""
@@ -12324,7 +12775,8 @@ Relay team broke club record"></textarea>
                 log.warning(
                     "make_page: content type %r references unknown endpoint %r — "
                     "rendering as disabled tile",
-                    ct, meta.primary_route_endpoint,
+                    ct,
+                    meta.primary_route_endpoint,
                 )
                 route_url = "#"
                 href_ok = False
@@ -12346,21 +12798,19 @@ Relay team broke club record"></textarea>
             fmt_chips = "".join(
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
-            effort_html = (
-                f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
-            )
+            effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
 
             tiles_html += (
                 f'<a {action} class="mh-template{disabled_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
-                f'{badge}'
-                '</div>'
-                f'<p>{_h(meta.description)}</p>'
+                f"{badge}"
+                "</div>"
+                f"<p>{_h(meta.description)}</p>"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
-                '</a>'
+                "</a>"
             )
 
         if tiles_html:
@@ -12369,8 +12819,8 @@ Relay team broke club record"></textarea>
             tiles_section = (
                 '<div class="card empty">'
                 '<p class="muted">No content types are registered on this deployment. '
-                'Check the deployment configuration.</p>'
-                '</div>'
+                "Check the deployment configuration.</p>"
+                "</div>"
             )
 
         # Brand-flow strip: small visible indicator that the active
@@ -12388,6 +12838,7 @@ Relay team broke club record"></textarea>
         if prof_for_strip is not None:
             try:
                 from mediahub.brand.palette import effective_palette as _eff_pal
+
                 _bs_pal = _eff_pal(
                     manual=prof_for_strip.brand_palette_manual or {},
                     extracted=prof_for_strip.brand_palette_extracted or {},
@@ -12404,8 +12855,8 @@ Relay team broke club record"></textarea>
                 _bs_swatches_parts.append(
                     f'<span aria-hidden="true" title="{_slot_esc} {_hex_esc}" '
                     f'style="display:inline-block;width:14px;height:14px;'
-                    f'border-radius:3px;background:{_hex_esc};'
-                    f'border:1px solid rgba(245,242,232,0.20);'
+                    f"border-radius:3px;background:{_hex_esc};"
+                    f"border:1px solid rgba(245,242,232,0.20);"
                     f'margin-right:6px;vertical-align:middle"></span>'
                 )
             if _bs_swatches_parts:
@@ -12414,19 +12865,19 @@ Relay team broke club record"></textarea>
                 _bs_swatches = "".join(_bs_swatches_parts)
                 brand_strip_html = (
                     f'<div style="margin-bottom:var(--sp-5);padding:10px 14px;'
-                    f'border:1px solid var(--border);border-radius:8px;'
-                    f'background:var(--surface);display:flex;align-items:center;'
+                    f"border:1px solid var(--border);border-radius:8px;"
+                    f"background:var(--surface);display:flex;align-items:center;"
                     f'gap:12px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim)">'
                     f'<span style="font-family:var(--font-mono,monospace);'
-                    f'font-size:10.5px;text-transform:uppercase;letter-spacing:0.12em;'
+                    f"font-size:10.5px;text-transform:uppercase;letter-spacing:0.12em;"
                     f'color:var(--ink-muted)">Brand in use</span>'
-                    f'{_bs_swatches}'
+                    f"{_bs_swatches}"
                     f'<span style="color:var(--ink);font-weight:600">{_name_esc}</span>'
                     f'<a href="{_setup_url}" '
                     f'style="margin-left:auto;font-size:12px;'
                     f'color:var(--ink-muted);text-decoration:underline">'
-                    f'Review brand setup &rarr;</a>'
-                    f'</div>'
+                    f"Review brand setup &rarr;</a>"
+                    f"</div>"
                 )
 
         body = (
@@ -12434,9 +12885,9 @@ Relay team broke club record"></textarea>
             '<span class="mh-hero-eyebrow">Create</span>'
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
-            '</section>'
-            f'{brand_strip_html}'
-            f'{tiles_section}'
+            "</section>"
+            f"{brand_strip_html}"
+            f"{tiles_section}"
         )
         return _layout("Create", body, active="create")
 
@@ -12477,13 +12928,15 @@ Relay team broke club record"></textarea>
         except Exception as e:
             log.warning(
                 "spotlight_build: build_spotlight_pack failed for %s/%s: %s",
-                run_id, swimmer_key, e,
+                run_id,
+                swimmer_key,
+                e,
             )
             pack = None
         if not pack:
             return _recovery_page(
                 "Swimmer not found",
-                f"No achievements were recorded for \"{swimmer_key}\" in this meet. "
+                f'No achievements were recorded for "{swimmer_key}" in this meet. '
                 "Pick another swimmer, or open the meet review to see who's in "
                 "the recognition report.",
                 eyebrow="Athlete spotlight",
@@ -12533,14 +12986,18 @@ Relay team broke club record"></textarea>
         fact_list = []
         for ra in approved[:8]:
             a = ra.get("achievement", {})
-            fact = {k: v for k, v in {
-                "event":    a.get("event"),
-                "time":     a.get("time"),
-                "place":    a.get("place"),
-                "headline": a.get("headline"),
-                "type":     a.get("type"),
-                "is_pb":    a.get("pb"),
-            }.items() if v not in (None, "", [], {})}
+            fact = {
+                k: v
+                for k, v in {
+                    "event": a.get("event"),
+                    "time": a.get("time"),
+                    "place": a.get("place"),
+                    "headline": a.get("headline"),
+                    "type": a.get("type"),
+                    "is_pb": a.get("pb"),
+                }.items()
+                if v not in (None, "", [], {})
+            }
             fact_list.append(fact)
 
         # English brief — no JSON envelope. Each approved moment is a
@@ -12563,16 +13020,19 @@ Relay team broke club record"></textarea>
             f"has hand-approved these moments for the spotlight post:\n"
             + "\n".join(f"- {l}" for l in moment_lines)
             + "\n\nWrite ONE single Instagram-ready caption: a hooky "
-              "opener, a tight body weaving the approved moments together, "
-              "and a closing line. Use the swimmer's first name. Don't "
-              "invent facts. ~700 characters max. Output the caption only."
+            "opener, a tight body weaving the approved moments together, "
+            "and a closing line. Use the swimmer's first name. Don't "
+            "invent facts. ~700 characters max. Output the caption only."
         )
         # Spotlight composite — pure AI, no template stitch. If the AI is
         # unavailable, render a clear "AI unavailable" page rather than
         # pretending to compose a post out of bullet points.
         from mediahub.ai_core import (
-            ask, ProviderNotConfigured, ProviderError,
+            ask,
+            ProviderNotConfigured,
+            ProviderError,
         )
+
         # Ground the spotlight caption in the active organisation's
         # full brand context: mandatory rules from uploaded guidelines,
         # identity (org type, country, sponsor), captured DNA (voice
@@ -12593,65 +13053,71 @@ Relay team broke club record"></textarea>
         try:
             spot_prof = _active_profile()
             from mediahub.brand.context import brand_context_for_llm
+
             brand_block = brand_context_for_llm(spot_prof) if spot_prof else ""
             if brand_block:
                 spotlight_system = brand_block + "\n\n" + tool_system
         except Exception:
             pass
         try:
-            composed_caption = (ask(
-                spotlight_system,
-                brief,
-                max_tokens=600,
-            ) or "").strip()
+            composed_caption = (
+                ask(
+                    spotlight_system,
+                    brief,
+                    max_tokens=600,
+                )
+                or ""
+            ).strip()
         except ProviderNotConfigured as e:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI features unavailable</h2>'
-                f'<p>Spotlight posts require AI. {_h(str(e))}</p>'
+                f"<p>Spotlight posts require AI. {_h(str(e))}</p>"
                 '<p class="muted">Contact your administrator to enable AI on '
-                'this deployment.</p>'
-                '</div>'
+                "this deployment.</p>"
+                "</div>"
             )
             return _layout("Build spotlight post", err_html, active="create"), 503
         except ProviderError as e:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI provider error</h2>'
-                f'<p>The AI provider couldn\'t finish the spotlight draft: '
-                f'<code>{_h(str(e))}</code>.</p>'
+                f"<p>The AI provider couldn't finish the spotlight draft: "
+                f"<code>{_h(str(e))}</code>.</p>"
                 '<p class="muted">Try again in a moment (rate limits typically '
-                'clear within seconds).</p>'
-                '</div>'
+                "clear within seconds).</p>"
+                "</div>"
             )
             return _layout("Build spotlight post", err_html, active="create"), 502
         if not composed_caption:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
                 '<h2 style="margin-top:0">AI returned no caption</h2>'
-                '<p>The provider responded but produced an empty caption. '
-                'Try regenerating.</p>'
-                '</div>'
+                "<p>The provider responded but produced an empty caption. "
+                "Try regenerating.</p>"
+                "</div>"
             )
             return _layout("Build spotlight post", err_html, active="create"), 502
 
         card = {
-            "platform":   "Instagram",
-            "caption":    composed_caption,
-            "hashtags":   ["#spotlight", "#swimming"],
+            "platform": "Instagram",
+            "caption": composed_caption,
+            "hashtags": ["#spotlight", "#swimming"],
             "confidence": 0.9,
-            "notes":      f"Composed from {len(approved)} approved achievement(s) for {swimmer_name}.",
-            "status":     "queue",
+            "notes": f"Composed from {len(approved)} approved achievement(s) for {swimmer_name}.",
+            "status": "queue",
         }
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
-            {"free_text":    f"Spotlight — {swimmer_name}",
-             "source":       "athlete_spotlight",
-             "swimmer_name": swimmer_name,
-             "meet_name":    meet_name,
-             "run_id":       run_id,
-             "swimmer_key":  swimmer_key,
-             "n_approved":   len(approved)},
+            {
+                "free_text": f"Spotlight — {swimmer_name}",
+                "source": "athlete_spotlight",
+                "swimmer_name": swimmer_name,
+                "meet_name": meet_name,
+                "run_id": run_id,
+                "swimmer_key": swimmer_key,
+                "n_approved": len(approved),
+            },
             [card],
             profile_id=_active_profile_id(),
         )
@@ -12751,7 +13217,7 @@ Relay team broke club record"></textarea>
 
         runs_opts = '<option value="">Select a meet&hellip;</option>'
         for r in recent_runs:
-            sel = 'selected' if r["id"] == run_id_param else ''
+            sel = "selected" if r["id"] == run_id_param else ""
             label = _h(r["meet_name"] or r["file_name"] or r["id"])
             runs_opts += f'<option value="{_h(r["id"])}" {sel}>{label}</option>'
 
@@ -12772,7 +13238,8 @@ Relay team broke club record"></textarea>
                 except Exception as e:
                     log.warning(
                         "spotlight: list_swimmers_in_run failed for %s: %s",
-                        run_id_param, e,
+                        run_id_param,
+                        e,
                     )
                     swimmers = []
                 if swimmers:
@@ -12780,13 +13247,15 @@ Relay team broke club record"></textarea>
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
                     for sw in swimmers:
-                        sp_url = url_for("spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"])
+                        sp_url = url_for(
+                            "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
+                        )
                         swimmers_html += f"""
 <a href="{sp_url}" style="display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
   <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
   <div style="font-size:12px;color:var(--ink-dim)">{sw["n_achievements"]} achievement{"s" if sw["n_achievements"] != 1 else ""}</div>
 </a>"""
-                    swimmers_html += '</div></div>'
+                    swimmers_html += "</div></div>"
                 else:
                     swimmers_html = '<div class="card"><p class="muted">No achievements found for this run. The recognition report may not be available.</p></div>'
 
@@ -12847,23 +13316,31 @@ Relay team broke club record"></textarea>
         except Exception as e:
             log.warning(
                 "spotlight_view: build_spotlight_pack failed for %s/%s: %s",
-                run_id, swimmer_key, e,
+                run_id,
+                swimmer_key,
+                e,
             )
             pack = None
         if not pack:
             return _recovery_page(
                 "Swimmer not found",
-                f"No achievements were recorded for \"{swimmer_key}\" in this meet. Pick another swimmer, or open the meet review to see who's in the recognition report.",
+                f'No achievements were recorded for "{swimmer_key}" in this meet. Pick another swimmer, or open the meet review to see who\'s in the recognition report.',
                 eyebrow="Athlete spotlight",
-                primary_cta=("Choose another swimmer", url_for("spotlight_landing") + f"?run_id={run_id}"),
+                primary_cta=(
+                    "Choose another swimmer",
+                    url_for("spotlight_landing") + f"?run_id={run_id}",
+                ),
                 secondary_cta=("Open review", url_for("review", run_id=run_id)),
             )
 
         _back_url = url_for("spotlight_landing") + f"?run_id={run_id}"
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _wf_api_base = url_for('api_workflow_set', run_id=run_id, card_id='CARD_ID').replace('CARD_ID', '')
+        _wf_api_base = url_for("api_workflow_set", run_id=run_id, card_id="CARD_ID").replace(
+            "CARD_ID", ""
+        )
         import json as _json
+
         _wf_api_base_js = _json.dumps(_wf_api_base)
 
         # Load workflow state for this run so spotlight cards reflect current status.
@@ -12877,11 +13354,11 @@ Relay team broke club record"></textarea>
 
         # Render achievements with full workflow controls.
         WF_PILL_STYLES = {
-            "queue":    ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
+            "queue": ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
             "approved": ("rgba(34,197,94,0.15)", "#22C55E"),
             "rejected": ("rgba(244,63,94,0.15)", "#F43F5E"),
-            "posted":   ("rgba(212,255,58,0.15)", "var(--accent)"),
-            "edited":   ("rgba(245,158,11,0.15)", "var(--warn)"),
+            "posted": ("rgba(212,255,58,0.15)", "var(--accent)"),
+            "edited": ("rgba(245,158,11,0.15)", "var(--warn)"),
         }
 
         rows_html = ""
@@ -12890,7 +13367,13 @@ Relay team broke club record"></textarea>
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
             rank = ra.get("rank", 0)
-            band_cls = {"elite": "warn", "strong": "info", "story": "", "nice": "", "not_worthy": "bad"}.get(band, "")
+            band_cls = {
+                "elite": "warn",
+                "strong": "info",
+                "story": "",
+                "nice": "",
+                "not_worthy": "bad",
+            }.get(band, "")
             headline = _h(a.get("headline", ""))
             angle = _h(_humanise(a.get("angle_hint", "") or ""))
             event = _h(a.get("event", ""))
@@ -12907,7 +13390,7 @@ Relay team broke club record"></textarea>
             cap_text = headline
             if angle:
                 cap_text = f"{headline}\\n\\n{angle}"
-            cap_text_safe = cap_text.replace('"', '&quot;')
+            cap_text_safe = cap_text.replace('"', "&quot;")
 
             # "Create graphic" — only for achievements with a real swim_id,
             # which api_create_graphic can resolve in the run's recognition
@@ -12921,12 +13404,12 @@ Relay team broke club record"></textarea>
                 sp_graphic_btn = (
                     f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" '
                     f"onclick=\"mhCreateGraphic(this, '{_h(_sp_g_url)}', '{card_id_safe}')\">"
-                    f'&#x2726; Create graphic</button>'
+                    f"&#x2726; Create graphic</button>"
                 )
                 sp_visual_panel = (
                     f'<div class="visual-panel" data-card="{card_id_safe}" '
                     f'style="display:none;margin-top:10px;padding:12px;'
-                    f'background:rgba(212,255,58,0.04);border:1px solid var(--border);'
+                    f"background:rgba(212,255,58,0.04);border:1px solid var(--border);"
                     f'border-radius:8px"></div>'
                 )
 
@@ -13046,36 +13529,48 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- Stub routes (now functional with real LLM + fallback) ---------
     _STUB_TYPE_BY_CLASS = {
         "WeekendPreviewStub": "weekend_preview",
-        "SponsorPostStub":    "sponsor_post",
-        "SessionUpdateStub":  "session_update",
-        "FreeTextStub":       "free_text",
+        "SponsorPostStub": "sponsor_post",
+        "SessionUpdateStub": "session_update",
+        "FreeTextStub": "free_text",
     }
 
     # Per-content-type hero copy. Centralised once so every stub form
     # (and its returned cards page) shares the same masthead voice. Each
     # entry is (eyebrow, italic-emphasised tail of the headline).
     _STUB_HEROES = {
-        "Event Preview":  ("Event preview", "preview it",
-            "Tell us the event, athletes to watch, and angles. We draft preview captions for Instagram, Stories, and Twitter — ready to edit and post."),
-        "Sponsor Post":   ("Sponsor post", "activate it",
-            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption."),
-        "Session Update": ("Session update", "live from poolside",
-            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing."),
-        "Free Text (quick)": ("Free text — quick", "in your own words",
-            "Paste a description of any moment. We identify the strongest social angles and draft platform-ready cards."),
+        "Event Preview": (
+            "Event preview",
+            "preview it",
+            "Tell us the event, athletes to watch, and angles. We draft preview captions for Instagram, Stories, and Twitter — ready to edit and post.",
+        ),
+        "Sponsor Post": (
+            "Sponsor post",
+            "activate it",
+            "Lead with the moment. Tell us the sponsor, the event, the key achievement, and brand rules. We make the partnership feel natural in every caption.",
+        ),
+        "Session Update": (
+            "Session update",
+            "live from poolside",
+            "Type the event, what's happened so far, and the current session. We draft short Stories and Twitter cards for mid-event sharing.",
+        ),
+        "Free Text (quick)": (
+            "Free text — quick",
+            "in your own words",
+            "Paste a description of any moment. We identify the strongest social angles and draft platform-ready cards.",
+        ),
     }
 
     def _stub_hero(title: str) -> str:
         meta = _STUB_HEROES.get(title)
         if not meta:
-            return f'<h1>{_h(title)}</h1>'
+            return f"<h1>{_h(title)}</h1>"
         eyebrow, italic_tail, lede = meta
         return (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             f'<span class="mh-hero-eyebrow">{_h(eyebrow)}</span>'
             f'<h1>Describe it.<br><em class="editorial">{_h(italic_tail)}.</em></h1>'
             f'<p class="lede">{_h(lede)}</p>'
-            '</section>'
+            "</section>"
         )
 
     def _llm_unavailable_banner() -> str:
@@ -13091,28 +13586,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         """
         try:
             from mediahub.media_ai.llm import is_available as _llm_avail
+
             if _llm_avail():
                 return ""
         except Exception:
             pass
         return (
             '<div role="status" style="margin-bottom:14px;padding:12px 14px;'
-            'border:1px solid rgba(255,180,84,0.45);border-radius:8px;'
-            'background:rgba(255,180,84,0.08);font-size:13px;'
+            "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+            "background:rgba(255,180,84,0.08);font-size:13px;"
             'color:var(--ink);line-height:1.5">'
             '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
-            'No cloud LLM provider is configured on this deployment. '
-            'Submitting this form will surface an AI-unavailable error. '
-            'Ask your administrator to set '
+            "No cloud LLM provider is configured on this deployment. "
+            "Submitting this form will surface an AI-unavailable error. "
+            "Ask your administrator to set "
             '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
-            'GEMINI_API_KEY</code> or '
+            "GEMINI_API_KEY</code> or "
             '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
-            'ANTHROPIC_API_KEY</code>.'
-            '</div>'
+            "ANTHROPIC_API_KEY</code>."
+            "</div>"
         )
 
-    def _render_stub(stub_cls_name: str, route_endpoint: str, title: str,
-                     active_tab: str = "create"):
+    def _render_stub(
+        stub_cls_name: str, route_endpoint: str, title: str, active_tab: str = "create"
+    ):
         """Shared handler for stub routes. GET renders form, POST renders cards."""
         try:
             from mediahub.club_platform import stubs as _stubs_mod
@@ -13143,6 +13640,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             photo = request.files.get("attached_photo")
             if photo and getattr(photo, "filename", ""):
                 import uuid as _uuid
+
                 ext = Path(photo.filename).suffix.lower() or ".jpg"
                 if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                     ext = ".jpg"
@@ -13181,12 +13679,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             continue
                         if a.profile_id != active_pid_for_pack:
                             continue
-                        resolved_assets.append({
-                            "id": a.id,
-                            "path": a.path,
-                            "filename": a.filename,
-                            "type": a.type,
-                        })
+                        resolved_assets.append(
+                            {
+                                "id": a.id,
+                                "path": a.path,
+                                "filename": a.filename,
+                                "type": a.type,
+                            }
+                        )
                 except Exception:
                     app.logger.exception("stub library picker resolve failed")
             if resolved_assets:
@@ -13210,8 +13710,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 generation_error = str(e)
                 # Show the actual error to the user — no silent fake card.
                 from mediahub.ai_core import (
-                    ProviderNotConfigured, ProviderError,
+                    ProviderNotConfigured,
+                    ProviderError,
                 )
+
                 if isinstance(e, ProviderNotConfigured):
                     return _recovery_page(
                         "AI features unavailable",
@@ -13241,6 +13743,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             saved = None
             try:
                 from mediahub.club_platform.stub_pack_store import save_pack
+
                 saved = save_pack(
                     _STUB_TYPE_BY_CLASS.get(stub_cls_name, "other"),
                     form_data,
@@ -13259,17 +13762,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _status_api_base = None
             _graphic_api_base = None
             if _pack_id:
-                _full = url_for("api_stub_pack_card_status",
-                                pack_id=_pack_id, card_idx=0)
+                _full = url_for("api_stub_pack_card_status", pack_id=_pack_id, card_idx=0)
                 _status_api_base = _full.rsplit("/", 2)[0]
                 # Same strip trick for the create-graphic base: render_cards_html
                 # appends "/<idx>/create-graphic" itself.
-                _full_g = url_for("api_stub_pack_create_graphic",
-                                  pack_id=_pack_id, card_idx=0)
+                _full_g = url_for("api_stub_pack_create_graphic", pack_id=_pack_id, card_idx=0)
                 _graphic_api_base = _full_g.rsplit("/", 2)[0]
             body = _stubs_mod.render_cards_html(
-                cards_payload, back, f"{title} — drafts",
-                pack_id=_pack_id, status_api_base=_status_api_base,
+                cards_payload,
+                back,
+                f"{title} — drafts",
+                pack_id=_pack_id,
+                status_api_base=_status_api_base,
                 graphic_api_base=_graphic_api_base,
             )
             if saved:
@@ -13295,8 +13799,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         picker_html = _render_library_picker_for_active_profile()
         if picker_html:
             body = body.replace(
-                'Leave blank to use a library photo or no photo.</p></div>',
-                'Or pick one from your library below.</p></div>' + picker_html,
+                "Leave blank to use a library photo or no photo.</p></div>",
+                "Or pick one from your library below.</p></div>" + picker_html,
                 1,
             )
         try:
@@ -13333,9 +13837,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'border:1px dashed var(--border);border-radius:6px">'
                 '<div style="font-weight:600;margin-bottom:4px">Pick from your library</div>'
                 '<p class="muted" style="font-size:12px;margin:0">'
-                f'No saved assets yet for this organisation. '
+                f"No saved assets yet for this organisation. "
                 f'<a href="{_h(_ml_url)}" style="text-decoration:underline">'
-                'Open your media library &rarr;</a></p></div>'
+                "Open your media library &rarr;</a></p></div>"
             )
         tiles = []
         for a in assets[:60]:
@@ -13345,7 +13849,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 continue
             file_url = url_for("api_media_library_file", asset_id=aid)
             label_bits = []
-            for n in (ad.get("linked_athlete_names") or []):
+            for n in ad.get("linked_athlete_names") or []:
                 if n:
                     label_bits.append(str(n))
                     break
@@ -13354,7 +13858,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             label = _h(" · ".join(label_bits) or (ad.get("filename") or "")[:40])
             tiles.append(
                 '<label class="lib-pick" style="position:relative;cursor:pointer;'
-                'border:1px solid var(--border);border-radius:6px;overflow:hidden;'
+                "border:1px solid var(--border);border-radius:6px;overflow:hidden;"
                 'background:#0a0a0a;display:block">'
                 f'<input type="checkbox" name="library_asset_id" value="{_h(aid)}" '
                 'style="position:absolute;top:6px;left:6px;z-index:2;cursor:pointer"/>'
@@ -13362,7 +13866,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="display:block;width:100%;height:90px;object-fit:cover"/>'
                 f'<div style="padding:6px 8px;font-size:11px;color:var(--ink-dim);'
                 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-                f'{label}</div></label>'
+                f"{label}</div></label>"
             )
         if not tiles:
             return ""
@@ -13374,12 +13878,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
             '<div style="font-weight:600">Pick from your library</div>'
             f'<a href="{_h(_ml_url)}" style="font-size:12px;text-decoration:underline;color:var(--ink-muted)">'
-            'Manage library &rarr;</a></div>'
+            "Manage library &rarr;</a></div>"
             '<p class="muted" style="font-size:11px;margin:0 0 10px 0">'
             "Tick photos already saved to this organisation's library. "
-            'Selected photos flow into the visual generator without re-upload.</p>'
+            "Selected photos flow into the visual generator without re-upload.</p>"
             '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">'
-            f'{grid}</div></div>'
+            f"{grid}</div></div>"
         )
 
     @app.route("/weekend-preview", methods=["GET", "POST"])
@@ -13404,6 +13908,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/free-text", methods=["GET"])
     def free_text_chat_page():
         from mediahub.free_text_chat.session import list_sessions
+
         # Fail-soft: a corrupted chat store would otherwise 500 the
         # Free-text landing page. Treat the failure as "no sessions
         # visible" so the user can still start a new chat.
@@ -13418,9 +13923,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         for it in sessions:
             view_url = url_for("free_text_chat_view", chat_id=it["chat_id"])
             ts = (it.get("updated_at") or "")[:19].replace("T", " ")
-            badge = ('<span class="tag good" style="font-size:10px">brief accepted</span>'
-                     if it.get("accepted") else
-                     '<span class="tag" style="font-size:10px">draft</span>')
+            badge = (
+                '<span class="tag good" style="font-size:10px">brief accepted</span>'
+                if it.get("accepted")
+                else '<span class="tag" style="font-size:10px">draft</span>'
+            )
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it.get("title") or "Untitled chat")}</a></td>'
                 f'<td>{badge}</td>'
@@ -13480,12 +13987,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if request.method == "GET":
             return redirect(url_for("free_text_chat_page"))
         from mediahub.free_text_chat.session import create_session
+
         s = create_session()
         return redirect(url_for("free_text_chat_view", chat_id=s.chat_id))
 
     @app.route("/free-text/chat/<chat_id>", methods=["GET"])
     def free_text_chat_view(chat_id):
         from mediahub.free_text_chat.session import load_session
+
         s = load_session(chat_id)
         if not s:
             return _recovery_page(
@@ -13504,7 +14013,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 continue  # internal — not shown to user
             role = m.get("role", "")
             text = _h(m.get("content", "") or "")
-            is_user = (role == "user")
+            is_user = role == "user"
             who = "You" if is_user else "Assistant"
             rail = "var(--lane)" if is_user else "var(--ink-faint)"
             msgs_html += (
@@ -13517,6 +14026,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="font-family:var(--font-body);font-size:14px;color:var(--ink);'
                 f'white-space:pre-wrap;line-height:1.5">{text}</div></div>'
             )
+
         def _format_brief_html(brief: dict) -> str:
             """Render a brief as a structured field list rather than a raw
             JSON dump. Round-7 cleanup: the audit flagged the previous
@@ -13524,12 +14034,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             leak — users were staring at curly braces and indentation
             instead of the actual content they were approving."""
             if not isinstance(brief, dict):
-                return f'<p>{_h(str(brief))}</p>'
+                return f"<p>{_h(str(brief))}</p>"
             rows = []
+
             # Field-name humanisation: snake_case -> Title Case sentence,
             # so the LLM's structured output reads as English.
             def _label(key: str) -> str:
                 return key.replace("_", " ").strip().capitalize()
+
             for k, v in brief.items():
                 if k.startswith("_"):
                     continue
@@ -13543,7 +14055,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 elif isinstance(v, dict):
                     sub_items = "".join(
                         f"<li><strong>{_h(_label(sk))}:</strong> {_h(str(sv))}</li>"
-                        for sk, sv in v.items() if not sk.startswith("_")
+                        for sk, sv in v.items()
+                        if not sk.startswith("_")
                     )
                     body = f'<ul style="margin:4px 0 0 var(--sp-5);padding:0">{sub_items}</ul>'
                 elif v is None or v == "":
@@ -13554,7 +14067,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'<div style="display:grid;grid-template-columns:140px 1fr;gap:var(--sp-3);padding:var(--sp-2) 0;border-bottom:1px solid var(--hairline)">'
                     f'<div class="strap" style="color:var(--ink-muted);padding:0">{label}</div>'
                     f'<div style="font-size:14px;color:var(--ink);line-height:1.5">{body}</div>'
-                    '</div>'
+                    "</div>"
                 )
             return "".join(rows) if rows else '<p class="muted">Empty brief.</p>'
 
@@ -13636,6 +14149,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return None
         try:
             from mediahub.brand.palette import effective_palette as _eff
+
             eff = _eff(
                 manual=prof.brand_palette_manual or {},
                 extracted=prof.brand_palette_extracted or {},
@@ -13643,25 +14157,26 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         except Exception:
             eff = {}
         return {
-            "name":          (prof.display_name or "").strip(),
-            "short_name":    (prof.short_name or "").strip(),
-            "org_type":      (prof.org_type or "").strip(),
-            "tone":          (prof.tone or "").strip(),
-            "tone_notes":    (prof.tone_notes or "").strip(),
-            "exemplars":     list(prof.exemplar_captions or [])[:6],
-            "sponsor_name":  (prof.sponsor_name or "").strip(),
+            "name": (prof.display_name or "").strip(),
+            "short_name": (prof.short_name or "").strip(),
+            "org_type": (prof.org_type or "").strip(),
+            "tone": (prof.tone or "").strip(),
+            "tone_notes": (prof.tone_notes or "").strip(),
+            "exemplars": list(prof.exemplar_captions or [])[:6],
+            "sponsor_name": (prof.sponsor_name or "").strip(),
             "sponsor_rules": (prof.sponsor_guidelines or "").strip(),
             "voice_summary": (prof.brand_voice_summary or "")[:600],
-            "keywords":      list(prof.brand_keywords or [])[:8],
-            "phrases_to_use":   list(prof.brand_phrases_to_use or [])[:6],
+            "keywords": list(prof.brand_keywords or [])[:8],
+            "phrases_to_use": list(prof.brand_phrases_to_use or [])[:6],
             "phrases_to_avoid": list(prof.brand_phrases_to_avoid or [])[:6],
-            "palette":       eff,
+            "palette": eff,
         }
 
     @app.route("/free-text/chat/<chat_id>/send", methods=["POST"])
     def free_text_chat_send(chat_id):
         from mediahub.free_text_chat.session import load_session, save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
+
         s = load_session(chat_id)
         if not s:
             return _recovery_page(
@@ -13684,15 +14199,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/free-text/chat/<chat_id>/accept", methods=["POST"])
     def free_text_chat_accept(chat_id):
         from mediahub.free_text_chat.session import load_session, save_session
+
         s = load_session(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
         if s.pending_brief:
             s.accepted_brief = s.pending_brief
             s.pending_brief = None
-            s.messages.append({"role": "system_note",
-                               "content": "[user accepted the brief]",
-                               "ts": datetime.now(timezone.utc).isoformat()})
+            s.messages.append(
+                {
+                    "role": "system_note",
+                    "content": "[user accepted the brief]",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             save_session(s)
         return redirect(url_for("free_text_chat_view", chat_id=chat_id))
 
@@ -13700,6 +14220,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def free_text_chat_decline(chat_id):
         from mediahub.free_text_chat.session import load_session, save_session
         from mediahub.free_text_chat.agent import next_assistant_turn
+
         s = load_session(chat_id)
         if not s:
             return redirect(url_for("free_text_chat_page"))
@@ -13723,20 +14244,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         approval pills + export flow apply."""
         from mediahub.free_text_chat.session import load_session
         from mediahub.club_platform.stub_pack_store import save_pack
+
         s = load_session(chat_id)
         if not s or not s.accepted_brief:
             return redirect(url_for("free_text_chat_view", chat_id=chat_id))
         brief = s.accepted_brief
         card = {
-            "platform":   brief.get("platform") or "Instagram",
-            "caption":    "\n\n".join([
-                p for p in [brief.get("headline", ""), brief.get("body", "")]
-                if p
-            ]).strip(),
-            "hashtags":   brief.get("hashtags") or [],
+            "platform": brief.get("platform") or "Instagram",
+            "caption": "\n\n".join(
+                [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
+            ).strip(),
+            "hashtags": brief.get("hashtags") or [],
             "confidence": 0.85,
-            "notes":      brief.get("visual_concept", "") or "",
-            "status":     "queue",
+            "notes": brief.get("visual_concept", "") or "",
+            "status": "queue",
         }
         pack_form_data = {
             "free_text": s.title or "Chat brief",
@@ -13771,21 +14292,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     pack_form_data["profile_id"] = active_pid_for_pack
             except Exception:
                 app.logger.exception("free-text chat library picker resolve failed")
-        saved = save_pack("free_text", pack_form_data, [card],
-                          profile_id=_active_profile_id())
+        saved = save_pack("free_text", pack_form_data, [card], profile_id=_active_profile_id())
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
 
     # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
-        "free_text":        "Free Text",
-        "weekend_preview":  "Event Preview",
-        "sponsor_post":     "Sponsor Post",
-        "session_update":   "Session Update",
+        "free_text": "Free Text",
+        "weekend_preview": "Event Preview",
+        "sponsor_post": "Sponsor Post",
+        "session_update": "Session Update",
     }
 
     @app.route("/drafts")
     def stub_packs_list():
         from mediahub.club_platform.stub_pack_store import list_packs
+
         # Fail-soft: a corrupted pack store would otherwise 500 the
         # Drafts page. Treat the failure as "no packs visible" and tell
         # the user the store wasn't reachable so they don't think their
@@ -13871,6 +14392,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def stub_pack_view(pack_id):
         from mediahub.club_platform.stub_pack_store import load_pack
         from mediahub.club_platform.stubs import render_cards_html
+
         # ``load_pack`` reads from the saved-drafts store; a corrupt
         # row or missing file should land on the same recovery hero as a
         # genuinely-deleted draft, not a 500.
@@ -13900,9 +14422,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         back_url = url_for("stub_packs_list")
         # /api/drafts/<pid>/card/<idx>/status → strip "/<idx>/status" so
         # render_cards_html can append the correct per-card suffix itself.
-        _full_status_url = url_for(
-            "api_stub_pack_card_status", pack_id=pack_id, card_idx=0
-        )
+        _full_status_url = url_for("api_stub_pack_card_status", pack_id=pack_id, card_idx=0)
         _status_api_base = _full_status_url.rsplit("/", 2)[0]
         _graphic_api_base = url_for(
             "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
@@ -13917,22 +14437,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
-        regenerate_url = url_for({
-            "free_text":       "free_text_chat_page",
-            "weekend_preview": "stub_weekend_preview",
-            "sponsor_post":    "stub_sponsor_post",
-            "session_update":  "stub_session_update",
-        }.get(stub_type, "free_text_chat_page"))
+        regenerate_url = url_for(
+            {
+                "free_text": "free_text_chat_page",
+                "weekend_preview": "stub_weekend_preview",
+                "sponsor_post": "stub_sponsor_post",
+                "session_update": "stub_session_update",
+            }.get(stub_type, "free_text_chat_page")
+        )
         regen_api = url_for("api_stub_pack_regenerate", pack_id=pack_id)
         footer = (
             f'<div style="margin-top:24px;display:flex;gap:10px;flex-wrap:wrap">'
             f'<button type="button" class="btn" onclick="mhRegenerateDraft(this, {repr(regen_api)})" '
             f'title="Re-run the content engine — the AI Director plans fresh angles, avoiding what you already have">'
-            f'&#x21BA; Regenerate (fresh angles)</button>'
+            f"&#x21BA; Regenerate (fresh angles)</button>"
             f'<a class="btn secondary" href="{export_url}">Export as text</a>'
             f'<a class="btn secondary" href="{regenerate_url}">Generate new draft</a>'
             f'<a class="btn secondary" href="{back_url}">&larr; All drafts</a>'
-            f'</div>'
+            f"</div>"
         )
         # Prepend a context band showing the type + timestamp.
         ts = (rec.get("created_at") or "")[:19].replace("T", " ")
@@ -13954,7 +14476,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         cards_html = cards_html.replace(
             f'<div style="margin-top:24px;display:flex;gap:10px">'
             f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
-            f'</div>',
+            f"</div>",
             footer,
             1,
         )
@@ -13994,7 +14516,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if a.profile_id != active_pid and not (a.profile_id or "").startswith("_run_"):
                 continue
             file_url = url_for("api_media_library_file", asset_id=a.id)
-            label = _h((a.linked_athlete_names[0] if a.linked_athlete_names else a.type) or a.filename)
+            label = _h(
+                (a.linked_athlete_names[0] if a.linked_athlete_names else a.type) or a.filename
+            )
             tiles.append(
                 f'<div style="display:inline-flex;flex-direction:column;align-items:center;'
                 f'gap:4px;width:90px">'
@@ -14003,7 +14527,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'border:1px solid var(--border);background:#0a0a0a"/>'
                 f'<div style="font-size:10px;color:var(--ink-muted);text-align:center;'
                 f'width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-                f'{label}</div></div>'
+                f"{label}</div></div>"
             )
         if not tiles:
             return ""
@@ -14021,6 +14545,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/drafts/<pack_id>/export.txt")
     def stub_pack_export(pack_id):
         from mediahub.club_platform.stub_pack_store import load_pack, export_pack_text
+
         rec = load_pack(pack_id)
         if not _can_access_pack(rec, _active_profile_id()):
             rec = None
@@ -14041,16 +14566,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Resolve the pack first, gate on ownership, then delegate. A
         # foreign session sees the same redirect either way.
         from mediahub.club_platform.stub_pack_store import (
-            load_pack, delete_pack,
+            load_pack,
+            delete_pack,
         )
+
         rec = load_pack(pack_id)
         if not _can_access_pack(rec, _active_profile_id()):
             return redirect(url_for("stub_packs_list"))
         delete_pack(pack_id)
         return redirect(url_for("stub_packs_list"))
 
-    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/status",
-               methods=["POST"])
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/status", methods=["POST"])
     def api_stub_pack_card_status(pack_id, card_idx):
         """Approve/reject a single card inside a saved stub pack.
 
@@ -14060,8 +14586,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         so reviewers can come back to it across sessions.
         """
         from mediahub.club_platform.stub_pack_store import (
-            load_pack, update_card_status,
+            load_pack,
+            update_card_status,
         )
+
         # Tenant-isolation guard: only the owning org may mutate card
         # status. Probe the pack first; if it's foreign, return the same
         # generic 400 as a malformed status string so existence isn't
@@ -14075,15 +14603,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return jsonify({"ok": False, "error": "invalid_request"}), 400
         cards = rec.get("cards") or []
         card = cards[card_idx] if 0 <= card_idx < len(cards) else {}
-        return jsonify({
-            "ok": True,
-            "pack_id": pack_id,
-            "card_idx": card_idx,
-            "status": card.get("status", status),
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "pack_id": pack_id,
+                "card_idx": card_idx,
+                "status": card.get("status", status),
+            }
+        )
 
-    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic",
-               methods=["POST"])
+    @app.route("/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic", methods=["POST"])
     def api_stub_pack_create_graphic(pack_id, card_idx):
         """Render a branded text-led graphic for one caption-only stub card.
 
@@ -14099,6 +14628,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return jsonify({"error": "v8_unavailable"}), 503
         from flask import request as _req
         from mediahub.club_platform.stub_pack_store import load_pack
+
         rec = load_pack(pack_id)
         # Tenant isolation: only the owning org may render its drafts. Same
         # generic 404 as a real miss so existence isn't confirmable.
@@ -14157,19 +14687,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
         except Exception:
             media_assets = []
-        _photo_types = {"athlete_action", "athlete_headshot", "team_photo",
-                        "venue_photo", "other"}
+        _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "venue_photo", "other"}
         available_photos = []
         for _ad in media_assets:
             _d = _ad if isinstance(_ad, dict) else {}
             if _d.get("id") and _d.get("type") in _photo_types:
                 _names = _d.get("linked_athlete_names") or []
-                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace("_", " ")
-                available_photos.append({
-                    "id": _d["id"],
-                    "url": url_for("api_media_library_file", asset_id=_d["id"]),
-                    "label": _label,
-                })
+                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace(
+                    "_", " "
+                )
+                available_photos.append(
+                    {
+                        "id": _d["id"],
+                        "url": url_for("api_media_library_file", asset_id=_d["id"]),
+                        "label": _label,
+                    }
+                )
 
         # The AI Director chooses the full visual treatment (palette role,
         # background, accent, typography, composition, hook, mood) — same as
@@ -14183,20 +14716,26 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         try:
             import dataclasses as _dc
             from mediahub.creative_brief.generator import random_variation_profile
+
             vp = random_variation_profile(angle="recap_mention")
             role = vp.palette_role_index if vp.palette_role_index in (0, 1, 3) else 0
             variation_profile = _dc.replace(
-                vp, layout_family="text_led_recap",
-                photo_treatment="no-photo", palette_role_index=role,
+                vp,
+                layout_family="text_led_recap",
+                photo_treatment="no-photo",
+                palette_role_index=role,
             )
         except Exception:
             variation_profile = None
 
         try:
             from mediahub.content_pack_visual.integration import create_visual_for_item
+
             res = create_visual_for_item(
-                item, brand_kit,
-                profile_id=profile_id, run_id=run_id,
+                item,
+                brand_kit,
+                profile_id=profile_id,
+                run_id=run_id,
                 media_assets=media_assets,
                 formats=formats_kw,
                 variation_profile=variation_profile,
@@ -14206,9 +14745,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
-        return jsonify({"ok": True, "available_photos": available_photos,
-                        "chosen_asset_id": chosen_asset_id,
-                        "no_photo": force_no_photo, **res})
+        return jsonify(
+            {
+                "ok": True,
+                "available_photos": available_photos,
+                "chosen_asset_id": chosen_asset_id,
+                "no_photo": force_no_photo,
+                **res,
+            }
+        )
 
     @app.route("/api/drafts/<pack_id>/regenerate", methods=["POST"])
     def api_stub_pack_regenerate(pack_id):
@@ -14239,8 +14784,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         n_cards = max(1, min(len(prior) or 3, 6))
         try:
             res = generate_content(
-                content_type=stub_type, brief=brief, requirements=requirements,
-                recent_cards=recent, n_cards=n_cards,
+                content_type=stub_type,
+                brief=brief,
+                requirements=requirements,
+                recent_cards=recent,
+                n_cards=n_cards,
             )
         except ProviderNotConfigured as e:
             return jsonify({"ok": False, "error": "no_provider", "message": str(e)}), 503
@@ -14254,8 +14802,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         replace_cards(pack_id, new_cards)
         # The draft view is a GET page that re-renders from the saved pack, so
         # the client just reloads to show the fresh set.
-        return jsonify({"ok": True, "n_cards": len(new_cards),
-                        "redirect": url_for("stub_pack_view", pack_id=pack_id)})
+        return jsonify(
+            {
+                "ok": True,
+                "n_cards": len(new_cards),
+                "redirect": url_for("stub_pack_view", pack_id=pack_id),
+            }
+        )
 
     @app.route("/add-input")
     def add_input_page():
@@ -14283,16 +14836,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             ("linkedin", "LinkedIn"),
         ]
         _TONES = [
-            ("warm-club", "Warm &amp; community &mdash; conversational, member-facing, first-name use"),
-            ("hype", "Energetic &amp; hype &mdash; race-day language, exclamation marks, high energy"),
+            (
+                "warm-club",
+                "Warm &amp; community &mdash; conversational, member-facing, first-name use",
+            ),
+            (
+                "hype",
+                "Energetic &amp; hype &mdash; race-day language, exclamation marks, high energy",
+            ),
             ("data-led", "Data-led &mdash; numbers-first, precise, sponsor-friendly"),
         ]
 
         saved_msg = ""
-        capture_preview = ""      # rendered preview HTML when a capture has just run
-        capture_error = ""        # rendered error banner when capture failed
-        voice_preview = ""        # rendered preview HTML after voice analysis
-        voice_error = ""          # rendered error banner when voice analysis failed
+        capture_preview = ""  # rendered preview HTML when a capture has just run
+        capture_error = ""  # rendered error banner when capture failed
+        voice_preview = ""  # rendered preview HTML after voice analysis
+        voice_error = ""  # rendered error banner when voice analysis failed
         # The capture/voice previews are kept in-memory only &mdash; the user must
         # click "Save organisation" to persist them (no silent writes).
         if request.method == "POST":
@@ -14310,12 +14869,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if not target_url:
                     capture_error = (
                         '<p class="tag bad" style="margin-bottom:20px">'
-                        'Enter a website URL to analyse.</p>'
+                        "Enter a website URL to analyse.</p>"
                     )
                     profile = existing
                 else:
                     try:
                         from mediahub.brand.dna_capture import capture_brand_dna
+
                         result = capture_brand_dna(target_url, force=False)
                     except Exception as e:
                         result = {"brand_capture_status": f"error: {e}"}
@@ -14325,11 +14885,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         # the preview shows them, but DON'T save until the user
                         # clicks "Save organisation".
                         for k in (
-                            "brand_voice_summary", "brand_keywords",
-                            "brand_palette_extracted", "brand_logo_url",
-                            "brand_typography_hint", "brand_phrases_to_avoid",
-                            "brand_phrases_to_use", "brand_source_url",
-                            "brand_captured_at", "brand_capture_status",
+                            "brand_voice_summary",
+                            "brand_keywords",
+                            "brand_palette_extracted",
+                            "brand_logo_url",
+                            "brand_typography_hint",
+                            "brand_phrases_to_avoid",
+                            "brand_phrases_to_use",
+                            "brand_source_url",
+                            "brand_captured_at",
+                            "brand_capture_status",
                         ):
                             if k in result:
                                 setattr(existing, k, result[k])
@@ -14337,11 +14902,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         # the existing profile is still on the default colours.
                         pal = result.get("brand_palette_extracted") or {}
                         if pal.get("primary") and existing.brand_primary in (
-                            "", "#0A2540", "#A30D2D",
+                            "",
+                            "#0A2540",
+                            "#A30D2D",
                         ):
                             existing.brand_primary = pal["primary"]
                         if pal.get("secondary") and existing.brand_secondary in (
-                            "", "#000000",
+                            "",
+                            "#000000",
                         ):
                             existing.brand_secondary = pal["secondary"]
                         note = (
@@ -14349,12 +14917,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "Save organisation to persist."
                             if status == "ok"
                             else "Captured from website (palette and logo only; "
-                                 "AI provider not configured, so the voice "
-                                 "summary and keywords are empty). Edit and save."
+                            "AI provider not configured, so the voice "
+                            "summary and keywords are empty). Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">'
-                            f'{_h(note)}</p>'
+                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
                         )
                     else:
                         # Surface the failure clearly but keep the form usable.
@@ -14363,8 +14930,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "fetch_failed": "Could not reach that URL &mdash; check it loads in a browser.",
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">'
-                            f'{_h(reason)}</p>'
+                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
                         )
                 profile = existing
 
@@ -14379,12 +14945,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if not target_url and not social_links:
                     capture_error = (
                         '<p class="tag bad" style="margin-bottom:20px">'
-                        'Enter a website URL or at least one social link to analyse.</p>'
+                        "Enter a website URL or at least one social link to analyse.</p>"
                     )
                     profile = existing
                 else:
                     try:
                         from mediahub.brand.social_dna import capture_from_socials
+
                         result = capture_from_socials(
                             social_links=social_links,
                             website_url=target_url,
@@ -14395,11 +14962,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     status = (result or {}).get("brand_capture_status", "")
                     if status in ("ok", "ok_heuristic"):
                         for k in (
-                            "brand_voice_summary", "brand_keywords",
-                            "brand_palette_extracted", "brand_logo_url",
-                            "brand_typography_hint", "brand_phrases_to_avoid",
-                            "brand_phrases_to_use", "brand_source_url",
-                            "brand_captured_at", "brand_capture_status",
+                            "brand_voice_summary",
+                            "brand_keywords",
+                            "brand_palette_extracted",
+                            "brand_logo_url",
+                            "brand_typography_hint",
+                            "brand_phrases_to_avoid",
+                            "brand_phrases_to_use",
+                            "brand_source_url",
+                            "brand_captured_at",
+                            "brand_capture_status",
                         ):
                             if k in result:
                                 setattr(existing, k, result[k])
@@ -14408,7 +14980,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             existing.voice_profile = vp
                         existing.social_links = social_links
                         pal = result.get("brand_palette_extracted") or {}
-                        if pal.get("primary") and existing.brand_primary in ("", "#0A2540", "#A30D2D"):
+                        if pal.get("primary") and existing.brand_primary in (
+                            "",
+                            "#0A2540",
+                            "#A30D2D",
+                        ):
                             existing.brand_primary = pal["primary"]
                         if pal.get("secondary") and existing.brand_secondary in ("", "#000000"):
                             existing.brand_secondary = pal["secondary"]
@@ -14417,11 +14993,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "and click Save organisation to persist."
                             if status == "ok"
                             else "Re-analysed (no live signal from the sources we tried). "
-                                 "Edit and save."
+                            "Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">'
-                            f'{_h(note)}</p>'
+                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
                         )
                     else:
                         reason = {
@@ -14433,8 +15008,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             ),
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">'
-                            f'{_h(reason)}</p>'
+                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
                         )
                 profile = existing
 
@@ -14444,7 +15018,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 if not raw_examples:
                     voice_error = (
                         '<p class="tag bad" style="margin-bottom:20px">'
-                        'Paste at least 3 captions (one per line) to analyse voice.</p>'
+                        "Paste at least 3 captions (one per line) to analyse voice.</p>"
                     )
                     profile = existing
                 else:
@@ -14452,43 +15026,52 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     if len(examples) < 2:
                         voice_error = (
                             '<p class="tag bad" style="margin-bottom:20px">'
-                            'Paste at least 3 captions to get meaningful results.</p>'
+                            "Paste at least 3 captions to get meaningful results.</p>"
                         )
                         profile = existing
                     else:
                         try:
                             from mediahub.brand.voice_imitation import analyse_examples as _analyse
+
                             vp = _analyse(examples)
                         except Exception as exc:
                             vp = {}
                             voice_error = (
                                 f'<p class="tag bad" style="margin-bottom:20px">'
-                                f'Analysis failed: {_h(str(exc))}</p>'
+                                f"Analysis failed: {_h(str(exc))}</p>"
                             )
                         if vp:
                             existing.voice_examples = examples[:20]
                             existing.voice_profile = vp
                             voice_preview = (
                                 '<p class="tag info" style="margin-bottom:20px">'
-                                'Voice profile analysed &mdash; review below and click '
-                                'Save organisation to persist.</p>'
+                                "Voice profile analysed &mdash; review below and click "
+                                "Save organisation to persist.</p>"
                             )
                     profile = existing
 
             else:
                 # ---- Save organisation ----
-                existing.display_name = (request.form.get("display_name") or existing.display_name).strip()
+                existing.display_name = (
+                    request.form.get("display_name") or existing.display_name
+                ).strip()
                 existing.short_name = (request.form.get("short_name") or "").strip()
                 existing.org_type = (request.form.get("org_type") or "other").strip()
                 existing.governing_body = (request.form.get("governing_body") or "").strip()
                 existing.country = (request.form.get("country") or "").strip()
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
-                existing.brand_primary = (request.form.get("brand_primary") or existing.brand_primary or "#0A2540").strip()
-                existing.brand_secondary = (request.form.get("brand_secondary") or existing.brand_secondary or "#000000").strip()
+                existing.brand_primary = (
+                    request.form.get("brand_primary") or existing.brand_primary or "#0A2540"
+                ).strip()
+                existing.brand_secondary = (
+                    request.form.get("brand_secondary") or existing.brand_secondary or "#000000"
+                ).strip()
                 existing.tone = (request.form.get("tone") or "warm-club").strip()
                 existing.caption_tone = existing.tone
-                existing.platforms = [p.strip() for p in request.form.getlist("platforms") if p.strip()]
+                existing.platforms = [
+                    p.strip() for p in request.form.getlist("platforms") if p.strip()
+                ]
                 existing.tone_notes = (request.form.get("tone_notes") or "").strip()
                 raw_exemplars = (request.form.get("exemplar_captions") or "").strip()
                 if raw_exemplars:
@@ -14498,6 +15081,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     existing.exemplar_captions = []
                 existing.sponsor_name = (request.form.get("sponsor_name") or "").strip()
                 existing.sponsor_guidelines = (request.form.get("sponsor_guidelines") or "").strip()
+
                 def _hidden_list(name: str) -> list[str]:
                     raw = (request.form.get(name) or "").strip()
                     if not raw:
@@ -14522,12 +15106,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         return {}
                     return {}
 
-                existing.brand_voice_summary = (request.form.get("brand_voice_summary") or "").strip()
+                existing.brand_voice_summary = (
+                    request.form.get("brand_voice_summary") or ""
+                ).strip()
                 existing.brand_logo_url = (request.form.get("brand_logo_url") or "").strip()
-                existing.brand_typography_hint = (request.form.get("brand_typography_hint") or "").strip()
-                existing.brand_source_url = (request.form.get("brand_source_url_saved") or "").strip()
+                existing.brand_typography_hint = (
+                    request.form.get("brand_typography_hint") or ""
+                ).strip()
+                existing.brand_source_url = (
+                    request.form.get("brand_source_url_saved") or ""
+                ).strip()
                 existing.brand_captured_at = (request.form.get("brand_captured_at") or "").strip()
-                existing.brand_capture_status = (request.form.get("brand_capture_status") or "").strip()
+                existing.brand_capture_status = (
+                    request.form.get("brand_capture_status") or ""
+                ).strip()
                 existing.brand_keywords = _hidden_list("brand_keywords_json")
                 existing.brand_phrases_to_use = _hidden_list("brand_phrases_to_use_json")
                 existing.brand_phrases_to_avoid = _hidden_list("brand_phrases_to_avoid_json")
@@ -14536,6 +15128,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     analyse_examples as _analyse_voice,
                     redact_pii as _redact_pii,
                 )
+
                 raw_voice_examples = (request.form.get("voice_examples") or "").strip()
                 if raw_voice_examples:
                     voice_lines = [
@@ -14555,12 +15148,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     existing.voice_profile = _analyse_voice(existing.voice_examples)
                     saved_msg = (
                         '<p class="tag good" style="margin-bottom:20px">'
-                        'Voice profile analysed and saved.</p>'
+                        "Voice profile analysed and saved.</p>"
                     )
                 else:
                     saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">'
-                        'Organisation saved.</p>'
+                        '<p class="tag good" style="margin-bottom:20px">' "Organisation saved.</p>"
                     )
                 # Persist any social-link edits made on the full form.
                 social_edits: dict[str, str] = {}
@@ -14574,11 +15166,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 # edits the org. Single LLM call; consumers cache-read.
                 try:
                     from mediahub.brand.derived import derive_operating_profile
+
                     existing.brand_operating_profile = derive_operating_profile(existing)
                 except Exception:
                     existing.brand_operating_profile = {
-                        "tone_prose": {}, "achievement_priorities": {},
-                        "type_phrases": {}, "artefact_voice": {},
+                        "tone_prose": {},
+                        "achievement_priorities": {},
+                        "type_phrases": {},
+                        "artefact_voice": {},
                         "status": "error",
                     }
                 save_profile(existing)
@@ -14590,10 +15185,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # GET: prefer the session-pinned profile; fall back to the
             # most-recent on disk, then to a blank one for the empty state.
             pid_pin = _active_profile_id()
-            profile = (load_profile(pid_pin) if pid_pin else None)
+            profile = load_profile(pid_pin) if pid_pin else None
             if profile is None:
                 profiles = list_profiles()
-                profile = profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
+                profile = (
+                    profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
+                )
 
         # Build select/checkbox HTML helpers
         def _opt(val, label, selected):
@@ -14602,19 +15199,29 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         def _radio(name, val, label, checked):
             chk = " checked" if checked else ""
-            return (f'<label class="mh-choice mh-choice-block">'
-                    f'<input type="radio" name="{_h(name)}" value="{_h(val)}"{chk}>'
-                    f'<span>{label}</span></label>')
+            return (
+                f'<label class="mh-choice mh-choice-block">'
+                f'<input type="radio" name="{_h(name)}" value="{_h(val)}"{chk}>'
+                f"<span>{label}</span></label>"
+            )
 
         def _cb(name, val, label, checked):
             chk = " checked" if checked else ""
-            return (f'<label class="mh-choice mh-choice-inline">'
-                    f'<input type="checkbox" name="{_h(name)}" value="{_h(val)}"{chk}>'
-                    f'<span>{_h(label)}</span></label>')
+            return (
+                f'<label class="mh-choice mh-choice-inline">'
+                f'<input type="checkbox" name="{_h(name)}" value="{_h(val)}"{chk}>'
+                f"<span>{_h(label)}</span></label>"
+            )
 
-        org_type_opts = "".join(_opt(v, l, v == (profile.org_type or "other")) for v, l in _ORG_TYPES)
-        tone_radios = "".join(_radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES)
-        platform_cbs = "".join(_cb("platforms", v, l, v in (profile.platforms or [])) for v, l in _PLATFORMS)
+        org_type_opts = "".join(
+            _opt(v, l, v == (profile.org_type or "other")) for v, l in _ORG_TYPES
+        )
+        tone_radios = "".join(
+            _radio("tone", v, l, v == (profile.tone or "warm-club")) for v, l in _TONES
+        )
+        platform_cbs = "".join(
+            _cb("platforms", v, l, v in (profile.platforms or [])) for v, l in _PLATFORMS
+        )
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
         voice_examples_text = "\n".join(profile.voice_examples or [])
 
@@ -14622,16 +15229,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the engine learned the last time they ran "Analyse voice".
         vp = profile.voice_profile or {}
         if vp:
+
             def _list_chips(items):
                 items = items or []
                 if not items:
                     return '<span class="muted" style="font-size:12px">&mdash;</span>'
                 return "".join(
                     f'<span style="display:inline-block;padding:2px 8px;'
-                    f'margin:2px 4px 2px 0;border:1px solid var(--border);'
+                    f"margin:2px 4px 2px 0;border:1px solid var(--border);"
                     f'border-radius:999px;font-size:12px">{_h(s)}</span>'
                     for s in items
                 )
+
             voice_profile_html = (
                 f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
                 f'border-radius:8px;background:var(--panel)">'
@@ -14655,8 +15264,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         else:
             voice_profile_html = (
                 '<p class="muted" style="font-size:12px;margin-top:8px">'
-                'No voice profile yet &mdash; paste 5-20 past captions and click '
-                '<b>Analyse voice</b>.</p>'
+                "No voice profile yet &mdash; paste 5-20 past captions and click "
+                "<b>Analyse voice</b>.</p>"
             )
 
         # Empty constants — round-7 cleanup. The organisation form used to
@@ -14674,7 +15283,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 return ""
             return (
                 f'<div title="{_h(hexv)}" style="display:inline-flex;align-items:center;'
-                f'gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;'
+                f"gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;"
                 f'margin-right:6px;margin-bottom:6px;background:var(--panel)">'
                 f'<span style="display:inline-block;width:18px;height:18px;border-radius:4px;'
                 f'background:{_h(hexv)};border:1px solid rgba(255,255,255,0.15)"></span>'
@@ -14690,7 +15299,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             }.get(tone, "var(--ink-dim)")
             return (
                 f'<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;'
-                f'border:1px solid var(--border);border-radius:999px;font-size:11px;'
+                f"border:1px solid var(--border);border-radius:999px;font-size:11px;"
                 f'color:{colour};background:rgba(255,255,255,0.02)">{_h(text)}</span>'
             )
 
@@ -14705,10 +15314,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         if has_brand:
             pal = profile.brand_palette_extracted or {}
-            swatches = "".join(_swatch(pal.get(k, "")) for k in ("primary", "secondary", "accent") if pal.get(k))
-            keywords_html = "".join(_chip(k, "neutral") for k in (profile.brand_keywords or [])[:12])
+            swatches = "".join(
+                _swatch(pal.get(k, "")) for k in ("primary", "secondary", "accent") if pal.get(k)
+            )
+            keywords_html = "".join(
+                _chip(k, "neutral") for k in (profile.brand_keywords or [])[:12]
+            )
             use_html = "".join(_chip(p, "good") for p in (profile.brand_phrases_to_use or [])[:5])
-            avoid_html = "".join(_chip(p, "bad") for p in (profile.brand_phrases_to_avoid or [])[:5])
+            avoid_html = "".join(
+                _chip(p, "bad") for p in (profile.brand_phrases_to_avoid or [])[:5]
+            )
             logo_html = ""
             if profile.brand_logo_url:
                 # Phase 1.6 Stage F: wrap detected logo in a neutral
@@ -14731,8 +15346,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'<p style="font-size:11px;color:var(--ink-dim);margin-top:8px">'
                     f'Source: <a href="{_h(src)}" target="_blank" rel="noopener" '
                     f'style="color:var(--ink-dim)">{_h(src)}</a> &middot; '
-                    f'captured {_h(ts)} &middot; status {_h(status)}'
-                    f'</p>'
+                    f"captured {_h(ts)} &middot; status {_h(status)}"
+                    f"</p>"
                 )
             brand_preview_html = f"""
 <div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(212,255,58,0.03)">
@@ -14782,6 +15397,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         voice_profile_html = ""
         vp = profile.voice_profile or {}
         if vp:
+
             def _stat_row(label: str, val) -> str:
                 return (
                     f'<div style="display:flex;justify-content:space-between;'
@@ -14790,10 +15406,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'<strong style="color:var(--ink)">{_h(str(val))}</strong></div>'
                 )
 
-            openers_html = " ".join(_chip(o, "neutral") for o in (vp.get("characteristic_openers") or [])[:6])
-            closers_html = " ".join(_chip(c, "neutral") for c in (vp.get("characteristic_closers") or [])[:4])
-            forbidden_html = " ".join(_chip(f, "bad") for f in (vp.get("forbidden_phrases") or [])[:6])
-            hashtags_html = " ".join(_chip(h, "neutral") for h in (vp.get("common_hashtags") or [])[:8])
+            openers_html = " ".join(
+                _chip(o, "neutral") for o in (vp.get("characteristic_openers") or [])[:6]
+            )
+            closers_html = " ".join(
+                _chip(c, "neutral") for c in (vp.get("characteristic_closers") or [])[:4]
+            )
+            forbidden_html = " ".join(
+                _chip(f, "bad") for f in (vp.get("forbidden_phrases") or [])[:6]
+            )
+            hashtags_html = " ".join(
+                _chip(h, "neutral") for h in (vp.get("common_hashtags") or [])[:8]
+            )
             address = _h(vp.get("preferred_swimmer_address") or "first_name")
             cap_style = _h(vp.get("capitalisation_style") or "sentence")
             n_examples = len(profile.voice_examples or [])
@@ -15079,25 +15703,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             new_org_url = url_for("organisation_setup")
             home_url = url_for("home")
             empty_body = (
-                '<h1>Sign in</h1>'
+                "<h1>Sign in</h1>"
                 '<p class="lede" style="margin-bottom:var(--sp-6)">'
-                'No organisation profiles exist on this deployment yet. '
-                'Create one and it will appear here for sign-in next time.'
-                '</p>'
+                "No organisation profiles exist on this deployment yet. "
+                "Create one and it will appear here for sign-in next time."
+                "</p>"
                 '<div class="card" style="padding:24px 28px;margin-bottom:18px">'
                 '<h2 style="margin-top:0;font-size:18px">Get started</h2>'
                 '<p class="dim" style="margin-bottom:18px;font-size:13px">'
-                'MediaHub needs to know who you are before it can produce '
-                'on-brand content. Create your first organisation profile '
-                '&mdash; it takes a minute &mdash; and the AI will read '
-                'your website and social profiles so every caption it '
-                'writes sounds like you.'
-                '</p>'
+                "MediaHub needs to know who you are before it can produce "
+                "on-brand content. Create your first organisation profile "
+                "&mdash; it takes a minute &mdash; and the AI will read "
+                "your website and social profiles so every caption it "
+                "writes sounds like you."
+                "</p>"
                 f'<a class="btn" href="{new_org_url}">'
-                'Create your first organisation &rarr;</a>'
+                "Create your first organisation &rarr;</a>"
                 f'<a class="btn secondary" href="{home_url}" '
                 'style="margin-left:10px">Back to home</a>'
-                '</div>'
+                "</div>"
             )
             return _layout("Sign in", empty_body, active="signin")
 
@@ -15111,7 +15735,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         cards_html = ""
         for p in profiles:
-            is_current = (p.profile_id == current_id)
+            is_current = p.profile_id == current_id
             logo_html = ""
             logo_url = (getattr(p, "brand_logo_url", "") or "").strip()
             if logo_url and (logo_url.startswith("http://") or logo_url.startswith("https://")):
@@ -15121,7 +15745,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 # (sign-in page renders many orgs side-by-side and
                 # one bare logo amid chipped ones reads as a glitch).
                 logo_html = _logo_chip_html(
-                    logo_url, alt="", height=48, force_chip=True,
+                    logo_url,
+                    alt="",
+                    height=48,
+                    force_chip=True,
                 )
             else:
                 logo_html = _h(_initials(p.display_name))
@@ -15140,13 +15767,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 pill_html += (
                     '<span class="pill" style="background:rgba(245,158,11,0.10);'
                     'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
-                    'Partial</span>'
+                    "Partial</span>"
                 )
             else:
                 pill_html += (
                     '<span class="pill" style="background:rgba(255,255,255,0.06);'
                     'border-color:rgba(255,255,255,0.10);color:var(--ink-muted)">'
-                    'Incomplete</span>'
+                    "Incomplete</span>"
                 )
 
             sign_in_url = url_for("sign_in_post")
@@ -15176,7 +15803,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         cards_html += (
             f'<a class="mh-new-profile" href="{new_org_url}">'
             '<div><div class="plus">+</div>'
-            'Create new organisation</div></a>'
+            "Create new organisation</div></a>"
         )
 
         # Surface any error flashed by sign_in_post (silent failures fixed).
@@ -15185,16 +15812,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if err:
             err_html = (
                 '<div class="mh-flash error" role="alert" style="'
-                'margin: 0 0 var(--sp-5);'
-                'padding: 14px 18px;'
-                'border: 1px solid rgba(255,107,107,0.30);'
-                'border-left: 3px solid var(--bad);'
-                'background: var(--bad-bg);'
-                'color: var(--ink);'
-                'font-family: var(--font-mono);'
-                'font-size: 12px;'
-                'letter-spacing: 0.10em;'
-                'text-transform: uppercase;'
+                "margin: 0 0 var(--sp-5);"
+                "padding: 14px 18px;"
+                "border: 1px solid rgba(255,107,107,0.30);"
+                "border-left: 3px solid var(--bad);"
+                "background: var(--bad-bg);"
+                "color: var(--ink);"
+                "font-family: var(--font-mono);"
+                "font-size: 12px;"
+                "letter-spacing: 0.10em;"
+                "text-transform: uppercase;"
                 f'">[ ERROR ] {_h(err)}</div>'
             )
 
@@ -15225,8 +15852,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prof = load_profile(pid)
         if prof is None:
             session["sign_in_error"] = (
-                f"Couldn't find a profile with id '{pid}'. "
-                "It may have been deleted."
+                f"Couldn't find a profile with id '{pid}'. " "It may have been deleted."
             )
             return redirect(url_for("sign_in_page"))
         _pin_active_profile(prof.profile_id)
@@ -15250,6 +15876,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not pid:
             return redirect(url_for("sign_in_page"))
         from .club_profile import _profiles_dir
+
         p = _profiles_dir() / f"{pid}.json"
         try:
             if p.exists():
@@ -15267,15 +15894,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prof = _active_profile()
         # Pre-fill from any existing profile so refreshing the page doesn't
         # wipe what the user just typed.
-        pid = (prof.profile_id if prof else "")
-        display_name = (prof.display_name if prof else "")
-        org_type = (prof.org_type if prof else "other")
-        country = (prof.country if prof else "")
-        governing_body = (prof.governing_body if prof else "")
-        website_url = (prof.brand_source_url if prof else "")
+        pid = prof.profile_id if prof else ""
+        display_name = prof.display_name if prof else ""
+        org_type = prof.org_type if prof else "other"
+        country = prof.country if prof else ""
+        governing_body = prof.governing_body if prof else ""
+        website_url = prof.brand_source_url if prof else ""
         social = dict(prof.social_links) if prof and prof.social_links else {}
         brand_logos = list(prof.brand_logos) if prof and prof.brand_logos else []
-        mandatory_rules = list(prof.brand_guidelines_mandatory_rules) if prof and prof.brand_guidelines_mandatory_rules else []
+        mandatory_rules = (
+            list(prof.brand_guidelines_mandatory_rules)
+            if prof and prof.brand_guidelines_mandatory_rules
+            else []
+        )
         link_state = dict(prof.link_capture_state) if prof and prof.link_capture_state else {}
 
         # Honest LLM-availability banner. The whole capture pipeline
@@ -15286,44 +15917,47 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         llm_banner_html = ""
         try:
             from mediahub.media_ai.llm import is_available as _llm_available
+
             llm_ok = _llm_available()
         except Exception:
             llm_ok = False
         if not llm_ok:
             llm_banner_html = (
                 '<div style="margin-bottom:14px;padding:12px 14px;'
-                'border:1px solid rgba(255,180,84,0.45);border-radius:8px;'
-                'background:rgba(255,180,84,0.08);font-size:13px;'
+                "border:1px solid rgba(255,180,84,0.45);border-radius:8px;"
+                "background:rgba(255,180,84,0.08);font-size:13px;"
                 'color:var(--ink);line-height:1.5">'
                 '<strong style="color:var(--warn,#FFB454)">AI features unavailable.</strong> '
-                'No cloud LLM provider is configured on this deployment, so the '
-                'engine cannot infer your brand voice, palette, or operating '
-                'profile. You can still complete setup, but generated content '
-                'will fall back to a generic template until '
+                "No cloud LLM provider is configured on this deployment, so the "
+                "engine cannot infer your brand voice, palette, or operating "
+                "profile. You can still complete setup, but generated content "
+                "will fall back to a generic template until "
                 '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
-                'GEMINI_API_KEY</code> or '
+                "GEMINI_API_KEY</code> or "
                 '<code style="font-family:var(--font-mono,monospace);font-size:12px">'
-                'ANTHROPIC_API_KEY</code> is set on the server.'
-                '</div>'
+                "ANTHROPIC_API_KEY</code> is set on the server."
+                "</div>"
             )
 
         from mediahub.web._countries import COUNTRIES
+
         # JSON-safe array literal for inlining into the combobox JS.
         # Each country is HTML-escaped because the same string is also
         # rendered into list-item innerHTML below.
-        _countries_js_array = "[" + ",".join(
-            '"' + c.replace("\\", "\\\\").replace('"', '\\"') + '"'
-            for c in COUNTRIES
-        ) + "]"
+        _countries_js_array = (
+            "["
+            + ",".join('"' + c.replace("\\", "\\\\").replace('"', '\\"') + '"' for c in COUNTRIES)
+            + "]"
+        )
 
         # --- Preview block (only when the AI has already run once) ---
         preview_html = ""
         if prof and prof.is_ready():
             kw_chips = "".join(
                 f'<span style="display:inline-block;padding:3px 10px;'
-                f'margin:2px 4px 2px 0;border:1px solid var(--border);'
+                f"margin:2px 4px 2px 0;border:1px solid var(--border);"
                 f'border-radius:999px;font-size:12px;color:var(--ink-dim)">'
-                f'{_h(k)}</span>'
+                f"{_h(k)}</span>"
                 for k in (prof.brand_keywords or [])[:10]
             )
             # Effective palette = manual override slots > AI-detected.
@@ -15331,17 +15965,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # raw pick rendered separately so the user can see what the
             # engine actually inferred.
             from mediahub.brand import palette as _palette_mod
+
             extracted_pal = prof.brand_palette_extracted or {}
             manual_pal = prof.brand_palette_manual or {}
             effective_pal = _palette_mod.effective_palette(
-                manual=manual_pal, extracted=extracted_pal,
+                manual=manual_pal,
+                extracted=extracted_pal,
             )
             use_fourth = bool(prof.brand_palette_use_fourth)
 
             slot_labels = _palette_mod.SLOTS
-            if (use_fourth
-                    or extracted_pal.get(_palette_mod.FOURTH_SLOT)
-                    or manual_pal.get(_palette_mod.FOURTH_SLOT)):
+            if (
+                use_fourth
+                or extracted_pal.get(_palette_mod.FOURTH_SLOT)
+                or manual_pal.get(_palette_mod.FOURTH_SLOT)
+            ):
                 slot_labels = slot_labels + (_palette_mod.FOURTH_SLOT,)
 
             def _swatch_row(palette: dict) -> str:
@@ -15352,11 +15990,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         continue
                     rendered += (
                         f'<span title="{_h(k)}: {_h(hexv)}" style="display:inline-flex;'
-                        f'align-items:center;gap:6px;padding:3px 8px;margin-right:6px;'
-                        f'margin-bottom:4px;border:1px solid var(--border);'
+                        f"align-items:center;gap:6px;padding:3px 8px;margin-right:6px;"
+                        f"margin-bottom:4px;border:1px solid var(--border);"
                         f'border-radius:6px;background:var(--panel)">'
                         f'<span style="display:inline-block;width:18px;height:18px;'
-                        f'border-radius:4px;background:{_h(hexv)};'
+                        f"border-radius:4px;background:{_h(hexv)};"
                         f'border:1px solid rgba(255,255,255,0.15)"></span>'
                         f'<code style="font-size:11px;color:var(--ink)">{_h(hexv)}</code></span>'
                     )
@@ -15377,14 +16015,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         continue
                     chips = "".join(
                         f'<span style="display:inline-flex;align-items:center;'
-                        f'gap:4px;padding:2px 6px;margin:2px 4px 2px 0;'
-                        f'border:1px solid var(--border);border-radius:4px;'
-                        f'font-size:10.5px;font-family:var(--font-mono,monospace);'
+                        f"gap:4px;padding:2px 6px;margin:2px 4px 2px 0;"
+                        f"border:1px solid var(--border);border-radius:4px;"
+                        f"font-size:10.5px;font-family:var(--font-mono,monospace);"
                         f'color:var(--ink-dim)">'
                         f'<span style="display:inline-block;width:10px;height:10px;'
-                        f'border-radius:2px;background:{_h(h)};'
+                        f"border-radius:2px;background:{_h(h)};"
                         f'border:1px solid rgba(255,255,255,0.12)"></span>'
-                        f'{_h(h)}</span>'
+                        f"{_h(h)}</span>"
                         for h in hexes[:8]
                     )
                     rows.append(
@@ -15407,7 +16045,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 reasoning_html = (
                     f'<p class="muted" style="font-size:11.5px;margin:6px 0 0 0;'
                     f'line-height:1.4;font-style:italic">'
-                    f'Engine reasoning: {_h(prof.brand_palette_reasoning)}</p>'
+                    f"Engine reasoning: {_h(prof.brand_palette_reasoning)}</p>"
                 )
 
             confirm_url = url_for("organisation_setup_palette")
@@ -15419,43 +16057,51 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 v = manual_pal.get(slot) or extracted_pal.get(slot) or fallback
                 return v if isinstance(v, str) and v.startswith("#") else fallback
 
-            def _picker_block(slot: str, label: str, default_hex: str,
-                              *, disabled: bool = False, max_width: str = "") -> str:
+            def _picker_block(
+                slot: str,
+                label: str,
+                default_hex: str,
+                *,
+                disabled: bool = False,
+                max_width: str = "",
+            ) -> str:
                 attr = "disabled" if disabled else ""
                 wrap_style = f"max-width:{max_width};" if max_width else ""
                 return (
                     f'<label style="display:flex;flex-direction:column;gap:4px;'
                     f'font-size:11.5px;color:var(--ink-dim);{wrap_style}">'
-                    f'<span>{_h(label)}</span>'
+                    f"<span>{_h(label)}</span>"
                     f'<span style="display:flex;gap:6px;align-items:center">'
                     f'<input type="color" name="palette_{slot}" '
                     f'id="palette-{slot}-color" value="{_h(default_hex)}" {attr} '
                     f'style="width:52px;height:44px;padding:0;'
-                    f'border:1px solid var(--border);border-radius:4px;'
+                    f"border:1px solid var(--border);border-radius:4px;"
                     f'background:var(--panel);cursor:pointer;flex-shrink:0"/>'
                     f'<input type="text" name="palette_{slot}_hex" '
                     f'id="palette-{slot}-hex" value="{_h(default_hex)}" '
                     f'pattern="^#[0-9a-fA-F]{{6}}$" maxlength="7" '
                     f'data-palette-mirror="palette_{slot}" {attr} '
                     f'style="flex:1;min-width:0;padding:11px 10px;min-height:44px;'
-                    f'border:1px solid var(--border);'
-                    f'border-radius:4px;background:var(--bg);color:var(--ink);'
+                    f"border:1px solid var(--border);"
+                    f"border-radius:4px;background:var(--bg);color:var(--ink);"
                     f'font-family:var(--font-mono,monospace);font-size:13px"/>'
-                    f'</span></label>'
+                    f"</span></label>"
                 )
 
             pickers_html = "".join(
                 _picker_block(slot, label, _slot_default(slot, fallback))
                 for slot, label, fallback in (
-                    ("primary",   "Primary",   "#0a2540"),
+                    ("primary", "Primary", "#0a2540"),
                     ("secondary", "Secondary", "#1a1a1a"),
-                    ("accent",    "Accent",    "#d4ff3a"),
+                    ("accent", "Accent", "#d4ff3a"),
                 )
             )
             fourth_picker_html = _picker_block(
-                "fourth", "Fourth colour",
+                "fourth",
+                "Fourth colour",
                 _slot_default("fourth", "#ffffff"),
-                disabled=not use_fourth, max_width="33%",
+                disabled=not use_fourth,
+                max_width="33%",
             )
             fourth_checked_attr = "checked" if use_fourth else ""
             fourth_visible_style = "" if use_fourth else "display:none"
@@ -15504,20 +16150,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # slot, minus the 4th unless the org opted into a fourth colour.
             # Keeping these in lock-step means every chip's move button
             # submits an `order` the route will actually honour.
-            present_for_reorder = [
-                s for s in _palette_mod.ALL_SLOTS if effective_pal.get(s)
-            ]
+            present_for_reorder = [s for s in _palette_mod.ALL_SLOTS if effective_pal.get(s)]
             if not use_fourth:
                 present_for_reorder = [
-                    s for s in present_for_reorder
-                    if s != _palette_mod.FOURTH_SLOT
+                    s for s in present_for_reorder if s != _palette_mod.FOURTH_SLOT
                 ]
             reorder_block_html = ""
             if len(present_for_reorder) >= 2:
                 _n = len(present_for_reorder)
                 _role_label = {
-                    "primary": "Primary", "secondary": "Secondary",
-                    "accent": "Accent", "fourth": "Fourth",
+                    "primary": "Primary",
+                    "secondary": "Secondary",
+                    "accent": "Accent",
+                    "fourth": "Fourth",
                 }
 
                 def _swap_order(i: int, j: int) -> str:
@@ -15527,9 +16172,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
                 # Cycle = rotate forward one role: slot k takes the colour
                 # from slot k-1, so the primary colour walks to secondary.
-                _cycle_order = ",".join(
-                    present_for_reorder[(k - 1) % _n] for k in range(_n)
-                )
+                _cycle_order = ",".join(present_for_reorder[(k - 1) % _n] for k in range(_n))
 
                 _arrow_base = (
                     "width:30px;height:30px;display:inline-flex;align-items:center;"
@@ -15538,8 +16181,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     "font-size:12px;line-height:1;padding:0"
                 )
 
-                def _arrow(i: int, j: int, glyph: str, where: str,
-                           role: str, disabled: bool) -> str:
+                def _arrow(
+                    i: int, j: int, glyph: str, where: str, role: str, disabled: bool
+                ) -> str:
                     if disabled:
                         return (
                             f'<button type="button" disabled aria-hidden="true" '
@@ -15559,23 +16203,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     _hexv = effective_pal.get(_slot)
                     _role = _role_label.get(_slot, _slot)
                     _left = _arrow(_i, _i - 1, "&#9664;", "left", _role, _i == 0)
-                    _right = _arrow(_i, _i + 1, "&#9654;", "right", _role,
-                                    _i == _n - 1)
+                    _right = _arrow(_i, _i + 1, "&#9654;", "right", _role, _i == _n - 1)
                     _chips.append(
                         f'<div style="display:flex;align-items:center;gap:8px;'
-                        f'padding:8px 10px;border:1px solid var(--border);'
+                        f"padding:8px 10px;border:1px solid var(--border);"
                         f'border-radius:8px;background:var(--panel)">'
                         f'<span style="display:inline-block;width:22px;height:22px;'
-                        f'border-radius:5px;background:{_h(_hexv)};'
+                        f"border-radius:5px;background:{_h(_hexv)};"
                         f'border:1px solid rgba(255,255,255,0.15);flex-shrink:0"></span>'
                         f'<span style="display:flex;flex-direction:column;line-height:1.2">'
                         f'<span style="font-size:12px;font-weight:600;color:var(--ink)">'
-                        f'{_i + 1} &middot; {_h(_role)}</span>'
+                        f"{_i + 1} &middot; {_h(_role)}</span>"
                         f'<code style="font-size:10.5px;color:var(--ink-dim)">'
-                        f'{_h(_hexv)}</code></span>'
+                        f"{_h(_hexv)}</code></span>"
                         f'<span style="display:flex;gap:3px;margin-left:2px">'
-                        f'{_left}{_right}</span>'
-                        f'</div>'
+                        f"{_left}{_right}</span>"
+                        f"</div>"
                     )
 
                 reorder_block_html = f"""
@@ -15646,14 +16289,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         # Social link inputs — one row per platform, all optional.
         _PLATFORMS = [
-            ("instagram", "Instagram",  "https://instagram.com/your-club"),
-            ("facebook",  "Facebook",   "https://facebook.com/your-club"),
-            ("twitter",   "Twitter / X","https://x.com/your-club"),
-            ("tiktok",    "TikTok",     "https://tiktok.com/@your-club"),
-            ("linkedin",  "LinkedIn",   "https://linkedin.com/company/your-club"),
+            ("instagram", "Instagram", "https://instagram.com/your-club"),
+            ("facebook", "Facebook", "https://facebook.com/your-club"),
+            ("twitter", "Twitter / X", "https://x.com/your-club"),
+            ("tiktok", "TikTok", "https://tiktok.com/@your-club"),
+            ("linkedin", "LinkedIn", "https://linkedin.com/company/your-club"),
         ]
         # ---- Logo thumbnail grid (D1) — render existing logos with rename/delete
-        from mediahub.brand.logos import MAX_LOGOS_PER_PROFILE as _LOGO_LIMIT
         _logos_grid_html = ""
         if brand_logos:
             cards = []
@@ -15662,10 +16304,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 desc = (logo.get("ai_description") or "").strip()
                 mime = logo.get("mime") or ""
                 # Server route exposes the actual file
-                serve_url = url_for("organisation_setup_logo_serve",
-                                    logo_id=logo.get("logo_id", ""))
-                delete_url = url_for("organisation_setup_logo_delete",
-                                     logo_id=logo.get("logo_id", ""))
+                serve_url = url_for(
+                    "organisation_setup_logo_serve", logo_id=logo.get("logo_id", "")
+                )
+                delete_url = url_for(
+                    "organisation_setup_logo_delete", logo_id=logo.get("logo_id", "")
+                )
                 preview = ""
                 if mime.startswith("image/"):
                     # Phase 1.6 Stage F: thumbnail grid — every uploaded
@@ -15673,8 +16317,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     # consistency matters more than per-logo lightness).
                     _dom = (logo.get("ai_dominant_colours") or [None])[0]
                     preview = _logo_chip_html(
-                        serve_url, alt=label, height=96,
-                        dominant_hex=_dom, force_chip=True,
+                        serve_url,
+                        alt=label,
+                        height=96,
+                        dominant_hex=_dom,
+                        force_chip=True,
                     )
                 else:
                     preview = (
@@ -15686,8 +16333,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 colours = logo.get("ai_dominant_colours") or []
                 colour_swatches = "".join(
                     f'<span title="{_h(c)}" style="display:inline-block;'
-                    f'width:14px;height:14px;border-radius:2px;'
-                    f'background:{_h(c)};border:1px solid rgba(255,255,255,0.15);'
+                    f"width:14px;height:14px;border-radius:2px;"
+                    f"background:{_h(c)};border:1px solid rgba(255,255,255,0.15);"
                     f'vertical-align:middle;margin-right:3px"></span>'
                     for c in colours[:4]
                 )
@@ -15699,39 +16346,38 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _desc_html = (
                     f'<div class="muted" style="font-size:11px;line-height:1.3" '
                     f'title="{str(_h(desc))}">{str(_h(desc[:120]))}</div>'
-                    if desc else ""
+                    if desc
+                    else ""
                 )
-                _swatches_html = (
-                    f'<div>{colour_swatches}</div>' if colour_swatches else ""
-                )
+                _swatches_html = f"<div>{colour_swatches}</div>" if colour_swatches else ""
                 _filename_attr = str(_h(logo.get("original_filename", "")))
                 _label_html = str(_h(label))
                 _delete_url_attr = str(_h(delete_url))
                 cards.append(
                     f'<div class="mh-logo-card" style="background:var(--surface,var(--panel));'
-                    f'border:1px solid var(--chrome,var(--border));border-radius:6px;'
+                    f"border:1px solid var(--chrome,var(--border));border-radius:6px;"
                     f'padding:10px;display:flex;flex-direction:column;gap:8px">'
-                    f'{preview}'
+                    f"{preview}"
                     f'<div style="font-size:12px;font-weight:600;color:var(--ink);'
                     f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
                     f'title="{_filename_attr}">{_label_html}</div>'
-                    f'{_desc_html}'
-                    f'{_swatches_html}'
+                    f"{_desc_html}"
+                    f"{_swatches_html}"
                     f'<form method="POST" action="{_delete_url_attr}" data-no-loader="1" '
-                    f'onsubmit="return confirm(\'Delete this logo?\')">'
+                    f"onsubmit=\"return confirm('Delete this logo?')\">"
                     f'<button type="submit" style="font-size:11px;padding:5px 9px;'
-                    f'background:transparent;border:1px solid rgba(255,107,107,0.3);'
-                    f'color:#FF6B6B;border-radius:4px;cursor:pointer;'
-                    f'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                    f"background:transparent;border:1px solid rgba(255,107,107,0.3);"
+                    f"color:#FF6B6B;border-radius:4px;cursor:pointer;"
+                    f"font-family:var(--font-mono,monospace);text-transform:uppercase;"
                     f'letter-spacing:0.10em">Delete</button>'
-                    f'</form>'
-                    f'</div>'
+                    f"</form>"
+                    f"</div>"
                 )
             _logos_grid_html = (
                 '<div style="margin-top:14px;display:grid;'
                 'grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">'
-                + "".join(cards) +
-                '</div>'
+                + "".join(cards)
+                + "</div>"
             )
 
         # M2 — "Where can AI read you" defaults to OPEN so a first-run
@@ -15760,11 +16406,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if rules:
                 rule_chips = "".join(
                     '<li style="padding:6px 10px;margin:4px 4px 0 0;'
-                    'display:inline-block;border-radius:4px;'
-                    'background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);'
+                    "display:inline-block;border-radius:4px;"
+                    "background:rgba(212,255,58,0.08);border:1px solid rgba(212,255,58,0.30);"
                     f'color:var(--ink);font-size:11.5px;line-height:1.35;max-width:100%">'
                     f'<strong style="color:var(--lane,var(--accent))">MUST</strong> &middot; {_h(r[:240])}'
-                    '</li>'
+                    "</li>"
                     for r in rules[:12]
                 )
                 more = ""
@@ -15774,15 +16420,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<div style="margin-top:10px">'
                     '<div style="font-size:11.5px;color:var(--ink);font-weight:600;'
                     'letter-spacing:0.02em;margin-bottom:4px">'
-                    f'Non-negotiable rules the AI extracted ({len(rules)})'
-                    '</div>'
+                    f"Non-negotiable rules the AI extracted ({len(rules)})"
+                    "</div>"
                     f'<ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap">{rule_chips}</ul>'
-                    + more +
-                    '<div class="muted" style="font-size:11px;margin-top:6px">'
-                    'These are surfaced at the TOP of every system prompt with explicit '
-                    'override framing &mdash; they will be respected on every generated caption.'
-                    '</div>'
-                    '</div>'
+                    + more
+                    + '<div class="muted" style="font-size:11px;margin-top:6px">'
+                    "These are surfaced at the TOP of every system prompt with explicit "
+                    "override framing &mdash; they will be respected on every generated caption."
+                    "</div>"
+                    "</div>"
                 )
             _gl_status_html = (
                 '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
@@ -15790,13 +16436,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
                 f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
                 f' &middot; {_h(prof.brand_guidelines_status or "")} via {_h(prof.brand_guidelines_extractor or "")}</div>'
-                + (f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>' if summary else "")
+                + (
+                    f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
+                    if summary
+                    else ""
+                )
                 + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
                 f'{n_dos} do{"s" if n_dos != 1 else ""}, {n_donts} don\'t{"s" if n_donts != 1 else ""}, '
                 f'{n_prohib} prohibited word{"s" if n_prohib != 1 else ""}.</div>'
-                + rules_html +
-                '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
-                '</div>'
+                + rules_html
+                + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
+                "</div>"
             )
 
         # Per-link status chips (M5): map each captured status to a
@@ -15804,20 +16454,61 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # social_inputs renderer so a missing status falls through to
         # "Idle" without exception.
         _STATUS_CHIP = {
-            "real_content":     ("Learned",      "rgba(94,227,154,0.12)",  "rgba(94,227,154,0.45)",  "var(--good, #5EE39A)"),
-            "soft_blocked_spa": ("Blocked (JS)", "rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
-            "hard_blocked":     ("Blocked",      "rgba(255,107,107,0.10)", "rgba(255,107,107,0.45)", "var(--bad, #FF6B6B)"),
-            "auth_walled":      ("Auth required","rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
-            "rate_limited":     ("Rate limited", "rgba(255,180,84,0.10)",  "rgba(255,180,84,0.45)",  "var(--warn, #FFB454)"),
-            "not_found":        ("Not found",    "rgba(255,107,107,0.10)", "rgba(255,107,107,0.45)", "var(--bad, #FF6B6B)"),
-            "unknown":          ("Unknown",      "rgba(245,242,232,0.04)", "rgba(245,242,232,0.14)", "var(--ink-dim, #B6B2A6)"),
+            "real_content": (
+                "Learned",
+                "rgba(94,227,154,0.12)",
+                "rgba(94,227,154,0.45)",
+                "var(--good, #5EE39A)",
+            ),
+            "soft_blocked_spa": (
+                "Blocked (JS)",
+                "rgba(255,180,84,0.10)",
+                "rgba(255,180,84,0.45)",
+                "var(--warn, #FFB454)",
+            ),
+            "hard_blocked": (
+                "Blocked",
+                "rgba(255,107,107,0.10)",
+                "rgba(255,107,107,0.45)",
+                "var(--bad, #FF6B6B)",
+            ),
+            "auth_walled": (
+                "Auth required",
+                "rgba(255,180,84,0.10)",
+                "rgba(255,180,84,0.45)",
+                "var(--warn, #FFB454)",
+            ),
+            "rate_limited": (
+                "Rate limited",
+                "rgba(255,180,84,0.10)",
+                "rgba(255,180,84,0.45)",
+                "var(--warn, #FFB454)",
+            ),
+            "not_found": (
+                "Not found",
+                "rgba(255,107,107,0.10)",
+                "rgba(255,107,107,0.45)",
+                "var(--bad, #FF6B6B)",
+            ),
+            "unknown": (
+                "Unknown",
+                "rgba(245,242,232,0.04)",
+                "rgba(245,242,232,0.14)",
+                "var(--ink-dim, #B6B2A6)",
+            ),
         }
 
         def _chip_html_for(platform_key: str, current_url: str) -> str:
             state = (link_state.get(platform_key) or {}) if current_url else {}
             status = (state.get("status") or "").strip()
             label, bg, border, ink = _STATUS_CHIP.get(
-                status, ("Idle", "rgba(245,242,232,0.04)", "rgba(245,242,232,0.14)", "var(--ink-dim, #B6B2A6)"),
+                status,
+                (
+                    "Idle",
+                    "rgba(245,242,232,0.04)",
+                    "rgba(245,242,232,0.14)",
+                    "var(--ink-dim, #B6B2A6)",
+                ),
             )
             # Per-failure inline hint. Without this, the only signal
             # a user gets that their URL was wrong (typo, DNS error,
@@ -15825,12 +16516,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # miss. A short message right next to the chip turns it
             # into an actionable error.
             failure_hints = {
-                "not_found":        "URL not reachable — check the spelling.",
-                "hard_blocked":     "Site is blocking automated reads.",
-                "auth_walled":      "Profile needs login to read.",
-                "rate_limited":     "Rate-limited — try Re-read in a minute.",
+                "not_found": "URL not reachable — check the spelling.",
+                "hard_blocked": "Site is blocking automated reads.",
+                "auth_walled": "Profile needs login to read.",
+                "rate_limited": "Rate-limited — try Re-read in a minute.",
                 "soft_blocked_spa": "Page renders client-side; only the shell loaded.",
-                "unknown":          "Couldn't classify the response.",
+                "unknown": "Couldn't classify the response.",
             }
             hint = failure_hints.get(status, "")
             hint_html = ""
@@ -15838,7 +16529,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 hint_html = (
                     f'<span class="muted" style="display:block;margin-top:4px;'
                     f'font-size:11px;line-height:1.4;color:var(--warn,#FFB454)">'
-                    f'{_h(hint)}</span>'
+                    f"{_h(hint)}</span>"
                 )
             # When a link is populated, allow a per-link "re-read now"
             # button so the user can force a fresh capture without
@@ -15852,11 +16543,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'style="display:inline" data-no-loader="1">'
                         '<button type="submit" '
                         'style="font-size:10.5px;padding:3px 8px;background:transparent;'
-                        'border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));'
-                        'color:var(--ink-dim,#B6B2A6);border-radius:3px;cursor:pointer;'
-                        'font-family:var(--font-mono,monospace);text-transform:uppercase;'
+                        "border:1px solid var(--chrome,var(--border,rgba(245,242,232,0.14)));"
+                        "color:var(--ink-dim,#B6B2A6);border-radius:3px;cursor:pointer;"
+                        "font-family:var(--font-mono,monospace);text-transform:uppercase;"
                         'letter-spacing:0.10em" title="Force the AI to re-read this link now">'
-                        'Re-read</button></form>'
+                        "Re-read</button></form>"
                     )
                 except Exception:
                     reread = ""
@@ -15864,11 +16555,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span style="display:inline-flex;align-items:center;gap:8px;'
                 'margin-left:8px;vertical-align:middle;flex-wrap:wrap">'
                 f'<span style="display:inline-block;padding:2px 8px;border-radius:3px;'
-                f'font-size:10.5px;font-family:var(--font-mono,monospace);'
-                f'text-transform:uppercase;letter-spacing:0.10em;'
+                f"font-size:10.5px;font-family:var(--font-mono,monospace);"
+                f"text-transform:uppercase;letter-spacing:0.10em;"
                 f'background:{bg};border:1px solid {border};color:{ink}">{_h(label)}</span>'
-                + reread + hint_html +
-                '</span>'
+                + reread
+                + hint_html
+                + "</span>"
             )
 
         social_inputs = ""
@@ -15880,11 +16572,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<label style="display:flex;align-items:center;flex-wrap:wrap;'
                 f'font-size:13px;color:var(--ink-dim);margin-bottom:4px">'
                 f'<span>{_h(label)} <span class="muted" style="font-size:11px">(optional)</span></span>'
-                f'{chip}'
-                f'</label>'
+                f"{chip}"
+                f"</label>"
                 f'<input type="url" name="social_{key}" value="{_h(val)}" '
                 f'placeholder="{_h(placeholder)}" style="{_input_style}"/>'
-                f'</div>'
+                f"</div>"
             )
 
         # Website status chip — same logic, separate label so it can
@@ -16339,8 +17031,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # genuinely collides with a DIFFERENT organisation, so we
             # never clobber someone else's profile.
             slug_match = load_profile(profile_id)
-            if (slug_match is not None
-                    and slug_match.display_name.strip().lower() != display_name.lower()):
+            if (
+                slug_match is not None
+                and slug_match.display_name.strip().lower() != display_name.lower()
+            ):
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
 
         prof = load_profile(profile_id) or ClubProfile(
@@ -16352,6 +17046,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         raw_country = (request.form.get("country") or "").strip()
         if raw_country:
             from mediahub.web._countries import COUNTRIES
+
             # Case-insensitive canonicalisation — if the user typed
             # "united kingdom" the combobox will already have offered the
             # canonical "United Kingdom", but defending in depth in case
@@ -16376,6 +17071,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # ---- AI capture (handles its own errors, never raises) ----
         try:
             from mediahub.brand.social_dna import capture_from_socials
+
             result = capture_from_socials(
                 social_links=social_links,
                 website_url=website_url,
@@ -16393,11 +17089,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         link_palette_signals: dict[str, list[str]] = {}
         if status in ("ok", "ok_heuristic"):
             for k in (
-                "brand_voice_summary", "brand_keywords",
-                "brand_palette_extracted", "brand_logo_url",
-                "brand_typography_hint", "brand_phrases_to_avoid",
-                "brand_phrases_to_use", "brand_source_url",
-                "brand_captured_at", "brand_capture_status",
+                "brand_voice_summary",
+                "brand_keywords",
+                "brand_palette_extracted",
+                "brand_logo_url",
+                "brand_typography_hint",
+                "brand_phrases_to_avoid",
+                "brand_phrases_to_use",
+                "brand_source_url",
+                "brand_captured_at",
+                "brand_capture_status",
             ):
                 if k in result:
                     setattr(prof, k, result[k])
@@ -16419,8 +17120,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             sigs = result.get("brand_palette_signals") or {}
             if isinstance(sigs, dict):
                 link_palette_signals = {
-                    str(k): list(v) for k, v in sigs.items()
-                    if isinstance(v, list)
+                    str(k): list(v) for k, v in sigs.items() if isinstance(v, list)
                 }
         elif status == "no_sources":
             # User submitted no links at all — keep the identity fields
@@ -16455,17 +17155,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # rather than silently store a garbage summary that
             # poisons every later caption.
             BINARY_MAGIC = (
-                b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff",
-                b"GIF87a", b"GIF89a", b"BM",
-                b"\x00\x00\x01\x00", b"II*\x00", b"MM\x00*",
-                b"\x7fELF", b"MZ",
+                b"\x89PNG\r\n\x1a\n",
+                b"\xff\xd8\xff",
+                b"GIF87a",
+                b"GIF89a",
+                b"BM",
+                b"\x00\x00\x01\x00",
+                b"II*\x00",
+                b"MM\x00*",
+                b"\x7fELF",
+                b"MZ",
             )
-            ext = (upload.filename.rsplit(".", 1)[-1] or "").lower() if "." in upload.filename else ""
-            IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "tiff",
-                          "tif", "bmp", "ico", "heic", "heif", "avif"}
-            looks_binary = (
-                ext in IMAGE_EXTS
-                or any(file_bytes.startswith(sig) for sig in BINARY_MAGIC)
+            ext = (
+                (upload.filename.rsplit(".", 1)[-1] or "").lower() if "." in upload.filename else ""
+            )
+            IMAGE_EXTS = {
+                "png",
+                "jpg",
+                "jpeg",
+                "gif",
+                "webp",
+                "tiff",
+                "tif",
+                "bmp",
+                "ico",
+                "heic",
+                "heif",
+                "avif",
+            }
+            looks_binary = ext in IMAGE_EXTS or any(
+                file_bytes.startswith(sig) for sig in BINARY_MAGIC
             )
             if looks_binary:
                 # Friendly status — don't pollute prof.brand_guidelines.
@@ -16480,6 +17199,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             elif file_bytes:
                 try:
                     from mediahub.brand.guidelines import ingest_guidelines_file
+
                     g_payload = ingest_guidelines_file(upload.filename, file_bytes)
                 except Exception as e:
                     g_payload = {
@@ -16503,6 +17223,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         logo_uploads = request.files.getlist("brand_logos")
         if logo_uploads:
             from mediahub.brand import logos as _logos_mod
+
             current_logos = list(prof.brand_logos or [])
             for upload in logo_uploads:
                 if not upload or not upload.filename:
@@ -16541,6 +17262,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # new logo or replacing the guidelines doc updates the pick.
         try:
             from mediahub.brand import palette as _palette
+
             sources = _palette.gather_colour_sources(
                 link_palette_signals=link_palette_signals,
                 brand_guidelines=prof.brand_guidelines or {},
@@ -16575,13 +17297,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # tool consults via the lookup helpers in brand.derived.
         try:
             from mediahub.brand.derived import derive_operating_profile
+
             prof.brand_operating_profile = derive_operating_profile(prof)
         except Exception as e:
             # Never block save on a derivation failure — consumers
             # transparently fall back to the hardcoded defaults.
             prof.brand_operating_profile = {
-                "tone_prose": {}, "achievement_priorities": {},
-                "type_phrases": {}, "artefact_voice": {},
+                "tone_prose": {},
+                "achievement_priorities": {},
+                "type_phrases": {},
+                "artefact_voice": {},
                 "status": f"error: {e}",
             }
 
@@ -16611,9 +17336,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return redirect(url_for("organisation_setup"))
 
         use_fourth = (request.form.get("palette_use_fourth") or "").strip().lower() in (
-            "on", "true", "1", "yes",
+            "on",
+            "true",
+            "1",
+            "yes",
         )
         from mediahub.brand import palette as _palette
+
         manual = _palette.sanitise_manual_palette(
             primary=(request.form.get("palette_primary") or "").strip(),
             secondary=(request.form.get("palette_secondary") or "").strip(),
@@ -16714,6 +17443,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return redirect(url_for("organisation_setup"))
 
         from mediahub.brand import palette as _palette
+
         eff = _palette.effective_palette(
             manual=prof.brand_palette_manual or {},
             extracted=prof.brand_palette_extracted or {},
@@ -16801,10 +17531,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         except Exception as e:
             log.warning("organisation_finalise: save_profile failed: %s", e)
             return jsonify({"error": "profile save failed", "detail": str(e)}), 500
-        return jsonify({
-            "seed_hex": (palette or {}).get("seed_hex", ""),
-            "was_repaired": bool((palette or {}).get("was_repaired", False)),
-        })
+        return jsonify(
+            {
+                "seed_hex": (palette or {}).get("seed_hex", ""),
+                "was_repaired": bool((palette or {}).get("was_repaired", False)),
+            }
+        )
 
     @app.route("/organisation/setup/logo/<logo_id>", methods=["GET"])
     def organisation_setup_logo_serve(logo_id):
@@ -16816,6 +17548,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not prof:
             return ("", 404)
         from mediahub.brand.logos import resolve_logo_path
+
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
@@ -16847,6 +17580,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Run just this one platform through the handler pipeline.
         try:
             from mediahub.brand import link_handlers as _lh
+
             handler = _lh.get_handler(platform)
             if handler is not None:
                 entry = handler.process(url)
@@ -16872,9 +17606,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not prof:
             return redirect(url_for("organisation_setup"))
         from mediahub.brand.logos import delete_logo as _del
+
         # Defensively match the entry by id before unlinking.
         remaining = [
-            entry for entry in (prof.brand_logos or [])
+            entry
+            for entry in (prof.brand_logos or [])
             if isinstance(entry, dict) and entry.get("logo_id") != logo_id
         ]
         if len(remaining) != len(prof.brand_logos or []):
@@ -16899,12 +17635,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return jsonify({"ok": True, "profile_id": pid})
         pid = _active_profile_id()
         prof = _active_profile()
-        return jsonify({
-            "ok": True,
-            "profile_id": pid,
-            "display_name": (prof.display_name if prof else ""),
-            "is_ready": bool(prof and prof.is_ready()),
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "profile_id": pid,
+                "display_name": (prof.display_name if prof else ""),
+                "is_ready": bool(prof and prof.is_ready()),
+            }
+        )
 
     # ---- /pack/<run_id> &mdash; content pack (V7.3 grouped is default; old approval-only at /pack/<run_id>/approved) ---
     @app.route("/pack/<run_id>")
@@ -16918,7 +17656,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         recommendation explorer still lives at /pack/<run_id>/grouped.
         """
         if _run_state(run_id) == "in_progress":
-            return _layout("Still processing", _in_progress_page(run_id, "content_pack"), active="home")
+            return _layout(
+                "Still processing", _in_progress_page(run_id, "content_pack"), active="home"
+            )
         run_data = _load_run(run_id)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             run_data = None
@@ -16933,13 +17673,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         profile_id = run_data.get("profile_id", "")
         try:
             from mediahub.workflow.pack import build_content_pack as _bcp
+
             approved = _bcp(run_id, profile_id, RUNS_DIR)
         except Exception:
             approved = []
 
         _review_url = url_for("review", run_id=run_id)
         _grouped_url = url_for("content_pack_grouped", run_id=run_id)
-        meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
+        meet_name = _h(
+            run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", "")
+        )
 
         # Empty state — nothing approved yet. Send the user back to triage.
         if not approved:
@@ -16972,7 +17715,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             card_uuid = str(card_id_raw).replace(":", "_").replace(",", "_")
             wf = card.get("workflow") or {}
             sched_state = (wf.get("schedule_status") or "queued").lower()
-            sched_pill_class = {"scheduled": "good", "published": "good", "failed": "bad"}.get(sched_state, "")
+            sched_pill_class = {"scheduled": "good", "published": "good", "failed": "bad"}.get(
+                sched_state, ""
+            )
             sched_pill = (
                 f'<span class="tag {sched_pill_class}" data-schedule-pill="wf-{card_uuid}" '
                 f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
@@ -16998,7 +17743,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   </div>
 </div>"""
 
-        _wf_api_base = url_for("api_workflow_set", run_id=run_id, card_id="CARD_ID").replace("CARD_ID", "")
+        _wf_api_base = url_for("api_workflow_set", run_id=run_id, card_id="CARD_ID").replace(
+            "CARD_ID", ""
+        )
         _reel_url = url_for("api_run_reel", run_id=run_id)
         _newsletter_html_url = url_for("api_run_newsletter", run_id=run_id)
         _newsletter_text_url = _newsletter_html_url + "?format=text"
@@ -17009,18 +17756,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Single global AI-availability banner (same pattern as /review).
         try:
             from mediahub.media_ai.llm import is_available as _llm_available
-            _ai_banner_html = "" if _llm_available() else (
-                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
-                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
-                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
-                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                '<span style="color:var(--ink-dim)">'
-                'Captions and &ldquo;why this card&rdquo; explanations need a Gemini or '
-                'Anthropic key set by the deployment operator.'
-                '</span>'
-                '</div>'
+
+            _ai_banner_html = (
+                ""
+                if _llm_available()
+                else (
+                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                    '<span style="color:var(--ink-dim)">'
+                    "Captions and &ldquo;why this card&rdquo; explanations need a Gemini or "
+                    "Anthropic key set by the deployment operator."
+                    "</span>"
+                    "</div>"
+                )
             )
         except Exception:
             _ai_banner_html = ""
@@ -17158,10 +17910,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 with app.test_request_context():
                     from mediahub.turn_into import turn_meet_into_pack, save_pack
+
                     pack = turn_meet_into_pack(run_data, profile, deterministic=deterministic)
                     save_pack(pack, run_id, base_dir=DATA_DIR / "turn_into_packs")
-                    pack_url = url_for("turn_into_pack_view",
-                                        run_id=run_id, pack_id=pack["pack_id"])
+                    pack_url = url_for(
+                        "turn_into_pack_view", run_id=run_id, pack_id=pack["pack_id"]
+                    )
                 record = {
                     "status": "done",
                     "run_id": run_id,
@@ -17176,6 +17930,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 }
             except Exception as e:
                 import traceback as _tb
+
                 record = {
                     "status": "error",
                     "run_id": run_id,
@@ -17189,6 +17944,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _ti_job_write(job_id, record)
 
         import uuid as _uuid
+
         job_id = _uuid.uuid4().hex
 
         # Evict any old finished jobs before inserting a new one so the
@@ -17209,12 +17965,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _ti_job_write(job_id, running)
             t = threading.Thread(target=_do_generate, args=(job_id,), daemon=True)
             t.start()
-            return jsonify({
-                "ok": True,
-                "job_id": job_id,
-                "status": "running",
-                "status_url": url_for("api_turn_into_status", run_id=run_id, job_id=job_id),
-            })
+            return jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "status": "running",
+                    "status_url": url_for("api_turn_into_status", run_id=run_id, job_id=job_id),
+                }
+            )
 
         # Synchronous (default): block until pack is generated, return final payload
         _turn_into_jobs[job_id] = running
@@ -17222,7 +17980,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         job = _turn_into_jobs[job_id]
         if job["status"] == "error":
             return jsonify({"error": "turn_into_failed", "message": job["error"]}), 500
-        return jsonify({"ok": True, **{k: v for k, v in job.items() if k != "pack" and k != "status"}})
+        return jsonify(
+            {"ok": True, **{k: v for k, v in job.items() if k != "pack" and k != "status"}}
+        )
 
     @app.route("/api/runs/<run_id>/turn-into-status/<job_id>", methods=["GET"])
     def api_turn_into_status(run_id: str, job_id: str):
@@ -17244,11 +18004,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return jsonify({"status": "running"})
         if job["status"] == "error":
             return jsonify({"status": "error", "error": job.get("error", "unknown")}), 500
-        return jsonify({
-            "ok": True,
-            "status": "done",
-            **{k: v for k, v in job.items() if k not in ("pack", "status")},
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "status": "done",
+                **{k: v for k, v in job.items() if k not in ("pack", "status")},
+            }
+        )
 
     @app.route("/api/runs/<run_id>/turn-into/<pack_id>/caption", methods=["POST"])
     def api_turn_into_edit_caption(run_id, pack_id):
@@ -17267,6 +18029,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
             return jsonify({"error": "pack not found"}), 404
         from mediahub.turn_into import load_pack, save_pack
+
         base = DATA_DIR / "turn_into_packs"
         pack = load_pack(run_id, pack_id, base_dir=base)
         if pack is None:
@@ -17345,6 +18108,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         try:
             from mediahub.turn_into import templates as _ti
             from mediahub.turn_into.pipeline import _meet_summary, _resolve_voice_profile
+
             meet_summary = _meet_summary(run_data)
             rr = run_data.get("recognition_report") or {}
             ranked = rr.get("ranked_achievements") or []
@@ -17356,20 +18120,24 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             except Exception:
                 brand_kit = None
             artefact = _ti.build_parent_newsletter(
-                meet_summary, ranked,
-                profile=profile, voice_profile=voice_profile,
-                brand_kit=brand_kit, deterministic=False,
+                meet_summary,
+                ranked,
+                profile=profile,
+                voice_profile=voice_profile,
+                brand_kit=brand_kit,
+                deterministic=False,
             )
         except Exception as e:
             return jsonify({"error": f"newsletter_build_failed: {e}"}), 500
 
         from mediahub.brand.newsletter_renderer import (
-            render_email_html, render_plaintext, render_zip,
+            render_email_html,
+            render_plaintext,
+            render_zip,
             safe_filename_for,
         )
-        slug = safe_filename_for(
-            (run_data.get("meet") or {}).get("name") or run_id
-        )
+
+        slug = safe_filename_for((run_data.get("meet") or {}).get("name") or run_id)
 
         if fmt == "text":
             body = render_plaintext(artefact)
@@ -17380,20 +18148,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 )
             return resp
         if fmt == "zip":
-            body = render_zip(artefact, profile=profile, meet_summary=meet_summary,
-                              base_name=f"{slug}-newsletter")
-            resp = Response(body, mimetype="application/zip")
-            resp.headers["Content-Disposition"] = (
-                f'attachment; filename="{slug}-newsletter.zip"'
+            body = render_zip(
+                artefact, profile=profile, meet_summary=meet_summary, base_name=f"{slug}-newsletter"
             )
+            resp = Response(body, mimetype="application/zip")
+            resp.headers["Content-Disposition"] = f'attachment; filename="{slug}-newsletter.zip"'
             return resp
         # html (default)
         body = render_email_html(artefact, profile=profile, meet_summary=meet_summary)
         resp = Response(body, mimetype="text/html; charset=utf-8")
         if download:
-            resp.headers["Content-Disposition"] = (
-                f'attachment; filename="{slug}-newsletter.html"'
-            )
+            resp.headers["Content-Disposition"] = f'attachment; filename="{slug}-newsletter.html"'
         return resp
 
     @app.route("/runs/<run_id>/pack/<pack_id>")
@@ -17402,18 +18167,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Turn-Into packs are namespaced under <run_id>/<pack_id> on
         # disk, so the run's owner check is the right gate.
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
-            return _layout("Not found",
-                           '<div class="empty">Repurpose pack not found.</div>'), 404
+            return _layout("Not found", '<div class="empty">Repurpose pack not found.</div>'), 404
         from mediahub.turn_into import load_pack
+
         pack = load_pack(run_id, pack_id, base_dir=DATA_DIR / "turn_into_packs")
         if pack is None:
-            return _layout("Not found",
-                           '<div class="empty">Repurpose pack not found.</div>'), 404
+            return _layout("Not found", '<div class="empty">Repurpose pack not found.</div>'), 404
 
         _review_url = url_for("review", run_id=run_id)
         _api_url = url_for("api_turn_into", run_id=run_id)
-        _edit_api = url_for("api_turn_into_edit_caption",
-                            run_id=run_id, pack_id=pack_id)
+        _edit_api = url_for("api_turn_into_edit_caption", run_id=run_id, pack_id=pack_id)
         meet_name = _h(pack.get("meet_name", ""))
         gen_at = _h(pack.get("generated_at", ""))
 
@@ -17424,40 +18187,41 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         skipped_html = ""
         if skipped:
             items = "".join(
-                f'<li><strong>{_h(s.get("type",""))}</strong>: '
-                f'{_h(s.get("reason",""))}</li>'
+                f'<li><strong>{_h(s.get("type",""))}</strong>: ' f'{_h(s.get("reason",""))}</li>'
                 for s in skipped
             )
             skipped_html = (
                 '<div class="card" style="border-color:var(--warn);background:rgba(245,158,11,0.04)">'
                 '<h2 style="margin-top:0">Skipped artefacts</h2>'
                 f'<ul style="margin:0">{items}</ul>'
-                '</div>'
+                "</div>"
             )
 
         # Human-friendly labels for internal artefact-type slugs so the
         # tag chips don't expose snake_case engineering enums.
         _ARTEFACT_LABEL = {
-            "meet_recap":         "Meet recap",
-            "swimmer_spotlight":  "Swimmer spotlight",
-            "athlete_spotlight":  "Athlete spotlight",
-            "weekend_preview":    "Event preview",
-            "sponsor_post":       "Sponsor post",
-            "session_update":     "Session update",
-            "x_thread":           "X / Twitter thread",
-            "twitter_thread":     "Twitter thread",
-            "linkedin_post":      "LinkedIn post",
-            "free_text":          "Free text brief",
-            "parent_newsletter":  "Parent newsletter",
-            "coach_dm":           "Coach DM",
-            "dm_pack":            "DM pack",
+            "meet_recap": "Meet recap",
+            "swimmer_spotlight": "Swimmer spotlight",
+            "athlete_spotlight": "Athlete spotlight",
+            "weekend_preview": "Event preview",
+            "sponsor_post": "Sponsor post",
+            "session_update": "Session update",
+            "x_thread": "X / Twitter thread",
+            "twitter_thread": "Twitter thread",
+            "linkedin_post": "LinkedIn post",
+            "free_text": "Free text brief",
+            "parent_newsletter": "Parent newsletter",
+            "coach_dm": "Coach DM",
+            "dm_pack": "DM pack",
         }
 
         # --- Artefact cards
         cards_html = ""
         for art_idx, art in enumerate(artefacts):
             atype = art.get("type", "")
-            atype_label = _ARTEFACT_LABEL.get(atype, atype.replace("_", " ").capitalize() or "Artefact")
+            atype_label = _ARTEFACT_LABEL.get(
+                atype, atype.replace("_", " ").capitalize() or "Artefact"
+            )
             title = _h(art.get("title", atype_label))
             captions = art.get("captions") or {}
             cards = art.get("cards") or []
@@ -17470,7 +18234,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if draft:
                 draft_html = (
                     '<div style="margin-bottom:12px;padding:10px 14px;'
-                    'background:rgba(245,158,11,0.12);border:1px solid var(--warn);'
+                    "background:rgba(245,158,11,0.12);border:1px solid var(--warn);"
                     f'border-radius:8px;font-weight:600;color:var(--warn)">{_h(draft)}</div>'
                 )
 
@@ -17488,22 +18252,22 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
                             f'<span class="muted" style="font-size:11px">Post {ti+1}</span>'
                             f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
-                            f'</div>'
+                            f"</div>"
                             f'<textarea class="ti-cap" data-artefact="{art_idx}" '
                             f'data-thread="{ti}" '
                             f'style="width:100%;min-height:60px;font-size:13px;'
-                            f'padding:8px;border:1px solid var(--border);border-radius:6px;'
+                            f"padding:8px;border:1px solid var(--border);border-radius:6px;"
                             f'background:var(--bg);color:var(--ink);font-family:inherit">'
-                            f'{_h(post)}</textarea>'
-                            f'</div>'
+                            f"{_h(post)}</textarea>"
+                            f"</div>"
                         )
                     caption_blocks += (
                         '<div style="margin-bottom:14px">'
                         f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
                         f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:8px">X thread '
-                        f'({len(cap_val)} posts, &le;280 chars each)</div>'
-                        f'{sub}'
-                        '</div>'
+                        f"({len(cap_val)} posts, &le;280 chars each)</div>"
+                        f"{sub}"
+                        "</div>"
                     )
                     continue
 
@@ -17521,14 +18285,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<div style="margin-bottom:14px">'
                     f'<div style="font-size:12px;font-weight:600;text-transform:uppercase;'
                     f'color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">'
-                    f'{_h(key_label)}{cap_limit_html}</div>'
+                    f"{_h(key_label)}{cap_limit_html}</div>"
                     f'<textarea class="ti-cap" data-artefact="{art_idx}" '
                     f'data-key="{_h(cap_key)}" '
                     f'style="width:100%;min-height:80px;font-size:13px;'
-                    f'padding:10px;border:1px solid var(--border);border-radius:6px;'
+                    f"padding:10px;border:1px solid var(--border);border-radius:6px;"
                     f'background:var(--bg);color:var(--ink);font-family:inherit">'
-                    f'{_h(cap_val)}</textarea>'
-                    '</div>'
+                    f"{_h(cap_val)}</textarea>"
+                    "</div>"
                 )
 
             # Optional sub-cards strip (e.g. spotlight series)
@@ -17556,7 +18320,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<summary style="cursor:pointer;font-size:12px;color:var(--accent)">View HTML preview</summary>'
                     f'<div style="margin-top:10px;padding:14px;border:1px dashed var(--border);'
                     f'border-radius:8px;background:rgba(255,255,255,0.02)">{html_block}</div>'
-                    '</details>'
+                    "</details>"
                 )
 
             notes_html = ""
@@ -17566,7 +18330,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     '<details style="margin-top:8px">'
                     '<summary style="cursor:pointer;font-size:12px;color:var(--ink-muted)">Why this artefact?</summary>'
                     f'<ul style="margin:8px 0 0 0;font-size:12px;color:var(--ink-dim)">{lis}</ul>'
-                    '</details>'
+                    "</details>"
                 )
 
             cards_html += f"""
@@ -17665,7 +18429,9 @@ function tiRegenerate() {{
         """Grouped content pack page &mdash; 8 buckets."""
         state = _run_state(run_id)
         if state == "in_progress":
-            return _layout("Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home")
+            return _layout(
+                "Still processing", _in_progress_page(run_id, "content_pack_grouped"), active="home"
+            )
         run_data = _load_run(run_id)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             run_data = None
@@ -17678,7 +18444,9 @@ function tiRegenerate() {{
             )
 
         profile_id = run_data.get("profile_id", "")
-        meet_name = _h(run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", ""))
+        meet_name = _h(
+            run_data.get("meet", {}).get("name", "") or run_data.get("profile_display", "")
+        )
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
         _reel_url = url_for("api_run_reel", run_id=run_id)
@@ -17707,6 +18475,7 @@ function tiRegenerate() {{
         except Exception as e:
             grouped = {}
             import traceback
+
             traceback.print_exc()
 
         counts = grouped.get("_counts", {})
@@ -17725,9 +18494,13 @@ function tiRegenerate() {{
                 headline = _h(ach.get("headline") or item.get("headline") or "")
                 angle = _h(_humanise(item.get("post_angle") or ""))
                 s2p = item.get("safe_to_post") or {}
-                s2p_level = s2p.get("level", "needs_review") if isinstance(s2p, dict) else "needs_review"
+                s2p_level = (
+                    s2p.get("level", "needs_review") if isinstance(s2p, dict) else "needs_review"
+                )
                 s2p_reason = _h(s2p.get("reason", "") if isinstance(s2p, dict) else "")
-                s2p_cls = {"safe": "good", "needs_review": "warn", "do_not_post": "bad"}.get(s2p_level, "")
+                s2p_cls = {"safe": "good", "needs_review": "warn", "do_not_post": "bad"}.get(
+                    s2p_level, ""
+                )
                 cap_only = _h(item.get("caption_only") or ach.get("headline") or "")
                 cap_hash = _h(item.get("caption_with_hashtags") or "")
                 cap_full = _h(item.get("caption_full_brief") or "")
@@ -17747,38 +18520,46 @@ function tiRegenerate() {{
                 else:
                     wf_status = str((item.get("workflow") or {}).get("status") or "queue").lower()
                 # Schedule state pill (queued|scheduled|published|failed).
-                sched_state_raw = (item.get("schedule_status")
-                                   or (item.get("workflow") or {}).get("schedule_status")
-                                   or "queued")
+                sched_state_raw = (
+                    item.get("schedule_status")
+                    or (item.get("workflow") or {}).get("schedule_status")
+                    or "queued"
+                )
                 sched_state = str(sched_state_raw).lower()
                 sched_pill_class = {
                     "scheduled": "good",
                     "published": "good",
-                    "failed":    "bad",
+                    "failed": "bad",
                 }.get(sched_state, "")
                 sched_pill_html = (
                     f'<span class="tag {sched_pill_class}" data-schedule-pill="g-{card_uuid}" '
                     f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
                 )
                 schedule_btn = (
-                    f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
-                    f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"g-{card_uuid}\")'>"
-                    f'Schedule&hellip;</button>'
-                ) if card_id_raw else ""
+                    (
+                        f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
+                        f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"g-{card_uuid}\")'>"
+                        f"Schedule&hellip;</button>"
+                    )
+                    if card_id_raw
+                    else ""
+                )
                 # Per-card motion download — the endpoint renders (or
                 # serves cached) MP4. New tab so the user lands on the
                 # video preview rather than blocking the pack page.
                 motion_btn = ""
                 if card_id_raw:
                     _motion_url = url_for(
-                        "api_card_motion", run_id=run_id, card_id=str(card_id_raw),
+                        "api_card_motion",
+                        run_id=run_id,
+                        card_id=str(card_id_raw),
                     )
                     motion_btn = (
                         f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
                         f'href="{_h(_motion_url)}" target="_blank" rel="noopener" '
                         f'title="Render a 6-second branded story-format MP4 for this card. '
                         f'First time can take 30-90s while Remotion runs.">'
-                        f'&#x25B6; Motion video</a>'
+                        f"&#x25B6; Motion video</a>"
                     )
                 # Per-card sponsor variant — Phase 1.2 deliverable.
                 # Sponsor-branded result-card graphic + sponsor-
@@ -17787,27 +18568,37 @@ function tiRegenerate() {{
                 if card_id_raw:
                     _sponsor_url = url_for(
                         "sponsor_variant_view",
-                        run_id=run_id, card_id=str(card_id_raw),
+                        run_id=run_id,
+                        card_id=str(card_id_raw),
                     )
                     sponsor_btn = (
                         f'<a class="btn secondary" style="font-size:12px;padding:4px 10px" '
                         f'href="{_h(_sponsor_url)}" target="_blank" rel="noopener" '
                         f'title="Render a sponsor-branded variant: sponsor-tile graphic + '
                         f'sponsor-acknowledging caption for this card.">'
-                        f'&#x2605; Sponsor variant</a>'
+                        f"&#x2605; Sponsor variant</a>"
                     )
                 _ra_for_why = {
-                    "achievement": ach if isinstance(ach, dict) else (item.get("achievement") or {}),
-                    "factors": item.get("factors") or (ach.get("factors") if isinstance(ach, dict) else None) or [],
+                    "achievement": ach
+                    if isinstance(ach, dict)
+                    else (item.get("achievement") or {}),
+                    "factors": item.get("factors")
+                    or (ach.get("factors") if isinstance(ach, dict) else None)
+                    or [],
                     "rank": item.get("rank"),
                 }
-                _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(",", "_").replace("/", "_") or f"gp-{section_id}"
-                why_html = _render_why_this_card(_ra_for_why, card_uuid=f"gp-{_why_uuid}", run_id=run_id)
+                _why_uuid = (str(card_id) or section_id).replace(":", "_").replace(
+                    ",", "_"
+                ).replace("/", "_") or f"gp-{section_id}"
+                why_html = _render_why_this_card(
+                    _ra_for_why, card_uuid=f"gp-{_why_uuid}", run_id=run_id
+                )
                 # Phase 1.4 — sortable confidence/priority. Stamp the band
                 # + priority on the card div so a JS sort handler in the
                 # section header can reorder without re-rendering.
                 _band_rank = {"elite": 4, "great": 3, "good": 2, "standard": 1}.get(
-                    (item.get("quality_band") or "").lower(), 0,
+                    (item.get("quality_band") or "").lower(),
+                    0,
                 )
                 try:
                     _prio_num = float(item.get("priority", 0) or 0)
@@ -17858,11 +18649,11 @@ function tiRegenerate() {{
                     f'<span class="muted">Sort:</span>'
                     f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" '
                     f'onclick="event.preventDefault();event.stopPropagation();'
-                    f'mhSortPackSection(this, \'band-rank\', \'desc\')">Confidence</button>'
+                    f"mhSortPackSection(this, 'band-rank', 'desc')\">Confidence</button>"
                     f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" '
                     f'onclick="event.preventDefault();event.stopPropagation();'
-                    f'mhSortPackSection(this, \'priority\', \'desc\')">Priority</button>'
-                    f'</span>'
+                    f"mhSortPackSection(this, 'priority', 'desc')\">Priority</button>"
+                    f"</span>"
                 )
             return f"""
 <details open data-mh-pack-section="{section_id}">
@@ -17882,7 +18673,7 @@ function tiRegenerate() {{
                 for s in stats
             )
             highlights = win.get("highlights", [])
-            hl_html = "".join(f'<li>{_h(h)}</li>' for h in highlights)
+            hl_html = "".join(f"<li>{_h(h)}</li>" for h in highlights)
             cap_txt = _h(win.get("caption_text", ""))
             win_html = f"""
 <details open>
@@ -17916,43 +18707,53 @@ function tiRegenerate() {{
                     vid = v.get("id", brief_dir.name)
                     fmt = v.get("format", "feed_portrait")
                     cap = (v.get("caption") or "").strip()[:140]
-                    fmt_label = {"feed_square": "Square", "feed_portrait": "Portrait", "story": "Story", "reel_cover": "Reel cover"}.get(fmt, fmt)
-                    tiles.append(f'''
+                    fmt_label = {
+                        "feed_square": "Square",
+                        "feed_portrait": "Portrait",
+                        "story": "Story",
+                        "reel_cover": "Reel cover",
+                    }.get(fmt, fmt)
+                    tiles.append(f"""
 <div class="card" style="padding:10px;display:flex;flex-direction:column;gap:8px;width:200px;flex:0 0 200px">
   <img src="{url_for('api_visual_png', vid=vid, format_name=fmt)}" alt="" style="width:100%;border-radius:6px;display:block" loading="lazy">
   <div style="font-size:11px;color:var(--ink-dim)">{_h(fmt_label)}</div>
   <div style="font-size:12px;line-height:1.3">{_h(cap)}</div>
   <a class="btn secondary" style="font-size:12px;padding:4px 10px" target="_blank" rel="noopener" href="{url_for('api_visual_png', vid=vid, format_name=fmt)}">Download PNG</a>
-</div>''')
+</div>""")
                 if tiles:
                     _zip_url = url_for("content_pack_zip", run_id=run_id)
-                    visuals_strip = f'''
+                    visuals_strip = f"""
 <details open>
   <summary style="cursor:pointer;font-size:16px;font-weight:700;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px;list-style:none;display:flex;justify-content:space-between;align-items:center">
     <span>&#x1F3A8; Generated visuals <span class="tag" style="font-size:11px">{len(tiles)}</span></span>
     <a class="btn" style="font-size:12px;padding:6px 14px" href="{_zip_url}">Download all as ZIP</a>
   </summary>
   <div style="display:flex;gap:12px;overflow-x:auto;padding:8px 0 12px">{"".join(tiles)}</div>
-</details>'''
+</details>"""
         except Exception:
             visuals_strip = ""
 
         # Single global AI-availability banner (same pattern as /review).
         try:
             from mediahub.media_ai.llm import is_available as _llm_available
-            _ai_banner_html = "" if _llm_available() else (
-                '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                'background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);'
-                'border-left:3px solid var(--warn);border-radius:var(--radius-sm);'
-                'font-family:var(--font-body);font-size:13px;color:var(--ink);'
-                'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                '<span style="color:var(--ink-dim)">'
-                'Cards show ranker reasoning and grounded source lines only. '
-                'Captions, &ldquo;why this card&rdquo; explanations and performance '
-                'context need a Gemini or Anthropic key set by the deployment operator.'
-                '</span>'
-                '</div>'
+
+            _ai_banner_html = (
+                ""
+                if _llm_available()
+                else (
+                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
+                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+                    '<span style="color:var(--ink-dim)">'
+                    "Cards show ranker reasoning and grounded source lines only. "
+                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
+                    "context need a Gemini or Anthropic key set by the deployment operator."
+                    "</span>"
+                    "</div>"
+                )
             )
         except Exception:
             _ai_banner_html = ""
@@ -18113,8 +18914,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     rk = json.loads(run_kit_path.read_text()) or {}
             except Exception:
                 rk = {}
-        display_name = (rk.get("display_name")
-                        or profile_id.replace("_", " ").replace("-", " ").title())
+        display_name = (
+            rk.get("display_name") or profile_id.replace("_", " ").replace("-", " ").title()
+        )
         primary = rk.get("primary_colour") or "#0A2540"
         secondary = rk.get("secondary_colour") or "#000000"
         accent = rk.get("accent_colour") or "#FFD86E"
@@ -18122,13 +18924,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         short_name = rk.get("short_name") or None
         try:
             from mediahub.brand.kit import BrandKit
-            bk = BrandKit(profile_id=profile_id, display_name=display_name,
-                          primary_colour=primary, secondary_colour=secondary,
-                          accent_colour=accent, logo_svg=logo_svg,
-                          short_name=short_name)
+
+            bk = BrandKit(
+                profile_id=profile_id,
+                display_name=display_name,
+                primary_colour=primary,
+                secondary_colour=secondary,
+                accent_colour=accent,
+                logo_svg=logo_svg,
+                short_name=short_name,
+            )
         except Exception:
+
             class _BK:
                 pass
+
             bk = _BK()
             bk.profile_id = profile_id
             bk.display_name = display_name
@@ -18163,6 +18973,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 code=503,
             )
         from flask import request as _req
+
         requested_pid = _req.args.get("profile_id")
         active_pid = _active_profile_id()
         # Strict isolation: even if the caller asks for another profile by
@@ -18174,22 +18985,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not profile_id:
             _profs = list_profiles()
             if not _profs:
-                _org_url = url_for('organisation_page')
+                _org_url = url_for("organisation_page")
                 _create_url = url_for("make_page")
                 empty_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
                     '<span class="mh-hero-eyebrow">Media library</span>'
                     '<h1>No organisation,<br><em class="editorial">no library.</em></h1>'
                     '<p class="lede">'
-                    'The media library is scoped per organisation. Set up your '
-                    'organisation first &mdash; or jump into Create and one '
-                    'gets created automatically.'
-                    '</p>'
+                    "The media library is scoped per organisation. Set up your "
+                    "organisation first &mdash; or jump into Create and one "
+                    "gets created automatically."
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{_org_url}">Set up organisation &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{_create_url}">Or start creating</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Media library", empty_body, active="media")
             profile_id = _profs[0].profile_id
@@ -18208,7 +19019,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
-            _file_url = url_for('api_media_library_file', asset_id=ad.get('id', ''))
+            _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
             rows_html += f"""
 <tr>
   <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
@@ -18271,6 +19082,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
         from flask import request as _req
+
         f = _req.files.get("file")
         if not f:
             return jsonify({"error": "no_file"}), 400
@@ -18290,6 +19102,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         upload_dir = UPLOADS_DIR / "media_library" / profile_id
         upload_dir.mkdir(parents=True, exist_ok=True)
         import uuid as _uuid
+
         ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
         dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
         f.save(str(dest))
@@ -18298,6 +19111,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         meta = _v8_parse_description(description) if description else {}
         store = _v8_get_media_store()
         from mediahub.media_library.models import MediaAsset
+
         athlete_names = list(meta.get("athletes") or [])
         asset = MediaAsset(
             id="",
@@ -18314,9 +19128,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         )
         asset = store.save(asset)
         # AJAX callers get JSON; plain form submissions redirect back to the library.
-        if (_req.headers.get("Accept", "").find("application/json") != -1
-                or _req.headers.get("X-Requested-With") == "XMLHttpRequest"):
-            return jsonify({"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset})
+        if (
+            _req.headers.get("Accept", "").find("application/json") != -1
+            or _req.headers.get("X-Requested-With") == "XMLHttpRequest"
+        ):
+            return jsonify(
+                {"ok": True, "asset": asset.to_dict() if hasattr(asset, "to_dict") else asset}
+            )
         return redirect(url_for("media_library_page", profile_id=profile_id))
 
     def _session_can_access_profile(asset_profile_id: Optional[str]) -> bool:
@@ -18345,6 +19163,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _session_can_access_profile(a.profile_id):
             return "", 403
         from flask import send_file
+
         try:
             return send_file(a.path)
         except Exception:
@@ -18361,6 +19180,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable", "assets": []}), 503
         from flask import request as _req
+
         requested_pid = (_req.args.get("profile_id") or "").strip()
         active_pid = _active_profile_id() or ""
         profile_id = requested_pid or active_pid
@@ -18372,17 +19192,19 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         assets_out = []
         for a in store.list(profile_id=profile_id, limit=200):
             ad = a.to_dict() if hasattr(a, "to_dict") else dict(a)
-            assets_out.append({
-                "id": ad.get("id", ""),
-                "filename": ad.get("filename", ""),
-                "type": ad.get("type", ""),
-                "linked_athlete_names": ad.get("linked_athlete_names") or [],
-                "linked_venue": ad.get("linked_venue") or "",
-                "linked_event": ad.get("linked_event") or "",
-                "permission_status": ad.get("permission_status", ""),
-                "approval_status": ad.get("approval_status", ""),
-                "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
-            })
+            assets_out.append(
+                {
+                    "id": ad.get("id", ""),
+                    "filename": ad.get("filename", ""),
+                    "type": ad.get("type", ""),
+                    "linked_athlete_names": ad.get("linked_athlete_names") or [],
+                    "linked_venue": ad.get("linked_venue") or "",
+                    "linked_event": ad.get("linked_event") or "",
+                    "permission_status": ad.get("permission_status", ""),
+                    "approval_status": ad.get("approval_status", ""),
+                    "file_url": url_for("api_media_library_file", asset_id=ad.get("id", "")),
+                }
+            )
         return jsonify({"profile_id": profile_id, "assets": assets_out})
 
     # ------------------------------------------------------------------
@@ -18409,8 +19231,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except Exception:
             return {"signatures": [], "hooks": []}
 
-    def _v9_save_variation_history(run_id: str, card_id: str,
-                                    signature: str, hook: str) -> None:
+    def _v9_save_variation_history(run_id: str, card_id: str, signature: str, hook: str) -> None:
         if not signature:
             return
         p = _v9_variation_history_path(run_id, card_id)
@@ -18483,6 +19304,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
         from flask import request as _req
+
         # Resolve run + card. Runs are stored as runs_v4/<run_id>.json;
         # also accept the legacy nested runs_v4/<run_id>/run.json layout.
         run_data = _load_run(run_id)
@@ -18515,7 +19337,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 break
         if target is None:
             # Fallback: try cards array
-            for c in (run_data.get("cards") or []):
+            for c in run_data.get("cards") or []:
                 if c.get("swim_id") == card_id or c.get("id") == card_id:
                     target = {"achievement": c}
                     break
@@ -18528,7 +19350,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "id": ach.get("swim_id") or card_id,
             "swim_id": ach.get("swim_id") or card_id,
             "achievement": ach,
-            "post_angle": ach.get("post_angle") or _req.json.get("post_angle") if _req.is_json else ach.get("post_angle"),
+            "post_angle": ach.get("post_angle") or _req.json.get("post_angle")
+            if _req.is_json
+            else ach.get("post_angle"),
             "meet_name": (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", ""),
             "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
         }
@@ -18538,7 +19362,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # profile id from the club_filter so brand-kit + media-library lookups still work.
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
         # Slugify
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
         # Defense-in-depth: if this run is pinned to an organisation, only
         # that organisation's session may pull its library into the render.
         # Run-scoped synthetic profiles are still allowed for everyone.
@@ -18592,25 +19418,31 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # Constrain to photo-capable families so the chosen photo actually
             # appears (a text-led family would ignore it).
             choice_allowed_families = [
-                "individual_hero", "big_number_hero", "story_card",
-                "athlete_spotlight", "medal_card",
+                "individual_hero",
+                "big_number_hero",
+                "story_card",
+                "athlete_spotlight",
+                "medal_card",
             ]
 
         # The photos the user can pick from for this card (their org's library
         # images), surfaced in the panel as a per-graphic picker.
-        _photo_types = {"athlete_action", "athlete_headshot", "team_photo",
-                        "venue_photo", "other"}
+        _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "venue_photo", "other"}
         available_photos = []
         for _ad in media_assets:
             _d = _ad if isinstance(_ad, dict) else {}
             if _d.get("id") and _d.get("type") in _photo_types:
                 _names = _d.get("linked_athlete_names") or []
-                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace("_", " ")
-                available_photos.append({
-                    "id": _d["id"],
-                    "url": url_for("api_media_library_file", asset_id=_d["id"]),
-                    "label": _label,
-                })
+                _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace(
+                    "_", " "
+                )
+                available_photos.append(
+                    {
+                        "id": _d["id"],
+                        "url": url_for("api_media_library_file", asset_id=_d["id"]),
+                        "label": _label,
+                    }
+                )
 
         # V9 variation overhaul: every regenerate produces a fresh random
         # creative direction (different layout family + background style +
@@ -18641,6 +19473,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         elif stable_mode:
             try:
                 from mediahub.creative_brief.generator import auto_variation_seed_for
+
                 variation_seed = auto_variation_seed_for(
                     item.get("swim_id") or item.get("id") or card_id
                 )
@@ -18652,19 +19485,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # random profile picker provides the variety.
             try:
                 from mediahub.creative_brief.generator import random_variation_profile
+
                 variation_profile = random_variation_profile(
                     angle=item.get("post_angle") or "",
                     avoid_signatures=recent_sigs,
                 )
             except Exception:
                 variation_profile = None
-            ai_directed = True   # generate() will try the AI director first
+            ai_directed = True  # generate() will try the AI director first
 
         try:
             with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
                 res = _v8_create_visual_for_item(
-                    item, brand_kit,
-                    profile_id=profile_id, run_id=run_id,
+                    item,
+                    brand_kit,
+                    profile_id=profile_id,
+                    run_id=run_id,
                     media_assets=media_assets,
                     formats=formats_kw,
                     variation_seed=variation_seed,
@@ -18690,18 +19526,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if new_sig:
             _v9_save_variation_history(run_id, card_id, new_sig, new_hook)
         # Include the seed in the response so the UI / debugging can see it.
-        return jsonify({
-            "ok": True,
-            "variation_seed": variation_seed,
-            "variation_signature": new_sig,
-            "ai_directed": bool(brief_d.get("ai_directed")),
-            "explanation": explanation,
-            # Per-graphic photo picker state.
-            "available_photos": available_photos,
-            "chosen_asset_id": chosen_asset_id,
-            "no_photo": force_no_photo,
-            **res,
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "variation_seed": variation_seed,
+                "variation_signature": new_sig,
+                "ai_directed": bool(brief_d.get("ai_directed")),
+                "explanation": explanation,
+                # Per-graphic photo picker state.
+                "available_photos": available_photos,
+                "chosen_asset_id": chosen_asset_id,
+                "no_photo": force_no_photo,
+                **res,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Sponsor variant — Phase 1.2 (output surface)
@@ -18734,11 +19572,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if run_data is None:
             return None, None
         rr = run_data.get("recognition_report") or {}
-        for ra in (rr.get("ranked_achievements") or []):
+        for ra in rr.get("ranked_achievements") or []:
             ach = ra.get("achievement") or {}
             if ach.get("swim_id") == card_id or ra.get("id") == card_id:
                 return run_data, ra
-        for c in (run_data.get("cards") or []):
+        for c in run_data.get("cards") or []:
             if c.get("swim_id") == card_id or c.get("id") == card_id:
                 return run_data, {"achievement": c}
         return run_data, None
@@ -18761,7 +19599,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return _recovery_page(
                 "Card not found",
                 "That card isn't part of this run any more. The pack may have been regenerated since the link was shared, or the card was deleted from the review queue.",
-                primary_cta=("Open the content pack", url_for("content_pack_grouped", run_id=run_id)),
+                primary_cta=(
+                    "Open the content pack",
+                    url_for("content_pack_grouped", run_id=run_id),
+                ),
                 secondary_cta=("Back to the review queue", url_for("review", run_id=run_id)),
             )
 
@@ -18801,7 +19642,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "safe_to_post": target.get("safe_to_post") or {"level": "safe"},
                 }
                 resolved_pid = profile_id or "_run_" + run_id
-                resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or ("_run_" + run_id)
+                resolved_pid = re.sub(r"[^a-z0-9_-]", "-", resolved_pid.lower()).strip("-") or (
+                    "_run_" + run_id
+                )
                 if not _session_can_access_profile(resolved_pid):
                     visual_error = "forbidden"
                     raise RuntimeError("forbidden")
@@ -18814,8 +19657,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 except Exception:
                     pass
                 res = _v8_create_visual_for_item(
-                    item, brand_kit,
-                    profile_id=resolved_pid, run_id=run_id,
+                    item,
+                    brand_kit,
+                    profile_id=resolved_pid,
+                    run_id=run_id,
                     media_assets=media_assets,
                     sponsor_name=sponsor_name,
                     variation_seed=0,
@@ -18827,7 +19672,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     fmt = v0.get("format_name") or "feed_portrait"
                     if vid:
                         img_url = url_for(
-                            "api_visual_png", vid=vid, format_name=fmt,
+                            "api_visual_png",
+                            vid=vid,
+                            format_name=fmt,
                         )
                         visual_html = (
                             f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
@@ -18837,9 +19684,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         visual_error = "Visual rendered but no asset id returned."
                 else:
                     errs = res.get("errors") or []
-                    visual_error = (
-                        "Sponsor-branded visual could not be rendered: "
-                        + (errs[0] if errs else "no visuals returned")
+                    visual_error = "Sponsor-branded visual could not be rendered: " + (
+                        errs[0] if errs else "no visuals returned"
                     )
             except Exception as e:
                 visual_error = f"render_failed: {e}"
@@ -18852,6 +19698,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         caption_unavailable = False
         try:
             from mediahub.brand.sponsor import generate_sponsor_caption
+
             caption_text = generate_sponsor_caption(ach, profile=profile)
         except Exception as e:
             # Detect "no LLM provider configured" by class name rather than
@@ -18864,37 +19711,41 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         # ---- 3. Render the page ----
         _pack_url = url_for("content_pack_grouped", run_id=run_id)
-        visual_block = visual_html if visual_html else (
-            f'<div class="empty" style="text-align:left;padding:14px">'
-            f'<strong style="color:var(--warn)">Visual not available.</strong>'
-            f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
-            '</div>'
+        visual_block = (
+            visual_html
+            if visual_html
+            else (
+                f'<div class="empty" style="text-align:left;padding:14px">'
+                f'<strong style="color:var(--warn)">Visual not available.</strong>'
+                f'<br><span class="muted" style="font-size:12px">{_h(visual_error)}</span>'
+                "</div>"
+            )
         )
         if caption_text:
             caption_block = (
                 f'<textarea readonly style="width:100%;min-height:140px;font-size:14px;'
-                f'padding:12px;border:1px solid var(--border);border-radius:8px;'
+                f"padding:12px;border:1px solid var(--border);border-radius:8px;"
                 f'background:var(--bg);color:var(--ink);font-family:inherit">'
-                f'{_h(caption_text)}</textarea>'
+                f"{_h(caption_text)}</textarea>"
                 f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
                 f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
-                f'this.textContent=\'Copied&hairsp;✓\'">Copy caption</button>'
+                f"this.textContent='Copied&hairsp;✓'\">Copy caption</button>"
             )
         elif caption_unavailable:
             caption_block = (
                 '<div class="empty" style="text-align:left;padding:14px">'
-                '<strong>AI captions are unavailable on this deployment.</strong>'
+                "<strong>AI captions are unavailable on this deployment.</strong>"
                 '<br><span class="muted" style="font-size:13px">'
-                'The sponsor-branded visual is still ready to download. '
-                'Contact your administrator to enable AI captions.'
-                '</span></div>'
+                "The sponsor-branded visual is still ready to download. "
+                "Contact your administrator to enable AI captions."
+                "</span></div>"
             )
         else:
             caption_block = (
                 f'<div class="empty" style="text-align:left;padding:14px">'
                 f'<strong style="color:var(--warn)">Caption not available.</strong>'
                 f'<br><span class="muted" style="font-size:12px">{_h(caption_error)}</span>'
-                '</div>'
+                "</div>"
             )
         swimmer = _h(ach.get("swimmer_name") or "")
         event = _h(ach.get("event") or "")
@@ -18954,7 +19805,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 target = ra
                 break
         if target is None:
-            for c in (run_data.get("cards") or []):
+            for c in run_data.get("cards") or []:
                 if c.get("swim_id") == card_id or c.get("id") == card_id:
                     target = {"achievement": c}
                     break
@@ -18973,7 +19824,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         # V8.1: profile_id optional; fall back to club_filter / synthetic id
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
         # Defense-in-depth: same per-org gate as create-graphic.
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
@@ -19003,11 +19856,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _choice_families = ["text_led_recap", "weekend_numbers"]
         elif _chosen:
             _forced_asset = _chosen
-            _choice_families = ["individual_hero", "big_number_hero", "story_card",
-                                "athlete_spotlight", "medal_card"]
+            _choice_families = [
+                "individual_hero",
+                "big_number_hero",
+                "story_card",
+                "athlete_spotlight",
+                "medal_card",
+            ]
 
         from concurrent.futures import ThreadPoolExecutor
         import dataclasses as _dc
+
         # V9: build three distinct random variation profiles so the
         # variant picker actually shows three different visual directions
         # (not the legacy palette-only seeds 1/2/3).
@@ -19037,8 +19896,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             try:
                 with _render_slot("variant", card_id, timeout=_RENDER_QUEUE_TIMEOUT):
                     res = _v8_create_visual_for_item(
-                        item, brand_kit,
-                        profile_id=profile_id, run_id=run_id,
+                        item,
+                        brand_kit,
+                        profile_id=profile_id,
+                        run_id=run_id,
                         media_assets=media_assets,
                         variation_profile=profile,
                         use_ai_director=True,
@@ -19048,7 +19909,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     )
                 visuals = res.get("visuals") or []
                 # Pick the feed_portrait by default if present, else first.
-                primary = next((v for v in visuals if v.get("format_name") == "feed_portrait"), visuals[0] if visuals else None)
+                primary = next(
+                    (v for v in visuals if v.get("format_name") == "feed_portrait"),
+                    visuals[0] if visuals else None,
+                )
                 return {
                     "seed": 0,
                     "variation_signature": (res.get("brief") or {}).get("variation_signature", ""),
@@ -19124,11 +19988,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """
         detail = str(e)
         low = detail.lower()
-        if ("cannot find module" in low or "remotion not installed" in low
-                or "module not found" in low or "modulenotfound" in low
-                or "node is not installed" in low or "/usr/bin/env: node" in low
-                or "remotion render failed" in low or "exit code 3" in low
-                or "(exit 3)" in low or "node_modules" in low):
+        if (
+            "cannot find module" in low
+            or "remotion not installed" in low
+            or "module not found" in low
+            or "modulenotfound" in low
+            or "node is not installed" in low
+            or "/usr/bin/env: node" in low
+            or "remotion render failed" in low
+            or "exit code 3" in low
+            or "(exit 3)" in low
+            or "node_modules" in low
+        ):
             return {
                 "error": "render_failed",
                 "kind": "infra_missing",
@@ -19158,7 +20029,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "detail": detail,
             "user_message": (
                 "Motion video rendering failed. Try again, or use "
-                "\"Create graphic\" to get a static visual instead."
+                '"Create graphic" to get a static visual instead.'
             ),
         }
 
@@ -19171,6 +20042,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         UI can use <video src=&hellip;> or a direct download.
         """
         from flask import send_file
+
         try:
             from mediahub.visual import motion as _motion
         except Exception as e:
@@ -19199,7 +20071,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 target = ra
                 break
         if target is None:
-            for c in (run_data.get("cards") or []):
+            for c in run_data.get("cards") or []:
                 if c.get("swim_id") == card_id or c.get("id") == card_id:
                     target = {"achievement": c}
                     break
@@ -19216,7 +20088,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         }
 
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
         try:
             brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
         except Exception:
@@ -19226,9 +20100,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # the motion render visually aligns with the still card.
         try:
             from mediahub.creative_brief.generator import auto_variation_seed_for
-            variation_seed = auto_variation_seed_for(
-                ach.get("swim_id") or card_id
-            )
+
+            variation_seed = auto_variation_seed_for(ach.get("swim_id") or card_id)
         except Exception:
             variation_seed = 1
 
@@ -19255,22 +20128,27 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except _RenderBusy:
             return _render_busy_response("motion")
         except RuntimeError as e:
-            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
+            _payload = _motion_error_payload(e)
+            return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
         except Exception as e:
-            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
+            _payload = _motion_error_payload(e)
+            return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
 
         if not Path(mp4).exists():
-            return jsonify({
-                "error": "render_failed",
-                "kind": "internal",
-                "detail": "mp4 missing after render",
-                "user_message": (
-                    "Motion video rendering didn't produce an output file. "
-                    "This is usually a transient issue — try again in a few seconds."
-                ),
-            }), 500
-        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
-                         download_name=f"{card_id}.mp4")
+            return jsonify(
+                {
+                    "error": "render_failed",
+                    "kind": "internal",
+                    "detail": "mp4 missing after render",
+                    "user_message": (
+                        "Motion video rendering didn't produce an output file. "
+                        "This is usually a transient issue — try again in a few seconds."
+                    ),
+                }
+            ), 500
+        return send_file(
+            str(mp4), mimetype="video/mp4", as_attachment=False, download_name=f"{card_id}.mp4"
+        )
 
     @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
     def api_run_reel(run_id: str):
@@ -19280,6 +20158,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         the count with ?n=<int> up to a hard cap of 5.
         """
         from flask import send_file
+
         try:
             from mediahub.visual import motion as _motion
         except Exception as e:
@@ -19324,15 +20203,19 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         cards: list[dict] = []
         for ra in top:
             ach = ra.get("achievement") or {}
-            cards.append({
-                "id": ach.get("swim_id") or ra.get("id") or "",
-                "swim_id": ach.get("swim_id") or "",
-                "achievement": ach,
-                "meet_name": meet_name,
-            })
+            cards.append(
+                {
+                    "id": ach.get("swim_id") or ra.get("id") or "",
+                    "swim_id": ach.get("swim_id") or "",
+                    "achievement": ach,
+                    "meet_name": meet_name,
+                }
+            )
 
         profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
-        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or ("_run_" + run_id)
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
         try:
             brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
         except Exception:
@@ -19362,22 +20245,30 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except _RenderBusy:
             return _render_busy_response("reel")
         except RuntimeError as e:
-            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
+            _payload = _motion_error_payload(e)
+            return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
         except Exception as e:
-            _payload = _motion_error_payload(e); return jsonify(_payload), 503 if _payload.get('kind') == 'infra_missing' else 500
+            _payload = _motion_error_payload(e)
+            return jsonify(_payload), 503 if _payload.get("kind") == "infra_missing" else 500
 
         if not Path(mp4).exists():
-            return jsonify({
-                "error": "render_failed",
-                "kind": "internal",
-                "detail": "mp4 missing after render",
-                "user_message": (
-                    "Reel rendering didn't produce an output file. "
-                    "This is usually a transient issue — try again."
-                ),
-            }), 500
-        return send_file(str(mp4), mimetype="video/mp4", as_attachment=False,
-                         download_name=f"meet_reel_{run_id}.mp4")
+            return jsonify(
+                {
+                    "error": "render_failed",
+                    "kind": "internal",
+                    "detail": "mp4 missing after render",
+                    "user_message": (
+                        "Reel rendering didn't produce an output file. "
+                        "This is usually a transient issue — try again."
+                    ),
+                }
+            ), 500
+        return send_file(
+            str(mp4),
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=f"meet_reel_{run_id}.mp4",
+        )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
     def api_card_voiceover(run_id: str, card_id: str):
@@ -19397,14 +20288,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _voiceover_enabled():
             # Honest, specific 503 — either the backend isn't importable or the
             # operator hasn't opted in. Never a silent fallback voice.
-            return jsonify({
-                "error": "voiceover_disabled",
-                "kind": "infra_missing",
-                "user_message": (
-                    "Voiceover is turned off. An operator can enable it by "
-                    "installing the speech backend and setting MEDIAHUB_VOICEOVER=1."
-                ),
-            }), 503
+            return jsonify(
+                {
+                    "error": "voiceover_disabled",
+                    "kind": "infra_missing",
+                    "user_message": (
+                        "Voiceover is turned off. An operator can enable it by "
+                        "installing the speech backend and setting MEDIAHUB_VOICEOVER=1."
+                    ),
+                }
+            ), 503
 
         run_data = _load_run(run_id)
         if run_data is None:
@@ -19429,7 +20322,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 card = {**ach, **ra}
                 break
         if card is None:
-            for c in (run_data.get("cards") or []):
+            for c in run_data.get("cards") or []:
                 if c.get("swim_id") == card_id or c.get("id") == card_id:
                     card = c
                     break
@@ -19441,19 +20334,25 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         state = ws.load(run_id).get(card_id) if ws is not None else None
         approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
         if not approved:
-            return jsonify({
-                "error": "not_approved",
-                "user_message": (
-                    "This card hasn't been approved yet. Approve the caption "
-                    "first — voiceover only speaks approved content."
-                ),
-            }), 409
+            return jsonify(
+                {
+                    "error": "not_approved",
+                    "user_message": (
+                        "This card hasn't been approved yet. Approve the caption "
+                        "first — voiceover only speaks approved content."
+                    ),
+                }
+            ), 409
 
         # Derive the verbatim caption text from approved state, server-side.
         text = ""
         if state is not None and state.edited_captions:
             # Honour the human's edits: join the saved slots in a stable order.
-            parts = [state.edited_captions[k] for k in sorted(state.edited_captions) if state.edited_captions.get(k)]
+            parts = [
+                state.edited_captions[k]
+                for k in sorted(state.edited_captions)
+                if state.edited_captions.get(k)
+            ]
             text = "\n".join(p for p in parts if p).strip()
         if not text and _build_caption_text is not None:
             try:
@@ -19461,45 +20360,61 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             except Exception:
                 text = ""
         if not text:
-            return jsonify({
-                "error": "no_caption",
-                "user_message": "This card has no caption text to speak.",
-            }), 422
+            return jsonify(
+                {
+                    "error": "no_caption",
+                    "user_message": "This card has no caption text to speak.",
+                }
+            ), 422
 
         try:
-            voice = os.environ.get("MEDIAHUB_VOICEOVER_VOICE", "").strip() or _voiceover.DEFAULT_VOICE
+            voice = (
+                os.environ.get("MEDIAHUB_VOICEOVER_VOICE", "").strip() or _voiceover.DEFAULT_VOICE
+            )
             with _render_slot("voiceover", card_id, timeout=_RENDER_TRY_TIMEOUT):
                 result = _voiceover.synthesize(text, voice=voice, run_id=run_id)
         except _RenderBusy:
             return _render_busy_response("voiceover")
         except _voiceover.VoiceoverError as e:
-            return jsonify({
-                "error": "voiceover_unavailable",
-                "kind": "infra_missing",
-                "detail": str(e),
-                "user_message": (
-                    "Voiceover couldn't be generated right now (the speech "
-                    "service is unavailable). Try again shortly."
-                ),
-            }), 503
+            return jsonify(
+                {
+                    "error": "voiceover_unavailable",
+                    "kind": "infra_missing",
+                    "detail": str(e),
+                    "user_message": (
+                        "Voiceover couldn't be generated right now (the speech "
+                        "service is unavailable). Try again shortly."
+                    ),
+                }
+            ), 503
         except Exception as e:
             return jsonify({"error": "voiceover_failed", "detail": str(e)}), 500
 
         fmt = (request.args.get("format") or "").strip().lower()
         if fmt == "json":
-            return jsonify({
-                "ok": True,
-                "transcript": result.transcript,
-                "voice": result.voice,
-                "duration_ms": result.duration_ms,
-                "cached": result.cached,
-                "has_subtitles": bool(result.word_boundaries),
-            })
+            return jsonify(
+                {
+                    "ok": True,
+                    "transcript": result.transcript,
+                    "voice": result.voice,
+                    "duration_ms": result.duration_ms,
+                    "cached": result.cached,
+                    "has_subtitles": bool(result.word_boundaries),
+                }
+            )
         if fmt == "srt":
-            return send_file(str(result.srt_path), mimetype="application/x-subrip",
-                             as_attachment=False, download_name=f"{card_id}.srt")
-        return send_file(str(result.audio_path), mimetype="audio/mpeg",
-                         as_attachment=False, download_name=f"{card_id}.mp3")
+            return send_file(
+                str(result.srt_path),
+                mimetype="application/x-subrip",
+                as_attachment=False,
+                download_name=f"{card_id}.srt",
+            )
+        return send_file(
+            str(result.audio_path),
+            mimetype="audio/mpeg",
+            as_attachment=False,
+            download_name=f"{card_id}.mp3",
+        )
 
     @app.route("/api/visual/<vid>")
     def api_visual_get(vid: str):
@@ -19527,10 +20442,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         return jsonify({"error": "not_found"}), 404
 
     _VALID_FORMAT_NAMES = {
-        "feed_portrait", "feed_square", "feed_landscape",
-        "story_portrait", "story_square",
-        "twitter_landscape", "twitter_square",
-        "print_a4", "print_letter",
+        "feed_portrait",
+        "feed_square",
+        "feed_landscape",
+        "story_portrait",
+        "story_square",
+        "twitter_landscape",
+        "twitter_square",
+        "print_a4",
+        "print_letter",
     }
 
     @app.route("/api/visual/<vid>/png/<format_name>")
@@ -19540,6 +20460,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _v8_ok:
             return "", 503
         from flask import send_file
+
         for run_dir in RUNS_DIR.iterdir():
             if not run_dir.is_dir():
                 continue
@@ -19581,12 +20502,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
             return jsonify({"error": "run_not_found"}), 404
         from flask import request as _req
+
         q = _req.args.get("q", "").strip()
         if not q:
             return jsonify({"results": []})
         try:
             results = _v8_search_venue(q, limit=8)
-            return jsonify({"results": [r.__dict__ if hasattr(r, "__dict__") else r for r in results]})
+            return jsonify(
+                {"results": [r.__dict__ if hasattr(r, "__dict__") else r for r in results]}
+            )
         except Exception as e:
             return jsonify({"error": str(e), "results": []}), 500
 
@@ -19653,15 +20577,17 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     f"{run_id}/captions/{vid}.txt",
                     f"CAPTION:\n{cap}\n\nALT TEXT:\n{alt}\n",
                 )
-                approval.append({
-                    "id": vid,
-                    "format": fmt,
-                    "status": visual.get("status", "draft"),
-                    "caption": cap,
-                    "alt_text": alt,
-                    "source_asset_ids": visual.get("source_asset_ids", []),
-                    "created_at": visual.get("created_at"),
-                })
+                approval.append(
+                    {
+                        "id": vid,
+                        "format": fmt,
+                        "status": visual.get("status", "draft"),
+                        "caption": cap,
+                        "alt_text": alt,
+                        "source_asset_ids": visual.get("source_asset_ids", []),
+                        "created_at": visual.get("created_at"),
+                    }
+                )
             z.writestr(
                 f"{run_id}/approval-summary.json",
                 json.dumps({"run_id": run_id, "items": approval, "count": len(approval)}, indent=2),

@@ -7,6 +7,7 @@ extracted tables (as list of list of strings).
 Uses stdlib urllib + BeautifulSoup for HTML parsing.
 Does not depend on any hardcoded domain-specific logic.
 """
+
 from __future__ import annotations
 
 import html
@@ -15,7 +16,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -28,10 +29,11 @@ if str(_REPO_ROOT) not in sys.path:
 @dataclass
 class ProfilePage:
     """Result of fetching and parsing a profile page."""
+
     url: str
     fetched_at: str
-    text: str                          # Full cleaned text content
-    tables: list[list[list[str]]]      # Tables as [row][col] strings
+    text: str  # Full cleaned text content
+    tables: list[list[list[str]]]  # Tables as [row][col] strings
     raw_html_length: int = 0
     fetch_success: bool = True
     error: Optional[str] = None
@@ -39,8 +41,8 @@ class ProfilePage:
 
 def _extract_domain(url: str) -> str:
     try:
-        s = re.sub(r'^https?://', '', url)
-        return s.split('/')[0].split('?')[0].split(':')[0].lower()
+        s = re.sub(r"^https?://", "", url)
+        return s.split("/")[0].split("?")[0].split(":")[0].lower()
     except Exception:
         return ""
 
@@ -73,7 +75,8 @@ def _parse_html(raw_bytes: bytes, url: str) -> ProfilePage:
 
     # Try BeautifulSoup parsing
     try:
-        from bs4 import BeautifulSoup, Tag
+        from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(raw, "lxml")
 
         # Remove noise elements
@@ -93,7 +96,7 @@ def _parse_html(raw_bytes: bytes, url: str) -> ProfilePage:
 
         # Extract text
         text = soup.get_text(separator=" ")
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         return ProfilePage(
             url=url,
@@ -107,22 +110,20 @@ def _parse_html(raw_bytes: bytes, url: str) -> ProfilePage:
         pass
 
     # Stdlib fallback
-    text = re.sub(r'<script[^>]*>.*?</script>', ' ', raw, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
 
     # Simple table extraction fallback (just rows with | separator)
     tables = []
-    table_matches = re.findall(
-        r'<table[^>]*>(.*?)</table>', raw, flags=re.DOTALL | re.IGNORECASE
-    )
+    table_matches = re.findall(r"<table[^>]*>(.*?)</table>", raw, flags=re.DOTALL | re.IGNORECASE)
     for table_html in table_matches:
         rows = []
-        for tr in re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, flags=re.DOTALL | re.IGNORECASE):
-            cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', tr, flags=re.DOTALL | re.IGNORECASE)
-            cells = [html.unescape(re.sub(r'<[^>]+>', '', c)).strip() for c in cells]
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, flags=re.DOTALL | re.IGNORECASE):
+            cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, flags=re.DOTALL | re.IGNORECASE)
+            cells = [html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in cells]
             if cells:
                 rows.append(cells)
         if rows:

@@ -25,21 +25,21 @@ palette role, composition, photo treatment). The profile is chosen by:
    regenerate route uses this so clicking "Regenerate" actually produces
    something new every time).
 """
+
 from __future__ import annotations
 
 import hashlib
 import json as _json
-import os
 import random as _random
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from mediahub.inspiration.pattern_library import best_pattern_for, get_pattern, patterns_for_post_angle, PATTERNS
-from mediahub.media_ai import generate_json, is_available as _llm_available
+from mediahub.inspiration.pattern_library import best_pattern_for, patterns_for_post_angle, PATTERNS
+from mediahub.media_ai import is_available as _llm_available
 
 
 # ---------------------------------------------------------------------------
@@ -54,62 +54,62 @@ from mediahub.media_ai import generate_json, is_available as _llm_available
 # "water" is the legacy default (subtle ripple SVG). The rest are new
 # pattern data URIs added alongside this overhaul.
 BACKGROUND_STYLES: tuple[str, ...] = (
-    "water",        # subtle horizontal ripples (legacy)
-    "halftone",     # repeating dot grid (sport-magazine feel)
-    "diagonal",     # angled stripes (energy/motion)
-    "radial",       # radial gradient burst (hero spotlight)
-    "geometric",    # blocky triangle/chevron field (editorial)
-    "clean",        # no pattern, gradient only (minimal)
-    "stripes",      # vertical stripes (broadcast graphic)
-    "dots",         # offset dot grid (newsprint)
-    "duotone",      # two-tone diagonal split (modern poster)
-    "grain",        # heavy film grain only (analogue)
+    "water",  # subtle horizontal ripples (legacy)
+    "halftone",  # repeating dot grid (sport-magazine feel)
+    "diagonal",  # angled stripes (energy/motion)
+    "radial",  # radial gradient burst (hero spotlight)
+    "geometric",  # blocky triangle/chevron field (editorial)
+    "clean",  # no pattern, gradient only (minimal)
+    "stripes",  # vertical stripes (broadcast graphic)
+    "dots",  # offset dot grid (newsprint)
+    "duotone",  # two-tone diagonal split (modern poster)
+    "grain",  # heavy film grain only (analogue)
 )
 
 # Accent decoration keys. The renderer paints these on top of the
 # composition; they layer the brand's accent colour into a recognisable
 # visual signature without altering layout structure.
 ACCENT_STYLES: tuple[str, ...] = (
-    "brackets",     # corner brackets top-left + bottom-right
-    "stripe",       # horizontal accent stripe across mid-section
-    "badge",        # round accent badge near result chip
-    "frame",        # thin frame around the whole canvas
-    "minimal",      # no accent geometry, accent in type only
-    "ribbon",       # diagonal ribbon across one corner
-    "arrow",        # arrow/chevron pointing at the result
-    "underline",    # bold underline beneath headline
+    "brackets",  # corner brackets top-left + bottom-right
+    "stripe",  # horizontal accent stripe across mid-section
+    "badge",  # round accent badge near result chip
+    "frame",  # thin frame around the whole canvas
+    "minimal",  # no accent geometry, accent in type only
+    "ribbon",  # diagonal ribbon across one corner
+    "arrow",  # arrow/chevron pointing at the result
+    "underline",  # bold underline beneath headline
 )
 
 # Typography pair keys. The first font drives headline/numeral, the
 # second drives body/labels. Adding a key requires the @font-face block
 # to actually have the font available (see _shared.css).
 TYPOGRAPHY_PAIRS: tuple[str, ...] = (
-    "anton-inter",        # legacy default (condensed display + clean body)
-    "bebas-grotesk",      # broadcast headline + modern body
-    "druk-inter",         # ultra-heavy editorial + clean body
-    "bowlby-inter",       # rounded chunky display + clean body
-    "archivo-inter",      # athletic geometric + clean body
-    "oswald-inter",       # tall condensed + clean body
+    "anton-inter",  # legacy default (condensed display + clean body)
+    "bebas-grotesk",  # broadcast headline + modern body
+    "druk-inter",  # ultra-heavy editorial + clean body
+    "bowlby-inter",  # rounded chunky display + clean body
+    "archivo-inter",  # athletic geometric + clean body
+    "oswald-inter",  # tall condensed + clean body
 )
 
 # Composition placement keys. Drives where the athlete cutout sits in the
 # canvas and how the text balances against it.
 COMPOSITIONS: tuple[str, ...] = (
-    "right",        # cutout right, text left (legacy)
-    "left",         # cutout left, text right (mirror)
-    "center",       # cutout centred, text stacked above/below
-    "off-center",   # slight offset for dynamic asymmetry
+    "right",  # cutout right, text left (legacy)
+    "left",  # cutout left, text right (mirror)
+    "center",  # cutout centred, text stacked above/below
+    "off-center",  # slight offset for dynamic asymmetry
 )
 
 # Photo treatment keys. Drives how the athlete cutout is processed by
 # the renderer before paste-in.
 PHOTO_TREATMENTS: tuple[str, ...] = (
-    "cutout",         # clean alpha cutout (legacy)
-    "vignette",       # cutout with soft vignette glow
-    "duotone",        # cutout tinted with brand colour
-    "frame",          # cutout boxed in a thin accent frame
-    "halftone",       # cutout rendered as halftone dots
-    "no-photo",       # text-led, no athlete image
+    "cutout",  # clean alpha cutout (legacy)
+    "vignette",  # cutout with soft vignette glow
+    "duotone",  # cutout tinted with brand colour
+    "frame",  # cutout boxed in a thin accent frame
+    "halftone",  # cutout rendered as halftone dots
+    "no-photo",  # text-led, no athlete image
 )
 
 
@@ -122,16 +122,17 @@ class VariationProfile:
     the underlying data is identical. The profile is what makes
     "regenerate" actually do something.
     """
-    layout_family: str = ""                  # e.g. "individual_hero"
-    palette_role_index: int = 0              # 0..5 (which permutation)
-    background_style: str = "water"          # see BACKGROUND_STYLES
-    accent_style: str = "brackets"           # see ACCENT_STYLES
-    typography_pair: str = "anton-inter"     # see TYPOGRAPHY_PAIRS
-    composition: str = "right"               # see COMPOSITIONS
-    photo_treatment: str = "cutout"          # see PHOTO_TREATMENTS
-    decoration_strength: float = 0.5         # 0..1, intensity of accent
-    hook_phrase: str = ""                    # specific hook copy (AI-supplied)
-    mood: str = ""                           # short mood word (AI-supplied)
+
+    layout_family: str = ""  # e.g. "individual_hero"
+    palette_role_index: int = 0  # 0..5 (which permutation)
+    background_style: str = "water"  # see BACKGROUND_STYLES
+    accent_style: str = "brackets"  # see ACCENT_STYLES
+    typography_pair: str = "anton-inter"  # see TYPOGRAPHY_PAIRS
+    composition: str = "right"  # see COMPOSITIONS
+    photo_treatment: str = "cutout"  # see PHOTO_TREATMENTS
+    decoration_strength: float = 0.5  # 0..1, intensity of accent
+    hook_phrase: str = ""  # specific hook copy (AI-supplied)
+    mood: str = ""  # short mood word (AI-supplied)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -156,10 +157,10 @@ class CreativeBrief:
     profile_id: str
     achievement_summary: str
     objective: str
-    primary_hook: str            # the main message/headline
-    confidence_label: str        # "NEW PB" / "LIKELY PB" / "GOLD" / etc.
-    tone: str                    # e.g. "data_led", "hype", "warm_club"
-    layout_template: str         # maps to graphic_renderer/layouts/<template>.html
+    primary_hook: str  # the main message/headline
+    confidence_label: str  # "NEW PB" / "LIKELY PB" / "GOLD" / etc.
+    tone: str  # e.g. "data_led", "hype", "warm_club"
+    layout_template: str  # maps to graphic_renderer/layouts/<template>.html
     inspiration_pattern_id: str
     image_treatment: str
     text_hierarchy: list[str]
@@ -168,8 +169,8 @@ class CreativeBrief:
     sourced_asset_ids: list[str]
     safety_notes: list[str]
     why_this_design: str
-    text_layers: dict[str, str]    # actual text values keyed by layer name
-    palette: dict[str, str]        # primary/secondary/accent
+    text_layers: dict[str, str]  # actual text values keyed by layer name
+    palette: dict[str, str]  # primary/secondary/accent
     format_priority: list[str]
     # --- new variation fields (additive; default-safe for legacy callers) ---
     background_style: str = "water"
@@ -178,9 +179,9 @@ class CreativeBrief:
     composition: str = "right"
     photo_treatment: str = "cutout"
     decoration_strength: float = 0.5
-    mood: str = ""                          # one or two mood words
-    ai_directed: bool = False               # True when AI chose the direction
-    variation_signature: str = ""           # short signature for dedup/audit
+    mood: str = ""  # one or two mood words
+    ai_directed: bool = False  # True when AI chose the direction
+    variation_signature: str = ""  # short signature for dedup/audit
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 
@@ -192,16 +193,24 @@ class CreativeBrief:
 # Public API
 # ---------------------------------------------------------------------------
 
-def generate(content_item: dict, evaluation, brand_kit, *,
-             voice_profile=None, profile_id: str = "",
-             meet_name: str = "", venue_name: str = "",
-             sponsor: Optional[dict] = None,
-             variation_seed: int = 0,
-             variation_profile: Optional[VariationProfile] = None,
-             use_ai_director: bool = False,
-             recent_signatures: Optional[list[str]] = None,
-             recent_hooks: Optional[list[str]] = None,
-             allowed_families: Optional[list[str]] = None) -> CreativeBrief:
+
+def generate(
+    content_item: dict,
+    evaluation,
+    brand_kit,
+    *,
+    voice_profile=None,
+    profile_id: str = "",
+    meet_name: str = "",
+    venue_name: str = "",
+    sponsor: Optional[dict] = None,
+    variation_seed: int = 0,
+    variation_profile: Optional[VariationProfile] = None,
+    use_ai_director: bool = False,
+    recent_signatures: Optional[list[str]] = None,
+    recent_hooks: Optional[list[str]] = None,
+    allowed_families: Optional[list[str]] = None,
+) -> CreativeBrief:
     """Build a CreativeBrief. Pure function — never reaches network unless
     LLM is available; falls back to deterministic defaults otherwise.
 
@@ -248,6 +257,7 @@ def generate(content_item: dict, evaluation, brand_kit, *,
     if use_ai_director:
         try:
             from mediahub.creative_brief.ai_director import ai_creative_direction
+
             ai_direction = ai_creative_direction(
                 content_item=content_item,
                 brand_kit=brand_kit,
@@ -263,7 +273,8 @@ def generate(content_item: dict, evaluation, brand_kit, *,
             # Promote the AI direction into a VariationProfile so the rest
             # of the function only has one code path to follow.
             variation_profile = _profile_from_ai_direction(
-                ai_direction, default_family=pattern["family"],
+                ai_direction,
+                default_family=pattern["family"],
                 allowed_families=allowed_families,
             )
 
@@ -291,16 +302,26 @@ def generate(content_item: dict, evaluation, brand_kit, *,
             _target = next((p for p in PATTERNS if p["family"] == allowed_families[0]), None)
             if _target is not None:
                 pattern = _target
-        if variation_profile is not None and getattr(variation_profile, "layout_family", None) not in allowed_families:
+        if (
+            variation_profile is not None
+            and getattr(variation_profile, "layout_family", None) not in allowed_families
+        ):
             import dataclasses as _dc
+
             _is_text = pattern["family"] in {"text_led_recap", "weekend_numbers"}
             try:
                 variation_profile = _dc.replace(
                     variation_profile,
                     layout_family=pattern["family"],
-                    photo_treatment=("no-photo" if _is_text else (
-                        "cutout" if variation_profile.photo_treatment == "no-photo"
-                        else variation_profile.photo_treatment)),
+                    photo_treatment=(
+                        "no-photo"
+                        if _is_text
+                        else (
+                            "cutout"
+                            if variation_profile.photo_treatment == "no-photo"
+                            else variation_profile.photo_treatment
+                        )
+                    ),
                 )
             except Exception:
                 pass
@@ -384,9 +405,7 @@ def generate(content_item: dict, evaluation, brand_kit, *,
         "meet_name": meet_name or content_item.get("meet_name") or "",
         "venue_name": venue_name or "",
         "club_short": (
-            getattr(brand_kit, "short_name", None)
-            or getattr(brand_kit, "display_name", "")
-            or ""
+            getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or ""
         ),
         "club_full": getattr(brand_kit, "display_name", "") or "",
         "sponsor_label": (sponsor or {}).get("name", "") if sponsor else "",
@@ -405,7 +424,9 @@ def generate(content_item: dict, evaluation, brand_kit, *,
     # Profile-driven palette role index has priority over seed.
     if variation_profile is not None:
         palette = _apply_palette_seed(
-            base_primary, base_secondary, base_accent,
+            base_primary,
+            base_secondary,
+            base_accent,
             # palette_role_index is 0-based, the helper is 1-based
             # (seed=0 = identity), so add 1 for non-zero indices.
             variation_profile.palette_role_index + 1
@@ -491,16 +512,14 @@ def generate(content_item: dict, evaluation, brand_kit, *,
         # Map profile.photo_treatment to a renderer-friendly phrase. The
         # renderer keys off the phrase to pick its filter pipeline.
         treatment_phrases = {
-            "no-photo":   "no photo, text-led layout",
-            "vignette":   "cutout with vignette glow",
-            "duotone":    "duotone-tinted cutout in brand colour",
-            "frame":      "cutout boxed in accent frame",
-            "halftone":   "halftone-dot cutout treatment",
-            "cutout":     image_treatment or "real cutout, contrast lift",
+            "no-photo": "no photo, text-led layout",
+            "vignette": "cutout with vignette glow",
+            "duotone": "duotone-tinted cutout in brand colour",
+            "frame": "cutout boxed in accent frame",
+            "halftone": "halftone-dot cutout treatment",
+            "cutout": image_treatment or "real cutout, contrast lift",
         }
-        image_treatment = treatment_phrases.get(
-            variation_profile.photo_treatment, image_treatment
-        )
+        image_treatment = treatment_phrases.get(variation_profile.photo_treatment, image_treatment)
     elif variation_seed == 3:
         # Force text-led / no photo (legacy seed-3 contract)
         image_treatment = "no photo, text-led layout"
@@ -518,8 +537,9 @@ def generate(content_item: dict, evaluation, brand_kit, *,
     else:
         # Legacy seed-only path — derive the new axes deterministically
         # from the seed so even legacy callers get *some* variety.
-        bg_style, accent_style, type_pair, composition, photo_treatment, decoration_strength = \
+        bg_style, accent_style, type_pair, composition, photo_treatment, decoration_strength = (
             _legacy_axes_from_seed(variation_seed)
+        )
         mood = ""
         ai_directed = False
 
@@ -546,7 +566,9 @@ def generate(content_item: dict, evaluation, brand_kit, *,
 
     brief = CreativeBrief(
         id="cb_" + uuid.uuid4().hex[:12],
-        content_item_id=str(content_item.get("id") or content_item.get("swim_id") or ach.get("swim_id") or ""),
+        content_item_id=str(
+            content_item.get("id") or content_item.get("swim_id") or ach.get("swim_id") or ""
+        ),
         profile_id=profile_id,
         achievement_summary=summary,
         objective=objective,
@@ -564,7 +586,9 @@ def generate(content_item: dict, evaluation, brand_kit, *,
         why_this_design=why,
         text_layers=layers,
         palette=palette,
-        format_priority=list(pattern.get("format_priority", ["feed_portrait", "story", "feed_square"])),
+        format_priority=list(
+            pattern.get("format_priority", ["feed_portrait", "story", "feed_square"])
+        ),
         background_style=bg_style,
         accent_style=accent_style,
         typography_pair=type_pair,
@@ -589,17 +613,23 @@ def generate(content_item: dict, evaluation, brand_kit, *,
 # Why-this-design — short LLM rationale; safe fallback
 # ---------------------------------------------------------------------------
 
-def _generate_why_this_design(angle: str, evaluation, pattern: dict,
-                              athlete: str, summary: str) -> str:
+
+def _generate_why_this_design(
+    angle: str, evaluation, pattern: dict, athlete: str, summary: str
+) -> str:
     fb_parts: list[str] = []
     fb_parts.append(f"Pattern '{pattern['label']}' fits {angle} ({pattern['why_use_this']}).")
     if evaluation:
         if evaluation.confidence_tier != "high":
-            fb_parts.append(f"Confidence is {evaluation.confidence_tier} — wording hedged ('{evaluation.confidence_label}').")
+            fb_parts.append(
+                f"Confidence is {evaluation.confidence_tier} — wording hedged ('{evaluation.confidence_label}')."
+            )
         if evaluation.matched.get("hero_athlete"):
             fb_parts.append(f"Using a real photo of {athlete}.")
         if evaluation.missing_optional:
-            fb_parts.append(f"Optional missing ({', '.join(evaluation.missing_optional)}) — design works without.")
+            fb_parts.append(
+                f"Optional missing ({', '.join(evaluation.missing_optional)}) — design works without."
+            )
     fb = " ".join(fb_parts)
 
     if not _llm_available():
@@ -619,6 +649,7 @@ def _generate_why_this_design(angle: str, evaluation, pattern: dict,
         f"Explain in one short paragraph why this design choice fits."
     )
     from mediahub.media_ai import generate as _gen
+
     try:
         out = _gen(prompt, system=sys, max_tokens=200)
     except Exception:
@@ -710,10 +741,10 @@ def vision_creative_direction(
     if cached:
         return cached
 
-    primary = (getattr(brand_kit, "primary_colour", None) or "#0A2540")
-    secondary = (getattr(brand_kit, "secondary_colour", None) or "#101820")
-    accent = (getattr(brand_kit, "accent_colour", None) or "#FFFFFF")
-    club_name = (getattr(brand_kit, "display_name", None) or "")
+    primary = getattr(brand_kit, "primary_colour", None) or "#0A2540"
+    secondary = getattr(brand_kit, "secondary_colour", None) or "#101820"
+    accent = getattr(brand_kit, "accent_colour", None) or "#FFFFFF"
+    club_name = getattr(brand_kit, "display_name", None) or ""
 
     sys_prompt = (
         "You are an art director for a sports content studio. Look at the "
@@ -731,8 +762,12 @@ def vision_creative_direction(
     )
     try:
         from mediahub.media_ai.llm import generate_vision
+
         out = generate_vision(
-            [photo_path], user_prompt, system=sys_prompt, max_tokens=180,
+            [photo_path],
+            user_prompt,
+            system=sys_prompt,
+            max_tokens=180,
         )
     except Exception:
         return None
@@ -748,6 +783,7 @@ def vision_creative_direction(
 # ---------------------------------------------------------------------------
 # Variation helpers (deterministic per seed)
 # ---------------------------------------------------------------------------
+
 
 def _rotate_pattern_for_seed(default_pattern: dict, angle: str, seed: int) -> dict:
     """Pick a different pattern based on ``seed`` — supports any positive int.
@@ -826,38 +862,68 @@ def _apply_palette_seed(primary: str, secondary: str, accent: str, seed: int) ->
     colors = (primary, secondary, accent)
     p_idx, s_idx, a_idx = _PALETTE_PERMUTATIONS[(seed - 1) % len(_PALETTE_PERMUTATIONS)]
     return {
-        "primary":   colors[p_idx],
+        "primary": colors[p_idx],
         "secondary": colors[s_idx],
-        "accent":    colors[a_idx],
+        "accent": colors[a_idx],
     }
 
 
 # Six phrase tables so any positive integer seed maps to a hook variant.
 _PHRASE_TABLES: list[dict[str, str]] = [
     # Table 1 — "personal best" tone
-    {"NEW PB": "PERSONAL BEST", "LIKELY PB": "LIKELY PERSONAL BEST",
-     "GOLD": "FIRST PLACE", "SILVER": "SECOND PLACE", "BRONZE": "THIRD PLACE",
-     "STRONG SWIM": "BIG SWIM"},
+    {
+        "NEW PB": "PERSONAL BEST",
+        "LIKELY PB": "LIKELY PERSONAL BEST",
+        "GOLD": "FIRST PLACE",
+        "SILVER": "SECOND PLACE",
+        "BRONZE": "THIRD PLACE",
+        "STRONG SWIM": "BIG SWIM",
+    },
     # Table 2 — "best ever" tone
-    {"NEW PB": "BEST EVER", "LIKELY PB": "BEST EVER (PROVISIONAL)",
-     "GOLD": "GOLD MEDAL", "SILVER": "SILVER MEDAL", "BRONZE": "BRONZE MEDAL",
-     "STRONG SWIM": "STANDOUT SWIM"},
+    {
+        "NEW PB": "BEST EVER",
+        "LIKELY PB": "BEST EVER (PROVISIONAL)",
+        "GOLD": "GOLD MEDAL",
+        "SILVER": "SILVER MEDAL",
+        "BRONZE": "BRONZE MEDAL",
+        "STRONG SWIM": "STANDOUT SWIM",
+    },
     # Table 3 — "alert" tone
-    {"NEW PB": "PB ALERT", "LIKELY PB": "PB CONTENDER",
-     "GOLD": "TOP OF THE PODIUM", "SILVER": "PODIUM FINISH", "BRONZE": "PODIUM FINISH",
-     "STRONG SWIM": "NOTABLE PERFORMANCE"},
+    {
+        "NEW PB": "PB ALERT",
+        "LIKELY PB": "PB CONTENDER",
+        "GOLD": "TOP OF THE PODIUM",
+        "SILVER": "PODIUM FINISH",
+        "BRONZE": "PODIUM FINISH",
+        "STRONG SWIM": "NOTABLE PERFORMANCE",
+    },
     # Table 4 — "career best" / "milestone" tone
-    {"NEW PB": "CAREER BEST", "LIKELY PB": "CAREER BEST (TBC)",
-     "GOLD": "CHAMPION", "SILVER": "RUNNER-UP", "BRONZE": "BRONZE FOR THE BOOKS",
-     "STRONG SWIM": "MAJOR SWIM"},
+    {
+        "NEW PB": "CAREER BEST",
+        "LIKELY PB": "CAREER BEST (TBC)",
+        "GOLD": "CHAMPION",
+        "SILVER": "RUNNER-UP",
+        "BRONZE": "BRONZE FOR THE BOOKS",
+        "STRONG SWIM": "MAJOR SWIM",
+    },
     # Table 5 — short / Stories-friendly tone
-    {"NEW PB": "NEW PB", "LIKELY PB": "PB INCOMING",
-     "GOLD": "GOLD", "SILVER": "SILVER", "BRONZE": "BRONZE",
-     "STRONG SWIM": "STRONG ONE"},
+    {
+        "NEW PB": "NEW PB",
+        "LIKELY PB": "PB INCOMING",
+        "GOLD": "GOLD",
+        "SILVER": "SILVER",
+        "BRONZE": "BRONZE",
+        "STRONG SWIM": "STRONG ONE",
+    },
     # Table 6 — celebratory tone
-    {"NEW PB": "LIFETIME BEST", "LIKELY PB": "LIFETIME BEST (PENDING)",
-     "GOLD": "FIRST ACROSS THE WALL", "SILVER": "RIGHT BEHIND IT",
-     "BRONZE": "ON THE PODIUM", "STRONG SWIM": "WHAT A SWIM"},
+    {
+        "NEW PB": "LIFETIME BEST",
+        "LIKELY PB": "LIFETIME BEST (PENDING)",
+        "GOLD": "FIRST ACROSS THE WALL",
+        "SILVER": "RIGHT BEHIND IT",
+        "BRONZE": "ON THE PODIUM",
+        "STRONG SWIM": "WHAT A SWIM",
+    },
 ]
 
 
@@ -888,8 +954,10 @@ def auto_variation_seed_for(card_id: str | None) -> int:
     if not card_id:
         # Fall back to a time-based randomish positive seed.
         import time as _time
+
         return int(_time.time() * 1000) % 997 + 1
     import hashlib as _hl
+
     h = int(_hl.sha256(card_id.encode("utf-8")).hexdigest()[:8], 16)
     # Keep the result well above zero so seed==0 (legacy "no variation")
     # is reserved for callers who explicitly want the default.
@@ -925,7 +993,12 @@ _MEDAL_FAMILIES: tuple[str, ...] = (
 
 def _is_medal_angle(angle: str) -> bool:
     a = (angle or "").lower()
-    return a.startswith("medal") or a in {"gold_medal", "silver_medal", "bronze_medal", "podium_finish"}
+    return a.startswith("medal") or a in {
+        "gold_medal",
+        "silver_medal",
+        "bronze_medal",
+        "podium_finish",
+    }
 
 
 def random_variation_profile(
@@ -969,7 +1042,7 @@ def random_variation_profile(
             composition=rng.choice(COMPOSITIONS),
             photo_treatment=photo,
             decoration_strength=round(rng.uniform(0.2, 1.0), 2),
-            hook_phrase="",   # left blank → seed-table fallback fills it
+            hook_phrase="",  # left blank → seed-table fallback fills it
             mood=rng.choice(_RANDOM_MOOD_WORDS),
         )
 
@@ -987,9 +1060,21 @@ def random_variation_profile(
 # bias the background style intensity and the accent treatment when the
 # AI isn't in the loop.
 _RANDOM_MOOD_WORDS: tuple[str, ...] = (
-    "electric", "calm", "fierce", "celebratory", "stoic",
-    "explosive", "precise", "warm", "underdog", "champion",
-    "milestone", "bold", "minimal", "editorial", "broadcast",
+    "electric",
+    "calm",
+    "fierce",
+    "celebratory",
+    "stoic",
+    "explosive",
+    "precise",
+    "warm",
+    "underdog",
+    "champion",
+    "milestone",
+    "bold",
+    "minimal",
+    "editorial",
+    "broadcast",
 )
 
 
@@ -1019,7 +1104,9 @@ def _legacy_axes_from_seed(seed: int) -> tuple[str, str, str, str, str, float]:
 
 
 def _profile_from_ai_direction(
-    direction: dict, *, default_family: str,
+    direction: dict,
+    *,
+    default_family: str,
     allowed_families: Optional[list[str]] = None,
 ) -> VariationProfile:
     """Convert the AI director's structured output into a VariationProfile.
@@ -1034,6 +1121,7 @@ def _profile_from_ai_direction(
     treatment is forced to no-photo so the render never expects a cutout
     that doesn't exist.
     """
+
     def _norm(key: str, allowed: tuple[str, ...], default: str) -> str:
         v = str(direction.get(key, "") or "").strip().lower()
         return v if v in allowed else default
@@ -1072,9 +1160,15 @@ def _profile_from_ai_direction(
 
 
 __all__ = [
-    "generate", "CreativeBrief", "VariationProfile",
-    "vision_creative_direction", "auto_variation_seed_for",
+    "generate",
+    "CreativeBrief",
+    "VariationProfile",
+    "vision_creative_direction",
+    "auto_variation_seed_for",
     "random_variation_profile",
-    "BACKGROUND_STYLES", "ACCENT_STYLES", "TYPOGRAPHY_PAIRS",
-    "COMPOSITIONS", "PHOTO_TREATMENTS",
+    "BACKGROUND_STYLES",
+    "ACCENT_STYLES",
+    "TYPOGRAPHY_PAIRS",
+    "COMPOSITIONS",
+    "PHOTO_TREATMENTS",
 ]

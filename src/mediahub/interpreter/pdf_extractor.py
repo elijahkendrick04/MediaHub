@@ -9,15 +9,16 @@ Operates purely on geometry:
 
 NO swim vocabulary literals; only structural regex (digits, time-shape, etc.).
 """
+
 from __future__ import annotations
 
 import io
 import logging
 import re
 from collections import defaultdict
-from typing import Iterable, Optional
+from typing import Optional
 
-from .schema_dataclasses import IngestStream, Line, TableCandidate
+from .schema_dataclasses import Line, TableCandidate
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ _NUM_TOKEN = re.compile(r"^=?\*?\d{1,3}\.?$|^---$|^DQ$|^DNS$|^DNF$|^NS$", re.IGN
 # ---------------------------------------------------------------------------
 # Column band detection
 # ---------------------------------------------------------------------------
+
 
 def detect_column_bands(
     words: list[dict],
@@ -83,9 +85,7 @@ def detect_column_bands(
 
     # Find text zone
     text_threshold = max_cov * 0.30
-    text_lo = next(
-        (x for x in range(page_w) if coverage[x] >= text_threshold), 0
-    )
+    text_lo = next((x for x in range(page_w) if coverage[x] >= text_threshold), 0)
     text_hi = next(
         (x for x in range(page_w - 1, -1, -1) if coverage[x] >= text_threshold),
         page_w,
@@ -128,10 +128,7 @@ def detect_column_bands(
             merged[-1] = (merged[-1][0], band[1])
         else:
             merged.append(band)
-    if (
-        len(merged) >= 2
-        and merged[-1][1] - merged[-1][0] < min_band_width
-    ):
+    if len(merged) >= 2 and merged[-1][1] - merged[-1][0] < min_band_width:
         merged[-2] = (merged[-2][0], merged[-1][1])
         merged.pop()
 
@@ -153,6 +150,7 @@ def detect_column_bands(
 # Row grouping inside a column band
 # ---------------------------------------------------------------------------
 
+
 def _looks_like_split_time_only(tokens: list[str]) -> bool:
     """Return True if every token is a time-shape value or pure number.
 
@@ -160,9 +158,7 @@ def _looks_like_split_time_only(tokens: list[str]) -> bool:
     """
     if not tokens:
         return False
-    matches = sum(
-        1 for t in tokens if _TIME_TOKEN.match(t) or _NUM_TOKEN.match(t)
-    )
+    matches = sum(1 for t in tokens if _TIME_TOKEN.match(t) or _NUM_TOKEN.match(t))
     return matches == len(tokens) and any(_TIME_TOKEN.match(t) for t in tokens)
 
 
@@ -220,11 +216,7 @@ def _merge_split_time_continuations(
         return lines
     out: list[tuple[float, list[str]]] = []
     for y, toks in lines:
-        if (
-            out
-            and _looks_like_split_time_only(toks)
-            and _has_alpha_word(out[-1][1])
-        ):
+        if out and _looks_like_split_time_only(toks) and _has_alpha_word(out[-1][1]):
             out[-1] = (out[-1][0], out[-1][1] + toks)
         else:
             out.append((y, list(toks)))
@@ -234,6 +226,7 @@ def _merge_split_time_continuations(
 # ---------------------------------------------------------------------------
 # Public extraction entry point
 # ---------------------------------------------------------------------------
+
 
 def extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate], dict]:
     """Extract text, lines, and table candidates from a PDF using pdfplumber.
@@ -264,9 +257,7 @@ def extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate], dic
                         keep_blank_chars=False,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    info["warnings"].append(
-                        f"page {page_no}: extract_words failed: {exc}"
-                    )
+                    info["warnings"].append(f"page {page_no}: extract_words failed: {exc}")
                     continue
 
                 if not words:
@@ -331,7 +322,9 @@ def extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate], dic
 
     text = "\n".join(all_text_parts)
     log.debug(
-        "pdfplumber extracted %d chars, %d lines, %d tables", len(text),
-        len(lines), len(tables),
+        "pdfplumber extracted %d chars, %d lines, %d tables",
+        len(text),
+        len(lines),
+        len(tables),
     )
     return text, lines, tables, info

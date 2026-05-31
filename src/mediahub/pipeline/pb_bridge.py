@@ -15,13 +15,14 @@ This module produces such a shape from a `PBDiscovery` so all downstream
 consumers (history, detectors, recognition report) keep working without
 caring where the data came from.
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import Optional, Iterable
 
-from mediahub.pb_discovery import PBDiscovery, PBRow
+from mediahub.pb_discovery import PBDiscovery
 
 
 _STROKE_TO_CODE: dict[str, str] = {
@@ -92,6 +93,7 @@ class BridgedSnapshot:
     Fields mirror `swim_content.enrichment_swimmingresults.SwimmerPBSnapshot`
     closely enough that the history wrapper sees no difference.
     """
+
     tiref: str
     pb_times: dict[str, list[dict]] = field(default_factory=dict)
     fetch_ok: bool = True
@@ -149,14 +151,16 @@ def discovery_to_snapshot(
             continue
 
         key = _event_key(distance, stroke_code, course)
-        snap.pb_times.setdefault(key, []).append({
-            "time_sec": seconds,
-            "date_iso": pb.date or "",
-            "source_url": source_url or "",
-            "retrieved_at": retrieved_at or "",
-            "meet": pb.meet or "",
-            "rank": pb.rank,
-        })
+        snap.pb_times.setdefault(key, []).append(
+            {
+                "time_sec": seconds,
+                "date_iso": pb.date or "",
+                "source_url": source_url or "",
+                "retrieved_at": retrieved_at or "",
+                "meet": pb.meet or "",
+                "rank": pb.rank,
+            }
+        )
 
     return snap
 

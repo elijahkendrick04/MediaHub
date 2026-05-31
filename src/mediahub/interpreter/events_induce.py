@@ -9,11 +9,12 @@ Detection strategy:
   3. For each candidate header line, attempt to extract all four fields.
   4. Build InterpretedEvent stubs (swims filled in by rows.py).
 """
+
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from .ontology_loader import OntologyLoader
@@ -68,15 +69,19 @@ def _build_ontology_patterns(
         return re.compile(r"\b(?:" + "|".join(escaped) + r")\b", re.IGNORECASE)
 
     return (
-        make_pattern(stroke_map), stroke_map,
-        make_pattern(course_map), course_map,
-        make_pattern(gender_map), gender_map,
+        make_pattern(stroke_map),
+        stroke_map,
+        make_pattern(course_map),
+        course_map,
+        make_pattern(gender_map),
+        gender_map,
     )
 
 
 # ---------------------------------------------------------------------------
 # Header-line scoring
 # ---------------------------------------------------------------------------
+
 
 def _score_header_line(
     text: str,
@@ -115,6 +120,7 @@ def _score_header_line(
 # ---------------------------------------------------------------------------
 # Field extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_fields(
     text: str,
@@ -173,6 +179,7 @@ def _extract_fields(
 # Section-break detection
 # ---------------------------------------------------------------------------
 
+
 def _is_section_break(
     line: Line,
     prev_line: Optional[Line],
@@ -199,6 +206,7 @@ def _is_section_break(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def induce_events(
     stream: IngestStream,
     ontology: OntologyLoader | None = None,
@@ -213,9 +221,12 @@ def induce_events(
         ontology = OntologyLoader()
 
     (
-        stroke_re, stroke_map,
-        course_re, course_map,
-        gender_re, gender_map,
+        stroke_re,
+        stroke_map,
+        course_re,
+        course_map,
+        gender_re,
+        gender_map,
     ) = _build_ontology_patterns(ontology)
 
     events: list[InterpretedEvent] = []

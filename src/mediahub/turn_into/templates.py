@@ -30,9 +30,10 @@ Each returns a single artefact dict shaped like::
 Builders MUST stay tolerant: missing fields produce a sensible fallback, not
 a crash.
 """
+
 from __future__ import annotations
 
-from typing import Optional, Iterable
+from typing import Optional
 
 
 # --- Tone-system prompt fragments ---------------------------------------
@@ -281,6 +282,7 @@ def _gen_caption(
     default_intent = _ARTEFACT_INTENTS.get(intent_key, "")
     try:
         from mediahub.brand.derived import artefact_intent_for
+
         intent = artefact_intent_for(profile, intent_key, default_intent)
     except Exception:
         intent = default_intent
@@ -304,7 +306,10 @@ def _gen_caption(
     brief_prose = _narrate_brief(payload) if payload.get("kind") else None
     try:
         text = generate_caption_for_tone(
-            enriched, club_brand, tone=tone, club_profile=profile,
+            enriched,
+            club_brand,
+            tone=tone,
+            club_profile=profile,
             brief_prose=brief_prose,
         )
     except Exception:
@@ -389,9 +394,12 @@ def build_meet_recap(
         "headliners": [_ach_payload(ra) for ra in top_achievements[:5]],
     }
     default_caption = _gen_caption(
-        payload, club_brand,
-        tone=tone, intent_key="meet_recap",
-        deterministic=deterministic, fallback_text=fallback_default,
+        payload,
+        club_brand,
+        tone=tone,
+        intent_key="meet_recap",
+        deterministic=deterministic,
+        fallback_text=fallback_default,
         profile=profile,
     )
     default_caption = _apply_sign_off(voice_profile, default_caption)
@@ -403,9 +411,12 @@ def build_meet_recap(
         f"Proud of everyone who raced. More results in the comments."
     )
     ig_caption = _gen_caption(
-        payload, club_brand,
-        tone=tone, intent_key="instagram_long",
-        deterministic=deterministic, fallback_text=fallback_ig,
+        payload,
+        club_brand,
+        tone=tone,
+        intent_key="instagram_long",
+        deterministic=deterministic,
+        fallback_text=fallback_ig,
         profile=profile,
     )
     ig_caption = _apply_sign_off(voice_profile, ig_caption)
@@ -413,8 +424,10 @@ def build_meet_recap(
         ig_caption = ig_caption[:2197] + "..."
 
     card = {
-        "swimmer": (headline_ach.get("achievement", {}) if headline_ach else {}).get("swimmer_name", ""),
-        "event":   (headline_ach.get("achievement", {}) if headline_ach else {}).get("event", ""),
+        "swimmer": (headline_ach.get("achievement", {}) if headline_ach else {}).get(
+            "swimmer_name", ""
+        ),
+        "event": (headline_ach.get("achievement", {}) if headline_ach else {}).get("event", ""),
         "headline": (headline_ach.get("achievement", {}) if headline_ach else {}).get(
             "headline", meet_summary.get("name", "")
         ),
@@ -431,7 +444,11 @@ def build_meet_recap(
         "cards": [card],
         "notes": [
             "Built from top achievement: "
-            + ((headline_ach.get("achievement", {}) if headline_ach else {}).get("headline", "no achievement available"))
+            + (
+                (headline_ach.get("achievement", {}) if headline_ach else {}).get(
+                    "headline", "no achievement available"
+                )
+            )
         ],
     }
 
@@ -461,28 +478,35 @@ def build_swimmer_spotlights(
     for idx, ra in enumerate(picks, start=1):
         a = ra.get("achievement") or {}
         payload = _ach_payload(ra)
-        display_name = _format_name(voice_profile, payload["swimmer_first"], payload["swimmer_last"])
+        display_name = _format_name(
+            voice_profile, payload["swimmer_first"], payload["swimmer_last"]
+        )
         fallback = (
             f"Spotlight: {display_name} — {payload.get('event', '')} "
             f"{('(' + payload['time'] + ')') if payload.get('time') else ''} "
             f"{payload.get('headline', '')}"
         ).strip()[:280]
         caption = _gen_caption(
-            payload, club_brand,
-            tone=tone, intent_key="swimmer_spotlight",
-            deterministic=deterministic, fallback_text=fallback,
+            payload,
+            club_brand,
+            tone=tone,
+            intent_key="swimmer_spotlight",
+            deterministic=deterministic,
+            fallback_text=fallback,
             profile=profile,
         )
         caption = _apply_sign_off(voice_profile, caption)
         key = f"swimmer_{idx}"
         captions[key] = caption
-        cards.append({
-            "rank": idx,
-            "swimmer": a.get("swimmer_name", display_name),
-            "event": a.get("event", ""),
-            "headline": a.get("headline", ""),
-            "body": caption,
-        })
+        cards.append(
+            {
+                "rank": idx,
+                "swimmer": a.get("swimmer_name", display_name),
+                "event": a.get("event", ""),
+                "headline": a.get("headline", ""),
+                "body": caption,
+            }
+        )
         notes.append(
             f"Spotlight #{idx}: {a.get('swimmer_name','')} · "
             f"priority {ra.get('priority', 0.0):.2f}"
@@ -534,8 +558,10 @@ def build_data_thread(
             "n_top": len(top_achievements),
         },
         club_brand,
-        tone=tone, intent_key="data_thread_post",
-        deterministic=deterministic, fallback_text=intro_fallback,
+        tone=tone,
+        intent_key="data_thread_post",
+        deterministic=deterministic,
+        fallback_text=intro_fallback,
         profile=profile,
     )
     posts.append(_truncate(intro, 280))
@@ -548,9 +574,12 @@ def build_data_thread(
             f"{payload.get('time','')} — {payload.get('headline','')}".strip()
         )
         post = _gen_caption(
-            payload, club_brand,
-            tone=tone, intent_key="data_thread_post",
-            deterministic=deterministic, fallback_text=fb,
+            payload,
+            club_brand,
+            tone=tone,
+            intent_key="data_thread_post",
+            deterministic=deterministic,
+            fallback_text=fb,
             profile=profile,
         )
         # Always prepend numbering so threading is unambiguous even when LLM
@@ -562,10 +591,12 @@ def build_data_thread(
 
     # Backfill if we don't have at least 3 (small meet, only 1 ach).
     while len(posts) < 3:
-        posts.append(_truncate(
-            f"{len(posts)}/ Full results coming. — {meet_summary.get('name', '')}".strip(),
-            280,
-        ))
+        posts.append(
+            _truncate(
+                f"{len(posts)}/ Full results coming. — {meet_summary.get('name', '')}".strip(),
+                280,
+            )
+        )
 
     # LinkedIn — single longer post.
     li_fallback = (
@@ -580,8 +611,10 @@ def build_data_thread(
             "highlights": [_ach_payload(ra) for ra in intros],
         },
         club_brand,
-        tone=tone, intent_key="linkedin_long",
-        deterministic=deterministic, fallback_text=li_fallback,
+        tone=tone,
+        intent_key="linkedin_long",
+        deterministic=deterministic,
+        fallback_text=li_fallback,
         profile=profile,
     )
 
@@ -622,7 +655,9 @@ def build_parent_newsletter(
     bullets = []
     for ra in headliners:
         a = ra.get("achievement") or {}
-        line = f"{a.get('swimmer_name','')} — {a.get('event','')}: {a.get('headline','')}".strip(" —:")
+        line = f"{a.get('swimmer_name','')} — {a.get('event','')}: {a.get('headline','')}".strip(
+            " —:"
+        )
         if line:
             bullets.append(line)
 
@@ -642,8 +677,10 @@ def build_parent_newsletter(
             "club": club_brand.get("club_name", ""),
         },
         club_brand,
-        tone=tone, intent_key="parent_newsletter",
-        deterministic=deterministic, fallback_text=fallback_plain,
+        tone=tone,
+        intent_key="parent_newsletter",
+        deterministic=deterministic,
+        fallback_text=fallback_plain,
         profile=profile,
     )
     plain = _apply_sign_off(voice_profile, plain)
@@ -653,9 +690,9 @@ def build_parent_newsletter(
     html_body = "\n".join(f"<p>{_esc(p)}</p>" for p in paras)
     html = (
         f'<section class="mh-newsletter">'
-        f'<h2>{_esc(meet_name)} — meet update</h2>\n'
-        f'{html_body}\n'
-        f'</section>'
+        f"<h2>{_esc(meet_name)} — meet update</h2>\n"
+        f"{html_body}\n"
+        f"</section>"
     )
 
     return {
@@ -703,8 +740,10 @@ def build_sponsor_thank_you(
             "sponsor_guidelines": (profile.sponsor_guidelines if profile else "") or "",
         },
         club_brand,
-        tone=tone, intent_key="sponsor_thank_you",
-        deterministic=deterministic, fallback_text=fallback,
+        tone=tone,
+        intent_key="sponsor_thank_you",
+        deterministic=deterministic,
+        fallback_text=fallback,
         profile=profile,
     )
     caption = _apply_sign_off(voice_profile, caption)
@@ -713,7 +752,9 @@ def build_sponsor_thank_you(
         "type": "sponsor_thank_you",
         "title": f"Sponsor thank-you — {sponsor}",
         "captions": {"default": caption},
-        "cards": [{"swimmer": "", "event": "", "headline": f"Thank you, {sponsor}", "body": caption}],
+        "cards": [
+            {"swimmer": "", "event": "", "headline": f"Thank you, {sponsor}", "body": caption}
+        ],
         "notes": [f"Sponsor: {sponsor}"],
     }
 
@@ -747,8 +788,8 @@ def build_coach_quote(
         )
     else:
         fallback_quote = (
-            f"\"Solid weekend at {meet_name}. Plenty to build on — "
-            f"the squad keeps doing the work.\" — Head Coach"
+            f'"Solid weekend at {meet_name}. Plenty to build on — '
+            f'the squad keeps doing the work." — Head Coach'
         )
 
     quote = _gen_caption(
@@ -758,8 +799,10 @@ def build_coach_quote(
             "highlights": achs_payload,
         },
         club_brand,
-        tone=tone, intent_key="coach_quote",
-        deterministic=deterministic, fallback_text=fallback_quote,
+        tone=tone,
+        intent_key="coach_quote",
+        deterministic=deterministic,
+        fallback_text=fallback_quote,
         profile=profile,
     )
 
@@ -770,12 +813,14 @@ def build_coach_quote(
         "type": "coach_quote",
         "title": "Coach quote (DRAFT)",
         "captions": {"default": caption, "quote_only": quote},
-        "cards": [{
-            "swimmer": "Head Coach",
-            "event": "",
-            "headline": "Coach quote (draft)",
-            "body": quote,
-        }],
+        "cards": [
+            {
+                "swimmer": "Head Coach",
+                "event": "",
+                "headline": "Coach quote (draft)",
+                "body": quote,
+            }
+        ],
         "draft_flag": flag,
         "notes": [
             "This quote is synthesised from the meet narrative and is NOT a real coach statement.",
@@ -800,8 +845,7 @@ def _next_meet_from_profile(profile) -> Optional[dict]:
     # 1. Explicit dict attribute (future-proof).
     nm = getattr(profile, "next_meet", None)
     if isinstance(nm, dict) and nm.get("name"):
-        return {"name": str(nm.get("name", "")).strip(),
-                "date": str(nm.get("date", "")).strip()}
+        return {"name": str(nm.get("name", "")).strip(), "date": str(nm.get("date", "")).strip()}
     # 2. Parse a "Next meet: <name> — <date>" line from notes / tone_notes.
     for text_field in ("notes", "tone_notes"):
         text = getattr(profile, text_field, "") or ""
@@ -848,8 +892,10 @@ def build_next_meet_preview(
             "previous_meet": meet_summary.get("name", ""),
         },
         club_brand,
-        tone=tone, intent_key="next_meet_preview",
-        deterministic=deterministic, fallback_text=fallback,
+        tone=tone,
+        intent_key="next_meet_preview",
+        deterministic=deterministic,
+        fallback_text=fallback,
         profile=profile,
     )
     caption = _apply_sign_off(voice_profile, caption)
@@ -858,15 +904,17 @@ def build_next_meet_preview(
         "type": "next_meet_preview",
         "title": f"Next-meet preview — {nm['name']}",
         "captions": {"default": caption},
-        "cards": [{
-            "swimmer": "",
-            "event": nm.get("name", ""),
-            "headline": f"Next up: {nm.get('name','')}",
-            "body": caption,
-        }],
+        "cards": [
+            {
+                "swimmer": "",
+                "event": nm.get("name", ""),
+                "headline": f"Next up: {nm.get('name','')}",
+                "body": caption,
+            }
+        ],
         "notes": [
             f"Next meet: {nm.get('name','')}"
-            + (f" — {nm.get('date','')}" if nm.get('date') else "")
+            + (f" — {nm.get('date','')}" if nm.get("date") else "")
         ],
     }
 

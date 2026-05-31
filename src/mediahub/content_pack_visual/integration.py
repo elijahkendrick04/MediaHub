@@ -13,12 +13,12 @@ Public API
    only_safe=True) -> pack`` — mutates the pack in place; only items in
    ``only_buckets`` are processed.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import traceback
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -26,6 +26,7 @@ from typing import Any, Iterable, Optional
 # ---------------------------------------------------------------------------
 # Disk layout helpers
 # ---------------------------------------------------------------------------
+
 
 def _runs_dir() -> Path:
     """Resolve RUNS_DIR. Must match `web.web.RUNS_DIR` exactly, otherwise the
@@ -96,6 +97,7 @@ def persist_visual(visual, *, run_id: str, brief=None) -> Path:
 # Per-item pipeline
 # ---------------------------------------------------------------------------
 
+
 def _flat_post_angle(item: dict) -> str:
     return (
         item.get("post_angle")
@@ -150,9 +152,10 @@ def create_visual_for_item(
     try:
         from mediahub.media_requirements.evaluator import evaluate
         from mediahub.media_library.models import MediaAsset
+
         # Accept either a list of MediaAsset objects or list of dicts
         library = []
-        for a in (media_assets or []):
+        for a in media_assets or []:
             if isinstance(a, MediaAsset):
                 library.append(a)
             elif isinstance(a, dict):
@@ -161,10 +164,13 @@ def create_visual_for_item(
                 except Exception:
                     pass
         evaluation = evaluate(
-            item, library_assets=library,
+            item,
+            library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
         )
-        out["evaluation"] = evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
+        out["evaluation"] = (
+            evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
+        )
     except Exception as e:
         out["errors"].append(f"evaluation_failed: {e}")
         traceback.print_exc()
@@ -177,6 +183,7 @@ def create_visual_for_item(
     # 2. Creative brief
     try:
         from mediahub.creative_brief.generator import generate as gen_brief
+
         brief = gen_brief(
             item,
             evaluation,
@@ -232,7 +239,7 @@ def create_visual_for_item(
     # wins over the automatic scorer so the user controls exactly which photo
     # lands on this graphic.
     if forced_hero_asset_id:
-        for a in (media_assets or []):
+        for a in media_assets or []:
             ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
             if str(ad.get("id")) == str(forced_hero_asset_id):
                 fp = ad.get("path") or ad.get("file_path")
@@ -244,7 +251,7 @@ def create_visual_for_item(
     # canvas behind the text rather than being cut out as a hero.
     bg_photo_path = None
     if forced_bg_asset_id:
-        for a in (media_assets or []):
+        for a in media_assets or []:
             ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
             if str(ad.get("id")) == str(forced_bg_asset_id):
                 bg_photo_path = ad.get("path") or ad.get("file_path")
@@ -265,6 +272,7 @@ def create_visual_for_item(
     # 4. Render variants
     try:
         from mediahub.graphic_renderer.variants import render_all_formats
+
         out_root = visuals_dir_for_run(run_id)
         # Each visual gets its own dir so multi-format files stay grouped
         # We'll let render_all_formats place files inside out_root/<brief.id>/
@@ -275,9 +283,8 @@ def create_visual_for_item(
         # athlete cutout entirely. Same treatment for any brief whose
         # photo_treatment is "no-photo" (set by the AI director or a
         # random variation profile).
-        skip_cutout_for_render = (
-            variation_seed == 3
-            or (getattr(brief, "photo_treatment", "") == "no-photo")
+        skip_cutout_for_render = variation_seed == 3 or (
+            getattr(brief, "photo_treatment", "") == "no-photo"
         )
         # A user-chosen photo always renders — never let a no-photo treatment
         # silently drop the photo they explicitly picked for this graphic.
@@ -308,18 +315,20 @@ def create_visual_for_item(
             persist_visual(r.visual, run_id=run_id, brief=brief)
         except Exception as e:
             out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
-        visuals_summary.append({
-            "id": r.visual.id,
-            "format_name": r.visual.format_name,
-            "width": r.visual.width,
-            "height": r.visual.height,
-            "file_path": r.visual.file_path,
-            "layout_template": r.visual.layout_template,
-            "confidence_label": r.visual.confidence_label,
-            "why_this_design": r.visual.why_this_design,
-            "safety_notes": r.visual.safety_notes,
-            "sourced_asset_ids": r.visual.sourced_asset_ids,
-        })
+        visuals_summary.append(
+            {
+                "id": r.visual.id,
+                "format_name": r.visual.format_name,
+                "width": r.visual.width,
+                "height": r.visual.height,
+                "file_path": r.visual.file_path,
+                "layout_template": r.visual.layout_template,
+                "confidence_label": r.visual.confidence_label,
+                "why_this_design": r.visual.why_this_design,
+                "safety_notes": r.visual.safety_notes,
+                "sourced_asset_ids": r.visual.sourced_asset_ids,
+            }
+        )
 
     out["visuals"] = visuals_summary
     return out
@@ -329,8 +338,13 @@ def create_visual_for_item(
 # Whole-pack overlay
 # ---------------------------------------------------------------------------
 
-DEFAULT_VISUAL_BUCKETS = ("main_feed", "stories", "athlete_spotlights",
-                          "weekend_in_numbers", "weekend_recap")
+DEFAULT_VISUAL_BUCKETS = (
+    "main_feed",
+    "stories",
+    "athlete_spotlights",
+    "weekend_in_numbers",
+    "weekend_recap",
+)
 
 
 def attach_visuals_to_pack(
@@ -362,8 +376,10 @@ def attach_visuals_to_pack(
             if max_per_bucket and rendered >= max_per_bucket:
                 break
             res = create_visual_for_item(
-                item, brand_kit,
-                profile_id=profile_id, run_id=run_id,
+                item,
+                brand_kit,
+                profile_id=profile_id,
+                run_id=run_id,
                 voice_profile=voice_profile,
                 media_assets=media_assets,
                 sponsor_name=sponsor_name,

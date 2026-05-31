@@ -21,16 +21,16 @@ Supported placeholders:
 
 Missing keys are replaced with "—" rather than raising.
 """
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, asdict
-from typing import Optional
+from dataclasses import dataclass, asdict
 
 
 @dataclass
 class CaptionTemplate:
-    slot: str        # 'headline' | 'body' | 'cta'
+    slot: str  # 'headline' | 'body' | 'cta'
     template: str
 
     def render(self, ctx: dict) -> str:
@@ -49,6 +49,7 @@ def render_template(template_str: str, ctx: dict) -> str:
     Fill {placeholder} variables from ctx.  Missing keys → "—".
     Never raises on missing keys.
     """
+
     def _replace(m: re.Match) -> str:
         key = m.group(1)
         return str(ctx.get(key, "—"))
@@ -59,6 +60,7 @@ def render_template(template_str: str, ctx: dict) -> str:
 # ---------------------------------------------------------------------------
 # Default templates (seeded for meet_recap × all three tones)
 # ---------------------------------------------------------------------------
+
 
 def _default_context_example() -> dict:
     """Return a minimal example context for template preview."""

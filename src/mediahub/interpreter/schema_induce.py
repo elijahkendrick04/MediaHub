@@ -10,12 +10,12 @@ a semantic type to each.  Works by voting across three independent signals:
 
 No swim-vocabulary literals.  All header synonyms come from the ontology.
 """
+
 from __future__ import annotations
 
 import logging
 import re
 from collections import Counter
-from typing import Optional
 
 from .ontology_loader import OntologyLoader
 from .schema_dataclasses import ColumnSchema, IngestStream, TableCandidate
@@ -27,12 +27,12 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FAMILIES: dict[str, re.Pattern] = {
-    "time":     re.compile(r"^\d{0,2}:?\d{2}\.\d{2}$"),
-    "place":    re.compile(r"^=?\d{1,3}$"),
-    "yob":      re.compile(r"^(19[4-9]\d|20[0-3]\d)$"),
+    "time": re.compile(r"^\d{0,2}:?\d{2}\.\d{2}$"),
+    "place": re.compile(r"^=?\d{1,3}$"),
+    "yob": re.compile(r"^(19[4-9]\d|20[0-3]\d)$"),
     "reaction": re.compile(r"^0\.\d{2,3}$"),
-    "name":     re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$"),
-    "club":     re.compile(r"^[A-Z]{2,6}$|^[A-Z][a-z]+ (?:SC|AC|TC|CC)$"),
+    "name": re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$"),
+    "club": re.compile(r"^[A-Z]{2,6}$|^[A-Z][a-z]+ (?:SC|AC|TC|CC)$"),
 }
 
 # Weight for each signal when voting
@@ -101,6 +101,7 @@ def _position_vote(
 # Main induction
 # ---------------------------------------------------------------------------
 
+
 def induce_schema(
     stream: IngestStream,
     ontology: OntologyLoader | None = None,
@@ -155,9 +156,7 @@ def _header_row_score(row: list[str], canonical_map: dict[str, str]) -> float:
     return header_score / total if total > 0 else 0.0
 
 
-def _find_best_header_row(
-    rows: list[list[str]], canonical_map: dict[str, str]
-) -> int:
+def _find_best_header_row(rows: list[list[str]], canonical_map: dict[str, str]) -> int:
     """
     Return the index of the row most likely to be the column-header row.
     Searches the first 5 rows only.
@@ -189,9 +188,9 @@ def _induce_from_table(
     header_idx = _find_best_header_row(table.rows, canonical_map)
     if header_idx >= 0:
         first_row = table.rows[header_idx]
-        data_rows = table.rows[header_idx + 1:]
+        data_rows = table.rows[header_idx + 1 :]
     else:
-        first_row = ["" ] * num_cols
+        first_row = [""] * num_cols
         data_rows = table.rows
 
     # If first_row has fewer cols than num_cols, pad it
@@ -202,9 +201,7 @@ def _induce_from_table(
     for col_idx in range(num_cols):
         header_text = first_row[col_idx].strip() if col_idx < len(first_row) else ""
         sample_values = [
-            row[col_idx]
-            for row in data_rows
-            if col_idx < len(row) and row[col_idx].strip()
+            row[col_idx] for row in data_rows if col_idx < len(row) and row[col_idx].strip()
         ][:20]  # cap sample size
 
         h_type, h_conf = _header_vote(header_text, canonical_map)

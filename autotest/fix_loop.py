@@ -46,6 +46,24 @@ def _max_attempts() -> int:
 
 
 def _is_meta_finding(bug: dict) -> bool:
+    """A finding the autonomous CODER cannot fix in MediaHub's product code, so it
+    must not enter the product-fix queue.
+
+    Two classes:
+    1. Text that names the tester/AI-judge itself (_META_MARKERS).
+    2. The ENTIRE ``council:blind_spot`` category (council ruling, RULE A). This
+       category is generated in council.py when the COUNCIL surfaces an issue the
+       judges missed — its ``route`` is a free-text ``area`` label the council
+       INVENTS, not a crawl-verified product route. By construction it is the
+       council theorising about sweep coverage gaps, not a reproducible product
+       defect. A genuine product bug surfaces under ``semantic:*`` with a real
+       route (and the council, which adjudicates all semantic findings, preserves
+       it there); it would not exist ONLY as a blind_spot. So the category
+       boundary — not a keyword heuristic — is the rule. (Functional-looking
+       blind-spots are re-filed as semantic findings BEFORE this rule applies, so
+       none are lost.)"""
+    if str(bug.get("category", "")).lower().startswith("council:blind_spot"):
+        return True
     blob = f"{bug.get('route', '')} {bug.get('title', '')}".lower()
     return any(m in blob for m in _META_MARKERS)
 
@@ -313,7 +331,10 @@ def fix_one(bug: dict) -> dict:
     pr_url, pr_err = builder._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
         _pr_body(bug, fp, reg_status, reg_detail))
-    merge = builder._merge_to_main(branch, has_pr=bool(pr_url))  # honours AUTOTEST_BUILD_MERGE
+    # Governance gate: pass the changed files so _merge_to_main can apply the
+    # human-authored product-vs-harness rule (CHANGE_CLASSIFICATION.md) — a product
+    # fix may auto-merge; a harness/governance change stops for a human merge.
+    merge = builder._merge_to_main(branch, has_pr=bool(pr_url), files=files)
     if pr_err:
         # Branch is pushed with the fix, but no PR opened → nothing landed and
         # nothing is in flight. Leave the bug OPEN so the next cycle retries it

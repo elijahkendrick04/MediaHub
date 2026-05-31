@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `8be81920b` · docs(adr): council verdict — do not integrate jcode (#188)
+**Last updated:** 2026-05-31 · `15cab5b26` · Merge pull request #207 from elijahkendrick04/claude/proof-run-prep
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,18 +63,16 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-05-31 | `8be81920b` | docs(adr): council verdict — do not integrate jcode (#188) |
-| 2026-05-31 | `21af4f990` | autopilot: persist builder state [skip ci] |
-| 2026-05-31 | `02ac71cef` | Deterministic, approval-gated caption voiceover (council verdict on Pixelle-Video) (#195) |
-| 2026-05-31 | `872230785` | feat(council): the Council as repo decision authority, wired into Claude Code (#192) |
-| 2026-05-31 | `c4aa2e880` | docs: ADR 0002 — decline CloakBrowser integration (council verdict) (#189) |
-| 2026-05-31 | `9d69cb486` | Vendor a curated subset of mattpocock/skills (reference only) (#190) |
-| 2026-05-31 | `1e1aa8a5c` | docs: reject 9router integration (ADR 0002) after council review (#191) |
-| 2026-05-31 | `e85505ad1` | docs(adr): council verdict — do not integrate agentmemory (#193) |
-| 2026-05-31 | `5e94f95d1` | autotest: add vision judge — the UI-TARS idea, not the stack (#194) |
-| 2026-05-31 | `0de1d8f12` | autotest: persist fixer memory [skip ci] |
-| 2026-05-31 | `eb15dae41` | autotest: refresh bug report [skip ci] |
-| 2026-05-31 | `f448dba20` | autopilot: persist builder state [skip ci] |
+| 2026-05-31 | `f240f1b99` | proof prereqs: add no-valid-patch + break-point + cascade + n=1 caveats (council) |
+| 2026-05-31 | `2574da021` | proof prereqs: autonomy boundary + independent verifier + #204/#205 note |
+| 2026-05-31 | `bcacf6d04` | autotest: persist fixer memory [skip ci] |
+| 2026-05-31 | `0e7b3d196` | autotest: refresh bug report [skip ci] |
+| 2026-05-31 | `72855b79a` | fix-c (RULE A): the whole council:blind_spot category is meta + clear residual queue |
+| 2026-05-31 | `83d0e0458` | autopilot: persist builder state [skip ci] |
+| 2026-05-31 | `9b4931693` | governance: human-authored change-classification rule + machine-verifiable proof criterion |
+| 2026-05-31 | `a5acc8242` | refactor(voice): remove the dead shadowed implementation in voice_imitation |
+| 2026-05-31 | `acdde4a34` | autotest(ledger): invalidate 32 code-provably-false open entries (PR #197 follow-up) |
+| 2026-05-31 | `9c36b5654` | fix(pb_discovery): make the interpreter PB-extraction path actually work |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---

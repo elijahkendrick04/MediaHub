@@ -8,21 +8,26 @@ The adapter is tolerant: missing fields produce ParseWarnings, never
 exceptions. A swimmer with no asa_id is given a stable hash key so we
 still capture the swim with low identity_confidence.
 """
+
 from __future__ import annotations
 import hashlib
 from typing import Optional
 
 from ..canonical import (
-    Meet, Club, Swimmer, RaceResult, RelayResult, RelayLeg, Split,
-    MeetAdapter, SourceEvidence,
+    Meet,
+    Club,
+    Swimmer,
+    RaceResult,
+    Split,
+    MeetAdapter,
+    SourceEvidence,
 )
 
 # Reuse V3's verified parser
 from swim_content.parsers_hy3 import parse_hy3_text, ParsedMeet
 
 
-def _stable_swimmer_key(*, asa_id: Optional[str], club_code: str,
-                        last: str, first: str) -> str:
+def _stable_swimmer_key(*, asa_id: Optional[str], club_code: str, last: str, first: str) -> str:
     if asa_id:
         return f"asa:{asa_id}"
     raw = f"{club_code}|{last.lower()}|{first.lower()}".encode("utf-8")
@@ -51,17 +56,14 @@ class HY3Adapter(MeetAdapter):
             text = file_bytes.decode("latin-1", errors="ignore")
         except Exception as e:
             m = Meet(source_format="hy3", source_filename=filename)
-            m.add_warning("decode_failed",
-                          f"Could not decode HY3 file: {e}",
-                          severity="error")
+            m.add_warning("decode_failed", f"Could not decode HY3 file: {e}", severity="error")
             return m
 
         try:
             parsed: ParsedMeet = parse_hy3_text(text)
         except Exception as e:
             m = Meet(source_format="hy3", source_filename=filename)
-            m.add_warning("parse_failed",
-                          f"HY3 parser raised: {e}", severity="error")
+            m.add_warning("parse_failed", f"HY3 parser raised: {e}", severity="error")
             return m
 
         meet = Meet(
@@ -73,23 +75,29 @@ class HY3Adapter(MeetAdapter):
             source_format="hy3",
             source_filename=filename,
         )
-        meet.source_evidence.append(SourceEvidence(
-            source="Meet results file",
-            note=f"Parsed from {filename} (HY3 format)",
-            confidence="high",
-        ))
+        meet.source_evidence.append(
+            SourceEvidence(
+                source="Meet results file",
+                note=f"Parsed from {filename} (HY3 format)",
+                confidence="high",
+            )
+        )
 
         # Clubs
         for code, c in parsed.clubs.items():
             meet.clubs[code] = Club(
-                code=code, name=c.name, short_name=c.short_name,
+                code=code,
+                name=c.name,
+                short_name=c.short_name,
             )
 
         # Swimmers — keyed by asa_id when present, else stable hash
         for asa_id, sw in parsed.swimmers.items():
             key = _stable_swimmer_key(
-                asa_id=asa_id, club_code=sw.club_code,
-                last=sw.last_name, first=sw.first_name,
+                asa_id=asa_id,
+                club_code=sw.club_code,
+                last=sw.last_name,
+                first=sw.first_name,
             )
             ident_conf = "high" if asa_id else "low"
             meet.swimmers[key] = Swimmer(
@@ -104,8 +112,7 @@ class HY3Adapter(MeetAdapter):
             )
 
         # Build asa_id -> swimmer_key map for swims
-        asa_to_key = {sw.asa_id: sw.swimmer_key
-                      for sw in meet.swimmers.values() if sw.asa_id}
+        asa_to_key = {sw.asa_id: sw.swimmer_key for sw in meet.swimmers.values() if sw.asa_id}
 
         # Race results
         kept = 0
@@ -121,8 +128,7 @@ class HY3Adapter(MeetAdapter):
                 continue
             # Splits: V3 stores cumulative cs only; we have no per-split diff
             splits = [
-                Split(distance_marker=(i + 1) * 50,
-                      cumulative_cs=cs)
+                Split(distance_marker=(i + 1) * 50, cumulative_cs=cs)
                 for i, cs in enumerate(s.splits_cs or [])
             ]
             status = "completed"
@@ -131,23 +137,25 @@ class HY3Adapter(MeetAdapter):
             elif s.finals_time_cs is None:
                 status = "dns"
 
-            meet.results.append(RaceResult(
-                swimmer_key=key,
-                club_code=s.club_code,
-                distance=s.distance,
-                stroke=s.stroke,
-                course=s.course,
-                gender=s.gender,
-                age_band=s.age_band or "",
-                finals_time_cs=s.finals_time_cs,
-                seed_time_cs=s.seed_time_cs,
-                place=s.place,
-                round=s.round,
-                dq=s.dq,
-                status=status,
-                swim_date=s.swim_date,
-                splits=splits,
-            ))
+            meet.results.append(
+                RaceResult(
+                    swimmer_key=key,
+                    club_code=s.club_code,
+                    distance=s.distance,
+                    stroke=s.stroke,
+                    course=s.course,
+                    gender=s.gender,
+                    age_band=s.age_band or "",
+                    finals_time_cs=s.finals_time_cs,
+                    seed_time_cs=s.seed_time_cs,
+                    place=s.place,
+                    round=s.round,
+                    dq=s.dq,
+                    status=status,
+                    swim_date=s.swim_date,
+                    splits=splits,
+                )
+            )
             kept += 1
 
         if kept == 0:

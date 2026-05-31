@@ -1,18 +1,19 @@
 """
 voice/profile.py — VoiceProfile and VoiceExemplar dataclasses.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
 class VoiceExemplar:
     """A pasted example post used for future few-shot LLM context."""
-    title: str              # "Loughborough big PB post"
+
+    title: str  # "Loughborough big PB post"
     source_url: str = ""
-    text: str = ""          # the actual post text — used for future few-shot
+    text: str = ""  # the actual post text — used for future few-shot
     notes: str = ""
 
     def to_dict(self) -> dict:
@@ -45,15 +46,16 @@ class VoiceProfile:
     - Store preferred/banned phrases for future LLM use
     - Store exemplars for future few-shot context
     """
+
     profile_id: str
-    tone: str = "warm-club"             # professional | hype | friendly | formal | warm-club | data-led
-    emoji_level: str = "moderate"       # none | sparing | moderate | heavy
-    preferred_phrases: list = field(default_factory=list)   # list[str]
-    banned_phrases: list = field(default_factory=list)      # list[str]
-    hashtag_style: str = "club_only"    # club_only | meet_specific | none | full
-    name_style: str = "first_name"      # first_name | full_name | surname
-    sign_off: str = ""                  # e.g. "—YourClub" or empty
-    exemplars: list = field(default_factory=list)   # list[VoiceExemplar]
+    tone: str = "warm-club"  # professional | hype | friendly | formal | warm-club | data-led
+    emoji_level: str = "moderate"  # none | sparing | moderate | heavy
+    preferred_phrases: list = field(default_factory=list)  # list[str]
+    banned_phrases: list = field(default_factory=list)  # list[str]
+    hashtag_style: str = "club_only"  # club_only | meet_specific | none | full
+    name_style: str = "first_name"  # first_name | full_name | surname
+    sign_off: str = ""  # e.g. "—YourClub" or empty
+    exemplars: list = field(default_factory=list)  # list[VoiceExemplar]
 
     def to_dict(self) -> dict:
         return {
@@ -101,26 +103,27 @@ class VoiceProfile:
         if self.emoji_level != "none":
             return text
         import re
+
         # Remove emoji unicode ranges
         # Use a broad emoji removal approach - encode/decode trick
         try:
             emoji_pattern = re.compile(
                 "["
-                "\U0001F300-\U0001FAFF"  # broad emoji block
-                "\U00002702-\U000027B0"
-                "\U000024C2-\U0001F251"
-                "\U0001F600-\U0001F64F"  # emoticons
-                "\U0001F680-\U0001F6FF"  # transport & map
-                "\U0001F1E0-\U0001F1FF"  # flags
-                "\U00002500-\U00002BEF"  # various symbols
-                "\U0001F900-\U0001F9FF"  # supplemental symbols
-                "\U0001FA00-\U0001FAFF"  # chess symbols etc.
+                "\U0001f300-\U0001faff"  # broad emoji block
+                "\U00002702-\U000027b0"
+                "\U000024c2-\U0001f251"
+                "\U0001f600-\U0001f64f"  # emoticons
+                "\U0001f680-\U0001f6ff"  # transport & map
+                "\U0001f1e0-\U0001f1ff"  # flags
+                "\U00002500-\U00002bef"  # various symbols
+                "\U0001f900-\U0001f9ff"  # supplemental symbols
+                "\U0001fa00-\U0001faff"  # chess symbols etc.
                 "]+",
                 flags=re.UNICODE,
             )
         except re.error:
             emoji_pattern = re.compile(
-                "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF]+",
+                "[\U0001f600-\U0001f64f\U0001f300-\U0001f5ff]+",
                 flags=re.UNICODE,
             )
         return emoji_pattern.sub("", text).strip()

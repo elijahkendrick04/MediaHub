@@ -25,11 +25,11 @@ change. Specifically the keys:
 When the LLM is unavailable a heuristic excerpt + hashtag scan is
 returned so the pipeline still produces something useful.
 """
+
 from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -60,20 +60,16 @@ def _build_prompt(url: str, platform_intent: str, raw_text: str) -> str:
         "Return a SINGLE JSON object with EXACTLY these keys:",
         "  voice_summary: string, 30-60 words on how this organisation "
         "talks about itself and what they're about. Empty if unclear.",
-        "  keywords: array of 6-12 short keywords this org would use "
-        "about itself.",
+        "  keywords: array of 6-12 short keywords this org would use " "about itself.",
         "  phrases_to_use: array of 3-6 short phrases that sound like "
         "them (quote directly where possible).",
-        "  phrases_to_avoid: array of 3-5 short phrases that would "
-        "feel off-brand for them.",
+        "  phrases_to_avoid: array of 3-5 short phrases that would " "feel off-brand for them.",
         "  palette_mentions: array of #rrggbb colours mentioned or "
         "implied in the text (lower-case).",
-        "  typography_hint: one of \"serif\", \"sans\", \"display\", "
-        "\"mono\", or empty.",
-        "  sponsor_mentions: array of sponsor / partner brand names "
-        "mentioned (up to 5).",
+        '  typography_hint: one of "serif", "sans", "display", ' '"mono", or empty.',
+        "  sponsor_mentions: array of sponsor / partner brand names " "mentioned (up to 5).",
         "  hashtag_patterns: array of hashtag-usage patterns (e.g. "
-        "\"always includes #ClubTeam\", \"3 hashtags per post\").",
+        '"always includes #ClubTeam", "3 hashtags per post").',
     ]
     return "\n".join(parts)
 
@@ -155,8 +151,12 @@ def _clean_excerpt(raw_text: str, *, cap: int = 280) -> str:
     # Drop low-information boilerplate lines that platform handlers
     # routinely produce ("Title: Instagram", "URL Source: ...").
     drop_prefixes = (
-        "title:", "url source:", "markdown content:", "published time:",
-        "warning:", "see everyday moments",
+        "title:",
+        "url source:",
+        "markdown content:",
+        "published time:",
+        "warning:",
+        "see everyday moments",
     )
     kept_lines = []
     for line in txt.splitlines():
@@ -321,8 +321,7 @@ def extract_brand_dna(
         out["palette_mentions"] = merged[:12]
     # Empty LLM result → fall back to heuristic so the user's data
     # isn't silently dropped.
-    has_signal = bool(out["voice_summary"] or out["keywords"]
-                       or out["hashtag_patterns"])
+    has_signal = bool(out["voice_summary"] or out["keywords"] or out["hashtag_patterns"])
     if not has_signal:
         return _heuristic(raw_text)
     return out

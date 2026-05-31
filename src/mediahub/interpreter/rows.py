@@ -6,18 +6,17 @@ normalises values, and assigns per-row and per-field confidence scores.
 
 No swim-vocabulary literals.
 """
+
 from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 from .schema_dataclasses import (
     ColumnSchema,
     IngestStream,
     InterpretedEvent,
     InterpretedSwim,
-    TableCandidate,
 )
 
 log = logging.getLogger(__name__)
@@ -83,18 +82,19 @@ def _normalise_club(raw: str) -> tuple[str | None, float]:
 
 
 _NORMALISERS = {
-    "time":     _normalise_time,
-    "place":    _normalise_place,
-    "yob":      _normalise_yob,
+    "time": _normalise_time,
+    "place": _normalise_place,
+    "yob": _normalise_yob,
     "reaction": _normalise_reaction,
-    "name":     _normalise_name,
-    "club":     _normalise_club,
+    "name": _normalise_name,
+    "club": _normalise_club,
 }
 
 
 # ---------------------------------------------------------------------------
 # Row extraction from table candidate
 # ---------------------------------------------------------------------------
+
 
 def _extract_swim_from_cells(
     cells: list[str],
@@ -126,9 +126,7 @@ def _extract_swim_from_cells(
         return None
 
     # Overall per-swim confidence: mean of field confidences
-    row_conf = (
-        sum(field_conf.values()) / len(field_conf) if field_conf else 0.0
-    )
+    row_conf = sum(field_conf.values()) / len(field_conf) if field_conf else 0.0
 
     return InterpretedSwim(
         swimmer_name=str(field_vals.get("name", "")),
@@ -164,7 +162,17 @@ _TIME = r"(?P<time>X?\d{1,2}:\d{2}\.\d{2}|X?\d{1,3}\.\d{2}|DQ|DNS|DNF|NS)"
 
 # Full row: place + name + age + club + time (most permissive ordering)
 _ROW_RE = re.compile(
-    r"^\s*" + _PLACE + r"\s+" + _NAME + r"\s+" + _AGE + r"\s+" + _CLUB + r"\s+" + _TIME + r"(?:\s|$)"
+    r"^\s*"
+    + _PLACE
+    + r"\s+"
+    + _NAME
+    + r"\s+"
+    + _AGE
+    + r"\s+"
+    + _CLUB
+    + r"\s+"
+    + _TIME
+    + r"(?:\s|$)"
 )
 # Variant without leading place (place column may be missing or merged)
 _ROW_RE_NO_PLACE = re.compile(
@@ -356,9 +364,7 @@ def assign_rows_to_events(
             if rows_to_process:
                 first = rows_to_process[0]
                 num_pat = re.compile(r"^\d")
-                is_header = all(
-                    not num_pat.match(c) for c in first if c.strip()
-                )
+                is_header = all(not num_pat.match(c) for c in first if c.strip())
                 if is_header:
                     rows_to_process = rows_to_process[1:]
             for cells in rows_to_process:
