@@ -21,10 +21,14 @@ from mediahub.web import web as webmod
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    # Patch via monkeypatch so DATA_DIR/RUNS_DIR are restored after the test —
+    # assigning the module globals directly would leak a now-deleted tmp dir
+    # into later tests.
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    webmod.DATA_DIR = tmp_path
-    webmod.RUNS_DIR = tmp_path / "runs"
-    webmod.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    runs = tmp_path / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(webmod, "DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(webmod, "RUNS_DIR", runs, raising=False)
     app = webmod.app
     app.config["TESTING"] = True
     with app.test_client() as c:
