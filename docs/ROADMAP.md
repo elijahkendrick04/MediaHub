@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `0dad3c980` · Merge pull request #205 from elijahkendrick04/autotest/fix-b07572c63c13
+**Last updated:** 2026-05-31 · `15cab5b26` · Merge pull request #207 from elijahkendrick04/claude/proof-run-prep
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,8 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `f240f1b99` | proof prereqs: add no-valid-patch + break-point + cascade + n=1 caveats (council) |
+| 2026-05-31 | `2574da021` | proof prereqs: autonomy boundary + independent verifier + #204/#205 note |
 | 2026-05-31 | `bcacf6d04` | autotest: persist fixer memory [skip ci] |
 | 2026-05-31 | `0e7b3d196` | autotest: refresh bug report [skip ci] |
 | 2026-05-31 | `72855b79a` | fix-c (RULE A): the whole council:blind_spot category is meta + clear residual queue |
@@ -71,8 +73,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `a5acc8242` | refactor(voice): remove the dead shadowed implementation in voice_imitation |
 | 2026-05-31 | `acdde4a34` | autotest(ledger): invalidate 32 code-provably-false open entries (PR #197 follow-up) |
 | 2026-05-31 | `9c36b5654` | fix(pb_discovery): make the interpreter PB-extraction path actually work |
-| 2026-05-31 | `d0e77590d` | decontaminate FIND/adjudicate: provenance guard, council framing, meta-filter, dedup |
-| 2026-05-31 | `abd5592df` | chore(lint): clear ruff F401/F811 debt + format touched files |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
