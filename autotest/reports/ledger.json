@@ -14,14 +14,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T11:41:59+00:00",
       "last_seen": "2026-05-29T11:41:59+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T114007Z-6617",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "e883e6f0bbc7": {
       "fingerprint": "e883e6f0bbc7",
@@ -48,7 +49,7 @@
     },
     "71e02f586c45": {
       "fingerprint": "71e02f586c45",
-      "category": "council:blind_spot",
+      "category": "semantic:user_brain",
       "severity": "high",
       "title": "Implement clear, immediate, and actionable user feedback when no content cards are generated due to insufficient data.",
       "route": "User Experience/Feedback",
@@ -65,7 +66,9 @@
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "refiled_from": "council:blind_spot",
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
     },
     "5cebfcb079da": {
       "fingerprint": "5cebfcb079da",
@@ -79,14 +82,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "55093f7335f8": {
       "fingerprint": "55093f7335f8",
@@ -100,14 +104,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "76196fe6a36b": {
       "fingerprint": "76196fe6a36b",
@@ -410,14 +415,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "1db920390f08": {
       "fingerprint": "1db920390f08",
@@ -527,14 +533,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T19:20:22+00:00",
       "last_seen": "2026-05-29T19:20:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "e8455cdfdedb": {
       "fingerprint": "e8455cdfdedb",
@@ -713,14 +720,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-29T20:35:30+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "7d64d57158d0": {
       "fingerprint": "7d64d57158d0",
@@ -950,14 +958,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T08:36:18+00:00",
       "last_seen": "2026-05-30T08:36:18+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "35ff22e13091": {
       "fingerprint": "35ff22e13091",
@@ -1114,14 +1123,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "b51047bfbf12": {
       "fingerprint": "b51047bfbf12",
@@ -1423,14 +1433,15 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T14:55:33+00:00",
       "last_seen": "2026-05-30T14:55:33+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "a70617621ebf": {
       "fingerprint": "a70617621ebf",
@@ -1637,18 +1648,19 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     },
     "4f1d8d41781e": {
       "fingerprint": "4f1d8d41781e",
-      "category": "council:blind_spot",
+      "category": "semantic:functional",
       "severity": "high",
       "title": "Confidence threshold may be silently filtering all generated cards",
       "route": "semantic:functional",
@@ -1665,7 +1677,9 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "refiled_from": "council:blind_spot",
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
@@ -1852,7 +1866,7 @@
       "rationale": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "council_review",
       "first_seen": "2026-05-31T08:55:03+00:00",
       "last_seen": "2026-05-31T08:55:03+00:00",
       "seen_count": 1,
@@ -1860,7 +1874,8 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
     }
   },
   "skipped": {
