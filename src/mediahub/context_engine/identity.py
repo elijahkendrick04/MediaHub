@@ -7,13 +7,12 @@ meet level, and host club for a swimming meet.
 No governing bodies, meet levels, or domains are hardcoded — everything is
 discovered from live search results and cached.
 """
+
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
 from typing import Optional
 
 from .cache import DiscoveryCache
@@ -28,36 +27,48 @@ from .trust import record_attempt
 
 _LEVEL_PATTERNS = [
     # Match "Level 1", "Level 2", "Level 3", etc.
-    (re.compile(r'\bLevel\s*([1-9])\b', re.IGNORECASE), lambda m: f"Level {m.group(1)}", 0.85),
+    (re.compile(r"\bLevel\s*([1-9])\b", re.IGNORECASE), lambda m: f"Level {m.group(1)}", 0.85),
     # Match "National" meets
-    (re.compile(r'\b(National\s+(?:Championships?|Qualifier|Qualifying|Open))\b', re.IGNORECASE),
-     lambda m: m.group(1), 0.8),
+    (
+        re.compile(r"\b(National\s+(?:Championships?|Qualifier|Qualifying|Open))\b", re.IGNORECASE),
+        lambda m: m.group(1),
+        0.8,
+    ),
     # Match "Regional" meets
-    (re.compile(r'\b(Regional\s+(?:Championships?|Qualifier|Qualifying|Open))\b', re.IGNORECASE),
-     lambda m: m.group(1), 0.75),
+    (
+        re.compile(r"\b(Regional\s+(?:Championships?|Qualifier|Qualifying|Open))\b", re.IGNORECASE),
+        lambda m: m.group(1),
+        0.75,
+    ),
     # Match "County" meets
-    (re.compile(r'\b(County\s+(?:Championships?|Open|Qualifier))\b', re.IGNORECASE),
-     lambda m: m.group(1), 0.7),
+    (
+        re.compile(r"\b(County\s+(?:Championships?|Open|Qualifier))\b", re.IGNORECASE),
+        lambda m: m.group(1),
+        0.7,
+    ),
     # Match "Open Meet"
-    (re.compile(r'\b(Open\s+Meet)\b', re.IGNORECASE), lambda m: m.group(1), 0.6),
+    (re.compile(r"\b(Open\s+Meet)\b", re.IGNORECASE), lambda m: m.group(1), 0.6),
     # Match qualifier designations
-    (re.compile(r'\b((?:national|regional|county)\s+qualifier)\b', re.IGNORECASE),
-     lambda m: m.group(1).title(), 0.72),
+    (
+        re.compile(r"\b((?:national|regional|county)\s+qualifier)\b", re.IGNORECASE),
+        lambda m: m.group(1).title(),
+        0.72,
+    ),
 ]
 
 # Patterns to extract governing body name from text context
 _GOVERNING_BODY_PATTERNS = [
     # "sanctioned by Swim England", "licensed by Welsh Swimming", etc.
     re.compile(
-        r'(?:sanctioned|licensed|approved|affiliated|registered)\s+(?:by|with|under)\s+'
-        r'([A-Z][a-zA-Z\s]{2,30}(?:Swimming|Swim\s+\w+|ASA|Amateur\s+Swimming))',
-        re.IGNORECASE
+        r"(?:sanctioned|licensed|approved|affiliated|registered)\s+(?:by|with|under)\s+"
+        r"([A-Z][a-zA-Z\s]{2,30}(?:Swimming|Swim\s+\w+|ASA|Amateur\s+Swimming))",
+        re.IGNORECASE,
     ),
     # Standalone governing body mentions near the meet name
     re.compile(
-        r'\b((?:Swim\s+\w+|Welsh\s+Swimming|Scottish\s+Swimming|'
-        r'Swim\s+Ireland|British\s+Swimming|Amateur\s+Swimming\s+Association|ASA))\b',
-        re.IGNORECASE
+        r"\b((?:Swim\s+\w+|Welsh\s+Swimming|Scottish\s+Swimming|"
+        r"Swim\s+Ireland|British\s+Swimming|Amateur\s+Swimming\s+Association|ASA))\b",
+        re.IGNORECASE,
     ),
 ]
 
@@ -130,9 +141,17 @@ def _extract_host_club(text: str, meet_name: str) -> Optional[str]:
     Looks for patterns like "hosted by X SC", "X Swimming Club presents", etc.
     """
     patterns = [
-        re.compile(r'[Hh]osted\s+by\s+([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))', re.IGNORECASE),
-        re.compile(r'([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))\s+presents', re.IGNORECASE),
-        re.compile(r'([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))\s+(?:Open|Championships?|Gala)', re.IGNORECASE),
+        re.compile(
+            r"[Hh]osted\s+by\s+([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))\s+presents", re.IGNORECASE
+        ),
+        re.compile(
+            r"([A-Z][A-Za-z\s&\'-]{2,40}(?:SC|Swimming Club|Swim Club))\s+(?:Open|Championships?|Gala)",
+            re.IGNORECASE,
+        ),
     ]
     for p in patterns:
         m = p.search(text)

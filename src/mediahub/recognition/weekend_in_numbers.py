@@ -3,9 +3,8 @@ recognition/weekend_in_numbers.py — Auto-generate a "weekend by the numbers" c
 
 build_weekend_in_numbers(report_dict) -> dict (card-compatible)
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 
 def build_weekend_in_numbers(report: dict) -> dict:
@@ -77,16 +76,20 @@ def build_weekend_in_numbers(report: dict) -> dict:
 
     # Build headline text
     n_swims = report.get("n_swims_analysed", 0)
-    n_swimmers = len(set(
-        (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id", "")
-        for ra in ranked
-        if (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id")
-    ))
+    n_swimmers = len(
+        set(
+            (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id", "")
+            for ra in ranked
+            if (ra.get("achievement", {}) if isinstance(ra, dict) else {}).get("swimmer_id")
+        )
+    )
 
     lines = []
     lines.append(f"{meet_name} — by the numbers")
     lines.append("")
-    lines.append(f"{n_swimmers} swimmer{'s' if n_swimmers != 1 else ''} · {n_swims} swim{'s' if n_swims != 1 else ''}")
+    lines.append(
+        f"{n_swimmers} swimmer{'s' if n_swimmers != 1 else ''} · {n_swims} swim{'s' if n_swims != 1 else ''}"
+    )
     if n_pbs or n_medals:
         medal_str = f"{n_medals} medal{'s' if n_medals != 1 else ''}" if n_medals else ""
         pb_str = f"{n_pbs} PB{'s' if n_pbs != 1 else ''}" if n_pbs else ""
@@ -128,7 +131,9 @@ def build_weekend_in_numbers(report: dict) -> dict:
     if most_pbs_swimmer and most_pbs_count >= 2:
         highlights.append(f"Most PBs: {most_pbs_swimmer} ({most_pbs_count})")
     if biggest_drop_swimmer:
-        highlights.append(f"Biggest drop: {biggest_drop_swimmer}, {biggest_drop_event}, −{biggest_drop_seconds:.2f}s")
+        highlights.append(
+            f"Biggest drop: {biggest_drop_swimmer}, {biggest_drop_event}, −{biggest_drop_seconds:.2f}s"
+        )
     if n_gold:
         highlights.append(f"{n_gold} gold medal{'s' if n_gold != 1 else ''}")
 
@@ -142,7 +147,10 @@ def build_weekend_in_numbers(report: dict) -> dict:
         "caption_text": caption_text,
         "suggested_post_type": "main_feed",
         "quality_band": "strong",
-        "safe_to_post": {"level": "safe", "reason": "Auto-generated aggregate stats, all facts from results file."},
+        "safe_to_post": {
+            "level": "safe",
+            "reason": "Auto-generated aggregate stats, all facts from results file.",
+        },
         "active_caption": {
             "headline": f"{meet_name} — by the numbers",
             "body": caption_text,

@@ -9,12 +9,12 @@ This allows the engine to grow its vocabulary from live documents.
 
 No aliases are hardcoded here — they come from data files and live research.
 """
+
 from __future__ import annotations
 
 import json
 import threading
 from pathlib import Path
-from typing import Any
 
 _LOCK = threading.Lock()
 

@@ -9,6 +9,7 @@ highly.
 Returns (Meet, dispatch_log) where dispatch_log captures which files
 were considered and which adapter won, for audit.
 """
+
 from __future__ import annotations
 import io
 import os
@@ -16,12 +17,15 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..canonical import Meet, ParseWarning
+from ..canonical import Meet
 from .hy3 import HY3Adapter
 
 # V7.4: SPORTSYSTEMS PDF adapter
 try:
-    from engine_v4.adapters.sportsystems_pdf import SportSystemsPDFAdapter as _SportSystemsPDFAdapter
+    from engine_v4.adapters.sportsystems_pdf import (
+        SportSystemsPDFAdapter as _SportSystemsPDFAdapter,
+    )
+
     _pdf_adapter_available = True
 except ImportError:
     _pdf_adapter_available = False
@@ -83,11 +87,13 @@ def dispatch(file_bytes: bytes, filename: str) -> tuple[Meet, DispatchLog]:
                         continue
                     inner_base = os.path.basename(name)
                     for score, ad, _ in _score_all(inner, inner_base):
-                        log.candidates.append({
-                            "adapter": ad.format_id,
-                            "filename": inner_base,
-                            "score": round(score, 3),
-                        })
+                        log.candidates.append(
+                            {
+                                "adapter": ad.format_id,
+                                "filename": inner_base,
+                                "score": round(score, 3),
+                            }
+                        )
                         if score > best[0]:
                             best = (score, ad, inner_base, inner)
                 if best[1] is None:
@@ -118,11 +124,13 @@ def dispatch(file_bytes: bytes, filename: str) -> tuple[Meet, DispatchLog]:
     # Direct dispatch (non-zip or zip-open failure).
     scored = _score_all(file_bytes, filename)
     for score, ad, fn in scored:
-        log.candidates.append({
-            "adapter": ad.format_id,
-            "filename": fn,
-            "score": round(score, 3),
-        })
+        log.candidates.append(
+            {
+                "adapter": ad.format_id,
+                "filename": fn,
+                "score": round(score, 3),
+            }
+        )
     scored.sort(key=lambda t: t[0], reverse=True)
     best_score, best_adapter, best_fn = scored[0]
     if best_score <= 0.0:

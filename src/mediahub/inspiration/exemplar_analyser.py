@@ -3,11 +3,11 @@
 Returns structured style features that can feed back into the creative_brief.
 Falls back to neutral defaults when no vision API is available.
 """
+
 from __future__ import annotations
 
-from typing import Any
 
-from mediahub.media_ai import generate_vision, generate_json
+from mediahub.media_ai import generate_vision
 from mediahub.media_ai.llm import ClaudeUnavailableError
 
 
@@ -66,6 +66,7 @@ def _try_extract_json(text: str) -> dict | None:
         return None
     import json as _json
     import re as _re
+
     s = text.strip()
     fence = _re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", s, _re.DOTALL)
     if fence:
@@ -75,7 +76,7 @@ def _try_extract_json(text: str) -> dict | None:
     if start == -1 or end == -1:
         return None
     try:
-        return _json.loads(s[start:end + 1])
+        return _json.loads(s[start : end + 1])
     except Exception:
         return None
 

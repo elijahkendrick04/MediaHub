@@ -17,6 +17,7 @@ Storage layout (inside the profile JSON under 'brand_kit', 'tone', 'caption_temp
 We never store brand data in a separate file — it stays with the profile JSON
 so there's a single source of truth.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,7 +27,6 @@ from typing import Optional
 
 from .kit import BrandKit
 from .tone import Tone, tone_from_str
-from .templates import get_default_templates
 
 
 def _profiles_dir() -> Path:

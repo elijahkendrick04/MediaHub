@@ -8,14 +8,15 @@ Inputs:
 Output: EvaluationResult with status, matched_assets per role, missing roles,
 and a recommended_action string.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable, Optional
 
 from mediahub.media_library import MediaAsset, select_assets
 
-from .rules import MediaRequirementSet, requirements_for
+from .rules import requirements_for
 
 
 READY = "ready"
@@ -28,13 +29,13 @@ TEXT_LED_OK = "text_led_ok"
 class EvaluationResult:
     content_item_id: str
     content_type: str
-    status: str                  # READY | NEEDS_MEDIA | SKIP_LOW_CONFIDENCE | TEXT_LED_OK
+    status: str  # READY | NEEDS_MEDIA | SKIP_LOW_CONFIDENCE | TEXT_LED_OK
     suggested_layout: str
     matched: dict[str, list[dict]]  # role -> scored asset dicts (best first)
     missing_required: list[str]
     missing_optional: list[str]
     recommended_action: str
-    confidence_tier: str = "high"   # high | medium | low
+    confidence_tier: str = "high"  # high | medium | low
     confidence_label: str = "NEW PB"  # readable label for graphic ("NEW PB" / "LIKELY PB" / ...)
     explain: str = ""
 
@@ -58,9 +59,14 @@ class EvaluationResult:
 # Confidence handling — engine-level, not sport-specific
 # ---------------------------------------------------------------------------
 
+
 def _confidence_tier_and_label(content_item: dict) -> tuple[str, str]:
     """Map the raw confidence + post_angle to a tier and graphic label."""
-    angle = content_item.get("post_angle") or content_item.get("achievement", {}).get("post_angle") or ""
+    angle = (
+        content_item.get("post_angle")
+        or content_item.get("achievement", {}).get("post_angle")
+        or ""
+    )
     s2p = content_item.get("safe_to_post") or {}
     s2p_level = s2p.get("level") if isinstance(s2p, dict) else "needs_review"
     conf = (
@@ -123,9 +129,14 @@ def _confidence_tier_and_label(content_item: dict) -> tuple[str, str]:
 # Main evaluator
 # ---------------------------------------------------------------------------
 
-def evaluate(content_item: dict, library_assets: Iterable[MediaAsset],
-             *, profile_logo_present: bool = False,
-             content_type_override: Optional[str] = None) -> EvaluationResult:
+
+def evaluate(
+    content_item: dict,
+    library_assets: Iterable[MediaAsset],
+    *,
+    profile_logo_present: bool = False,
+    content_type_override: Optional[str] = None,
+) -> EvaluationResult:
     """Compute readiness + best-fit assets per role."""
     item_id = (
         content_item.get("id")
@@ -155,9 +166,7 @@ def evaluate(content_item: dict, library_assets: Iterable[MediaAsset],
         or ach.get("athlete_name")
     )
     athlete_id = (
-        content_item.get("swimmer_id")
-        or ach.get("swimmer_id")
-        or content_item.get("athlete_id")
+        content_item.get("swimmer_id") or ach.get("swimmer_id") or content_item.get("athlete_id")
     )
 
     # Cache for asset list (used multiple times)
@@ -171,8 +180,13 @@ def evaluate(content_item: dict, library_assets: Iterable[MediaAsset],
         # Logo handled separately via brand profile
         if req.role == "logo":
             if profile_logo_present:
-                matched["logo"] = [{"asset_id": "_brand_logo_", "score": 1.0,
-                                    "reason_summary": "from brand profile"}]
+                matched["logo"] = [
+                    {
+                        "asset_id": "_brand_logo_",
+                        "score": 1.0,
+                        "reason_summary": "from brand profile",
+                    }
+                ]
             else:
                 if req.required:
                     missing_required.append("logo")
@@ -183,8 +197,12 @@ def evaluate(content_item: dict, library_assets: Iterable[MediaAsset],
         scored = select_assets(
             library_list,
             role=req.role,
-            athlete_name=athlete_name if req.role.startswith("hero") or req.role == "headshot" else None,
-            athlete_id=athlete_id if req.role.startswith("hero") or req.role == "headshot" else None,
+            athlete_name=athlete_name
+            if req.role.startswith("hero") or req.role == "headshot"
+            else None,
+            athlete_id=athlete_id
+            if req.role.startswith("hero") or req.role == "headshot"
+            else None,
             preferred_orientation="portrait" if req.role.startswith("hero") else None,
             min_score=0.35,
             k=5,
@@ -242,8 +260,9 @@ def evaluate(content_item: dict, library_assets: Iterable[MediaAsset],
     )
 
 
-def _build_explanation(angle: str, matched: dict, missing_req: list,
-                       missing_opt: list, tier: str) -> str:
+def _build_explanation(
+    angle: str, matched: dict, missing_req: list, missing_opt: list, tier: str
+) -> str:
     parts = []
     if matched.get("hero_athlete"):
         a = matched["hero_athlete"][0]
@@ -261,5 +280,8 @@ def _build_explanation(angle: str, matched: dict, missing_req: list,
 __all__ = [
     "evaluate",
     "EvaluationResult",
-    "READY", "NEEDS_MEDIA", "SKIP_LOW_CONFIDENCE", "TEXT_LED_OK",
+    "READY",
+    "NEEDS_MEDIA",
+    "SKIP_LOW_CONFIDENCE",
+    "TEXT_LED_OK",
 ]

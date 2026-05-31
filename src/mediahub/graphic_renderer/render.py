@@ -22,13 +22,11 @@ Public API
   → returns a ``RenderResult`` with the on-disk PNG path + GeneratedVisual record.
 - ``render_html_to_png(html, output_path, size)`` → low-level helper.
 """
+
 from __future__ import annotations
 
 import base64
-import io
-import json
 import logging
-import math
 import os
 import re
 import uuid
@@ -55,6 +53,7 @@ _SHARED_CSS_PATH = LAYOUTS_DIR / "_shared.css"
 # V8.1 Issue 7 — feature flags (env-driven so tests + ops can toggle)
 # ---------------------------------------------------------------------------
 
+
 def _flag(name: str, default: str = "1") -> bool:
     return os.environ.get(name, default).lower() not in ("0", "", "false", "no", "off")
 
@@ -79,16 +78,16 @@ def _dpr_render() -> int:
 _GRAIN_SVG_BLOCK = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" '
     'style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">'
-    '<defs>'
+    "<defs>"
     '<filter id="grain" x="0%" y="0%" width="100%" height="100%">'
     # baseFrequency tuned for fine film-grain; numOctaves=2 keeps it cheap.
     '<feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" seed="7"/>'
     # Push values toward greys + drop alpha to 3%.
     '<feColorMatrix values="0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0.03 0"/>'
     '<feComposite in2="SourceGraphic" operator="in"/>'
-    '</filter>'
-    '</defs>'
-    '</svg>'
+    "</filter>"
+    "</defs>"
+    "</svg>"
 )
 
 
@@ -96,9 +95,11 @@ _GRAIN_SVG_BLOCK = (
 # Data shapes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GeneratedVisual:
     """Persistent record of a rendered visual. Mirrors what we'll store in DB."""
+
     id: str
     brief_id: str
     content_item_id: str
@@ -124,6 +125,7 @@ class GeneratedVisual:
 @dataclass
 class RenderResult:
     """Output of a single render — PNG path + visual record + html debug."""
+
     visual: GeneratedVisual
     html: str
     png_bytes: int
@@ -132,6 +134,7 @@ class RenderResult:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
@@ -182,13 +185,18 @@ def _img_to_data_uri(path: str | Path) -> str:
     raw = p.read_bytes()
     suffix = p.suffix.lower().lstrip(".")
     mime = {
-        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-        "webp": "image/webp", "svg": "image/svg+xml", "gif": "image/gif",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "gif": "image/gif",
     }.get(suffix, "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
 # ----- Background generators (SVG data URIs, no network) -------------------
+
 
 def _water_pattern_data_uri() -> str:
     """Subtle ripple pattern — repeating SVG."""
@@ -209,7 +217,7 @@ def _water_pattern_data_uri() -> str:
   <circle cx='150' cy='150' r='100' fill='url(#r)'/>
   <circle cx='450' cy='350' r='140' fill='url(#r)'/>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _noise_pattern_data_uri() -> str:
@@ -221,7 +229,7 @@ def _noise_pattern_data_uri() -> str:
   </filter>
   <rect width='100%' height='100%' filter='url(#n)' opacity='0.85'/>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +239,7 @@ def _noise_pattern_data_uri() -> str:
 # rebadged for backwards compat but every layout reads the same slot, so
 # every pattern works in every layout.
 # ---------------------------------------------------------------------------
+
 
 def _bg_halftone_data_uri() -> str:
     svg = """<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>
@@ -252,7 +261,7 @@ def _bg_halftone_data_uri() -> str:
     <circle cx='360' cy='360' r='1.5'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_diagonal_stripes_data_uri() -> str:
@@ -266,7 +275,7 @@ def _bg_diagonal_stripes_data_uri() -> str:
     <line x1='-100' y1='850' x2='700' y2='450'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_radial_burst_data_uri() -> str:
@@ -291,7 +300,7 @@ def _bg_radial_burst_data_uri() -> str:
     <circle cx='400' cy='400' r='340'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_geometric_data_uri() -> str:
@@ -309,14 +318,14 @@ def _bg_geometric_data_uri() -> str:
     <polygon points='200,400 400,400 300,200'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_clean_data_uri() -> str:
     """No pattern, just an invisible 1x1 pixel — leaves the canvas clean
     so the gradient + vignette do all the lifting."""
     svg = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>"
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_vertical_stripes_data_uri() -> str:
@@ -327,7 +336,7 @@ def _bg_vertical_stripes_data_uri() -> str:
     <rect x='160' y='0' width='40' height='400'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_dots_data_uri() -> str:
@@ -344,7 +353,7 @@ def _bg_dots_data_uri() -> str:
     <circle cx='140' cy='140' r='2.2'/>
   </g>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 def _bg_duotone_data_uri() -> str:
@@ -353,23 +362,23 @@ def _bg_duotone_data_uri() -> str:
     svg = """<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'>
   <polygon points='0,400 400,0 400,400' fill='white' fill-opacity='0.09'/>
 </svg>"""
-    return f"url(\"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}\")"
+    return f'url("data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}")'
 
 
 # Lookup table: brief.background_style → CSS url() value
 def _background_pattern_for(style: str) -> str:
     style = (style or "water").lower()
     builders = {
-        "water":     _water_pattern_data_uri,
-        "halftone":  _bg_halftone_data_uri,
-        "diagonal":  _bg_diagonal_stripes_data_uri,
-        "radial":    _bg_radial_burst_data_uri,
+        "water": _water_pattern_data_uri,
+        "halftone": _bg_halftone_data_uri,
+        "diagonal": _bg_diagonal_stripes_data_uri,
+        "radial": _bg_radial_burst_data_uri,
         "geometric": _bg_geometric_data_uri,
-        "clean":     _bg_clean_data_uri,
-        "stripes":   _bg_vertical_stripes_data_uri,
-        "dots":      _bg_dots_data_uri,
-        "duotone":   _bg_duotone_data_uri,
-        "grain":     _bg_clean_data_uri,  # rely on the noise overlay only
+        "clean": _bg_clean_data_uri,
+        "stripes": _bg_vertical_stripes_data_uri,
+        "dots": _bg_dots_data_uri,
+        "duotone": _bg_duotone_data_uri,
+        "grain": _bg_clean_data_uri,  # rely on the noise overlay only
     }
     builder = builders.get(style, _water_pattern_data_uri)
     return builder()
@@ -431,8 +440,10 @@ def _typography_overrides_css(pair: str) -> str:
 # touching the layout structure.
 # ---------------------------------------------------------------------------
 
-def _accent_decoration_html(style: str, accent: str, width: int, height: int,
-                             strength: float = 0.5) -> str:
+
+def _accent_decoration_html(
+    style: str, accent: str, width: int, height: int, strength: float = 0.5
+) -> str:
     style = (style or "brackets").lower()
     s = max(0.0, min(1.0, float(strength)))
     if s <= 0.05 or style == "minimal":
@@ -445,10 +456,10 @@ def _accent_decoration_html(style: str, accent: str, width: int, height: int,
         offset = int(min(width, height) * 0.04)
         return (
             f'<div style="position:absolute;left:{offset}px;top:{offset}px;width:{long_side}px;'
-            f'height:{long_side}px;border-top:{weight}px solid {color};border-left:{weight}px solid {color};'
+            f"height:{long_side}px;border-top:{weight}px solid {color};border-left:{weight}px solid {color};"
             f'z-index:11;pointer-events:none;"></div>'
             f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height*0.07)}px;'
-            f'width:{long_side}px;height:{long_side}px;border-bottom:{weight}px solid {color};'
+            f"width:{long_side}px;height:{long_side}px;border-bottom:{weight}px solid {color};"
             f'border-right:{weight}px solid {color};z-index:11;pointer-events:none;"></div>'
         )
     if style == "stripe":
@@ -456,22 +467,22 @@ def _accent_decoration_html(style: str, accent: str, width: int, height: int,
         top = int(height * 0.46)
         return (
             f'<div style="position:absolute;left:0;right:0;top:{top}px;height:{band_h}px;'
-            f'background:linear-gradient(90deg,transparent 0%,{color} 50%,transparent 100%);'
+            f"background:linear-gradient(90deg,transparent 0%,{color} 50%,transparent 100%);"
             f'opacity:0.85;z-index:5;pointer-events:none;"></div>'
         )
     if style == "frame":
         inset = int(min(width, height) * 0.035)
         return (
             f'<div style="position:absolute;left:{inset}px;right:{inset}px;top:{inset}px;'
-            f'bottom:{inset}px;border:{weight}px solid {color};opacity:0.55;'
+            f"bottom:{inset}px;border:{weight}px solid {color};opacity:0.55;"
             f'z-index:11;pointer-events:none;"></div>'
         )
     if style == "ribbon":
         size = int(min(width, height) * 0.20 * (0.6 + s))
         return (
             f'<div style="position:absolute;left:-{size//2}px;top:{int(height*0.20)}px;'
-            f'width:{size*2}px;height:{max(20, int(size*0.18))}px;background:{color};'
-            f'transform:rotate(-32deg);transform-origin:left center;opacity:0.85;'
+            f"width:{size*2}px;height:{max(20, int(size*0.18))}px;background:{color};"
+            f"transform:rotate(-32deg);transform-origin:left center;opacity:0.85;"
             f'z-index:11;pointer-events:none;"></div>'
         )
     if style == "arrow":
@@ -479,23 +490,23 @@ def _accent_decoration_html(style: str, accent: str, width: int, height: int,
         top = int(height * 0.52)
         return (
             f'<div style="position:absolute;right:{int(width*0.06)}px;top:{top}px;'
-            f'width:0;height:0;border-left:{size}px solid {color};'
-            f'border-top:{size}px solid transparent;border-bottom:{size}px solid transparent;'
+            f"width:0;height:0;border-left:{size}px solid {color};"
+            f"border-top:{size}px solid transparent;border-bottom:{size}px solid transparent;"
             f'z-index:11;pointer-events:none;opacity:0.95;"></div>'
         )
     if style == "underline":
         bar_h = max(4, int(height * 0.006 * (0.6 + s)))
         return (
             f'<div style="position:absolute;left:{int(width*0.06)}px;right:{int(width*0.40)}px;'
-            f'top:{int(height*0.20)}px;height:{bar_h}px;background:{color};'
+            f"top:{int(height*0.20)}px;height:{bar_h}px;background:{color};"
             f'z-index:11;pointer-events:none;"></div>'
         )
     if style == "badge":
         size = int(min(width, height) * 0.085 * (0.6 + s))
         return (
             f'<div style="position:absolute;right:{int(width*0.06)}px;top:{int(height*0.32)}px;'
-            f'width:{size}px;height:{size}px;border-radius:50%;background:{color};'
-            f'opacity:0.85;z-index:11;pointer-events:none;'
+            f"width:{size}px;height:{size}px;border-radius:50%;background:{color};"
+            f"opacity:0.85;z-index:11;pointer-events:none;"
             f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
         )
     return ""
@@ -506,6 +517,7 @@ def _accent_decoration_html(style: str, accent: str, width: int, height: int,
 # requests it. The default templates pin .athlete-wrap to right:-40px so
 # all we need to do is inject a CSS override that retargets it.
 # ---------------------------------------------------------------------------
+
 
 def _composition_overrides_css(composition: str) -> str:
     c = (composition or "right").lower()
@@ -542,6 +554,7 @@ def _composition_overrides_css(composition: str) -> str:
 # CSS in case the cutout slipped through.
 # ---------------------------------------------------------------------------
 
+
 def _photo_treatment_css(treatment: str, palette: dict) -> str:
     t = (treatment or "cutout").lower()
     accent = palette.get("accent", "#FFFFFF")
@@ -556,9 +569,7 @@ def _photo_treatment_css(treatment: str, palette: dict) -> str:
             f"sepia(0.30); }}\n.athlete-cutout {{ mix-blend-mode: luminosity; opacity: 0.92; }}"
         )
     if t == "halftone":
-        return (
-            ".athlete-cutout { filter: grayscale(0.45) contrast(1.18) brightness(0.96); }"
-        )
+        return ".athlete-cutout { filter: grayscale(0.45) contrast(1.18) brightness(0.96); }"
     if t == "frame":
         return (
             ".athlete-wrap { border-left: 4px solid " + accent + "; "
@@ -568,6 +579,7 @@ def _photo_treatment_css(treatment: str, palette: dict) -> str:
 
 
 # ----- Athlete cutout pipeline ---------------------------------------------
+
 
 def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default") -> Path:
     """Run the configured background remover on the athlete photo if needed.
@@ -587,8 +599,9 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
     if "cutout" in src.stem.lower() or src.parent.name == "cutouts":
         return src
 
-    uploads_root = os.environ.get("UPLOADS_DIR") \
-        or str(Path(os.environ.get("DATA_DIR", "data")) / "uploads_v4")
+    uploads_root = os.environ.get("UPLOADS_DIR") or str(
+        Path(os.environ.get("DATA_DIR", "data")) / "uploads_v4"
+    )
     cache_dir = Path(uploads_root) / "media_library" / profile_id / "cutouts"
     cache_dir.mkdir(parents=True, exist_ok=True)
     out_path = cache_dir / f"{src.stem}__cutout.png"
@@ -597,6 +610,7 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
 
     try:
         from mediahub.media_ai.providers import get_bg_remover  # type: ignore
+
         remover = get_bg_remover()
         if remover is None:
             log.warning("cutout: no bg remover provider available for %s", src.name)
@@ -604,11 +618,9 @@ def _maybe_cut_out_athlete(src_path: str | Path, *, profile_id: str = "default")
         ok = remover.remove(src, out_path)
         if ok and out_path.exists():
             return out_path
-        log.warning("cutout: provider returned ok=%s for %s (out=%s)",
-                    ok, src.name, out_path)
+        log.warning("cutout: provider returned ok=%s for %s (out=%s)", ok, src.name, out_path)
     except Exception as exc:
-        log.warning("cutout: provider raised for %s: %s",
-                    src.name, exc)
+        log.warning("cutout: provider raised for %s: %s", src.name, exc)
     return src
 
 
@@ -630,12 +642,17 @@ def _knockout_uniform_background(img):
     preserved), and reverts entirely if the fill would erase almost the whole
     image (i.e. the logo itself was that colour).
     """
-    from PIL import Image, ImageDraw
+    from PIL import ImageDraw
+
     w, h = img.size
     if w < 4 or h < 4:
         return img
-    corners = [img.getpixel((0, 0)), img.getpixel((w - 1, 0)),
-               img.getpixel((0, h - 1)), img.getpixel((w - 1, h - 1))]
+    corners = [
+        img.getpixel((0, 0)),
+        img.getpixel((w - 1, 0)),
+        img.getpixel((0, h - 1)),
+        img.getpixel((w - 1, h - 1)),
+    ]
     if all(len(c) == 4 and c[3] < 32 for c in corners):
         return img  # already transparent border — nothing to do
 
@@ -648,7 +665,7 @@ def _knockout_uniform_background(img):
 
     rgb = img.convert("RGB")
     SENT = (1, 254, 2)  # improbable sentinel fill colour
-    for (x, y) in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+    for x, y in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
         try:
             ImageDraw.floodfill(rgb, (x, y), SENT, thresh=36)
         except Exception:
@@ -680,10 +697,16 @@ def _logo_dominant_hex(img) -> Optional[str]:
         r, g, b, a = px
         if a < 64:
             continue
-        n2 += 1; rs2 += r; gs2 += g; bs2 += b
+        n2 += 1
+        rs2 += r
+        gs2 += g
+        bs2 += b
         if max(r, g, b) - min(r, g, b) < 24:
             continue  # near-neutral — skip when looking for the brand hue
-        n += 1; rs += r; gs += g; bs += b
+        n += 1
+        rs += r
+        gs += g
+        bs += b
     if n >= max(20, n2 * 0.02):
         return _rgb_to_hex((rs / n, gs / n, bs / n))
     if n2:
@@ -713,6 +736,7 @@ def _prepare_logo_data_uri(logo_path: str | Path) -> tuple[str, Optional[str]]:
 
     import io
     from PIL import Image
+
     img = Image.open(p).convert("RGBA")
     if max(img.size) > 400:
         img.thumbnail((400, 400), Image.LANCZOS)
@@ -750,6 +774,7 @@ def _decide_logo_mark_mod(dominant_hex: Optional[str], surface_hex: str) -> str:
         return ""
     try:
         from mediahub.theming.logo_chip import decide_logo_chip
+
         if decide_logo_chip(dominant_hex, surface_hex).mode == "bare":
             return " logo-mark--bare"
         # Chip needed against the surface — choose its colour: white unless the
@@ -762,7 +787,9 @@ def _decide_logo_mark_mod(dominant_hex: Optional[str], surface_hex: str) -> str:
 
 
 def _build_logo_treatment(
-    brand_kit, logo_path: Optional[str | Path], surface_hex: str = "",
+    brand_kit,
+    logo_path: Optional[str | Path],
+    surface_hex: str = "",
 ) -> tuple[str, str]:
     """Return ``(inner_html, logo_mark_modifier)`` for ``.brand-corner .logo-mark``."""
     if logo_path:
@@ -779,7 +806,9 @@ def _build_logo_treatment(
     if svg and isinstance(svg, str) and svg.lstrip().startswith("<"):
         return svg, ""
     # Text-mark fallback: club initials
-    name = getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or "CLUB"
+    name = (
+        getattr(brand_kit, "short_name", None) or getattr(brand_kit, "display_name", "") or "CLUB"
+    )
     parts = [w for w in str(name).replace("Swimming Club", "").split() if w]
     initials = "".join(p[0].upper() for p in parts[:3]) or "CL"
     return initials, ""
@@ -803,7 +832,7 @@ def _build_athlete_block(athlete_data_uri: Optional[str], full_name: str) -> str
         )
     # No photo: render nothing inside the athlete-wrap. The layout's
     # text-led-fill block (added separately) takes over the empty region.
-    return ''
+    return ""
 
 
 def _build_text_led_fill_block(
@@ -826,45 +855,44 @@ def _build_text_led_fill_block(
     relative to the canvas so it works for portrait, square, and story formats.
     """
     if has_photo:
-        return ''
-    initials = ''.join(p[0] for p in (full_name or '').split()[:2]).upper()
+        return ""
+    initials = "".join(p[0] for p in (full_name or "").split()[:2]).upper()
     if not initials:
-        initials = (surname or '').strip()[:2].upper() or '\u2014'
-    mega_letter = (surname or full_name or '').upper()
+        initials = (surname or "").strip()[:2].upper() or "\u2014"
+    mega_letter = (surname or full_name or "").upper()
     if not mega_letter:
         mega_letter = initials
 
     # Stat strip cells
-    event = (layers.get('event_name') or '').strip()
-    course = ''
-    if 'LC' in event.upper():
-        course = 'Long Course'
-    elif 'SC' in event.upper():
-        course = 'Short Course'
+    event = (layers.get("event_name") or "").strip()
+    course = ""
+    if "LC" in event.upper():
+        course = "Long Course"
+    elif "SC" in event.upper():
+        course = "Short Course"
     elif event:
-        course = 'Race'
-    meet = (layers.get('meet_name') or '').strip()
-    result = (layers.get('result_value') or '').strip()
-    place = (layers.get('place') or '').strip()
+        course = "Race"
+    meet = (layers.get("meet_name") or "").strip()
+    result = (layers.get("result_value") or "").strip()
+    place = (layers.get("place") or "").strip()
 
     cells = []
     if event:
-        cells.append(('EVENT', event))
+        cells.append(("EVENT", event))
     if result:
-        cells.append(('TIME', result))
+        cells.append(("TIME", result))
     if place:
         place_label = (
-            f"{place} place" if not place.lower().endswith(('st', 'nd', 'rd', 'th'))
-            else place
+            f"{place} place" if not place.lower().endswith(("st", "nd", "rd", "th")) else place
         )
-        cells.append(('FINISH', place_label))
+        cells.append(("FINISH", place_label))
     if course and len(cells) < 3:
-        cells.append(('COURSE', course))
+        cells.append(("COURSE", course))
     if meet and len(cells) < 3:
-        cells.append(('MEET', meet[:32]))
+        cells.append(("MEET", meet[:32]))
     cells = cells[:3]
     if not cells:
-        cells = [('NEW PB', layers.get('achievement_label') or 'PB')]
+        cells = [("NEW PB", layers.get("achievement_label") or "PB")]
 
     # Position the mega-initial roughly where the photo would have been.
     # Use a smaller, more architectural sizing for `compact` mode (so it lives
@@ -884,15 +912,15 @@ def _build_text_led_fill_block(
         glow_top = int(height * 0.20)
         glow_right = int(-width * 0.16)
 
-    strip_class = 'txl-stat-strip compact-tr' if compact else 'txl-stat-strip'
+    strip_class = "txl-stat-strip compact-tr" if compact else "txl-stat-strip"
     # In compact mode, only show 2 cells (event/time) so the column is short.
     cells_for_render = cells[:2] if compact else cells
-    cells_html = ''.join(
+    cells_html = "".join(
         f'<div class="cell"><div class="lab">{html_escape(lab)}</div>'
         f'<div class="val">{html_escape(val)}</div></div>'
         for lab, val in cells_for_render
     )
-    strip_html = '' if skip_stat_strip else f'<div class="{strip_class}">{cells_html}</div>'
+    strip_html = "" if skip_stat_strip else f'<div class="{strip_class}">{cells_html}</div>'
 
     return (
         f'<div class="txl-photo-glow" '
@@ -901,9 +929,9 @@ def _build_text_led_fill_block(
         f'<div class="txl-accent-bar dot-grid"></div>'
         f'<div class="txl-mega-initial" '
         f'style="top:{mega_top}px;right:{mega_right}px;font-size:{mega_size}px;">'
-        f'{html_escape(mega_letter[:8])}'
-        f'</div>'
-        f'{strip_html}'
+        f"{html_escape(mega_letter[:8])}"
+        f"</div>"
+        f"{strip_html}"
     )
 
 
@@ -925,23 +953,19 @@ def _build_sponsor_block(sponsor_name: str | None) -> str:
         '<div class="sponsor-strip">'
         '<span class="label">Performance supported by</span>'
         f'<span class="name">{html_escape(sponsor_name)}</span>'
-        '</div>'
+        "</div>"
     )
 
 
 def html_escape(s: Any) -> str:
     s = "" if s is None else str(s)
-    return (
-        s.replace("&", "&amp;")
-         .replace("<", "&lt;")
-         .replace(">", "&gt;")
-         .replace('"', "&quot;")
-    )
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 # ---------------------------------------------------------------------------
 # Layout-specific filler functions
 # ---------------------------------------------------------------------------
+
 
 def _surname_for_display(surname: str, max_chars: int = 8) -> str:
     s = (surname or "").upper()
@@ -950,12 +974,18 @@ def _surname_for_display(surname: str, max_chars: int = 8) -> str:
 
 def _scale_for_format(width: int, height: int) -> dict[str, float]:
     """Return per-format multipliers used to pick font sizes."""
-    if width == height:           # square
+    if width == height:  # square
         return {"surname": 0.32, "first": 0.075, "event": 0.026, "result": 0.055, "ribbon": 0.034}
-    if height > width:            # portrait / story
+    if height > width:  # portrait / story
         ratio = height / width
-        if ratio >= 1.7:          # 9:16 story
-            return {"surname": 0.28, "first": 0.06, "event": 0.022, "result": 0.045, "ribbon": 0.028}
+        if ratio >= 1.7:  # 9:16 story
+            return {
+                "surname": 0.28,
+                "first": 0.06,
+                "event": 0.022,
+                "result": 0.045,
+                "ribbon": 0.028,
+            }
         return {"surname": 0.34, "first": 0.07, "event": 0.024, "result": 0.052, "ribbon": 0.032}
     return {"surname": 0.30, "first": 0.07, "event": 0.024, "result": 0.050, "ribbon": 0.032}
 
@@ -989,21 +1019,27 @@ def _detect_medal_tier(brief) -> Optional[str]:
 # Medal palette overrides — applied on top of the club's brand colours so
 # tier is unmistakable at a glance while the brand still dominates.
 _MEDAL_ACCENTS = {
-    "gold":   {"accent": "#FFD24A", "accent_deep": "#A77A07", "badge": "GOLD"},
+    "gold": {"accent": "#FFD24A", "accent_deep": "#A77A07", "badge": "GOLD"},
     "silver": {"accent": "#E8EAED", "accent_deep": "#6F757B", "badge": "SILVER"},
     "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
-    "pb":     {"accent": "#22D3EE", "accent_deep": "#0E7C8F", "badge": "NEW PB"},
+    "pb": {"accent": "#22D3EE", "accent_deep": "#0E7C8F", "badge": "NEW PB"},
 }
 
 
-def _common_replacements(brief, width: int, height: int, brand_kit, *,
-                         athlete_data_uri: str | None,
-                         logo_block: str,
-                         result_chip: str,
-                         sponsor_block: str,
-                         logo_mark_mod: str = "",
-                         bg_photo_uri: str = "",
-                         theme_json: Optional[dict] = None) -> dict[str, str]:
+def _common_replacements(
+    brief,
+    width: int,
+    height: int,
+    brand_kit,
+    *,
+    athlete_data_uri: str | None,
+    logo_block: str,
+    result_chip: str,
+    sponsor_block: str,
+    logo_mark_mod: str = "",
+    bg_photo_uri: str = "",
+    theme_json: Optional[dict] = None,
+) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
     # Phase 1.6 Stage G — when an on-disk theme JSON is reachable
@@ -1018,12 +1054,14 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         if pid:
             try:
                 from mediahub.theming.theme_store import read_theme
+
                 theme_json = read_theme(pid)
             except Exception:
                 theme_json = None
     if theme_json:
         try:
             from mediahub.theming.theme_store import palette_for_static
+
             p = palette_for_static(theme_json)
             # The brief palette already carries the club's CONFIRMED brand
             # colours (primary/secondary/accent from the BrandKit). Those
@@ -1078,7 +1116,7 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
     try:
         text_led_css = _read_text(_TEXT_LED_FILL_CSS_PATH)
     except Exception:
-        text_led_css = ''
+        text_led_css = ""
     # Premium @font-face declarations from _shared.css (V8.1 Issue 7 §1).
     # Feature-flagged via MEDIAHUB_RENDER_PREMIUM_FONTS; falls back to the
     # legacy @import css2 URL otherwise.
@@ -1086,23 +1124,23 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         try:
             shared_css = _read_text(_SHARED_CSS_PATH)
         except Exception:
-            shared_css = ''
+            shared_css = ""
         # Also keep the @import as a belt-and-braces fallback if the
         # gstatic .woff2 URLs above shift; @font-face wins in cascade order.
         fonts_import = (
-            '@import url(\'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton'
-            '&family=Bowlby+One&family=Inter:wght@400;500;600;700;800'
-            '&family=Space+Grotesk:wght@500;600;700'
-            '&family=JetBrains+Mono:wght@500;700&display=swap\');\n'
+            "@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton"
+            "&family=Bowlby+One&family=Inter:wght@400;500;600;700;800"
+            "&family=Space+Grotesk:wght@500;600;700"
+            "&family=JetBrains+Mono:wght@500;700&display=swap');\n"
         )
-        base_css = fonts_import + shared_css + '\n' + base_css + '\n' + text_led_css
+        base_css = fonts_import + shared_css + "\n" + base_css + "\n" + text_led_css
     else:
         fonts_import = (
-            '@import url(\'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton'
-            '&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700'
-            '&family=JetBrains+Mono:wght@500;700&display=swap\');\n'
+            "@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton"
+            "&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700"
+            "&family=JetBrains+Mono:wght@500;700&display=swap');\n"
         )
-        base_css = fonts_import + base_css + '\n' + text_led_css
+        base_css = fonts_import + base_css + "\n" + text_led_css
 
     layers = brief.text_layers or {}
     full_name = layers.get("athlete_full_name") or ""
@@ -1127,16 +1165,20 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
     ai_bg_uri = None
     try:
         import os as _os
+
         if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
             from mediahub.visual.ai_background import (
                 is_available as _ai_bg_ok,
                 background_data_uri_for,
             )
+
             if _ai_bg_ok():
                 # Map width/height back to a format name so the cache key
                 # is stable across cards of the same shape.
-                fmt_for_bg = "feed_square" if width == height else (
-                    "story" if height > width * 1.5 else "feed_portrait"
+                fmt_for_bg = (
+                    "feed_square"
+                    if width == height
+                    else ("story" if height > width * 1.5 else "feed_portrait")
                 )
                 ai_bg_uri = background_data_uri_for(brief, format_name=fmt_for_bg)
     except Exception:
@@ -1171,16 +1213,25 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
     # Inline the variation overrides at the end of the base CSS so they
     # win the cascade (they all use !important too).
     if variation_css_blocks:
-        base_css = base_css + "\n\n/* --- variation overrides --- */\n" + "\n".join(variation_css_blocks)
+        base_css = (
+            base_css + "\n\n/* --- variation overrides --- */\n" + "\n".join(variation_css_blocks)
+        )
 
     accent_overlay_html = _accent_decoration_html(
-        accent_style, accent, width, height, decoration_strength,
+        accent_style,
+        accent,
+        width,
+        height,
+        decoration_strength,
     )
 
     return {
-        "WIDTH": str(width), "HEIGHT": str(height),
-        "PRIMARY": primary, "PRIMARY_DEEP": primary_deep,
-        "SECONDARY": secondary, "ACCENT": accent,
+        "WIDTH": str(width),
+        "HEIGHT": str(height),
+        "PRIMARY": primary,
+        "PRIMARY_DEEP": primary_deep,
+        "SECONDARY": secondary,
+        "ACCENT": accent,
         "BASE_CSS": base_css,
         "WATER_PATTERN": _background_pattern_for(bg_style),
         "ACCENT_DECORATION": accent_overlay_html,
@@ -1211,7 +1262,9 @@ def _common_replacements(brief, width: int, height: int, brand_kit, *,
         "BG_PHOTO_BLOCK": (
             f'<div class="bg-photo" style="background-image:url(\'{bg_photo_uri}\')"></div>'
             '<div class="bg-photo-scrim"></div>'
-        ) if bg_photo_uri else "",
+        )
+        if bg_photo_uri
+        else "",
         "RESULT_CHIP_BLOCK": result_chip,
         "SPONSOR_BLOCK": sponsor_block,
         "MEDAL_BADGE_BLOCK": medal_badge_html,
@@ -1229,22 +1282,28 @@ def _fill_individual_hero(brief, width: int, height: int, repl: dict[str, str]) 
         repl["TEXT_LED_FILL_BLOCK"] = _build_text_led_fill_block(
             full_name=layers.get("athlete_full_name") or "",
             surname=layers.get("athlete_surname") or "",
-            width=width, height=height, layers=layers,
-            palette=brief.palette or {}, has_photo=False, compact=True,
+            width=width,
+            height=height,
+            layers=layers,
+            palette=brief.palette or {},
+            has_photo=False,
+            compact=True,
         )
-    repl.update({
-        "SURNAME_BOTTOM": str(int(height * 0.30)),
-        "SURNAME_LEFT": str(-int(width * 0.04)),
-        "SURNAME_RIGHT": "auto",
-        "SURNAME_FONT_SIZE": str(int(height * s["surname"])),
-        "ATHLETE_W": str(int(width * 0.82)),
-        "ATHLETE_H": str(int(height * 0.78)),
-        "FG_TEXT_BOTTOM": str(int(height * 0.16)),
-        "FIRSTNAME_FONT_SIZE": str(int(height * s["first"])),
-        "EVENT_FONT_SIZE": str(int(height * s["event"])),
-        "RIBBON_FONT_SIZE": str(int(height * s["ribbon"])),
-        "RESULT_FONT_SIZE": str(int(height * s["result"])),
-    })
+    repl.update(
+        {
+            "SURNAME_BOTTOM": str(int(height * 0.30)),
+            "SURNAME_LEFT": str(-int(width * 0.04)),
+            "SURNAME_RIGHT": "auto",
+            "SURNAME_FONT_SIZE": str(int(height * s["surname"])),
+            "ATHLETE_W": str(int(width * 0.82)),
+            "ATHLETE_H": str(int(height * 0.78)),
+            "FG_TEXT_BOTTOM": str(int(height * 0.16)),
+            "FIRSTNAME_FONT_SIZE": str(int(height * s["first"])),
+            "EVENT_FONT_SIZE": str(int(height * s["event"])),
+            "RIBBON_FONT_SIZE": str(int(height * s["ribbon"])),
+            "RESULT_FONT_SIZE": str(int(height * s["result"])),
+        }
+    )
     return repl
 
 
@@ -1262,7 +1321,7 @@ def _fill_medal_card(brief, width: int, height: int, repl: dict[str, str]) -> di
         medal_label = "GOLD"
 
     medals = {
-        "GOLD":   ("#FFE07A", "#9A6E0E", "1ST"),
+        "GOLD": ("#FFE07A", "#9A6E0E", "1ST"),
         "SILVER": ("#F2F2F2", "#6E6E6E", "2ND"),
         "BRONZE": ("#F0BC8A", "#7A4314", "3RD"),
     }
@@ -1270,23 +1329,25 @@ def _fill_medal_card(brief, width: int, height: int, repl: dict[str, str]) -> di
 
     s = _scale_for_format(width, height)
     repl = dict(repl)
-    repl.update({
-        "SURNAME_BOTTOM": str(int(height * 0.32)),
-        "SURNAME_LEFT": str(-int(width * 0.03)),
-        "SURNAME_FONT_SIZE": str(int(height * s["surname"] * 0.85)),
-        "ATHLETE_W": str(int(width * 0.55)),
-        "ATHLETE_H": str(int(height * 0.78)),
-        "FG_TEXT_BOTTOM": str(int(height * 0.16)),
-        "FIRSTNAME_FONT_SIZE": str(int(height * s["first"])),
-        "EVENT_FONT_SIZE": str(int(height * s["event"])),
-        "RIBBON_FONT_SIZE": str(int(height * s["ribbon"])),
-        "MEDAL_LIGHT": light,
-        "MEDAL_DARK": dark,
-        "MEDAL_TEXT": medal_label,
-        "MEDAL_PLACE_LABEL": place_label,
-        "MEDAL_SIZE": str(int(min(width, height) * 0.40)),
-        "MEDAL_FONT_SIZE": str(int(min(width, height) * 0.10)),
-    })
+    repl.update(
+        {
+            "SURNAME_BOTTOM": str(int(height * 0.32)),
+            "SURNAME_LEFT": str(-int(width * 0.03)),
+            "SURNAME_FONT_SIZE": str(int(height * s["surname"] * 0.85)),
+            "ATHLETE_W": str(int(width * 0.55)),
+            "ATHLETE_H": str(int(height * 0.78)),
+            "FG_TEXT_BOTTOM": str(int(height * 0.16)),
+            "FIRSTNAME_FONT_SIZE": str(int(height * s["first"])),
+            "EVENT_FONT_SIZE": str(int(height * s["event"])),
+            "RIBBON_FONT_SIZE": str(int(height * s["ribbon"])),
+            "MEDAL_LIGHT": light,
+            "MEDAL_DARK": dark,
+            "MEDAL_TEXT": medal_label,
+            "MEDAL_PLACE_LABEL": place_label,
+            "MEDAL_SIZE": str(int(min(width, height) * 0.40)),
+            "MEDAL_FONT_SIZE": str(int(min(width, height) * 0.10)),
+        }
+    )
     return repl
 
 
@@ -1321,33 +1382,36 @@ def _fill_weekend_numbers(brief, width: int, height: int, repl: dict[str, str]) 
         defaults = [("1", "MEET"), ("✓", "COMPLETE"), ("24", "HOURS"), ("★", "HIGHLIGHT")]
         i = 0
         while len(stat_pairs) < 4 and i < len(defaults):
-            stat_pairs.append(defaults[i]); i += 1
+            stat_pairs.append(defaults[i])
+            i += 1
     tiles_html = ""
     for value, label in stat_pairs[:6]:
         tiles_html += (
             '<div class="stat-tile">'
             f'<div class="num">{html_escape(value)}</div>'
             f'<div class="label">{html_escape(label)}</div>'
-            '</div>\n'
+            "</div>\n"
         )
 
     headline_line1 = (layers.get("headline_line1") or "WEEKEND").upper()
     headline_line2 = (layers.get("headline_line2") or "IN NUMBERS").upper()
 
     repl = dict(repl)
-    repl.update({
-        "STAT_TILES": tiles_html,
-        "SUBHEAD_TEXT": html_escape(layers.get("meet_name") or ""),
-        # Subhead sits ABOVE the headline; leave room for letter-spacing.
-        "SUBHEAD_TOP": str(int(height * 0.035)),
-        "HEADLINE_TOP": str(int(height * 0.075)),
-        "GRID_TOP": str(int(height * 0.32)),
-        "GRID_BOTTOM": str(int(height * 0.16)),
-        "NUM_FONT_SIZE": str(int(min(width, height) * 0.13)),
-        "HEADLINE_FONT_SIZE": str(int(height * 0.085)),
-        "HEADLINE_LINE1": html_escape(headline_line1),
-        "HEADLINE_LINE2": html_escape(headline_line2),
-    })
+    repl.update(
+        {
+            "STAT_TILES": tiles_html,
+            "SUBHEAD_TEXT": html_escape(layers.get("meet_name") or ""),
+            # Subhead sits ABOVE the headline; leave room for letter-spacing.
+            "SUBHEAD_TOP": str(int(height * 0.035)),
+            "HEADLINE_TOP": str(int(height * 0.075)),
+            "GRID_TOP": str(int(height * 0.32)),
+            "GRID_BOTTOM": str(int(height * 0.16)),
+            "NUM_FONT_SIZE": str(int(min(width, height) * 0.13)),
+            "HEADLINE_FONT_SIZE": str(int(height * 0.085)),
+            "HEADLINE_LINE1": html_escape(headline_line1),
+            "HEADLINE_LINE2": html_escape(headline_line2),
+        }
+    )
     return repl
 
 
@@ -1369,13 +1433,13 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         # Position centered horizontally, in the middle vertical band
         custom_block = (
             f'<div class="txl-photo-glow" style="top:{int(height*0.40)}px;'
-            f'left:50%;transform:translateX(-50%);width:{int(min(width,height)*0.55)}px;'
+            f"left:50%;transform:translateX(-50%);width:{int(min(width,height)*0.55)}px;"
             f'height:{int(min(width,height)*0.55)}px;"></div>'
             f'<div class="txl-accent-bar diagonal"></div>'
             f'<div class="txl-mega-initial" style="top:{int(height*0.36)}px;'
-            f'left:50%;transform:translateX(-50%);right:auto;font-size:{mega_size}px;'
+            f"left:50%;transform:translateX(-50%);right:auto;font-size:{mega_size}px;"
             f'-webkit-text-stroke:4px rgba(255,255,255,0.16);">'
-            f'{html_escape(mega_letter)}</div>'
+            f"{html_escape(mega_letter)}</div>"
         )
         repl["TEXT_LED_FILL_BLOCK"] = custom_block
 
@@ -1412,7 +1476,7 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
             f'<div class="ev">{html_escape(ev)}</div>'
             f'<div class="rs">{html_escape(res)}</div>'
             f'<div class="lab">{html_escape(note)}</div>'
-            '</div>'
+            "</div>"
         )
 
     # Career-best card — the headline metric for this swimmer at this meet
@@ -1432,9 +1496,9 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         )
         if cb_delta:
             career_best_html += f'<div class="delta">{html_escape(cb_delta)}</div>'
-        career_best_html += '</div>'
+        career_best_html += "</div>"
     else:
-        career_best_html = ''
+        career_best_html = ""
 
     # Bottom support grid — always shown when no photo (to fill the empty
     # left half) and when at least one secondary fact exists. Renders as a
@@ -1446,44 +1510,54 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         support_cells.append(("Venue", layers["venue_name"][:24]))
     if layers.get("event_name"):
         ev_text = layers["event_name"]
-        course = "Long Course" if "LC" in ev_text.upper() else ("Short Course" if "SC" in ev_text.upper() else "Race")
+        course = (
+            "Long Course"
+            if "LC" in ev_text.upper()
+            else ("Short Course" if "SC" in ev_text.upper() else "Race")
+        )
         support_cells.append(("Course", course))
     if layers.get("club_full"):
         support_cells.append(("Club", layers["club_full"][:24]))
     support_cells = support_cells[:4]
-    support_grid_html = ''
+    support_grid_html = ""
     if support_cells and not has_photo:
-        cells_html = ''.join(
+        cells_html = "".join(
             f'<div class="cell"><div class="lab">{html_escape(lab)}</div>'
             f'<div class="val">{html_escape(val)}</div></div>'
             for lab, val in support_cells
         )
         # Full-width row — 4 equal cells across the canvas bottom
-        support_grid_html = (
-            f'<div class="support-grid full-row">{cells_html}</div>'
-        )
+        support_grid_html = f'<div class="support-grid full-row">{cells_html}</div>'
 
     side_width = int(width * (0.46 if has_photo else 0.50))
     name_size = int(height * (0.060 if not has_photo else 0.075))
 
     repl = dict(repl)
-    repl.update({
-        "STAT_ROWS": rows_html,
-        "SIDE_WIDTH": str(side_width),
-        "SUPPORT_WIDTH": str(int(width * 0.46)),
-        "ATHLETE_W": str(int(width * 0.46)),
-        "ATHLETE_H": str(int(height * 0.82)),
-        "NAME_FONT_SIZE": str(name_size),
-        "SPOTLIGHT_TAG": "ATHLETE SPOTLIGHT",
-        "CAREER_BEST_BLOCK": career_best_html,
-        "SUPPORT_GRID_BLOCK": support_grid_html,
-    })
+    repl.update(
+        {
+            "STAT_ROWS": rows_html,
+            "SIDE_WIDTH": str(side_width),
+            "SUPPORT_WIDTH": str(int(width * 0.46)),
+            "ATHLETE_W": str(int(width * 0.46)),
+            "ATHLETE_H": str(int(height * 0.82)),
+            "NAME_FONT_SIZE": str(name_size),
+            "SPOTLIGHT_TAG": "ATHLETE SPOTLIGHT",
+            "CAREER_BEST_BLOCK": career_best_html,
+            "SUPPORT_GRID_BLOCK": support_grid_html,
+        }
+    )
     return repl
 
 
-def _fill_meet_preview(brief, width: int, height: int, repl: dict[str, str], *,
-                        venue_data_uri: str | None,
-                        venue_attribution: str = "") -> dict[str, str]:
+def _fill_meet_preview(
+    brief,
+    width: int,
+    height: int,
+    repl: dict[str, str],
+    *,
+    venue_data_uri: str | None,
+    venue_attribution: str = "",
+) -> dict[str, str]:
     layers = brief.text_layers or {}
     repl = dict(repl)
 
@@ -1503,22 +1577,26 @@ def _fill_meet_preview(brief, width: int, height: int, repl: dict[str, str], *,
     if not cells:
         cells = [("Status", "Coming up"), ("Type", "Race meet"), ("Format", "Multi-event")]
     cells = cells[:3]
-    cells_html = ''.join(
+    cells_html = "".join(
         f'<div class="cell"><div class="lab">{html_escape(lab)}</div>'
         f'<div class="val">{html_escape(val)}</div></div>'
         for lab, val in cells
     )
     stripe_html = f'<div class="preview-stripe">{cells_html}</div>'
 
-    repl.update({
-        "VENUE_BG_URL": f"url('{venue_data_uri}')" if venue_data_uri else f"linear-gradient(180deg, {repl['PRIMARY']}, {repl['PRIMARY_DEEP']})",
-        "VENUE_ATTRIBUTION": html_escape(venue_attribution),
-        "VENUE_NAME": html_escape(layers.get("venue_name") or ""),
-        "DATES": html_escape(layers.get("dates") or "TBA"),
-        "HEADLINE": html_escape(layers.get("meet_name") or "UPCOMING MEET"),
-        "HEADLINE_FONT_SIZE": str(int(height * 0.075)),
-        "PREVIEW_STRIPE_BLOCK": stripe_html,
-    })
+    repl.update(
+        {
+            "VENUE_BG_URL": f"url('{venue_data_uri}')"
+            if venue_data_uri
+            else f"linear-gradient(180deg, {repl['PRIMARY']}, {repl['PRIMARY_DEEP']})",
+            "VENUE_ATTRIBUTION": html_escape(venue_attribution),
+            "VENUE_NAME": html_escape(layers.get("venue_name") or ""),
+            "DATES": html_escape(layers.get("dates") or "TBA"),
+            "HEADLINE": html_escape(layers.get("meet_name") or "UPCOMING MEET"),
+            "HEADLINE_FONT_SIZE": str(int(height * 0.075)),
+            "PREVIEW_STRIPE_BLOCK": stripe_html,
+        }
+    )
     return repl
 
 
@@ -1540,8 +1618,7 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
     bullets_html = ""
     for i, b in enumerate(bullets[:4], 1):
         bullets_html += (
-            f'<div class="row"><span class="num">0{i}</span>'
-            f'<span>{html_escape(b)}</span></div>'
+            f'<div class="row"><span class="num">0{i}</span>' f"<span>{html_escape(b)}</span></div>"
         )
     headline_line1 = (layers.get("headline_line1") or "WEEKEND").upper()
     headline_line2 = (layers.get("headline_line2") or "RECAP").upper()
@@ -1568,9 +1645,10 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
         defaults = [(str(len(bullets[:6])), "HIGHLIGHTS"), ("3", "VOICES"), ("WEEK", "WINDOW")]
         i = 0
         while len(stat_cells) < 3 and i < len(defaults):
-            stat_cells.append(defaults[i]); i += 1
+            stat_cells.append(defaults[i])
+            i += 1
     stat_cells = stat_cells[:3]
-    stats_inner = ''.join(
+    stats_inner = "".join(
         f'<div class="cell"><div class="num">{html_escape(v)}</div>'
         f'<div class="lab">{html_escape(l)}</div></div>'
         for v, l in stat_cells
@@ -1578,14 +1656,16 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
     recap_stats_block = f'<div class="recap-stats">{stats_inner}</div>'
 
     repl = dict(repl)
-    repl.update({
-        "BULLETS_HTML": bullets_html,
-        "KICKER": html_escape(layers.get("meet_name") or ""),
-        "HEADLINE_LINE1": html_escape(headline_line1),
-        "HEADLINE_LINE2": html_escape(headline_line2),
-        "HEADLINE_FONT_SIZE": str(int(height * 0.115)),
-        "RECAP_STATS_BLOCK": recap_stats_block,
-    })
+    repl.update(
+        {
+            "BULLETS_HTML": bullets_html,
+            "KICKER": html_escape(layers.get("meet_name") or ""),
+            "HEADLINE_LINE1": html_escape(headline_line1),
+            "HEADLINE_LINE2": html_escape(headline_line2),
+            "HEADLINE_FONT_SIZE": str(int(height * 0.115)),
+            "RECAP_STATS_BLOCK": recap_stats_block,
+        }
+    )
     return repl
 
 
@@ -1596,21 +1676,25 @@ def _fill_story_card(brief, width: int, height: int, repl: dict[str, str]) -> di
     headline = (meet[:36] + "…") if len(meet) > 36 else meet
     if not headline:
         headline = "FEATURED RESULT"
-    repl.update({
-        "ATHLETE_W": str(int(width * 0.78)),
-        "ATHLETE_H": str(int(height * 0.42)),
-        "FIRSTNAME_FONT_SIZE": str(int(height * 0.080)),
-        "EVENT_FONT_SIZE": str(int(height * 0.030)),
-        "RIBBON_FONT_SIZE": str(int(height * 0.028)),
-        "RESULT_FONT_SIZE": str(int(height * 0.060)),
-        "SURNAME_FONT_SIZE": str(int(height * 0.30)),
-        "RESULT_VALUE_RAW": html_escape(layers.get("result_value") or "—"),
-        "STORY_HEADLINE": html_escape(headline.upper()),
-    })
+    repl.update(
+        {
+            "ATHLETE_W": str(int(width * 0.78)),
+            "ATHLETE_H": str(int(height * 0.42)),
+            "FIRSTNAME_FONT_SIZE": str(int(height * 0.080)),
+            "EVENT_FONT_SIZE": str(int(height * 0.030)),
+            "RIBBON_FONT_SIZE": str(int(height * 0.028)),
+            "RESULT_FONT_SIZE": str(int(height * 0.060)),
+            "SURNAME_FONT_SIZE": str(int(height * 0.30)),
+            "RESULT_VALUE_RAW": html_escape(layers.get("result_value") or "—"),
+            "STORY_HEADLINE": html_escape(headline.upper()),
+        }
+    )
     return repl
 
 
-def _fill_sponsor_branded(brief, width: int, height: int, repl: dict[str, str], sponsor_name: str = "") -> dict[str, str]:
+def _fill_sponsor_branded(
+    brief, width: int, height: int, repl: dict[str, str], sponsor_name: str = ""
+) -> dict[str, str]:
     repl = _fill_individual_hero(brief, width, height, repl)
     repl["SPONSOR_NAME"] = html_escape(sponsor_name or "")
     return repl
@@ -1635,11 +1719,15 @@ def _fill_reel_cover(brief, width: int, height: int, repl: dict[str, str]) -> di
         mega = surname or full_name or first
         repl["TEXT_LED_COVER_BLOCK"] = (
             f'<div class="cover-mega">{html_escape(mega)}</div>'
-            + (f'<div class="cover-sub">{html_escape(sub_text)}</div>' if sub_text else '')
-            + (f'<div class="cover-name">{html_escape(full_name)}</div>' if full_name and full_name != mega else '')
+            + (f'<div class="cover-sub">{html_escape(sub_text)}</div>' if sub_text else "")
+            + (
+                f'<div class="cover-name">{html_escape(full_name)}</div>'
+                if full_name and full_name != mega
+                else ""
+            )
         )
     else:
-        repl["TEXT_LED_COVER_BLOCK"] = ''
+        repl["TEXT_LED_COVER_BLOCK"] = ""
     return repl
 
 
@@ -1656,18 +1744,20 @@ def _fill_big_number_hero(brief, width: int, height: int, repl: dict[str, str]) 
     # a 6-char time like "2:28.21" — characters render narrower than they tax.
     char_count = max(1, len(result_value))
     # Cap so very long results don't overflow horizontally.
-    by_width  = (width * 0.85) / max(2, char_count) * 1.50
+    by_width = (width * 0.85) / max(2, char_count) * 1.50
     by_height = height * 0.30
     hero_size = int(min(by_width, by_height))
 
-    repl.update({
-        "HERO_FONT_SIZE": str(hero_size),
-        "EVENT_TOP": str(int(height * 0.22)),
-        "EVENT_FONT_SIZE": str(int(min(width, height) * 0.028)),
-        "ATHLETE_BOTTOM": str(int(height * 0.20)),
-        "NAME_FONT_SIZE": str(int(min(width, height) * 0.068)),
-        "RESULT_VALUE": html_escape(result_value),
-    })
+    repl.update(
+        {
+            "HERO_FONT_SIZE": str(hero_size),
+            "EVENT_TOP": str(int(height * 0.22)),
+            "EVENT_FONT_SIZE": str(int(min(width, height) * 0.028)),
+            "ATHLETE_BOTTOM": str(int(height * 0.20)),
+            "NAME_FONT_SIZE": str(int(min(width, height) * 0.068)),
+            "RESULT_VALUE": html_escape(result_value),
+        }
+    )
     return repl
 
 
@@ -1688,6 +1778,7 @@ _FILLERS = {
 # Substitution
 # ---------------------------------------------------------------------------
 
+
 def _apply(template: str, replacements: dict[str, str]) -> str:
     out = template
     for k, v in replacements.items():
@@ -1698,6 +1789,7 @@ def _apply(template: str, replacements: dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 # Playwright runner
 # ---------------------------------------------------------------------------
+
 
 def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]) -> int:
     """Headless-Chromium render; returns bytes written. Raises if Playwright is unavailable.
@@ -1744,7 +1836,9 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
             except Exception:
                 pass
         png = page.screenshot(
-            full_page=False, type="png", omit_background=False,
+            full_page=False,
+            type="png",
+            omit_background=False,
             clip={"x": 0, "y": 0, "width": width, "height": height},
         )
         browser.close()
@@ -1755,6 +1849,7 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
     if dpr > 1 and Image is not None:
         try:
             from io import BytesIO
+
             src_img = Image.open(BytesIO(png))
             if src_img.size != (width, height):
                 src_img = src_img.convert("RGBA") if src_img.mode != "RGBA" else src_img
@@ -1774,6 +1869,7 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 # ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
+
 
 def render_brief(
     brief,
@@ -1806,8 +1902,11 @@ def render_brief(
     athlete_uri = None
     if athlete_path:
         try:
-            cut_path = athlete_path if skip_cutout else _maybe_cut_out_athlete(
-                athlete_path, profile_id=brief.profile_id or "default")
+            cut_path = (
+                athlete_path
+                if skip_cutout
+                else _maybe_cut_out_athlete(athlete_path, profile_id=brief.profile_id or "default")
+            )
             athlete_uri = _img_to_data_uri(cut_path)
         except Exception:
             athlete_uri = None
@@ -1838,7 +1937,10 @@ def render_brief(
     )
     _logo_inner, _logo_mod = _build_logo_treatment(brand_kit, logo_path, _logo_surface)
     base_repl = _common_replacements(
-        brief, width, height, brand_kit,
+        brief,
+        width,
+        height,
+        brand_kit,
         athlete_data_uri=athlete_uri,
         logo_block=_logo_inner,
         logo_mark_mod=_logo_mod,
@@ -1852,9 +1954,14 @@ def render_brief(
 
     # Layout-specific
     if family == "meet_preview":
-        repl = _fill_meet_preview(brief, width, height, base_repl,
-                                  venue_data_uri=venue_uri,
-                                  venue_attribution=venue_attribution)
+        repl = _fill_meet_preview(
+            brief,
+            width,
+            height,
+            base_repl,
+            venue_data_uri=venue_uri,
+            venue_attribution=venue_attribution,
+        )
     elif family == "sponsor_branded":
         repl = _fill_sponsor_branded(brief, width, height, base_repl, sponsor_name=sponsor_name)
     else:
@@ -1866,6 +1973,7 @@ def render_brief(
     html = _apply(template, repl)
     # Replace any unfilled placeholders to avoid raw {{X}} in output
     import re as _re
+
     html = _re.sub(r"\{\{[A-Z0-9_]+\}\}", "", html)
 
     # Inject the accent decoration overlay (V9 variation overhaul). It sits
@@ -1880,24 +1988,24 @@ def render_brief(
         canvas_marker = '<div class="canvas'
         idx = html.find(canvas_marker)
         if idx != -1:
-            search_from = html.find('>', idx) + 1
+            search_from = html.find(">", idx) + 1
             depth = 1
             i = search_from
             close_at = -1
             while i < len(html) and depth > 0:
-                next_open = html.find('<div', i)
-                next_close = html.find('</div>', i)
+                next_open = html.find("<div", i)
+                next_close = html.find("</div>", i)
                 if next_close == -1:
                     break
                 if next_open != -1 and next_open < next_close:
                     depth += 1
-                    i = html.find('>', next_open) + 1
+                    i = html.find(">", next_open) + 1
                 else:
                     depth -= 1
                     if depth == 0:
                         close_at = next_close
                         break
-                    i = next_close + len('</div>')
+                    i = next_close + len("</div>")
             if close_at != -1:
                 html = html[:close_at] + accent_html + html[close_at:]
             else:
@@ -1913,7 +2021,8 @@ def render_brief(
         html = _re.sub(r"(<body[^>]*>)", r"\1" + _GRAIN_SVG_BLOCK, html, count=1)
         html = html.replace(
             '<div class="canvas"',
-            '<div class="canvas texture-grain-host"', 1,
+            '<div class="canvas texture-grain-host"',
+            1,
         )
         # Inject the grain overlay INSIDE the .canvas as the last child so it
         # shares the canvas' stacking context (the canvas sets
@@ -1927,24 +2036,24 @@ def render_brief(
             # Walk forward to find the matching close </div> at the canvas
             # wrapper's level. Use a depth counter starting at 0 (we'll
             # enter the canvas at +1 once we step past its opening tag).
-            search_from = html.find('>', idx) + 1
+            search_from = html.find(">", idx) + 1
             depth = 1
             i = search_from
             close_at = -1
             while i < len(html) and depth > 0:
-                next_open = html.find('<div', i)
-                next_close = html.find('</div>', i)
+                next_open = html.find("<div", i)
+                next_close = html.find("</div>", i)
                 if next_close == -1:
                     break
                 if next_open != -1 and next_open < next_close:
                     depth += 1
-                    i = html.find('>', next_open) + 1
+                    i = html.find(">", next_open) + 1
                 else:
                     depth -= 1
                     if depth == 0:
                         close_at = next_close
                         break
-                    i = next_close + len('</div>')
+                    i = next_close + len("</div>")
             if close_at != -1:
                 html = (
                     html[:close_at]
@@ -1981,7 +2090,8 @@ def render_brief(
         profile_id=brief.profile_id,
         layout_template=family,
         format_name=format_name,
-        width=width, height=height,
+        width=width,
+        height=height,
         file_path=str(out_png),
         text_layers=dict(brief.text_layers or {}),
         palette=dict(brief.palette or {}),

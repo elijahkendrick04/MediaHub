@@ -12,6 +12,7 @@ a transport / API error.
 No templates, no JSON envelopes, no heuristic substitutes. If the model
 won't answer, the caller is told and surfaces it to the user.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
+
 
 class ProviderNotConfigured(RuntimeError):
     """Raised when no LLM provider has been configured."""
@@ -67,6 +69,7 @@ def _resolve_key(env_names: tuple[str, ...], secret_name: str) -> Optional[str]:
             return v
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = get_secret(secret_name)
         return v.strip() if v else None
     except Exception:
@@ -88,6 +91,7 @@ def _preferred_pref() -> str:
         return env
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = (get_secret("mediahub_llm_provider") or "").strip().lower()
         if v in _PROVIDERS + ("auto",):
             return v
@@ -151,14 +155,20 @@ def _ask_claude(system: str, user: str, max_tokens: int) -> str:
         )
     except Exception as e:
         raise ProviderError(f"Anthropic call failed: {e}") from e
-    parts = [getattr(b, "text", "") or "" for b in resp.content
-             if getattr(b, "type", None) == "text"]
+    parts = [
+        getattr(b, "text", "") or "" for b in resp.content if getattr(b, "type", None) == "text"
+    ]
     return "".join(parts).strip()
 
 
-def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
-                            on_tool_call: Callable[[str, dict], str],
-                            max_tokens: int, max_rounds: int) -> ToolConversation:
+def _ask_claude_with_tools(
+    system: str,
+    user: str,
+    tools: list[dict],
+    on_tool_call: Callable[[str, dict], str],
+    max_tokens: int,
+    max_rounds: int,
+) -> ToolConversation:
     key = _key_for("claude")
     if not key:
         raise ProviderNotConfigured("Anthropic API key not configured.")
@@ -169,8 +179,11 @@ def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
     for _ in range(max_rounds):
         try:
             resp = client.messages.create(
-                model=model, system=system, tools=tools,
-                max_tokens=max_tokens, messages=messages,
+                model=model,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                messages=messages,
             )
         except Exception as e:
             raise ProviderError(f"Anthropic tool call failed: {e}") from e
@@ -184,9 +197,12 @@ def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
                 texts.append(txt)
                 blocks.append({"type": "text", "text": txt})
             elif t == "tool_use":
-                tu = {"type": "tool_use", "id": getattr(b, "id", ""),
-                      "name": getattr(b, "name", ""),
-                      "input": getattr(b, "input", {}) or {}}
+                tu = {
+                    "type": "tool_use",
+                    "id": getattr(b, "id", ""),
+                    "name": getattr(b, "name", ""),
+                    "input": getattr(b, "input", {}) or {},
+                }
                 tool_uses.append(tu)
                 blocks.append(tu)
         messages.append({"role": "assistant", "content": blocks})
@@ -199,11 +215,15 @@ def _ask_claude_with_tools(system: str, user: str, tools: list[dict],
                 r = on_tool_call(tu["name"], tu["input"])
             except Exception as e:
                 r = f"(tool {tu['name']!r} failed: {e})"
-            convo.tool_calls.append(ToolCallRecord(
-                name=tu["name"], input=tu["input"], result=r, provider="claude",
-            ))
-            results.append({"type": "tool_result",
-                             "tool_use_id": tu["id"], "content": r})
+            convo.tool_calls.append(
+                ToolCallRecord(
+                    name=tu["name"],
+                    input=tu["input"],
+                    result=r,
+                    provider="claude",
+                )
+            )
+            results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": r})
         messages.append({"role": "user", "content": results})
     convo.text = "(Claude is still gathering evidence; try a smaller question.)"
     return convo
@@ -262,9 +282,13 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
         f"{_gemini_model()}:generateContent"
     )
     try:
-        r = requests.post(url, params={"key": key}, json=payload,
-                          headers={"Content-Type": "application/json"},
-                          timeout=45)
+        r = requests.post(
+            url,
+            params={"key": key},
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=45,
+        )
     except Exception as e:
         raise ProviderError(f"Gemini HTTP error: {e}") from e
     if r.status_code != 200:
@@ -276,29 +300,37 @@ def _ask_gemini(system: str, user: str, max_tokens: int) -> str:
     cands = data.get("candidates") or []
     if not cands:
         raise ProviderError(f"Gemini empty response: {str(data)[:240]}")
-    parts = ((cands[0].get("content") or {}).get("parts") or [])
-    return "".join(p.get("text", "") for p in parts
-                    if isinstance(p, dict)).strip()
+    parts = (cands[0].get("content") or {}).get("parts") or []
+    return "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
 
 
-def _ask_gemini_with_tools(system: str, user: str, tools: list[dict],
-                            on_tool_call: Callable[[str, dict], str],
-                            max_tokens: int, max_rounds: int) -> ToolConversation:
+def _ask_gemini_with_tools(
+    system: str,
+    user: str,
+    tools: list[dict],
+    on_tool_call: Callable[[str, dict], str],
+    max_tokens: int,
+    max_rounds: int,
+) -> ToolConversation:
     """Gemini function-calling loop. Tool schema in Anthropic shape is
     translated to Gemini's functionDeclarations on the fly so callers
     pass the same `tools` list whichever provider is active."""
     import requests
-    import json
+
     key = _key_for("gemini")
     if not key:
         raise ProviderNotConfigured("Gemini API key not configured.")
     # Translate tool schema.
-    fn_decls = [{
-        "name":        t["name"],
-        "description": t.get("description", ""),
-        "parameters":  t.get("input_schema") or t.get("parameters")
-                        or {"type": "object", "properties": {}},
-    } for t in tools]
+    fn_decls = [
+        {
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "parameters": t.get("input_schema")
+            or t.get("parameters")
+            or {"type": "object", "properties": {}},
+        }
+        for t in tools
+    ]
     contents: list[dict] = [{"role": "user", "parts": [{"text": user}]}]
     convo = ToolConversation(text="", provider="gemini")
     url = (
@@ -308,14 +340,18 @@ def _ask_gemini_with_tools(system: str, user: str, tools: list[dict],
     for _ in range(max_rounds):
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents":          contents,
-            "tools":             [{"functionDeclarations": fn_decls}],
-            "generationConfig":  _gemini_generation_config(max_tokens),
+            "contents": contents,
+            "tools": [{"functionDeclarations": fn_decls}],
+            "generationConfig": _gemini_generation_config(max_tokens),
         }
         try:
-            r = requests.post(url, params={"key": key}, json=payload,
-                              headers={"Content-Type": "application/json"},
-                              timeout=60)
+            r = requests.post(
+                url,
+                params={"key": key},
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=60,
+            )
         except Exception as e:
             raise ProviderError(f"Gemini tool HTTP error: {e}") from e
         if r.status_code != 200:
@@ -346,13 +382,22 @@ def _ask_gemini_with_tools(system: str, user: str, tools: list[dict],
                 r_str = on_tool_call(name, args)
             except Exception as e:
                 r_str = f"(tool {name!r} failed: {e})"
-            convo.tool_calls.append(ToolCallRecord(
-                name=name, input=args, result=r_str, provider="gemini",
-            ))
-            tool_response_parts.append({"functionResponse": {
-                "name":     name,
-                "response": {"content": r_str},
-            }})
+            convo.tool_calls.append(
+                ToolCallRecord(
+                    name=name,
+                    input=args,
+                    result=r_str,
+                    provider="gemini",
+                )
+            )
+            tool_response_parts.append(
+                {
+                    "functionResponse": {
+                        "name": name,
+                        "response": {"content": r_str},
+                    }
+                }
+            )
         contents.append({"role": "user", "parts": tool_response_parts})
     convo.text = "(Gemini is still gathering evidence; try a smaller question.)"
     return convo
@@ -378,6 +423,7 @@ def _gemini_breaker_open() -> bool:
     """
     try:
         from mediahub.media_ai.llm import _gemini_breaker_is_open
+
         return _gemini_breaker_is_open()
     except Exception:
         return False
@@ -413,17 +459,22 @@ def _is_transient(err_msg: str) -> bool:
     and won't fix on a retry."""
     s = err_msg.lower()
     return (
-        "429" in s or "rate" in s
-        or "401" in s or "403" in s
+        "429" in s
+        or "rate" in s
+        or "401" in s
+        or "403" in s
         or "auth" in s
-        or " 500" in s or "502" in s or "503" in s or "504" in s
-        or "timeout" in s or "timed out" in s
+        or " 500" in s
+        or "502" in s
+        or "503" in s
+        or "504" in s
+        or "timeout" in s
+        or "timed out" in s
         or "overloaded" in s
     )
 
 
-def ask(system: str, user: str, *, max_tokens: int = 800,
-        provider: Optional[str] = None) -> str:
+def ask(system: str, user: str, *, max_tokens: int = 800, provider: Optional[str] = None) -> str:
     """Plain-text in, plain-text out.
 
     Tries the active provider first; on a *transient* failure (429, 401,
@@ -450,18 +501,23 @@ def ask(system: str, user: str, *, max_tokens: int = 800,
             last_err = e
             if not _is_transient(str(e)) or p == chain[-1]:
                 raise
-            log.warning("provider %s transient error, falling through: %s",
-                        p, str(e)[:200])
+            log.warning("provider %s transient error, falling through: %s", p, str(e)[:200])
             continue
     if last_err is not None:
         raise last_err
     raise ProviderError("All configured providers failed.")
 
 
-def ask_with_tools(system: str, user: str, *, tools: list[dict],
-                    on_tool_call: Callable[[str, dict], str],
-                    max_tokens: int = 1200, max_rounds: int = 5,
-                    provider: Optional[str] = None) -> ToolConversation:
+def ask_with_tools(
+    system: str,
+    user: str,
+    *,
+    tools: list[dict],
+    on_tool_call: Callable[[str, dict], str],
+    max_tokens: int = 1200,
+    max_rounds: int = 5,
+    provider: Optional[str] = None,
+) -> ToolConversation:
     """Tool-using conversation. Same fallback semantics as ask()."""
     primary = (provider or active_provider() or "").lower() or None
     chain = _fallback_chain(primary) if primary else []
@@ -474,14 +530,12 @@ def ask_with_tools(system: str, user: str, *, tools: list[dict],
     last_err: Optional[Exception] = None
     for p in chain:
         try:
-            return _DISPATCH[p][1](system, user, tools, on_tool_call,
-                                    max_tokens, max_rounds)
+            return _DISPATCH[p][1](system, user, tools, on_tool_call, max_tokens, max_rounds)
         except ProviderError as e:
             last_err = e
             if not _is_transient(str(e)) or p == chain[-1]:
                 raise
-            log.warning("provider %s transient tool error, falling through: %s",
-                        p, str(e)[:200])
+            log.warning("provider %s transient tool error, falling through: %s", p, str(e)[:200])
             continue
     if last_err is not None:
         raise last_err

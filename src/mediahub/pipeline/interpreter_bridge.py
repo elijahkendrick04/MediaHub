@@ -21,16 +21,15 @@ No domain literals (governing bodies, source domains) are introduced
 here — the caller is responsible for choosing how to enrich those
 fields.
 """
+
 from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional, Iterable
+from typing import Optional
 
 from mediahub.interpreter.schema_dataclasses import (
     InterpretedMeet,
-    InterpretedEvent,
-    InterpretedSwim,
 )
 
 from mediahub.web.canonical import (
@@ -110,9 +109,7 @@ def _gender_code(gender: Optional[str]) -> str:
 # Time conversion
 # ---------------------------------------------------------------------------
 
-_TIME_RE = re.compile(
-    r"^\s*(?:(\d+):)?(\d{1,2})[.:](\d{1,2})\s*$"
-)
+_TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2})[.:](\d{1,2})\s*$")
 
 
 def _time_to_cs(time_str: Optional[str]) -> Optional[int]:

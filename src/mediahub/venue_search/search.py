@@ -14,11 +14,12 @@ Each result includes:
 Falls back to Openverse if Wikimedia returns nothing.
 Network failures return [] — never raises.
 """
+
 from __future__ import annotations
 
 import logging
 import urllib.parse
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 import requests
@@ -44,7 +45,7 @@ class VenueImageResult:
     attribution_required: bool = True
     permission_status: str = "approved_public"
     description: str = ""
-    confidence: float = 0.5     # how likely this is the right venue
+    confidence: float = 0.5  # how likely this is the right venue
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -80,6 +81,7 @@ def search(query: str, *, limit: int = 8, timeout: int = 8) -> list[VenueImageRe
 # Wikimedia Commons
 # ---------------------------------------------------------------------------
 
+
 def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImageResult]:
     # Step 1: search for files matching query
     params = {
@@ -87,12 +89,15 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
         "format": "json",
         "list": "search",
         "srsearch": f"{query} filetype:bitmap",
-        "srnamespace": 6,         # File namespace
+        "srnamespace": 6,  # File namespace
         "srlimit": str(limit * 2),
     }
-    r = requests.get(WIKI_API, params=params,
-                     headers={"User-Agent": "MediaHub/0.8 (venue_search)"},
-                     timeout=timeout)
+    r = requests.get(
+        WIKI_API,
+        params=params,
+        headers={"User-Agent": "MediaHub/0.8 (venue_search)"},
+        timeout=timeout,
+    )
     r.raise_for_status()
     data = r.json()
     titles = [hit["title"] for hit in data.get("query", {}).get("search", [])]
@@ -103,14 +108,14 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
     info_params = {
         "action": "query",
         "format": "json",
-        "titles": "|".join(titles[:limit * 2]),
+        "titles": "|".join(titles[: limit * 2]),
         "prop": "imageinfo",
         "iiprop": "url|size|extmetadata|user",
         "iiurlwidth": "800",
     }
-    r2 = requests.get(WIKI_API, params=info_params,
-                      headers={"User-Agent": "MediaHub/0.8"},
-                      timeout=timeout)
+    r2 = requests.get(
+        WIKI_API, params=info_params, headers={"User-Agent": "MediaHub/0.8"}, timeout=timeout
+    )
     r2.raise_for_status()
     pages = r2.json().get("query", {}).get("pages", {}) or {}
 
@@ -121,15 +126,20 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
             if not info:
                 continue
             ext = info.get("extmetadata") or {}
-            licence = ext.get("LicenseShortName", {}).get("value", "") or ext.get("UsageTerms", {}).get("value", "")
+            licence = ext.get("LicenseShortName", {}).get("value", "") or ext.get(
+                "UsageTerms", {}
+            ).get("value", "")
             licence_url = ext.get("LicenseUrl", {}).get("value")
             attribution = ext.get("Artist", {}).get("value") or info.get("user")
             description = ext.get("ImageDescription", {}).get("value", "") or ""
             # Strip simple HTML
             import re as _re
+
             description = _re.sub(r"<[^>]+>", "", description).strip()
             attribution = _re.sub(r"<[^>]+>", "", attribution or "").strip() or None
-            file_page = "https://commons.wikimedia.org/wiki/" + urllib.parse.quote(page.get("title", ""))
+            file_page = "https://commons.wikimedia.org/wiki/" + urllib.parse.quote(
+                page.get("title", "")
+            )
 
             licence_lower = (licence or "").lower()
             attribution_required = bool(licence) and "public domain" not in licence_lower
@@ -141,22 +151,24 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
             else:
                 perm = "needs_approval"
 
-            results.append(VenueImageResult(
-                title=page.get("title", "").replace("File:", ""),
-                thumb_url=info.get("thumburl") or info.get("url", ""),
-                direct_url=info.get("url", ""),
-                source_url=file_page,
-                source_site="wikimedia",
-                width=info.get("width", 0) or 0,
-                height=info.get("height", 0) or 0,
-                licence=licence,
-                licence_url=licence_url,
-                attribution=attribution,
-                attribution_required=attribution_required,
-                permission_status=perm,
-                description=description[:400],
-                confidence=0.55,
-            ))
+            results.append(
+                VenueImageResult(
+                    title=page.get("title", "").replace("File:", ""),
+                    thumb_url=info.get("thumburl") or info.get("url", ""),
+                    direct_url=info.get("url", ""),
+                    source_url=file_page,
+                    source_site="wikimedia",
+                    width=info.get("width", 0) or 0,
+                    height=info.get("height", 0) or 0,
+                    licence=licence,
+                    licence_url=licence_url,
+                    attribution=attribution,
+                    attribution_required=attribution_required,
+                    permission_status=perm,
+                    description=description[:400],
+                    confidence=0.55,
+                )
+            )
         except Exception as e:
             log.debug("wiki entry parse failed: %s", e)
             continue
@@ -167,12 +179,14 @@ def _search_wikimedia(query: str, *, limit: int, timeout: int) -> list[VenueImag
 # Openverse fallback (also CC-licensed)
 # ---------------------------------------------------------------------------
 
+
 def _search_openverse(query: str, *, limit: int, timeout: int) -> list[VenueImageResult]:
     if limit <= 0:
         return []
     params = {"q": query, "page_size": str(min(limit, 20))}
-    r = requests.get(OPENVERSE_API, params=params,
-                     headers={"User-Agent": "MediaHub/0.8"}, timeout=timeout)
+    r = requests.get(
+        OPENVERSE_API, params=params, headers={"User-Agent": "MediaHub/0.8"}, timeout=timeout
+    )
     r.raise_for_status()
     data = r.json()
     out: list[VenueImageResult] = []
@@ -192,22 +206,24 @@ def _search_openverse(query: str, *, limit: int, timeout: int) -> list[VenueImag
             else:
                 perm = "needs_approval"
                 attribution_required = True
-            out.append(VenueImageResult(
-                title=item.get("title") or "",
-                thumb_url=item.get("thumbnail") or item.get("url", ""),
-                direct_url=item.get("url", ""),
-                source_url=item.get("foreign_landing_url") or item.get("url", ""),
-                source_site=(item.get("source") or "openverse"),
-                width=item.get("width", 0) or 0,
-                height=item.get("height", 0) or 0,
-                licence=licence.strip(),
-                licence_url=item.get("license_url"),
-                attribution=attribution,
-                attribution_required=attribution_required,
-                permission_status=perm,
-                description=item.get("description", "") or "",
-                confidence=0.5,
-            ))
+            out.append(
+                VenueImageResult(
+                    title=item.get("title") or "",
+                    thumb_url=item.get("thumbnail") or item.get("url", ""),
+                    direct_url=item.get("url", ""),
+                    source_url=item.get("foreign_landing_url") or item.get("url", ""),
+                    source_site=(item.get("source") or "openverse"),
+                    width=item.get("width", 0) or 0,
+                    height=item.get("height", 0) or 0,
+                    licence=licence.strip(),
+                    licence_url=item.get("license_url"),
+                    attribution=attribution,
+                    attribution_required=attribution_required,
+                    permission_status=perm,
+                    description=item.get("description", "") or "",
+                    confidence=0.5,
+                )
+            )
         except Exception:
             continue
     return out

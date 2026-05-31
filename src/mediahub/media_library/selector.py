@@ -12,10 +12,9 @@ Scoring axes (all 0..1):
 
 Returns assets sorted high → low with .score attached on a copy of the dict.
 """
+
 from __future__ import annotations
 
-import math
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -36,11 +35,14 @@ ROLE_TYPE_MAP = {
 }
 
 
-def score_asset(asset: MediaAsset, *,
-                role: str = "hero_athlete",
-                athlete_name: Optional[str] = None,
-                athlete_id: Optional[str] = None,
-                preferred_orientation: Optional[str] = None) -> float:
+def score_asset(
+    asset: MediaAsset,
+    *,
+    role: str = "hero_athlete",
+    athlete_name: Optional[str] = None,
+    athlete_id: Optional[str] = None,
+    preferred_orientation: Optional[str] = None,
+) -> float:
     """Compute a 0..1 fitness score for using `asset` in the given role."""
     if not asset.is_usable_for_post():
         return 0.0
@@ -118,25 +120,28 @@ def score_asset(asset: MediaAsset, *,
 
     # Weighted blend
     score = (
-        0.30 * am +
-        0.18 * type_fit +
-        0.14 * perm_score +
-        0.10 * appr_score +
-        0.10 * quality +
-        0.08 * o_fit +
-        0.05 * fresh +
-        0.05 * reuse_penalty
+        0.30 * am
+        + 0.18 * type_fit
+        + 0.14 * perm_score
+        + 0.10 * appr_score
+        + 0.10 * quality
+        + 0.08 * o_fit
+        + 0.05 * fresh
+        + 0.05 * reuse_penalty
     )
     return max(0.0, min(1.0, score))
 
 
-def select_assets(assets: Iterable[MediaAsset], *,
-                  role: str = "hero_athlete",
-                  athlete_name: Optional[str] = None,
-                  athlete_id: Optional[str] = None,
-                  preferred_orientation: Optional[str] = None,
-                  min_score: float = 0.35,
-                  k: int = 5) -> list[dict]:
+def select_assets(
+    assets: Iterable[MediaAsset],
+    *,
+    role: str = "hero_athlete",
+    athlete_name: Optional[str] = None,
+    athlete_id: Optional[str] = None,
+    preferred_orientation: Optional[str] = None,
+    min_score: float = 0.35,
+    k: int = 5,
+) -> list[dict]:
     """Return up to k scored asset dicts sorted high → low.
 
     Each item is a dict: {asset_id, score, reason_summary, asset (dict)}.
@@ -144,19 +149,22 @@ def select_assets(assets: Iterable[MediaAsset], *,
     scored: list[dict] = []
     for a in assets:
         s = score_asset(
-            a, role=role,
+            a,
+            role=role,
             athlete_name=athlete_name,
             athlete_id=athlete_id,
             preferred_orientation=preferred_orientation,
         )
         if s < min_score:
             continue
-        scored.append({
-            "asset_id": a.id,
-            "score": round(s, 3),
-            "reason_summary": _reason(a, role, athlete_name, athlete_id),
-            "asset": a.to_dict(),
-        })
+        scored.append(
+            {
+                "asset_id": a.id,
+                "score": round(s, 3),
+                "reason_summary": _reason(a, role, athlete_name, athlete_id),
+                "asset": a.to_dict(),
+            }
+        )
     scored.sort(key=lambda x: -x["score"])
     return scored[:k]
 
@@ -174,12 +182,15 @@ def _freshness(uploaded_at: str) -> float:
         return 0.5
 
 
-def _reason(asset: MediaAsset, role: str, athlete_name: Optional[str],
-            athlete_id: Optional[str]) -> str:
+def _reason(
+    asset: MediaAsset, role: str, athlete_name: Optional[str], athlete_id: Optional[str]
+) -> str:
     parts: list[str] = []
     if athlete_id and athlete_id in (asset.linked_athlete_ids or []):
         parts.append("athlete-ID match")
-    elif athlete_name and any(athlete_name.lower() in n.lower() for n in (asset.linked_athlete_names or [])):
+    elif athlete_name and any(
+        athlete_name.lower() in n.lower() for n in (asset.linked_athlete_names or [])
+    ):
         parts.append(f"named match ({athlete_name})")
     if asset.type in ROLE_TYPE_MAP.get(role, []):
         parts.append(f"type fits role ({asset.type})")

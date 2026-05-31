@@ -3,6 +3,7 @@
 Schema is created lazily; all reads tolerate older row shapes by routing through
 MediaAsset.from_dict.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,7 @@ import sqlite3
 import threading
 import uuid
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from .models import MediaAsset
 
@@ -85,8 +86,7 @@ _DICT_FIELDS = {"description_parsed"}
 class MediaLibraryStore:
     """Thread-safe SQLite-backed media asset store."""
 
-    def __init__(self, db_path: Optional[Path] = None,
-                 uploads_dir: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, uploads_dir: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else _DEFAULT_DB
         self.uploads_dir = Path(uploads_dir) if uploads_dir else _DEFAULT_UPLOADS
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -144,9 +144,16 @@ class MediaLibraryStore:
             row = cur.fetchone()
         return self._row_to_asset(row) if row else None
 
-    def list(self, *, profile_id: Optional[str] = None, asset_type: Optional[str] = None,
-             athlete_id: Optional[str] = None, athlete_name: Optional[str] = None,
-             venue: Optional[str] = None, limit: int = 500) -> list[MediaAsset]:
+    def list(
+        self,
+        *,
+        profile_id: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        athlete_id: Optional[str] = None,
+        athlete_name: Optional[str] = None,
+        venue: Optional[str] = None,
+        limit: int = 500,
+    ) -> list[MediaAsset]:
         sql = "SELECT * FROM media_assets WHERE 1=1"
         args: list = []
         if profile_id:
@@ -170,7 +177,8 @@ class MediaLibraryStore:
         if athlete_name:
             needle = athlete_name.lower()
             assets = [
-                a for a in assets
+                a
+                for a in assets
                 if any(needle in (n or "").lower() for n in a.linked_athlete_names)
                 or needle in (a.description_raw or "").lower()
             ]
@@ -196,8 +204,9 @@ class MediaLibraryStore:
     # File helpers
     # ------------------------------------------------------------------
 
-    def store_blob(self, src_bytes: bytes, original_filename: str,
-                   profile_id: Optional[str] = None) -> Path:
+    def store_blob(
+        self, src_bytes: bytes, original_filename: str, profile_id: Optional[str] = None
+    ) -> Path:
         """Save raw bytes under uploads/media_library/<profile>/<id>_<name>."""
         suffix = Path(original_filename).suffix or ".bin"
         target_dir = self.uploads_dir / (profile_id or "_shared")

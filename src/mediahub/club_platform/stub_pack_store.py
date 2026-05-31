@@ -14,6 +14,7 @@ Each pack has:
   form_data:  the raw form values that produced the cards
   cards:      list of {platform, caption, hashtags, confidence, notes}
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 
 def _data_dir() -> Path:
@@ -61,8 +62,9 @@ def _derive_title(stub_type: str, form_data: dict) -> str:
     return "Content draft"
 
 
-def save_pack(stub_type: str, form_data: dict, cards: list[dict],
-              profile_id: Optional[str] = None) -> dict:
+def save_pack(
+    stub_type: str, form_data: dict, cards: list[dict], profile_id: Optional[str] = None
+) -> dict:
     """Persist a generated pack to disk; return the saved record (with pack_id).
 
     ``profile_id`` is the organisation that owns the pack; it's used by
@@ -72,13 +74,15 @@ def save_pack(stub_type: str, form_data: dict, cards: list[dict],
     """
     pack_id = uuid.uuid4().hex[:10]
     record = {
-        "pack_id":    pack_id,
+        "pack_id": pack_id,
         "profile_id": (profile_id or "").strip() or None,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "stub_type":  stub_type,
-        "title":      _derive_title(stub_type, form_data),
-        "form_data":  {k: v for k, v in (form_data or {}).items() if isinstance(v, (str, int, float))},
-        "cards":      list(cards or []),
+        "stub_type": stub_type,
+        "title": _derive_title(stub_type, form_data),
+        "form_data": {
+            k: v for k, v in (form_data or {}).items() if isinstance(v, (str, int, float))
+        },
+        "cards": list(cards or []),
     }
     path = _packs_dir() / f"{pack_id}.json"
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -104,13 +108,15 @@ def list_packs(limit: int = 50) -> list[dict]:
     for p in _packs_dir().glob("*.json"):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            items.append({
-                "pack_id":    data.get("pack_id", p.stem),
-                "created_at": data.get("created_at", ""),
-                "stub_type":  data.get("stub_type", "other"),
-                "title":      data.get("title", "Untitled"),
-                "n_cards":    len(data.get("cards") or []),
-            })
+            items.append(
+                {
+                    "pack_id": data.get("pack_id", p.stem),
+                    "created_at": data.get("created_at", ""),
+                    "stub_type": data.get("stub_type", "other"),
+                    "title": data.get("title", "Untitled"),
+                    "n_cards": len(data.get("cards") or []),
+                }
+            )
         except (OSError, json.JSONDecodeError):
             continue
     items.sort(key=lambda r: r.get("created_at", ""), reverse=True)
@@ -160,10 +166,12 @@ def replace_cards(pack_id: str, new_cards: list[dict]) -> Optional[dict]:
     history = list(rec.get("card_history") or [])
     for c in prior:
         if isinstance(c, dict) and (c.get("caption") or "").strip():
-            history.append({
-                "platform": c.get("platform", ""),
-                "caption":  c.get("caption", ""),
-            })
+            history.append(
+                {
+                    "platform": c.get("platform", ""),
+                    "caption": c.get("caption", ""),
+                }
+            )
     rec["card_history"] = history[-24:]
     rec["cards"] = list(new_cards or [])
     path = _packs_dir() / f"{pack_id}.json"

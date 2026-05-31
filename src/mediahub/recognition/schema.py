@@ -7,15 +7,17 @@ Extends and re-exports from swim_content_v5.schema with new V7.3 additions:
   - SafeToPost dataclass
   - safe_to_post field on RankedAchievement
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
 # Re-export everything from v5 schema for backward compat
 from swim_content_v5.schema import (
-    QualityBand, PostType,
+    QualityBand,
+    PostType,
     AchievementEvidence,
     Achievement as _Achievement,
     RankFactor,
@@ -32,6 +34,7 @@ from swim_content_v5.schema import (
 # PostAngle taxonomy (Phase D)
 # ---------------------------------------------------------------------------
 
+
 class PostAngle(str, Enum):
     # PB family
     CONFIRMED_OFFICIAL_PB = "confirmed_official_pb"
@@ -43,7 +46,7 @@ class PostAngle(str, Enum):
     MEDAL_GOLD = "medal_gold"
     MEDAL_SILVER = "medal_silver"
     MEDAL_BRONZE = "medal_bronze"
-    MEDAL_AND_PB_COMBO = "medal_and_pb_combo"   # recommender override
+    MEDAL_AND_PB_COMBO = "medal_and_pb_combo"  # recommender override
     FINALIST = "finalist"
     HEAT_TO_FINAL_DROP = "heat_to_final_drop"
 
@@ -94,10 +97,11 @@ POST_ANGLE_LABELS: dict[PostAngle, str] = {
 # SafeToPost (Phase F)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SafeToPost:
-    level: str      # "safe" | "needs_review" | "do_not_post"
-    reason: str     # short user-facing explanation
+    level: str  # "safe" | "needs_review" | "do_not_post"
+    reason: str  # short user-facing explanation
 
     def to_dict(self) -> dict:
         return {"level": self.level, "reason": self.reason}
@@ -107,10 +111,12 @@ class SafeToPost:
 # Extended Achievement with post_angle (Phase D)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Achievement(_Achievement):
     """Extended Achievement with post_angle field."""
-    post_angle: Optional[str] = None    # PostAngle value as string
+
+    post_angle: Optional[str] = None  # PostAngle value as string
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -122,10 +128,12 @@ class Achievement(_Achievement):
 # Extended SwimTrace with near_miss_category (Phase J)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SwimTrace(_SwimTrace):
     """Extended SwimTrace with near_miss_category for grouped display."""
-    near_miss_category: Optional[str] = None   # "almost_pb" | "possible_pb_uncertain" | etc.
+
+    near_miss_category: Optional[str] = None  # "almost_pb" | "possible_pb_uncertain" | etc.
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -137,11 +145,13 @@ class SwimTrace(_SwimTrace):
 # Extended RankedAchievement with safe_to_post (Phase F)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RankedAchievement(_RankedAchievement):
     """Extended RankedAchievement with safe_to_post and post_angle."""
+
     safe_to_post: Optional[SafeToPost] = None
-    post_angle: Optional[str] = None   # PostAngle value as string
+    post_angle: Optional[str] = None  # PostAngle value as string
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -151,7 +161,8 @@ class RankedAchievement(_RankedAchievement):
 
 
 __all__ = [
-    "QualityBand", "PostType",
+    "QualityBand",
+    "PostType",
     "AchievementEvidence",
     "Achievement",
     "RankFactor",

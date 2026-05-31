@@ -23,30 +23,30 @@ Public surface:
     interpret_guidelines(text: str) -> dict
     ingest_guidelines_file(filename, file_bytes) -> dict
 """
+
 from __future__ import annotations
 
 import io
-import json
 import logging
 import re
 import zipfile
 from datetime import datetime, timezone
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
 # Limits — sized for typical PDF/DOCX brand guides while preventing
 # zip-bomb / multi-megabyte plaintext blow-ups.
-_MAX_UPLOAD_BYTES = 25 * 1024 * 1024          # 25 MB upload cap
-_MAX_EXTRACTED_CHARS = 200_000                # ~50 pages of text
-_MAX_ZIP_FILES = 50                           # within a single zip
-_MAX_ZIP_DECOMPRESSED = 50 * 1024 * 1024      # 50 MB total inside zip
-_RAW_EXCERPT_CHARS = 6_000                    # what we persist on the profile
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB upload cap
+_MAX_EXTRACTED_CHARS = 200_000  # ~50 pages of text
+_MAX_ZIP_FILES = 50  # within a single zip
+_MAX_ZIP_DECOMPRESSED = 50 * 1024 * 1024  # 50 MB total inside zip
+_RAW_EXCERPT_CHARS = 6_000  # what we persist on the profile
 
 
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -64,11 +64,13 @@ def _ext(filename: str) -> str:
 # Text extraction — one entry point, per-format fail-soft backends
 # ---------------------------------------------------------------------------
 
+
 def _extract_pdf(data: bytes) -> str:
     """Try pdfplumber first, then pypdf. Return whatever we get."""
     text = ""
     try:
         import pdfplumber  # already a project dep
+
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             pages = []
             for page in pdf.pages:
@@ -83,6 +85,7 @@ def _extract_pdf(data: bytes) -> str:
     # pypdf fallback for files pdfplumber can't read.
     try:
         from pypdf import PdfReader  # already a project dep
+
         reader = PdfReader(io.BytesIO(data))
         pages = []
         for page in reader.pages:
@@ -120,12 +123,13 @@ def _extract_docx(data: bytes) -> str:
         runs = [m.group(1) for m in _DOCX_TEXT_RE.finditer(para_xml)]
         para_text = "".join(runs)
         # Decode the XML entities the runs may carry.
-        para_text = (para_text
-                     .replace("&amp;", "&")
-                     .replace("&lt;", "<")
-                     .replace("&gt;", ">")
-                     .replace("&quot;", '"')
-                     .replace("&apos;", "'"))
+        para_text = (
+            para_text.replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", '"')
+            .replace("&apos;", "'")
+        )
         para_text = para_text.strip()
         if para_text:
             paragraphs.append(para_text)
@@ -135,6 +139,7 @@ def _extract_docx(data: bytes) -> str:
 def _extract_html(data: bytes) -> str:
     try:
         from bs4 import BeautifulSoup  # already a project dep
+
         soup = BeautifulSoup(data, "html.parser")
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
@@ -231,14 +236,38 @@ def _dispatch_extract(ext: str, data: bytes) -> str:
     # screenshots"). The right response for these is "unsupported",
     # not a best-effort UTF-8 decode of the binary bytes.
     _BINARY_EXTS = {
-        "png", "jpg", "jpeg", "gif", "webp", "tiff", "tif", "bmp",
-        "ico", "svg",  # SVG technically XML but treated as image by
-                       # the brand-DNA pipeline upstream
-        "heic", "heif", "avif",
-        "mp4", "mov", "avi", "mkv", "webm", "m4v",
-        "mp3", "wav", "ogg", "flac", "m4a",
-        "exe", "dll", "so", "dylib",
-        "psd", "ai", "indd",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+        "tiff",
+        "tif",
+        "bmp",
+        "ico",
+        "svg",  # SVG technically XML but treated as image by
+        # the brand-DNA pipeline upstream
+        "heic",
+        "heif",
+        "avif",
+        "mp4",
+        "mov",
+        "avi",
+        "mkv",
+        "webm",
+        "m4v",
+        "mp3",
+        "wav",
+        "ogg",
+        "flac",
+        "m4a",
+        "exe",
+        "dll",
+        "so",
+        "dylib",
+        "psd",
+        "ai",
+        "indd",
     }
     if ext in _BINARY_EXTS:
         return ""
@@ -246,18 +275,20 @@ def _dispatch_extract(ext: str, data: bytes) -> str:
     # Magic-byte check: even if the extension is unknown, refuse to
     # decode files that start with common binary signatures.
     _BINARY_MAGIC = (
-        b"\x89PNG\r\n\x1a\n",   # PNG
-        b"\xff\xd8\xff",        # JPEG
-        b"GIF87a", b"GIF89a",   # GIF
-        b"RIFF",                # WebP / WAV (with WEBP/WAVE at byte 8)
-        b"BM",                  # BMP
-        b"\x00\x00\x01\x00",    # ICO
-        b"II*\x00", b"MM\x00*", # TIFF
-        b"\x1f\x8b",            # gzip
-        b"PK\x03\x04",          # zip (already handled above)
-        b"%PDF",                # PDF (already handled above)
-        b"\x7fELF",             # Linux executable
-        b"MZ",                  # Windows executable
+        b"\x89PNG\r\n\x1a\n",  # PNG
+        b"\xff\xd8\xff",  # JPEG
+        b"GIF87a",
+        b"GIF89a",  # GIF
+        b"RIFF",  # WebP / WAV (with WEBP/WAVE at byte 8)
+        b"BM",  # BMP
+        b"\x00\x00\x01\x00",  # ICO
+        b"II*\x00",
+        b"MM\x00*",  # TIFF
+        b"\x1f\x8b",  # gzip
+        b"PK\x03\x04",  # zip (already handled above)
+        b"%PDF",  # PDF (already handled above)
+        b"\x7fELF",  # Linux executable
+        b"MZ",  # Windows executable
     )
     if data and any(data.startswith(sig) for sig in _BINARY_MAGIC):
         return ""
@@ -362,9 +393,9 @@ def _build_mandatory_rules_prompt(text: str) -> str:
         "Scan the document and extract every rule the organisation "
         "literally states is non-negotiable. Look for words like MUST, "
         "NEVER, ALWAYS, REQUIRED, SHALL, MANDATORY, FORBIDDEN, "
-        "PROHIBITED, \"do not\", \"never\", \"only\", and any rule "
-        "stated in equivalent force (e.g. \"the strapline appears on "
-        "every caption\" is mandatory even without MUST).\n\n"
+        'PROHIBITED, "do not", "never", "only", and any rule '
+        'stated in equivalent force (e.g. "the strapline appears on '
+        'every caption" is mandatory even without MUST).\n\n'
         "Return a SINGLE JSON object with EXACTLY one key:\n"
         "  mandatory_rules: array of strings — each entry is one rule, "
         "quoted as close to the document's own wording as possible "
@@ -429,8 +460,9 @@ def extract_mandatory_rules(text: str) -> list[str]:
         return []
     prompt = _build_mandatory_rules_prompt(text)
     try:
-        raw = generate_json(prompt, system=_MANDATORY_RULES_LLM_SYSTEM,
-                             max_tokens=1_800, fallback={})
+        raw = generate_json(
+            prompt, system=_MANDATORY_RULES_LLM_SYSTEM, max_tokens=1_800, fallback={}
+        )
     except Exception as e:
         log.debug("mandatory-rules LLM call failed: %s", e)
         return []
@@ -450,8 +482,8 @@ def _build_prompt(text: str) -> str:
         "voice the way another AI would need to know it before writing "
         "content for this org\n"
         "  voice_attributes: array of up to 8 single-word or short "
-        "adjectives describing the desired voice (e.g. \"warm\", "
-        "\"data-led\", \"irreverent\")\n"
+        'adjectives describing the desired voice (e.g. "warm", '
+        '"data-led", "irreverent")\n'
         "  tone_dos: array of up to 8 short imperatives — things the "
         "voice should DO\n"
         "  tone_donts: array of up to 8 short imperatives — things the "
@@ -459,7 +491,7 @@ def _build_prompt(text: str) -> str:
         "  prohibited_words: array of explicitly banned words or "
         "phrases\n"
         "  preferred_terminology: object mapping the wrong term to the "
-        "preferred term (e.g. {\"members\": \"athletes\"})\n"
+        'preferred term (e.g. {"members": "athletes"})\n'
         "  hashtag_rules: short string describing how hashtags should "
         "be used (counts, required tags, anything banned)\n"
         "  sponsor_mention_rules: short string on how/when sponsors "
@@ -611,6 +643,7 @@ def interpret_guidelines(text: str) -> dict:
 # ---------------------------------------------------------------------------
 # Combined entry point — call this from the web layer
 # ---------------------------------------------------------------------------
+
 
 def ingest_guidelines_file(filename: str, file_bytes: bytes) -> dict:
     """End-to-end: extract → interpret → return saveable payload.
