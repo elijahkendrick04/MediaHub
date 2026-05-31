@@ -127,16 +127,37 @@ class Charter:
 
 CHARTERS = (
     Charter(
+        # functional rubric v2 — adds the swim-match zero-card rules so the judge
+        # stops false-positiving on legitimate club-mismatch empty states while
+        # still catching genuine pipeline failures. Before/after behaviour and
+        # the v1 text are recorded in autotest/CHANGE_CLASSIFICATION.md (tagged
+        # "AI judgement surface, non-suppressive"); see that entry for the diff.
         name="functional",
         persona=("You are a meticulous QA engineer verifying that a sports-content "
                  "web app does what its UI promises at each step."),
         rubric=("Given the flow result, the routes visited (with HTTP status), and a "
                 "summary of the produced content pack, decide whether each step did "
-                "what it claims. Flag silent functional failures: e.g. a real meet "
-                "file that yielded ZERO cards, a 'done' run with no content, export "
-                "that returns nothing, a step that 'succeeds' but produces empty/"
-                "placeholder output. Do NOT flag missing AI captions when no AI key "
-                "is configured — that is expected."),
+                "what it claims. Flag silent functional failures: a 'done' run with no "
+                "content, an export that returns nothing, a step that 'succeeds' but "
+                "produces empty/placeholder output.\n\n"
+                "ZERO-CARD RULES — apply these FIRST, in order, before any other "
+                "reasoning about an empty content pack:\n"
+                "1. If parsed_swim_count or our_swim_count is 'unknown'/absent, OR "
+                "parse_warnings shows a filter/parse error, treat the empty result as "
+                "UNKNOWN: escalate to human review (flag it medium) — do NOT "
+                "exonerate it.\n"
+                "2. If our_swim_count > 0 AND cards = 0, flag HIGH severity. No "
+                "exceptions; no other signal overrides this — swims matched the club "
+                "but no content was produced, which is a genuine pipeline failure.\n\n"
+                "Only AFTER those two rules: a run with parsed_swim_count > 0 AND "
+                "our_swim_count = 0 AND no error parse_warnings is a LEGITIMATE, "
+                "explained empty state — the file parsed fine but none of its swims "
+                "matched the selected club, and the review page says so. This is NOT a "
+                "bug; do not flag it. A run with parsed_swim_count = 0 means the file "
+                "yielded no swims at all — report it as informational, not as a 'real "
+                "meet produced zero cards' failure.\n"
+                "Do NOT flag missing AI captions when no AI key is configured — that "
+                "is expected."),
         artifact_keys=("flow_result", "pages", "content_summary"),
         # A QA persona checking flow STATUS is *meant* to inspect internal state.
         allowed_provenance=ALL_PROVENANCE,
@@ -196,8 +217,25 @@ def _content_summary(export: dict[str, Any]) -> str:
     cards = export.get("cards") or []
     meet = export.get("meet") or {}
     have_caps = sum(1 for c in cards if (c.get("caption") or "").strip())
+    # Swim-match counts let the functional judge tell a LEGITIMATE explained
+    # empty state (a file parsed fine but none of its swims matched the club —
+    # the honest "No swims matched your club" review state) from a REAL pipeline
+    # failure (swims matched but no content came out). Without these, "cards=0"
+    # is indistinguishable from a bug and the judge false-positives on every
+    # club-mismatch run. Show "unknown" — never coerce an absent count to 0 —
+    # so the judge ESCALATES an unknown rather than exonerating it (rule 1).
+    def _count(key: str) -> Any:
+        v = export.get(key)
+        return "unknown" if v is None else v
+    warns = export.get("parse_warnings") or []
+    warn_codes = ",".join(w.get("code", "") for w in warns
+                          if isinstance(w, dict) and w.get("code")) or "none"
     return (f"meet={meet.get('name') or meet.get('meet_name') or '?'}; "
             f"cards={len(cards)}; cards_with_caption={have_caps}; "
+            f"parsed_swim_count={_count('parsed_swim_count')}; "
+            f"our_swim_count={_count('our_swim_count')}; "
+            f"club_filter={export.get('club_filter') or '(none)'}; "
+            f"parse_warnings={warn_codes}; "
             f"trust={json.dumps(export.get('trust') or {})[:300]}")
 
 

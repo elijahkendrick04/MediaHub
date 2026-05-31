@@ -38,14 +38,21 @@
         "Reproduce the flow (result: passed-empty) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T124201Z-5db9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "71e02f586c45": {
       "fingerprint": "71e02f586c45",
@@ -59,7 +66,7 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T12:43:49+00:00",
       "last_seen": "2026-05-29T12:43:49+00:00",
       "seen_count": 1,
@@ -68,7 +75,14 @@
       "fix_pr": null,
       "fix_branch": null,
       "refiled_from": "council:blind_spot",
-      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it.",
+      "verified_fixed": {
+        "commit": "5c86706 (#196)",
+        "tests": "tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "The real UX gap this finding requested \u2014 clear, actionable feedback when no cards are generated \u2014 is exactly what #196 shipped ('No swims matched your club', shows parsed count, links to re-run).",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "5cebfcb079da": {
       "fingerprint": "5cebfcb079da",
@@ -178,7 +192,7 @@
         "Open a recent run \u2014 0 cards"
       ],
       "screenshot": "autotest/screenshots/37d87cf5f107.png",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T13:28:44+00:00",
       "last_seen": "2026-05-31T13:50:54+00:00",
       "seen_count": 15,
@@ -186,7 +200,14 @@
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 2
+      "fix_attempts": 2,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "c078dfe0fd10": {
       "fingerprint": "c078dfe0fd10",
@@ -252,14 +273,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T18:21:22+00:00",
       "last_seen": "2026-05-29T18:21:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "e9e98e5f2b67": {
       "fingerprint": "e9e98e5f2b67",
@@ -489,14 +517,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T19:20:22+00:00",
       "last_seen": "2026-05-29T19:20:22+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "c9862d27b7c0": {
       "fingerprint": "c9862d27b7c0",
@@ -557,14 +592,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-29T20:35:30+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "7c66fb1350e3": {
       "fingerprint": "7c66fb1350e3",
@@ -580,14 +622,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-29T20:35:30+00:00",
       "last_seen": "2026-05-29T20:35:30+00:00",
       "seen_count": 1,
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "aff50d6aa9db": {
       "fingerprint": "aff50d6aa9db",
@@ -1008,14 +1057,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-30T13:49:45+00:00",
       "last_seen": "2026-05-30T13:49:45+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "76ad189abd62": {
       "fingerprint": "76ad189abd62",
@@ -1484,14 +1540,21 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "verified_fixed": {
+        "commit": "5c86706 (#196, product honest empty state) + this PR (finder precision: functional rubric v2)",
+        "tests": "tests/test_autotest_empty_state_precision.py (8 passed); tests/test_review_empty_state_club_match.py (3 passed)",
+        "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "b3fcfc7348e7": {
       "fingerprint": "b3fcfc7348e7",
@@ -1671,7 +1734,7 @@
       "suspect": "",
       "repro": [],
       "screenshot": "",
-      "status": "open",
+      "status": "verified-fixed",
       "first_seen": "2026-05-30T16:19:14+00:00",
       "last_seen": "2026-05-30T16:19:14+00:00",
       "seen_count": 1,
@@ -1680,7 +1743,14 @@
       "fix_pr": null,
       "fix_branch": null,
       "refiled_from": "council:blind_spot",
-      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it."
+      "refiled_reason": "council ruling: functional/product concern re-filed as semantic so RULE A doesn't lose it.",
+      "verified_fixed": {
+        "commit": "5c86706 (#196)",
+        "tests": "manual: seeded sample meet -> 177 cards (Co Manch Aq) / 8 (Altrincham)",
+        "note": "Premise ('confidence threshold silently filtering ALL cards') is falsified \u2014 cards are generated and surfaced. The 0-cards condition is club-mismatch (#196), not threshold filtering.",
+        "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
+        "at": "2026-05-31T16:50:03+00:00"
+      }
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
