@@ -2764,9 +2764,12 @@ BASE_CSS = """
    - Hanken Grotesk: humanist body / UI (not Inter, not Roboto)
    - JetBrains Mono: scoreboard data, mono labels, slashed-zero
 */
-/* Font @imports moved to _layout's <head> as a single preconnect + non-
-   blocking <link> pair. CSS @import is fully render-blocking and was
-   costing ~500-700ms of FCP per the round-6 performance audit. */
+/* Fonts are SELF-HOSTED (Council verdict 2026-05-31): _layout's <head> links
+   the first-party static/theme/fonts.css (@font-face -> static/fonts/*.woff2)
+   and preloads the two universal above-the-fold faces. No Google Fonts CDN —
+   that fixes the intermittent Impact/Oswald fallback users saw and the EU/UK
+   GDPR exposure of the CDN. The --font-body stack carries a metric-tuned
+   'Hanken Grotesk Fallback' so the load swap produces no layout shift. */
 
 :root {
   /* PHASE 1.6 STAGE A — every colour token below now resolves through the
@@ -2846,7 +2849,7 @@ BASE_CSS = """
   /* Typography stacks — every face here is intentional */
   --font-display: 'Big Shoulders Display', 'Impact', 'Oswald', sans-serif;
   --font-serif:   'Fraunces', 'Source Serif Pro', Georgia, serif;
-  --font-body:    'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body:    'Hanken Grotesk', 'Hanken Grotesk Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Spacing scale (4px base) */
@@ -5608,12 +5611,16 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 <meta name="format-detection" content="telephone=no" />
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,500;1,9..144,700&amp;family=Hanken+Grotesk:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap"
-      media="print" onload="this.media='all'" />
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&amp;family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&amp;family=Hanken+Grotesk:wght@400;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" /></noscript>
+<!-- Self-hosted typefaces (Council verdict 2026-05-31): first-party woff2, no
+     Google Fonts CDN. Fixes the intermittent Impact/Oswald fallback users saw
+     when gstatic was blocked/slow, and removes the EU/UK GDPR exposure of the
+     Google CDN (Munich ruling). Preload the two universal above-the-fold faces
+     (body + display); the rest load on demand via @font-face in fonts.css. -->
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{{ url_for('static', filename='fonts/hanken-latin-normal-400.woff2') }}" />
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{{ url_for('static', filename='fonts/bigshoulders-latin-normal-800.woff2') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='theme/fonts.css') }}" />
 <style>{{ css | safe }}</style>
 {{ theme_seed_style | safe }}
 <script>
