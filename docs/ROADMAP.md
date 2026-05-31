@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `8be81920b` · docs(adr): council verdict — do not integrate jcode (#188)
+**Last updated:** 2026-05-31 · `5c8670678` · fix(review): explain zero-card runs when no swims match the club (#196)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `5c8670678` | fix(review): explain zero-card runs when no swims match the club (#196) |
 | 2026-05-31 | `8be81920b` | docs(adr): council verdict — do not integrate jcode (#188) |
 | 2026-05-31 | `21af4f990` | autopilot: persist builder state [skip ci] |
 | 2026-05-31 | `02ac71cef` | Deterministic, approval-gated caption voiceover (council verdict on Pixelle-Video) (#195) |
@@ -73,8 +74,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `e85505ad1` | docs(adr): council verdict — do not integrate agentmemory (#193) |
 | 2026-05-31 | `5e94f95d1` | autotest: add vision judge — the UI-TARS idea, not the stack (#194) |
 | 2026-05-31 | `0de1d8f12` | autotest: persist fixer memory [skip ci] |
-| 2026-05-31 | `eb15dae41` | autotest: refresh bug report [skip ci] |
-| 2026-05-31 | `f448dba20` | autopilot: persist builder state [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
