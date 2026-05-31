@@ -98,6 +98,18 @@ deterministic finder still runs.
   *is it doing what it should* (functional), *is the output correct* (captions
   grounded, confidence sane), and *does it work how a user would want*
   (user-brain). Dispatched in parallel.
+- **Vision judge** (`vision.py`) — looks at the *rendered* review/home
+  screenshots for **visual defects** the deterministic finder and the text-only
+  semantic judges are blind to: a logo/photo that 404'd into a broken-image box,
+  a caption clipped out of its card, an error banner painted over the page, an
+  empty review screen, illegible contrast. It runs on MediaHub's existing
+  `media_ai.llm` vision capability (Gemini→Anthropic) — **no GPU, no new
+  runtime**, honest-skip with no key. The VLM *looks and reports*; it never
+  drives the UI and never decides a swim time / PB (that stays in the
+  deterministic engine). This is the one idea taken from ByteDance's
+  UI-TARS-desktop — *let an AI see the screen* — applied to QA, not control
+  (verdict: `reports/council/ui-tars-desktop-*`). Toggle with `AUTOTEST_VISION`
+  (default `1`).
 - **LLM Council** (`council.py`, embedding the vendored `skills/llm-council`) —
   5 adversarial advisors → anonymised peer review → chairman verdict. It
   **adjudicates** the subagents' findings: confirms real bugs, demotes noise,
@@ -130,6 +142,7 @@ change and production, and they are strict:
 | `AUTOTEST_FIX_MAX_ATTEMPTS` | `2` | give up + open a GitHub issue after N failed fix tries (credit guard) |
 | `AUTOTEST_GATE_MAX_ITERS` | `3` | when a change fails the test gate, feed the failure back to the coder to fix the root cause, up to N iterations, then give up (bounded) |
 | `AUTOTEST_SEMANTIC` / `AUTOTEST_COUNCIL` | `1` | enable the AI judges / the council |
+| `AUTOTEST_VISION` | `1` | enable the screenshot vision judge (`vision.py`) — skips cleanly with no provider key |
 | `AUTOTEST_DISCOVER` | unset | let `claude` find more test files on the web |
 | `AUTOTEST_BUILD_ITEM` | — | force a specific roadmap id (e.g. `PAR-2`) |
 

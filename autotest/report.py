@@ -112,11 +112,11 @@ class Finding:
     is_bug: bool = True
 
     def fingerprint(self) -> str:
-        # LLM judges (semantic/council) phrase one defect many ways and vary the
-        # route, so for them hash a STABLE defect class — collapsing re-phrasings
-        # of the same defect into a single ledger entry. Deterministic findings
-        # keep their precise suspect/evidence signal.
-        if (self.category or "").startswith(("semantic", "council")):
+        # LLM judges (semantic/council/vision) phrase one defect many ways and
+        # vary the route, so for them hash a STABLE defect class — collapsing
+        # re-phrasings of the same defect into a single ledger entry.
+        # Deterministic findings keep their precise suspect/evidence signal.
+        if (self.category or "").startswith(("semantic", "council", "vision")):
             dc = _defect_class(f"{self.title} {self.expected} {self.actual}")
             if dc:
                 return fingerprint("llm", "", dc)
