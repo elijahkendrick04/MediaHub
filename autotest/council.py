@@ -238,8 +238,11 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
             c.is_bug = False
             c.category = f"{c.category} (council:noise)"
             c.evidence += f"\n\n[council triage] demoted — {d.get('reason', 'judged not a real problem')}"
-        elif d and d.get("severity") in ("low", "medium", "high"):
-            c.severity = d["severity"]
+        elif d:
+            if d.get("severity") in ("low", "medium", "high"):
+                c.severity = d["severity"]
+            if d.get("reason"):
+                c.rationale = str(d["reason"])[:2000]   # OPEN-PR: persist the WHY for the PR body
         out.append(c)
     out += candidates[10:]
 

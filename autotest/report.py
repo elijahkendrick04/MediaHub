@@ -108,6 +108,7 @@ class Finding:
     suspect: str = ""      # best-guess "file:line" in the repo
     repro: list[str] = dataclasses.field(default_factory=list)
     screenshot: str = ""   # path relative to repo root
+    rationale: str = ""    # the LLM-Council's WHY, persisted for the fix PR body
     is_bug: bool = True
 
     def fingerprint(self) -> str:
@@ -177,6 +178,8 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
             entry["actual"] = f.actual
             entry["evidence"] = f.evidence
             entry["suspect"] = f.suspect
+            if f.rationale:
+                entry["rationale"] = f.rationale[:2000]
             entry["repro"] = f.repro
             if f.screenshot:
                 entry["screenshot"] = f.screenshot
@@ -191,6 +194,7 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
                 "actual": f.actual,
                 "evidence": f.evidence,
                 "suspect": f.suspect,
+                "rationale": (f.rationale or "")[:2000],
                 "repro": f.repro,
                 "screenshot": f.screenshot,
                 "status": "open",
