@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -301,6 +303,87 @@ def implement_until_green(task: str, *, complex: bool = False,
             f"test to force a pass — fix the actual problem. Follow the discipline in "
             f"autotest/skills/coding/. Do NOT run git. pytest output:\n{tail[-2500:]}")
     return False, files, ins, f"still failing the gate after {max_iters} iterations"
+
+
+def _added_test_selectors(parent: str) -> tuple[list[str], list[str]]:
+    """(changed test files, names of test_ functions ADDED) between parent..HEAD."""
+    rc, out = _git("diff", "--name-only", f"{parent}..HEAD", "--", "tests/")
+    test_files = [f for f in out.splitlines() if f.strip().endswith(".py")]
+    if not test_files:
+        return [], []
+    rc, diff = _git("diff", f"{parent}..HEAD", "--", *test_files)
+    names = re.findall(r"^\+\s*def (test_\w+)", diff, re.M)
+    seen: set[str] = set()
+    uniq = [n for n in names if not (n in seen or seen.add(n))]
+    return test_files, uniq
+
+
+def prove_regression(parent: str | None = None) -> tuple[str, str]:
+    """Advisory regression-proof (council FIX rule): does the fix's NEW test
+    actually exercise the bug — fail/error on the PRE-fix source, pass after?
+    "Prove it when you can, never block when you can't."
+
+    Returns (status, detail) where status is one of:
+      proven   — a new test fails/errors on pre-fix source (so it exercises the bug)
+      hollow   — a new test passes even on pre-fix source (may not exercise the bug)
+      no-test  — the fix added no new test_ function (some fixes legitimately can't)
+      unproven — couldn't run the proof (no parent, added/deleted-only diff, error)
+
+    Never raises and never rewrites history. It reverts the fix's SOURCE in the
+    working tree (the editable install imports from there), runs ONLY the new
+    tests, then restores with `git reset --hard HEAD`. Advisory by default; the
+    caller hard-blocks only under AUTOTEST_REQUIRE_REGRESSION_PROOF=1."""
+    try:
+        if parent is None:
+            rc, mb = _git("merge-base", "HEAD", f"origin/{BASE_BRANCH}")
+            parent = mb.strip() if rc == 0 and mb.strip() else ""
+            if not parent:
+                rc, p = _git("rev-parse", "HEAD~1")
+                parent = p.strip() if rc == 0 else ""
+        if not parent:
+            return "unproven", "could not determine the parent commit"
+
+        test_files, names = _added_test_selectors(parent)
+        if not names:
+            return "no-test", "the fix added no new test_ function"
+
+        rc, out = _git("diff", "--name-only", f"{parent}..HEAD")
+        src_files = [f for f in out.splitlines() if f.strip() and not f.startswith("tests/")]
+        if not src_files:
+            return "unproven", "fix changed nothing outside tests/ — nothing to revert"
+
+        # Revert the fix's source to pre-fix, IN PLACE (editable install).
+        for f in src_files:
+            rc, _ = _git("cat-file", "-e", f"{parent}:{f}")
+            if rc == 0:
+                _git("checkout", parent, "--", f)          # modified/deleted → parent
+            else:
+                try:                                       # added-by-fix → remove
+                    (REPO_ROOT / f).unlink()
+                except OSError:
+                    pass
+        kexpr = " or ".join(names)
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", *test_files, "-k", kexpr,
+                 "-q", "-p", "no:cacheprovider"],
+                cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=600)
+            rc_prefix = proc.returncode
+        finally:
+            _git("reset", "--hard", "HEAD")                # bulletproof restore to the fix
+
+        if rc_prefix == 5:
+            return "no-test", f"no test matched the new selectors ({kexpr})"
+        if rc_prefix == 0:
+            return "hollow", f"new test(s) ({kexpr}) PASS on pre-fix source — may not exercise the bug"
+        # rc 1 (failed) or 2/3 (collection/error, e.g. imports a helper the fix added)
+        return "proven", f"new test(s) ({kexpr}) fail/error on pre-fix source, pass with the fix"
+    except Exception as e:
+        try:
+            _git("reset", "--hard", "HEAD")
+        except Exception:
+            pass
+        return "unproven", f"regression proof could not run: {type(e).__name__}: {str(e)[:120]}"
 
 
 def build_cycle() -> dict:

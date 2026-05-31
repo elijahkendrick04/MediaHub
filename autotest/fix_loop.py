@@ -218,6 +218,15 @@ def fix_one(bug: dict) -> dict:
 
     builder._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
                  f"finding {fp} ({bug.get('category')}).")
+    # Advisory regression-proof (council FIX rule): did the coder's new test
+    # actually exercise the bug (fail on PRE-fix source, pass after)? Hollow/no
+    # test isn't fatal — many real fixes can't have a failing-first test — so it
+    # only hard-blocks under AUTOTEST_REQUIRE_REGRESSION_PROOF=1; otherwise it's
+    # surfaced in the PR body + result for the operator to weigh.
+    reg_status, reg_detail = builder.prove_regression()
+    if os.environ.get("AUTOTEST_REQUIRE_REGRESSION_PROOF") == "1" and reg_status in ("hollow", "no-test"):
+        builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
+        return _give_up_or_retry(bug, attempts, f"regression proof {reg_status}: {reg_detail}")
     # Force: the fix branch is loop-owned and rebuilt fresh from main each
     # attempt, so a leftover from a prior attempt (or a stranded no-PR push)
     # must be overwritten — a plain push would be rejected non-fast-forward,
@@ -225,7 +234,8 @@ def fix_one(bug: dict) -> dict:
     builder._git("push", "-u", "--force", "origin", branch)
     pr_url, pr_err = builder._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
-        f"Autonomous fix for autotest finding `{fp}` ({bug.get('category')}).")
+        f"Autonomous fix for autotest finding `{fp}` ({bug.get('category')}).\n\n"
+        f"**Regression proof:** `{reg_status}` — {reg_detail}")
     merge = builder._merge_to_main(branch, has_pr=bool(pr_url))  # honours AUTOTEST_BUILD_MERGE
     if pr_err:
         # Branch is pushed with the fix, but no PR opened → nothing landed and
@@ -239,9 +249,11 @@ def fix_one(bug: dict) -> dict:
             f"Autopilot pushed a fix for `{fp}` but could not open a PR",
             f"Branch `{branch}` carries the fix, but no PR opened so it will not land. {pr_err}")
         return {"fp": fp, "result": "fix-pushed-no-pr", "files": len(files),
-                "pr": "", "pr_error": pr_err, "merge": merge, "branch": branch}
+                "pr": "", "pr_error": pr_err, "merge": merge, "branch": branch,
+                "regression": reg_status}
     _mark_fixing(fp, branch, pr_url)
-    return {"fp": fp, "result": "fix-opened", "files": len(files), "pr": pr_url, "merge": merge}
+    return {"fp": fp, "result": "fix-opened", "files": len(files), "pr": pr_url,
+            "merge": merge, "regression": reg_status}
 
 
 def main() -> int:
