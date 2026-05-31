@@ -66,6 +66,35 @@ def _is_hard_cluster(bug: dict) -> bool:
     return any(m in blob for m in _HARD_MARKERS)
 
 
+# Council RANK rule (severity floor): a genuine security/data-loss bug must be
+# attempted ahead of cosmetic ones — but bounded, so an UNFIXABLE critical can't
+# freeze the queue (the starvation problem never-skip+rotation was built to
+# avoid). A bug must PROVE it's critical by what it TOUCHES, not just by the
+# LLM judge's (gameable, inflation-prone) severity label: severity=="critical"
+# AND a structural security/data marker. And it jumps the queue only for its
+# first CRITICAL_ATTEMPT_CAP attempts, then falls back into normal rotation —
+# still eligible forever (never dropped). Cap the PRIORITY, not the bug.
+CRITICAL_ATTEMPT_CAP = int(os.environ.get("AUTOTEST_CRITICAL_ATTEMPT_CAP", "3"))
+_SECURITY_MARKERS = (
+    "auth", "idor", "leak", "secret", "api key", "api-key", "credential",
+    "tenant", "isolation", "data loss", "data-loss", "dataloss", "injection",
+    "xss", "csrf", "traversal", "rce", "ssrf",
+)
+
+
+def _is_verified_critical(bug: dict) -> bool:
+    """True for a bug that jumps the RANK queue: severity 'critical' AND a
+    structural security/data marker in its category/route/title, AND still within
+    its bounded priority window (fix_attempts < CRITICAL_ATTEMPT_CAP). After the
+    cap it returns False so the bug rejoins normal never-skip rotation."""
+    if str(bug.get("severity", "")).lower() != "critical":
+        return False
+    if int(bug.get("fix_attempts", 0)) >= CRITICAL_ATTEMPT_CAP:
+        return False
+    blob = f"{bug.get('category', '')} {bug.get('route', '')} {bug.get('title', '')}".lower()
+    return any(m in blob for m in _SECURITY_MARKERS)
+
+
 def _open_bugs(limit: int) -> list[dict]:
     """Open bugs eligible for a fix attempt. NEVER-SKIP policy: every open
     product bug stays eligible forever — we never drop one for having too many
@@ -77,12 +106,15 @@ def _open_bugs(limit: int) -> list[dict]:
     bugs = [b for b in ledger["bugs"].values()
             if b.get("status") == "open" and not b.get("fix_pr")
             and not _is_meta_finding(b)]
-    # NEVER-SKIP ordering (not exclusion). Round-robin by attempts FIRST so every
-    # bug gets a fresh shot before any is retried; then tractable bugs before the
-    # architectural content-empty cluster (so the coder lands quick wins instead
-    # of burning every run on the one bug it can't one-shot); then severity; then
-    # reproduced-this-sweep. Nothing is ever dropped — hard bugs just sink.
+    # NEVER-SKIP ordering (not exclusion). A bounded "verified-critical" tier
+    # jumps the queue FIRST (real security/data bugs beat cosmetics), but only
+    # for its first few attempts (see _is_verified_critical) so it can't starve
+    # the rest. Then: round-robin by attempts so every bug gets a fresh shot
+    # before any is retried; then tractable bugs before the architectural
+    # content-empty cluster; then severity; then reproduced-this-sweep. Nothing
+    # is ever dropped — hard bugs just sink.
     bugs.sort(key=lambda b: (
+        0 if _is_verified_critical(b) else 1,
         int(b.get("fix_attempts", 0)),
         1 if _is_hard_cluster(b) else 0,
         SEV_ORDER.get(b.get("severity", "low"), 4),
