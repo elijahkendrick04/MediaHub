@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `28cedbfbf` · harden(RANK): bounded verified-critical severity floor (#183)
+**Last updated:** 2026-05-31 · `63063c408` · harden(FIX): advisory regression-proof for the coder's test (#184)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `63063c408` | harden(FIX): advisory regression-proof for the coder's test (#184) |
 | 2026-05-31 | `28cedbfbf` | harden(RANK): bounded verified-critical severity floor (#183) |
 | 2026-05-31 | `f3342087b` | build(PAR-1): PAR-1 · Caption quality pack (#182) |
 | 2026-05-31 | `b9bc39a21` | fix(autotest): force-push loop branches + delete on merge (robust retry/redo) (#181) |
@@ -72,8 +73,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-05-31 | `6cd9034ab` | fix(autotest): make PR-open/auto-merge honest — stop silently stranding fixes (#177) |
 | 2026-05-30 | `740d459f8` | test(review): assert /review/&lt;id&gt; renders card content (rescue council blind-spot fix) (#176) |
 | 2026-05-30 | `e3300268c` | autotest: persist fixer memory [skip ci] |
-| 2026-05-30 | `cfa3863dd` | autotest: refresh bug report [skip ci] |
-| 2026-05-30 | `d2a6f5621` | autotest: persist fixer memory [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
