@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-05-31 · `20b00808e` · harden(MERGE): auto-revert catches silent content regressions, guarded + honest (#187)
+**Last updated:** 2026-05-31 · `e85505ad1` · docs(adr): council verdict — do not integrate agentmemory (#193)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,15 +63,18 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-05-31 | `e85505ad1` | docs(adr): council verdict — do not integrate agentmemory (#193) |
+| 2026-05-31 | `5e94f95d1` | autotest: add vision judge — the UI-TARS idea, not the stack (#194) |
+| 2026-05-31 | `0de1d8f12` | autotest: persist fixer memory [skip ci] |
+| 2026-05-31 | `eb15dae41` | autotest: refresh bug report [skip ci] |
+| 2026-05-31 | `f448dba20` | autopilot: persist builder state [skip ci] |
+| 2026-05-31 | `ecb8d71f7` | autotest: persist fixer memory [skip ci] |
+| 2026-05-31 | `5ab8f22aa` | autotest: refresh bug report [skip ci] |
 | 2026-05-31 | `20b00808e` | harden(MERGE): auto-revert catches silent content regressions, guarded + honest (#187) |
 | 2026-05-31 | `aaab9da2c` | harden(OPEN-PR): carry the council's reasoning into the PR body (#186) |
 | 2026-05-31 | `2d1236af5` | harden(FIND): golden-input baseline-diff for silent regressions (#185) |
 | 2026-05-31 | `63063c408` | harden(FIX): advisory regression-proof for the coder's test (#184) |
 | 2026-05-31 | `28cedbfbf` | harden(RANK): bounded verified-critical severity floor (#183) |
-| 2026-05-31 | `f3342087b` | build(PAR-1): PAR-1 · Caption quality pack (#182) |
-| 2026-05-31 | `b9bc39a21` | fix(autotest): force-push loop branches + delete on merge (robust retry/redo) (#181) |
-| 2026-05-31 | `4f7de3206` | fix(autotest): stranded fix (no PR) keeps its bug open, not stuck in limbo (#180) |
-| 2026-05-31 | `ba2b8cc69` | fix(autotest): rotate roadmap builds attempts-first so a hard item can't starve the rest (#179) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
