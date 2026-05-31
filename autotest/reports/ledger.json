@@ -1063,7 +1063,8 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "fix_attempts": 1
     },
     "46a3dad3dccc": {
       "fingerprint": "46a3dad3dccc",
