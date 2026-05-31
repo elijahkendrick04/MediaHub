@@ -218,7 +218,11 @@ def fix_one(bug: dict) -> dict:
 
     builder._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
                  f"finding {fp} ({bug.get('category')}).")
-    builder._git("push", "-u", "origin", branch)
+    # Force: the fix branch is loop-owned and rebuilt fresh from main each
+    # attempt, so a leftover from a prior attempt (or a stranded no-PR push)
+    # must be overwritten — a plain push would be rejected non-fast-forward,
+    # which would then open the PR against the STALE branch content.
+    builder._git("push", "-u", "--force", "origin", branch)
     pr_url, pr_err = builder._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
         f"Autonomous fix for autotest finding `{fp}` ({bug.get('category')}).")

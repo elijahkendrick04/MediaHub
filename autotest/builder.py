@@ -251,7 +251,9 @@ def _merge_to_main(branch: str, *, has_pr: bool) -> str:
         return "no PR opened — auto-merge NOT armed (nothing will land; see the PR error)"
     if not shutil.which("gh"):
         return "gh CLI not found — cannot enable CI-gated auto-merge"
-    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--squash"],
+    # --delete-branch tidies the loop-owned branch once the auto-merge lands, so
+    # these throwaway branches don't accumulate on origin.
+    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch"],
                        cwd=str(REPO_ROOT), capture_output=True, text=True)
     if m.returncode != 0:
         return "auto-merge NOT armed: " + ((m.stderr or m.stdout or "").strip()[:300]
@@ -365,7 +367,10 @@ def build_cycle() -> dict:
            f"Autonomously implemented roadmap item {item.id}.\n"
            f"{roadmap.directive(item.id, 'wip')}\n")
     _git("commit", "-m", msg)
-    _git("push", "-u", "origin", branch)
+    # Force: this branch is loop-owned, deterministic, and always rebuilt fresh
+    # from main, so a leftover (merged-but-undeleted or a prior attempt) must be
+    # overwritten — a plain push would be rejected non-fast-forward and strand it.
+    _git("push", "-u", "--force", "origin", branch)
 
     pr_url, pr_err = _open_pr(
         branch, f"build({item.id}): {item.title[:60]}",

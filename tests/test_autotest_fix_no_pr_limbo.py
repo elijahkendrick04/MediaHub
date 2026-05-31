@@ -27,13 +27,20 @@ def one_open_bug(tmp_path, monkeypatch):
     led.write_text(json.dumps({"schema": 1, "bugs": {"deadbeef01": bug}}))
     monkeypatch.setattr(report, "LEDGER_PATH", led)
     fix_loop._JOURNAL.clear()
-    # Neutralise the heavy side effects so fix_one reaches the PR step.
-    monkeypatch.setattr(builder, "_git", lambda *a, **k: (0, ""))
+    # Neutralise the heavy side effects so fix_one reaches the PR step, recording
+    # the git invocations so a test can assert how the branch was pushed.
+    git_calls: list[tuple] = []
+
+    def _rec_git(*a, **k):
+        git_calls.append(a)
+        return (0, "")
+
+    monkeypatch.setattr(builder, "_git", _rec_git)
     monkeypatch.setattr(builder, "implement_until_green",
                         lambda *a, **k: (True, ["src/x.py"], 3, "green"))
     # fix_one does a local `from autotest import notify` → patch the module attr.
     monkeypatch.setattr("autotest.notify.notify", lambda *a, **k: None)
-    return led, bug
+    return led, bug, git_calls
 
 
 def _status(led):
@@ -41,7 +48,7 @@ def _status(led):
 
 
 def test_no_pr_leaves_bug_open_not_fixing(one_open_bug, monkeypatch):
-    led, bug = one_open_bug
+    led, bug, _ = one_open_bug
     # PR creation is denied → _open_pr returns an error, no url.
     monkeypatch.setattr(builder, "_open_pr", lambda *a, **k: ("", "denied: not permitted to create"))
     monkeypatch.setattr(builder, "_merge_to_main", lambda *a, **k: "no PR opened — auto-merge NOT armed")
@@ -54,8 +61,23 @@ def test_no_pr_leaves_bug_open_not_fixing(one_open_bug, monkeypatch):
     assert not entry.get("fix_pr"), "must not set fix_pr when no PR opened (would exclude it forever)"
 
 
+def test_branch_push_is_forced(one_open_bug, monkeypatch):
+    """The fix branch is rebuilt fresh from main each attempt, so its push must
+    be forced to overwrite any leftover (prior attempt / stranded no-PR push) —
+    else the push is rejected and the PR opens against stale content."""
+    led, bug, git_calls = one_open_bug
+    monkeypatch.setattr(builder, "_open_pr", lambda *a, **k: ("https://x/pr/1", ""))
+    monkeypatch.setattr(builder, "_merge_to_main", lambda *a, **k: "enabled")
+
+    fix_loop.fix_one(bug)
+
+    pushes = [c for c in git_calls if c and c[0] == "push"]
+    assert pushes, "expected a git push"
+    assert any("--force" in c for c in pushes), f"branch push must be forced, got: {pushes}"
+
+
 def test_pr_opened_marks_fixing(one_open_bug, monkeypatch):
-    led, bug = one_open_bug
+    led, bug, _ = one_open_bug
     url = "https://github.com/acme/repo/pull/9"
     monkeypatch.setattr(builder, "_open_pr", lambda *a, **k: (url, ""))
     monkeypatch.setattr(builder, "_merge_to_main", lambda *a, **k: "auto-merge to main enabled")
