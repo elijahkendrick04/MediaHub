@@ -16,7 +16,7 @@ the classification rule once.
 
 ## The four criteria — ALL must be satisfied; each is an ARTIFACT, not a judgement
 
-1. **prove_regression RED (pre-fix):** `builder.prove_regression()` (or an equivalent
+1. **prove_regression RED (pre-fix):** `gitops.prove_regression()` (or an equivalent
    run) on the target bug's PRE-fix tree logs a status of `proven` — i.e. the new
    regression test FAILS/ERRORS on the source before the patch. Captured to a file.
 

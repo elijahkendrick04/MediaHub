@@ -37,8 +37,8 @@ that product code.
 ## Protected engine (unchanged, still hard-blocked)
 
 Independent of merge policy, the deterministic engine remains un-editable by the loop
-(`builder.PROTECTED`): parsers, detectors, the ranker, colour-science. A diff touching
-those aborts the cycle regardless of classification.
+(`gitops.PROTECTED`): parsers, detectors, the ranker, colour-science. A diff touching
+those aborts the attempt regardless of classification.
 
 ## Mixed diffs
 
@@ -47,7 +47,7 @@ If a single change touches BOTH product and harness/governance paths, it is clas
 
 ## How the loop consumes this
 
-`autotest/builder.py` reads this rule (the path lists above) to decide, for a given
+`autotest/gitops.py` reads this rule (the path lists above) to decide, for a given
 fix's changed-file set, whether to arm auto-merge (product) or stop at PR-opened for a
 human merge (harness/governance). The loop never overrides it.
 

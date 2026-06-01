@@ -19,7 +19,7 @@
    by `claude -p` in the loop, not hand-written. → check: the fix commit author is the
    autotest bot; no human commit touches product code in the fix branch.
 
-3. **[ ] prove_regression RED→GREEN.** `builder.prove_regression()` logged `proven` for the
+3. **[ ] prove_regression RED→GREEN.** `gitops.prove_regression()` logged `proven` for the
    fix (the new test fails on pre-fix source, passes after). → check: committed
    `prove_regression.log` shows the status `proven`.
 
