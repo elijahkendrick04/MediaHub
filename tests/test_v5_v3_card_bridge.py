@@ -73,3 +73,85 @@ def test_bridged_cards_carry_real_content(manchester_run):
     assert any(getattr(c, "swimmer_names", None) for c in cards), (
         "no bridged card carries a swimmer name — content is not grounded in V5 output"
     )
+
+
+def test_content_card_to_dict_exposes_caption_key():
+    """ContentCard.to_dict() must include a flat 'caption' key.
+
+    The export API and autotest observer read c.get('caption') — the singular
+    form. Before this fix, to_dict() only produced 'captions' (plural, per-tone
+    variants), so every card appeared to have an empty caption.
+    """
+    from swim_content.cards import ContentCard, CaptionVariants
+
+    # Card with clean caption populated
+    card = ContentCard(
+        card_id="test-1",
+        card_type="standout_swim",
+        headline="Gold for Alice in 100m Freestyle",
+        captions=CaptionVariants(clean="Alice goes gold", team="We love you Alice", hype="GOLD!"),
+    )
+    d = card.to_dict()
+    assert "caption" in d, "to_dict() missing 'caption' key — export consumers always see empty"
+    assert d["caption"] == "Alice goes gold", (
+        f"caption should be captions.clean but got: {d['caption']!r}"
+    )
+
+    # user_caption takes priority when set (approved/edited caption)
+    card.user_caption = "Edited by club social"
+    d2 = card.to_dict()
+    assert d2["caption"] == "Edited by club social", (
+        f"user_caption should win over captions.clean but got: {d2['caption']!r}"
+    )
+
+
+def test_v5_stubs_have_non_empty_captions():
+    """V5→V3 stubs must not have empty captions when voice_captions is absent.
+
+    The stub builder previously left captions empty when the voice.learned
+    renderer wasn't configured. The fix falls back to the achievement headline
+    so cards always carry meaningful caption text.
+    """
+    from mediahub.pipeline.pipeline_v4 import _v5_ranked_to_v3_stubs
+
+    ranked = [
+        {
+            "rank": 1,
+            "achievement": {
+                "swim_id": "swim-reg-1",
+                "swimmer_name": "Bob Jones",
+                "type": "pb_confirmed",
+                "headline": "Bob Jones sets a new PB in 200m IM",
+                "event": "200m IM (LC)",
+            },
+            "voice_captions": {},  # no voice captions configured
+        },
+        {
+            "rank": 2,
+            "achievement": {
+                "swim_id": "swim-reg-2",
+                "swimmer_name": "Carol Smith",
+                "type": "medal_gold",
+                "headline": "Gold for Carol Smith in 100m Backstroke",
+                "event": "100m Backstroke (SC)",
+            },
+            # voice_captions key absent entirely
+        },
+    ]
+    stubs = _v5_ranked_to_v3_stubs(ranked)
+    assert len(stubs) == 2
+
+    for stub, ra in zip(stubs, ranked):
+        ach = ra["achievement"]
+        d = stub.to_dict()
+        assert d["caption"], (
+            f"Stub for {ach['swim_id']} has empty 'caption' in to_dict() — "
+            "the export API will show empty captions for this card"
+        )
+        assert stub.captions.clean, (
+            f"Stub for {ach['swim_id']} has empty captions.clean — "
+            "headline fallback not applied"
+        )
+        assert d["caption"] == ach["headline"], (
+            f"Expected headline as fallback caption but got: {d['caption']!r}"
+        )

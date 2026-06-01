@@ -164,11 +164,18 @@ def _v5_ranked_to_v3_stubs(ranked: list[dict]) -> list[ContentCard]:
                 cap = vc
             if cap:
                 break
+        # When no voice caption is available, fall back to the achievement
+        # headline so the card carries a meaningful caption instead of
+        # empty strings. The headline is always populated by the recognition
+        # engine and makes the export/observer output readable.
+        headline = ach.get("headline") or ""
+        if not cap:
+            cap = headline
         stubs.append(
             ContentCard(
                 card_id=swim_id,
                 card_type=ach.get("type") or "standout_swim",
-                headline=ach.get("headline") or "",
+                headline=headline,
                 subhead=ach.get("event") or "",
                 swimmer_names=[swimmer] if swimmer else [],
                 claims=[],

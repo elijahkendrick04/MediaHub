@@ -103,4 +103,14 @@ class ContentCard:
         d["claims"] = [asdict(c) for c in self.claims]
         d["evidence"] = [e.to_dict() for e in self.evidence]
         d["captions"] = self.captions.all()
+        # Flat 'caption' key for consumers (export API, autotest) that expect a
+        # single canonical caption rather than per-tone variants. Prefer the
+        # user-edited caption if approved; otherwise use the clean voice.
+        d["caption"] = (
+            self.user_caption
+            or self.captions.clean
+            or self.captions.team
+            or self.captions.hype
+            or ""
+        )
         return d
