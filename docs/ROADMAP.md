@@ -55,7 +55,7 @@ flips an item's status badge when a commit message contains a directive line:
 > `roadmap: SEQ-1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `8ad41baf7` · Merge pull request #212: fix review progress denominator (ranked total, not store total)
+**Last updated:** 2026-06-02 · `2ca4ad0d5` · Merge pull request #214 from elijahkendrick04/claude/awesome-wright-6JCYk
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -63,6 +63,7 @@ flips an item's status badge when a commit message contains a directive line:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-01 | `d40d673c6` | Remove the autobuilder; extract shared git/PR plumbing to gitops |
 | 2026-06-01 | `499a94083` | test: add real /review route regression for the progress-denominator fix |
 | 2026-06-02 | `0e4dbdc04` | Rebuild |
 | 2026-06-01 | `0fa7633ea` | autotest: persist fixer memory [skip ci] |
@@ -74,7 +75,6 @@ flips an item's status badge when a commit message contains a directive line:
 | 2026-06-01 | `4cd98502d` | autotest: refresh bug report [skip ci] |
 | 2026-06-01 | `89958737f` | autopilot: persist builder state [skip ci] |
 | 2026-06-01 | `d995c75cf` | autotest: persist fixer memory [skip ci] |
-| 2026-06-01 | `8385e7010` | autotest: refresh bug report [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
