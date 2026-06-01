@@ -1,18 +1,18 @@
-# MediaHub Autopilot — autonomous tester + builder
+# MediaHub Autopilot — autonomous tester + fixer
 
-Two cooperating loops that test, find/fix bugs, and build the roadmap on their
-own — **fully autonomous and cloud-based, running in GitHub Actions** (no
-desktop, no Cowork). A headless browser does real uploads/downloads inside the
-runner, so nothing needs to "escape a sandbox".
+Two cooperating halves that test the product, find bugs, and turn them into fix
+PRs on their own — **fully autonomous and cloud-based, running in GitHub
+Actions** (no desktop, no Cowork). A headless browser does real uploads/downloads
+inside the runner, so nothing needs to "escape a sandbox".
 
 **Cloud setup (this is the engine):**
 1. Add **one** repo secret: **`CLAUDE_CODE_OAUTH_TOKEN`** — generated once with
    **`claude setup-token`** from a **Claude Pro/Max subscription**. That single
-   token powers the WHOLE loop (subagents, council, coder + fixer) via the
-   Claude CLI — **no API keys anywhere, flat cost, no metered billing**. No
-   token → the AI judges + build/fix steps skip cleanly, so nothing runs wild
-   until you arm it. On repeated failure the loop **opens a GitHub issue and
-   stops** (capped attempts) instead of wasting subscription quota.
+   token powers the WHOLE loop (subagents, council, fixer) via the Claude CLI —
+   **no API keys anywhere, flat cost, no metered billing**. No token → the AI
+   judges + fix steps skip cleanly, so nothing runs wild until you arm it. On
+   repeated failure the loop **opens a GitHub issue and stops** (capped attempts)
+   instead of wasting subscription quota.
    *(Prefer the free-tier Gemini coder/judges instead? Set `AUTOTEST_CODER=gemini`
    and the relevant API key — but the default is API-key-free.)*
 2. Settings → General → enable **Allow auto-merge**, and allow the actions bot
@@ -21,36 +21,39 @@ runner, so nothing needs to "escape a sandbox".
    Settings → Actions → General → tick **"Allow GitHub Actions to create and
    approve pull requests"**, **or** add an **`AUTOTEST_GH_PAT`** secret (a
    fine-grained PAT with `pull_request: write` + `contents: write`) — the
-   workflows prefer it over `GITHUB_TOKEN`, and a PAT-opened PR also triggers CI
+   workflow prefers it over `GITHUB_TOKEN`, and a PAT-opened PR also triggers CI
    so `--auto` merge can actually fire. Without one of these, `gh pr create`
    is denied, the loop reports `fix-pushed-no-pr` (branch pushed, **not** merged)
    and notifies you — it no longer silently claims success.
-3. That's it. `.github/workflows/autotest.yml` (hourly) finds + fixes bugs and
-   commits `BUGS.md` back; `.github/workflows/autopilot.yml` (every 2h) builds
-   the next roadmap item, tests it, and merges it to `main` if it didn't
-   regress. The roadmap status flips itself via the existing autoupdate.
+3. That's it. `.github/workflows/autotest.yml` (every 6h) finds + reports bugs,
+   commits `BUGS.md` + `ledger.json` back to `main` so the dedup memory persists,
+   then runs the fixer to turn new bugs into fix PRs (auto-merged on green CI when
+   armed).
 
-The `loop.py` / `build_loop.py` "run forever" drivers below are an OPTIONAL
-always-on worker (e.g. a cloud VM) if you ever want continuous rather than
-scheduled — the cloud default is the two workflows.
+The `loop.py` "run forever" driver below is an OPTIONAL always-on worker (e.g. a
+cloud VM) if you ever want continuous rather than scheduled — the cloud default
+is the scheduled workflow.
 
 ```
-                ┌───────────────── BUILDER loop (autotest.build_loop) ─────────────────┐
-  docs/ROADMAP.md → pick next item → Claude coder builds it → guards + test gate →
-                     commit + PR → (arm) merge to main → writes a HANDOVER ───────────┐
-                                                                                       │
-                ┌───────────────── TESTING loop (autotest.loop) ──────────────────────▼─┐
-  boot app → drive real flow + crawl → deterministic detectors ┐                        │
-                                                               ├→ semantic subagents ┐  │
-   (reads the HANDOVER, judges the new feature vs ROADMAP intent)                    ├→ LLM Council
-                                                               ┘  (adjudicates)      ┘  │
-  → BUGS.md (deduped, fix-ready)  → accept: mark roadmap DONE  ◄── or AUTO-REVERT ◄──────┘
-                                  → fixer (autotest.fix_loop) turns bugs into PRs
+                ┌──────────────── TESTING loop (autotest.loop / autotest.run) ───────────┐
+  boot app → drive real flow + crawl → deterministic detectors ┐                         │
+                                                               ├→ semantic subagents ┐   │
+                                                               ├→ vision judge       ├→ LLM Council
+                                                               ┘  (adjudicates)      ┘   │
+  → BUGS.md (deduped, fix-ready) ──────────────────────────────────────────────────────►│
+                                                                                          │
+                ┌──────────────── FIXER loop (autotest.fix_loop) ────────────────────────▼─┐
+  read ledger → pick top open bug → Claude coder fixes it on a branch → guards + test gate →
+                regression-proof → commit + PR → (armed) auto-merge to main on green CI ────┘
 ```
 
-## Optional: run it locally (the cloud workflows are the default)
+The two share their git/PR/test-gate plumbing through `autotest/gitops.py` (the
+neutral change-landing harness: implement-to-green → protected-engine + scope
+guards → product-vs-harness classification → open PR → arm CI-gated auto-merge).
 
-These are the same single-shot entrypoints the workflows call — handy for a
+## Optional: run it locally (the cloud workflow is the default)
+
+These are the same single-shot entrypoints the workflow calls — handy for a
 local smoke test or an always-on worker. The cloud needs none of this.
 
 ```bash
@@ -65,14 +68,6 @@ python -m autotest.run
 
 # 4) autonomous bug fixing (bugs -> claude -> PR; arm prod merge separately):
 python -m autotest.fix_loop
-
-# 5) autonomous roadmap building (build next item -> PR -> handover):
-python -m autotest.build_loop
-
-# Full autopilot = run the builder loop AND the testing loop together,
-# with the tester allowed to mark the roadmap done / revert:
-AUTOTEST_ACCEPT_APPLY=1 python -m autotest.loop      # terminal 1
-python -m autotest.build_loop                        # terminal 2
 ```
 
 The bug report lands in **`autotest/reports/BUGS.md`** — deduped and written so a
@@ -85,8 +80,8 @@ or let `autotest.fix_loop` do it.
 The Gemini/Anthropic key is read from the environment (loaded from the gitignored
 `.env` by `autotest/_env.py`). It is **never** written into source, tests,
 commits, or logs. Rotate it by editing `.env` alone. With no key, the AI layers
-(semantic subagents + council + acceptance judge) skip cleanly and the
-deterministic finder still runs.
+(semantic subagents + council + vision judge) skip cleanly and the deterministic
+finder still runs.
 
 ## The intelligence layer
 
@@ -106,10 +101,7 @@ deterministic finder still runs.
   `media_ai.llm` vision capability (Gemini→Anthropic) — **no GPU, no new
   runtime**, honest-skip with no key. The VLM *looks and reports*; it never
   drives the UI and never decides a swim time / PB (that stays in the
-  deterministic engine). This is the one idea taken from ByteDance's
-  UI-TARS-desktop — *let an AI see the screen* — applied to QA, not control
-  (verdict: `reports/council/ui-tars-desktop-*`). Toggle with `AUTOTEST_VISION`
-  (default `1`).
+  deterministic engine). Toggle with `AUTOTEST_VISION` (default `1`).
 - **LLM Council** (`council.py`, embedding the vendored `skills/llm-council`) —
   5 adversarial advisors → anonymised peer review → chairman verdict. It
   **adjudicates** the subagents' findings: confirms real bugs, demotes noise,
@@ -118,55 +110,39 @@ deterministic finder still runs.
 
 ## Safety nets & flags
 
-The operator chose **full auto-merge to `main`** (overriding the council's
-advice for a human gate). These are therefore the only things between a bad AI
-change and production, and they are strict:
+The operator chose **full auto-merge to `main`** for product fixes (overriding
+the council's advice for a human gate). These are therefore the only things
+between a bad AI change and production, and they are strict:
 
 | Net | Behaviour |
 |---|---|
-| Kill switch | `touch autotest/STOP` halts both loops immediately |
-| Circuit breaker | `AUTOTEST_BUILD_BREAKER` (3) consecutive failed builds → halt for a human |
-| Protected paths | a build/fix touching the deterministic engine (parsers, detectors, ranker, colour-science) aborts before merge |
+| Kill switch | `touch autotest/STOP` halts the loop immediately |
+| Protected paths | a fix touching the deterministic engine (parsers, detectors, ranker, colour-science) aborts before merge |
+| Harness/governance gate | a fix touching `autotest/`, CI, deploy, or governance paths opens the PR but stops for a HUMAN merge (`CHANGE_CLASSIFICATION.md`) — the loop never auto-lands a change to its own harness |
 | Scope cap | `AUTOTEST_BUILD_MAX_FILES` (25) / `AUTOTEST_BUILD_MAX_INSERTIONS` (2000) |
 | Test gate | the full suite must stay green or nothing merges |
-| Iterate-to-green | a gate failure is fed back to the coder to fix the ROOT CAUSE (repo skills), up to `AUTOTEST_GATE_MAX_ITERS`, then it carries on merging — it does not just abandon the change (and may not delete/weaken tests to pass) |
-| Auto-revert | the testing loop reverts a merged item on `main` if it regresses, and marks the roadmap `blocked` |
+| Iterate-to-green | a gate failure is fed back to the coder to fix the ROOT CAUSE (repo skills), up to `AUTOTEST_GATE_MAX_ITERS`, then it stops — it may not delete/weaken tests to pass |
+| Regression-proof | the fix's new test must fail on pre-fix source and pass after (`gitops.prove_regression`); advisory by default, hard-blocking under `AUTOTEST_REQUIRE_REGRESSION_PROOF=1` |
+| Attempt cap | after `AUTOTEST_FIX_MAX_ATTEMPTS` failed tries on one bug the loop opens a GitHub issue and de-prioritises it (never silently drops it) |
 
 | Flag | Default | Effect |
 |---|---|---|
-| `AUTOTEST_BUILD_APPLY` | `1` | build the item (claude + commit + push + PR). `0` = dry-run plan |
-| `AUTOTEST_BUILD_MERGE` | `0` | **arm** CI-gated auto-merge to `main` (full auto to prod). One flag from hands-off |
-| `AUTOTEST_ACCEPT_APPLY` | `0` | let the tester push roadmap `done`/`blocked` directives + reverts |
 | `AUTOTEST_FIX_APPLY` | `1` | run the bug-fixer (`0` = list only) |
+| `AUTOTEST_BUILD_MERGE` | `0` | **arm** CI-gated auto-merge of fix PRs to `main` (full auto to prod). One flag from hands-off |
 | `AUTOTEST_CODER` | `claude` | coding agent: `claude` (best quality, no fallback) or `gemini` |
 | `AUTOTEST_FIX_MAX_ATTEMPTS` | `2` | give up + open a GitHub issue after N failed fix tries (credit guard) |
 | `AUTOTEST_GATE_MAX_ITERS` | `3` | when a change fails the test gate, feed the failure back to the coder to fix the root cause, up to N iterations, then give up (bounded) |
 | `AUTOTEST_SEMANTIC` / `AUTOTEST_COUNCIL` | `1` | enable the AI judges / the council |
 | `AUTOTEST_VISION` | `1` | enable the screenshot vision judge (`vision.py`) — skips cleanly with no provider key |
 | `AUTOTEST_DISCOVER` | unset | let `claude` find more test files on the web |
-| `AUTOTEST_BUILD_ITEM` | — | force a specific roadmap id (e.g. `PAR-2`) |
 
-## Roadmap integration
-
-The builder reads `docs/ROADMAP.md` (IDs `SEQ-N`, `PAR-N`, `Step N`, phase
-`1.6`) and picks the next uncompleted item. Status is flipped via the existing
-`scripts/roadmap_autoupdate.py` machinery — the loops just emit a
-`roadmap: <id> <status>` commit trailer (`wip` on build, `done` on acceptance,
-`blocked` on regression).
+> `AUTOTEST_BUILD_MERGE` keeps its historical name (the deployed workflow sets it)
+> so re-homing the auto-merge code from the old builder into `gitops.py` didn't
+> change the operator's configured behaviour. It arms the **fixer's** auto-merge.
 
 ## GitHub Actions backstop
 
 `.github/workflows/autotest.yml` runs the finder on a schedule (no machine
-needed) and uploads `BUGS.md` + screenshots as an artifact. Add `GEMINI_API_KEY`
-as a repo secret to run the subagents + council there too.
-
-## What the council said about full autonomy
-
-Consulted on this exact design, the council called fully-autonomous
-build→merge→deploy with no human "catastrophic risk" — chiefly the
-builder/tester validating each other's mistakes (a "hallucination cascade") and
-uncontrolled prod deploys. Its #1 recommendation was a human feature-level check
-before prod. The operator reviewed this and chose full auto to `main` anyway;
-the safety nets above are the agreed mitigation. Flip to a human gate any time
-by requiring approval on the build PRs and leaving `AUTOTEST_BUILD_MERGE=0`.
-```
+needed) and uploads `BUGS.md` + screenshots as an artifact, then runs the fixer.
+Add `GEMINI_API_KEY` as a repo secret to run the subagents + council there too
+(or use the subscription `CLAUDE_CODE_OAUTH_TOKEN`).

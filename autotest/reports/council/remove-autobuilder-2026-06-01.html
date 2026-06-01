@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Council Verdict — Remove the Autobuilder</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--ink:#e8ebf0;--mut:#9aa3b2;
+        --accent:#5b8cff;--good:#2ecc71;--warn:#f1c40f;--bad:#e74c3c;--line:#272c37}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:40px 22px 80px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);
+     margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:7px}
+  .sub{color:var(--mut);margin:0 0 8px}
+  .pill{display:inline-block;font-size:12px;padding:3px 10px;border-radius:999px;
+        background:var(--panel2);border:1px solid var(--line);color:var(--mut);margin-right:6px}
+  .verdict{background:linear-gradient(180deg,#1b2230,#161a22);border:1px solid #2b3550;
+           border-radius:14px;padding:22px 24px;margin-top:14px}
+  .verdict h3{margin:0 0 14px;font-size:18px}
+  .row{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:0}
+  .k{flex:0 0 152px;color:var(--mut);font-weight:600}
+  .v{flex:1}
+  .tag{font-weight:700}
+  .tag.a{color:var(--accent)} .tag.x{color:var(--good)} .tag.keep{color:var(--warn)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}.k{flex-basis:110px}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 16px}
+  .card .name{font-weight:700;margin-bottom:4px}
+  .card .pos{font-size:12px;color:var(--mut);margin-bottom:8px}
+  .vote{font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--panel2)}
+  .va{color:var(--accent)} .vx{color:var(--good)} .vk{color:var(--warn)} .vrm{color:var(--bad)}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 16px;margin:10px 0}
+  summary{cursor:pointer;font-weight:600;outline:none}
+  details p{color:#cfd5e0}
+  .first{background:#12251a;border:1px solid #1f5d3a;border-radius:11px;padding:16px 18px;margin-top:10px}
+  .first b{color:var(--good)}
+  code{background:#0c0e13;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px}
+  .foot{color:var(--mut);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+  .clash{border-left:3px solid var(--warn);padding-left:14px;margin:6px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Council Verdict — Remove the Autobuilder</h1>
+  <p class="sub">Keep the autotester (bug-finder) &amp; autochecker (bug-fixer). 2026-06-01.</p>
+  <div>
+    <span class="pill">5 advisors</span><span class="pill">anonymised peer review</span>
+    <span class="pill">chairman synthesis</span><span class="pill">governance: CLAUDE.md</span>
+  </div>
+
+  <h2>The decision</h2>
+  <div class="verdict">
+    <h3>Extract the shared plumbing, delete the rest — thoroughly.</h3>
+    <div class="row"><div class="k">Fork 1 · plumbing</div><div class="v">
+      <span class="tag a">A — Extract</span> the shared git/PR/test-gate helpers the fixer depends on into a new
+      neutral module <code>autotest/gitops.py</code>, then delete <code>builder.py</code> + <code>build_loop.py</code>.
+      <em>Not</em> <code>harness.py</code> — that word already means the whole package. Fixer stays byte-identical
+      (same bodies, same <code>AUTOTEST_BUILD_*</code> env-var names).</div></div>
+    <div class="row"><div class="k">Fork 2 · boundary</div><div class="v">
+      <span class="tag x">X — Thorough</span> delete <code>accept.py</code>, <code>handover.py</code>,
+      <code>autotest/handover/</code>, <code>roadmap.py</code>, <code>builder_state.json</code>; strip the acceptance
+      handshake from <code>run.py</code>. A no-producer auto-revert pathway is a latent foot-gun, not tidy dead weight.</div></div>
+    <div class="row"><div class="k">Roadmap write-side</div><div class="v">
+      <span class="tag keep">KEEP</span> <code>roadmap-autoupdate.yml</code> + <code>scripts/roadmap_autoupdate.py</code>
+      + <code>docs/ROADMAP.md</code> — a separate subsystem outside the autobuilder; degrades to human-driven.
+      Add one honest line noting the autonomous emitter is gone.</div></div>
+    <div class="row"><div class="k">Tests</div><div class="v">
+      <b>Repoint</b> <code>change_classification</code>, <code>pr_open</code>, <code>regression_proof</code>,
+      <code>fix_no_pr_limbo</code> → <code>gitops</code>. <b>Delete</b> <code>build_rotation</code> + <code>merge_revert</code>
+      (tests for removed behaviour). No test weakened to go green.</div></div>
+    <div class="row"><div class="k">Docs</div><div class="v">
+      Rewrite <code>autotest/README.md</code> to a tester+fixer system; fix the <code>CLAUDE.md</code>
+      "tester/builder" line; audit <code>docs/*.md</code>; add a CHANGELOG removal entry.</div></div>
+  </div>
+
+  <div class="first">
+    <b>Do this first →</b> create <code>autotest/gitops.py</code> by moving the shared helpers out of
+    <code>builder.py</code> verbatim, repoint <code>fix_loop.py</code> + the three shared-helper tests + the
+    <code>fix_no_pr_limbo</code> monkeypatch targets, and get the full suite green <em>before deleting anything</em>.
+    Extraction-first keeps the tree green at every step and defuses the silent mock-patch false-green trap.
+  </div>
+
+  <h2>Where the advisors landed</h2>
+  <div class="grid">
+    <div class="card"><div class="name">The Executor <span class="vote va">A</span> <span class="vote vx">X</span></div>
+      <div class="pos">Peer pick: strongest (5/5)</div>
+      Concrete green-at-every-checkpoint sequence; named the mock-patch trap <em>and</em> resolved it.</div>
+    <div class="card"><div class="name">The Contrarian <span class="vote va">A</span> <span class="vote vx">X</span></div>
+      <div class="pos">Caught the foot-gun</div>
+      <code>accept</code>'s auto-revert is a "loaded weapon" with stale handovers; mock patches break silently → false green.</div>
+    <div class="card"><div class="name">First Principles <span class="vote va">A</span> <span class="vote vx">X</span> <span class="vote vk">keep</span></div>
+      <div class="pos">Reframed the boundary</div>
+      Essence removed = roadmap <em>autonomy</em>; git plumbing is neutral. Keep the badge-updater (CI doc).</div>
+    <div class="card"><div class="name">The Expansionist <span class="vote va">A</span> <span class="vote vx">X</span> <span class="vote vrm">remove</span></div>
+      <div class="pos">Found the upside</div>
+      Extraction yields a composable platform for future automations. Remove the badge-updater as overhead.</div>
+    <div class="card"><div class="name">The Outsider <span class="vote va">A</span> <span class="vote vx">X</span> <span class="vote vrm">remove</span></div>
+      <div class="pos">Fresh eyes on naming</div>
+      A <code>builder.py</code> that doesn't build is a trap; ghost auto-revert wastes afternoons.</div>
+    <div class="card"><div class="name">Chairman <span class="vote va">A</span> <span class="vote vx">X</span> <span class="vote vk">keep</span></div>
+      <div class="pos">Binding</div>
+      A+X unanimous. On the clash, sided KEEP — verified nothing else writes the trailers; it's outside the boundary.</div>
+  </div>
+
+  <h2>Where the council clashed</h2>
+  <div class="clash"><b>The roadmap badge-updater.</b> First Principles said keep (CI documentation);
+    Expansionist + Outsider said remove (it "becomes a liar" with nothing advancing the roadmap). Peer review
+    demanded the deciding fact: <em>who still writes the <code>roadmap:</code> trailers?</em> Verified —
+    after removal, nothing in <code>autotest/</code> does (only the deleted builder/accept did; the fixer writes none).
+    Chairman call: <b>KEEP</b> — it's a separate subsystem, two of its three functions are builder-independent and
+    useful, and the operator scoped removal to the autobuilder <em>of</em> the roadmap tool, not the tool itself.
+    One honest clarifying line removes the "ghost" smell.</div>
+
+  <h2>Blind spots peer review caught</h2>
+  <details><summary>Naming — <code>harness.py</code> collides with "the harness"</summary>
+    <p>The whole <code>autotest/</code> package is colloquially "the harness" in CLAUDE.md. The new module is named
+    <code>gitops.py</code> instead, to stay unambiguous.</p></details>
+  <details><summary>Env vars — don't rename <code>AUTOTEST_BUILD_MERGE</code></summary>
+    <p>It's read by <code>_merge_to_main</code>, which the <em>kept</em> fixer workflow sets. Renaming would silently
+    change fixer behaviour on the runner. All <code>AUTOTEST_BUILD_*</code> names are preserved verbatim.</p></details>
+  <details><summary>Docs lie after removal</summary>
+    <p><code>autotest/README.md</code> (build-loop diagram, full-autonomy section), <code>CLAUDE.md</code>, and several
+    <code>docs/*.md</code> describe a system that won't exist. Honest doc rewrite is in scope, not optional.</p></details>
+  <details><summary>Process &amp; reversibility</summary>
+    <p>Run the CLAUDE.md 15-step breakage check first; one reviewable commit; verify the deterministic engine is
+    untouched. "Fully remove from ever existing" settles reversibility — git history is the only hedge, no commented-out code.</p></details>
+
+  <p class="foot">Counciled: removing the autobuilder while keeping the autotester + autochecker.
+  Methodology: Karpathy's LLM Council (5 advisors → anonymised peer review → chairman). Full transcript:
+  <code>remove-autobuilder-2026-06-01.md</code>.</p>
+</div>
+</body>
+</html>

@@ -7,7 +7,7 @@
 #      report PERSIST across these stateless runs (without this, every run
 #      re-reports the same bugs);
 #   3. runs the fixer — turns new bugs into fix PRs (and merges them when armed)
-#      with the same gates as the builder.
+#      with the shared gitops gates (protected-engine guard, scope cap, green-test gate).
 #
 # Secret: CLAUDE_CODE_OAUTH_TOKEN only — NO API keys. The finder's subagents +
 #         council AND the fixer's Claude Code all run on a flat Pro/Max

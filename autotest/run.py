@@ -935,31 +935,9 @@ def _resolve_base() -> tuple[str, AppServer | None]:
     return server.base, server
 
 
-def _write_last_run(run_id: str, *, flow_result: str = "tester-crashed", open_bugs: int = 0,
-                    crit_high: int = 0, hard_crashes: int = 1, council_verdict: str = "",
-                    accepted: bool = False, blocked: bool = True) -> None:
-    """Write the gate file the autopilot reads to decide merge-vs-discard. It is
-    written on EVERY exit (success or crash); the defaults are FAIL-CLOSED
-    (hard_crashes=1, blocked=True) so a crashed tester makes the autopilot
-    DISCARD the freshly-built branch instead of leaving it dangling."""
-    try:
-        (report.REPORTS_DIR / "last_run.json").write_text(json.dumps({
-            "run_id": run_id, "flow_result": flow_result, "open_bugs": open_bugs,
-            "critical_high": crit_high, "hard_crashes": hard_crashes,
-            "council_verdict": council_verdict,
-            "roadmap_accepted": accepted, "roadmap_blocked": blocked,
-        }, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-
 def main() -> int:
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:4]
-    try:
-        return _run(run_id)
-    except Exception:
-        _write_last_run(run_id)   # fail-closed sentinel so the autopilot discards, never dangles
-        raise
+    return _run(run_id)
 
 
 def _run(run_id: str) -> int:
@@ -1082,14 +1060,6 @@ def _run(run_id: str) -> int:
                         evidence=tb, suspect=_extract_suspect(tb)))
             server.stop()
 
-    # roadmap acceptance handshake: consume any builder handovers, judge them
-    # against roadmap intent + this sweep's evidence, mark done or auto-revert.
-    try:
-        from autotest import accept
-        tester.findings.extend(accept.process(tester.findings, tester.artifacts))
-    except Exception:
-        pass
-
     # FIND baseline-diff (council): catch a SILENT primary-flow regression on the
     # fixed golden input the subagents don't think to flag (e.g. 12 cards -> 3).
     # Deterministic, so it bypasses council triage. Never break the sweep over it.
@@ -1111,21 +1081,6 @@ def _run(run_id: str) -> int:
                 "pages_crawled": tester.pages_crawled, "flow_result": flow_result,
                 "council_verdict": council_verdict}
     report.write_report(run_meta)
-
-    # Stable machine-readable summary the cloud autopilot reads to decide
-    # whether to merge a freshly-built branch or discard it.
-    crit_high = sum(1 for f in tester.findings if f.is_bug and f.severity in ("critical", "high"))
-    # Hard regressions = unambiguous SERVER breakage a build introduces (5xx,
-    # tracebacks, routes that won't load). Deliberately NOT flow_failure: a flow
-    # that runs but yields the wrong output is usually a pre-existing product bug
-    # (it's still reported in BUGS.md) and must not block every autonomous merge.
-    _crash = {"http_5xx", "server_traceback", "navigation_error"}
-    hard_crashes = sum(1 for f in tester.findings if f.is_bug and f.category in _crash)
-    _write_last_run(run_id, flow_result=flow_result, open_bugs=stats["open"],
-                    crit_high=crit_high, hard_crashes=hard_crashes,
-                    council_verdict=council_verdict,
-                    accepted=any(f.category == "roadmap_accepted" for f in tester.findings),
-                    blocked=any(f.category == "roadmap_regression" for f in tester.findings))
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     (RUNS_DIR / f"{run_id}.json").write_text(json.dumps({
