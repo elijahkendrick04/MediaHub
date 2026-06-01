@@ -1986,14 +1986,15 @@
         "Open https://mediahub-gzwc.onrender.com/static/fonts/bigshoulders-latin-normal-800.woff2"
       ],
       "screenshot": "autotest/screenshots/a12292408770.png",
-      "status": "open",
+      "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
       "last_seen": "2026-06-01T04:28:03+00:00",
       "seen_count": 2,
       "last_run_id": "20260601T042046Z-1030",
       "present_last_run": true,
-      "fix_pr": null,
-      "fix_branch": null
+      "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/210",
+      "fix_branch": "autotest/fix-a12292408770",
+      "fix_attempts": 1
     },
     "0fc5bf4cd758": {
       "fingerprint": "0fc5bf4cd758",
