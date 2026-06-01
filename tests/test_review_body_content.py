@@ -313,3 +313,48 @@ class TestReviewBodyContainsCardData:
             # Must not contain a Python traceback
             assert "Traceback" not in body
             assert "Internal Server Error" not in body
+
+
+class TestReviewProgressUsesRankedTotal:
+    """Regression guard for the "REVIEWED 3/3 = 100%" false-completion bug.
+
+    The progress strip denominator must be the pipeline's ranked-achievement
+    count, not the workflow-store total. With 4 ranked achievements and only 1
+    approved, the store total is 1 (only the touched card has a saved state) —
+    the buggy code did ``wf_total or n_ranked`` = 1 and rendered "1/1 = 100%
+    reviewed" while 3 cards were still queued.
+
+    Unlike the unit test that mirrors the formula in a local helper (it passes on
+    the buggy source — "hollow"), this drives the REAL /review route end-to-end.
+    """
+
+    def test_progress_denominator_is_ranked_total_not_store_total(self, review_env):
+        wm = review_env["wm"]
+        client = review_env["client"]
+        achievements = [
+            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
+             "event": "100m Freestyle", "headline": f"PB for Swimmer {i}"}
+            for i in range(4)
+        ]
+        payload = _make_run_payload("org-test", achievements)
+        run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
+
+        # Approve exactly ONE card via the same store the route reads.
+        from mediahub.workflow.status import CardStatus
+        ws = wm._get_wf_store()
+        ws.set_status(run_id, "card-swim-0", CardStatus.APPROVED)
+        # The store only knows the 1 card we touched ...
+        assert ws.summary(run_id)["total"] == 1
+        # ... but the run has 4 ranked achievements.
+        assert len(payload["recognition_report"]["ranked_achievements"]) == 4
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        # FIXED: 1 decided / 4 ranked = 25%.
+        assert '1<span class="total">/ 4</span>' in body, "denominator must be the ranked total (4)"
+        assert 'mh-progress-strip-label">25%<' in body, "1 of 4 reviewed must read 25%"
+        # BUG SIGNATURE must be ABSENT: store-total denominator (1) -> 100%.
+        assert '1<span class="total">/ 1</span>' not in body
+        assert 'mh-progress-strip-label">100%<' not in body

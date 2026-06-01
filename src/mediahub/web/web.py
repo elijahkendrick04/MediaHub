@@ -9158,7 +9158,7 @@ def create_app() -> Flask:
             _review_base = url_for("review", run_id=run_id)
             _wf_filter_buttons = ""
             _wf_counts = {
-                "": _wf_n_total or len(ranked_achs),
+                "": len(ranked_achs) or _wf_n_total,
                 "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
                 "approved": _wf_n_approved,
                 "rejected": _wf_n_rejected,
@@ -9184,7 +9184,7 @@ def create_app() -> Flask:
                 )
             # Progress maths — how much of the queue has the user actioned?
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
-            _wf_grand_total = _wf_n_total or len(ranked_achs) or 0
+            _wf_grand_total = len(ranked_achs) or _wf_n_total or 0
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
 
             workflow_summary_card = f"""
