@@ -49,6 +49,9 @@ jobs:
           pip install -e ".[dev,render]"
           python -m playwright install --with-deps chromium
           npm install -g @anthropic-ai/claude-code
+          # B2: axe-core for the deterministic accessibility pass. autotest/a11y.py
+          # finds it under node_modules and honest-skips if this ever fails to install.
+          npm install axe-core || echo "::warning::axe-core not installed — a11y pass will skip"
 
       - name: Run the finder + subagents + council (against the LIVE site)
         env:
@@ -66,13 +69,29 @@ jobs:
           AUTOTEST_MAX_PAGES: "30"
           AUTOTEST_SWEEP: ${{ github.run_number }}
           AUTOTEST_ACCEPT: "0"
+          # Tier A–B finding lifecycle + deterministic coverage (all default-on,
+          # honest-skip when a dep is missing). The confirm/decay gates keep one-shot
+          # subjective findings out of the open list; a11y is deterministic.
+          AUTOTEST_CONFIRM_SWEEPS: "2"
+          AUTOTEST_DECAY_SWEEPS_SUBJECTIVE: "3"
+          AUTOTEST_DECAY_SWEEPS_DETERMINISTIC: "6"
+          AUTOTEST_A11Y: "1"
+          AUTOTEST_VISUAL: "1"
         run: python -m autotest.run
+
+      - name: Judge-trust metrics (A5)
+        run: |
+          # Recompute the council's precision/recall vs the human calibration set and
+          # refresh precision.json / METRICS.md. Publishes a real number only once enough
+          # labels are human-curated (else stays null → live system keeps its defaults).
+          python -m autotest.metrics || echo "::notice::metrics step skipped"
 
       - name: Commit the bug report back (persists dedup memory)
         run: |
           git config user.name "mediahub-autotest[bot]"
           git config user.email "mediahub-autotest[bot]@users.noreply.github.com"
-          git add autotest/reports/BUGS.md autotest/reports/ledger.json 2>/dev/null || true
+          git add autotest/reports/BUGS.md autotest/reports/ledger.json \
+                  autotest/reports/METRICS.md autotest/calibration/precision.json 2>/dev/null || true
           git commit -m "autotest: refresh bug report [skip ci]" || echo "no change"
           git pull --rebase --autostash origin main || true
           git push origin main || echo "::warning::could not push report"

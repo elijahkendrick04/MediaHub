@@ -63,6 +63,21 @@ dev = [
   # reportlab is used by test_interpreter_corpus to synthesise PDF
   # fixtures so the corpus tests can run without external sample files.
   "reportlab>=4.0",
+  # B5: property-based API contract testing (Schemathesis). tests/test_api_contract.py
+  # honest-skips when it's absent, so this only enables the deeper fuzz; the plain
+  # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
+  # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
+  # API drift, so a future bump can't redden CI — only a real 5xx fails it.
+  "schemathesis>=3.19,<4",
+  # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
+  # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
+  "pytest-rerunfailures>=12.0",
+]
+# D1 flake-hunting only — kept OUT of `dev` on purpose: pytest-randomly auto-shuffles
+# test order when installed, and the GATING suite must stay deterministic. The separate
+# flake-detection CI job installs `.[dev,flake]` and opts into randomisation.
+flake = [
+  "pytest-randomly>=3.15",
 ]
 
 [project.scripts]

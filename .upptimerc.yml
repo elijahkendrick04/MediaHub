@@ -1,0 +1,24 @@
+# Upptime config (C1) — external uptime + behaviour monitor, intentionally SEPARATE
+# from the autotest finder/fixer so monitoring noise can never reach the fixer.
+# To enable: add a GH_PAT secret and uncomment the schedule in
+# .github/workflows/upptime.yml — see monitoring/README.md.
+owner: elijahkendrick04
+repo: mediahub
+
+sites:
+  - name: MediaHub (home)
+    url: https://mediahub-gzwc.onrender.com/
+  - name: MediaHub health
+    url: https://mediahub-gzwc.onrender.com/healthz
+    # A keyword check turns "is it up?" into "is it behaving?" — the body must
+    # contain "ok" (the healthz payload), not merely return 200.
+    __dashboard__: keyword
+    expectedStatusCodes:
+      - 200
+
+status-website:
+  name: MediaHub Status
+  introMessage: "Live status of the MediaHub deployment, monitored every 5 minutes from outside CI."
+
+assignees:
+  - elijahkendrick04

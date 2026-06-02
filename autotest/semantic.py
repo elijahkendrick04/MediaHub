@@ -43,10 +43,21 @@ _MAX_CARDS = 12
 RENDERED_PAGE = "rendered_page"      # page.inner_text(body) — genuinely user-visible
 TESTER_CONTROL = "tester_control"    # a tester control/flow token — NEVER user-visible
 TESTER_SUMMARY = "tester_summary"    # derived from internal state / the export JSON
+# A4 (Tier A): a fourth KIND for an artifact whose producing flow was NOT exercised
+# this sweep (e.g. signup_text when AUTOTEST_SIGNUP=0). It is judge-INELIGIBLE —
+# it is in NO charter's allowed set (not even ALL_PROVENANCE), so filter_artifacts
+# drops it for every judge REGARDLESS of its underlying RENDERED_PAGE/TESTER_* class.
+# This stops the loop flagging an "empty page" that is empty only because we didn't
+# run that flow, while a genuinely-empty page from an EXERCISED flow still reaches
+# the judge. Carried via a parallel ``meta`` dict ({key: {"exercised": bool}}), so
+# an artifact's base class is unchanged for when it IS exercised next sweep.
+NOT_EXERCISED = "not_exercised"
 
 # The complete set — a charter that may see EVERYTHING declares this explicitly,
 # so "fully permissive" is a deliberate choice in the source, not an accident a
-# future charter author falls into by listing all three kinds by hand.
+# future charter author falls into by listing all three kinds by hand. NOT_EXERCISED
+# is deliberately ABSENT: a fully-permissive charter still must not see an
+# unexercised artifact.
 ALL_PROVENANCE = frozenset({RENDERED_PAGE, TESTER_CONTROL, TESTER_SUMMARY})
 
 PROVENANCE: dict[str, str] = {
@@ -65,8 +76,24 @@ PROVENANCE: dict[str, str] = {
 }
 
 
-def filter_artifacts(artifacts: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any]:
-    """Return only the artifacts whose provenance KIND is in ``allowed``.
+def effective_provenance(key: str, meta: dict[str, Any] | None = None) -> str:
+    """The provenance KIND that governs whether ``key`` may reach a judge.
+
+    Normally the static PROVENANCE class (unknown → TESTER_CONTROL). But if the
+    parallel ``meta`` marks this artifact's flow as NOT exercised this sweep
+    (``meta[key]["exercised"] is False``), it returns ``NOT_EXERCISED`` REGARDLESS
+    of the base class — so an artifact that exists only because we skipped its flow
+    is judge-ineligible (A4). The base class is untouched, so the same artifact is
+    judge-eligible again on a sweep where its flow DOES run."""
+    info = (meta or {}).get(key)
+    if isinstance(info, dict) and info.get("exercised") is False:
+        return NOT_EXERCISED
+    return PROVENANCE.get(key, TESTER_CONTROL)
+
+
+def filter_artifacts(artifacts: dict[str, Any], allowed: frozenset[str],
+                     meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return only the artifacts whose effective provenance KIND is in ``allowed``.
 
     The single guard called by BOTH the judge (``_run_charter``) and the council
     framing (``adjudicate``), so there is one implementation, not several that drift.
@@ -78,9 +105,42 @@ def filter_artifacts(artifacts: dict[str, Any], allowed: frozenset[str]) -> dict
     caller whose ``allowed`` includes TESTER_CONTROL (e.g. the council, which is
     meant to see tester context) an unknown key is FAIL-OPEN (passed through as
     internal context). That is correct: a stray unknown value must never reach the
-    "you ARE the user" judge, but it is harmless as tester-side adjudication context."""
+    "you ARE the user" judge, but it is harmless as tester-side adjudication context.
+
+    ``meta`` (A4) is the parallel exercised-ness map ({key: {"exercised": bool, …}}).
+    An artifact marked ``exercised=False`` resolves to NOT_EXERCISED, which is in NO
+    caller's ``allowed`` set, so it is dropped for every judge — fail-closed for an
+    unexercised flow. ``meta=None`` (the default) preserves the original behaviour."""
     return {k: v for k, v in artifacts.items()
-            if PROVENANCE.get(k, TESTER_CONTROL) in allowed}
+            if effective_provenance(k, meta) in allowed}
+
+
+# A4: which raw capture point each judge-facing (derived) artifact comes from. The
+# tester records exercised-ness keyed by the raw capture point (e.g. "export_json",
+# "signup_text"); this maps that onto the derived keys a judge actually sees, so the
+# three export-derived summaries inherit the export's exercised flag.
+_DERIVED_SOURCE: dict[str, str] = {
+    "flow_result": "flow_result",
+    "pages": "pages",
+    "content_summary": "export_json",
+    "content_pack": "export_json",
+    "meet_summary": "export_json",
+    "home_text": "home_text",
+    "signup_text": "signup_text",
+    "review_text": "review_text",
+}
+
+
+def _derive_meta(raw_meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Project the tester's raw exercised-ness meta onto the derived artifact keys
+    a judge sees (the export-derived summaries inherit the export's flag)."""
+    raw_meta = raw_meta or {}
+    out: dict[str, Any] = {}
+    for derived, source in _DERIVED_SOURCE.items():
+        info = raw_meta.get(source)
+        if isinstance(info, dict):
+            out[derived] = info
+    return out
 
 
 def scrub_control_tokens(text: str, artifacts: dict[str, Any]) -> str:
@@ -286,12 +346,14 @@ def _parse_verdict(text: str) -> list[dict]:
     return issues if isinstance(issues, list) else []
 
 
-def _run_charter(charter: Charter, arts: dict[str, str]) -> list[Finding]:
+def _run_charter(charter: Charter, arts: dict[str, str],
+                 meta: dict[str, Any] | None = None) -> list[Finding]:
     from autotest import cli_llm  # judges run on the Claude CLI (subscription, no API key)
 
-    # Provenance guard: drop any artifact whose KIND this charter may not see, so a
-    # tester-internal control token never reaches a user-perspective judge.
-    safe = filter_artifacts(arts, charter.allowed_provenance)
+    # Provenance guard: drop any artifact whose KIND this charter may not see (so a
+    # tester-internal control token never reaches a user-perspective judge), AND any
+    # artifact from a flow that wasn't exercised this sweep (A4 — judge-ineligible).
+    safe = filter_artifacts(arts, charter.allowed_provenance, meta)
     body = "\n\n".join(f"## {k}\n{safe.get(k, '(none)')}"
                        for k in charter.artifact_keys if k in safe)
     system = f"{charter.persona}\n\n{charter.rubric}\n\n{_VERDICT_CONTRACT}"
@@ -325,8 +387,12 @@ def _run_charter(charter: Charter, arts: dict[str, str]) -> list[Finding]:
     return findings
 
 
-def evaluate(raw_artifacts: dict[str, Any]) -> list[Finding]:
-    """Dispatch all charters in parallel; return their findings. Never raises."""
+def evaluate(raw_artifacts: dict[str, Any],
+             artifact_meta: dict[str, Any] | None = None) -> list[Finding]:
+    """Dispatch all charters in parallel; return their findings. Never raises.
+
+    ``artifact_meta`` (A4) is the tester's exercised-ness map keyed by raw capture
+    point; artifacts from an unexercised flow are dropped before any judge sees them."""
     try:
         from autotest import cli_llm
         if not cli_llm.available():
@@ -343,9 +409,10 @@ def evaluate(raw_artifacts: dict[str, Any]) -> list[Finding]:
         return []
 
     arts = _build_artifacts(raw_artifacts)
+    meta = _derive_meta(artifact_meta)
     findings: list[Finding] = []
     with ThreadPoolExecutor(max_workers=len(CHARTERS)) as pool:
-        futures = {pool.submit(_run_charter, c, arts): c for c in CHARTERS}
+        futures = {pool.submit(_run_charter, c, arts, meta): c for c in CHARTERS}
         for fut in as_completed(futures):
             try:
                 findings.extend(fut.result())

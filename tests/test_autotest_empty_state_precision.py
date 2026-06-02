@@ -172,9 +172,12 @@ def test_redetection_does_not_reopen_a_retired_finding(tmp_path, monkeypatch):
     f = report.Finding(category="semantic:functional", severity="high",
                        title="13 /review 200 but 0 cards", route="/review/:id",
                        expected="cards", actual="0 cards")
-    report.merge_findings([f], "run-1")                       # first detection -> open
+    report.merge_findings([f], "run-1")                       # first detection
     fp = f.fingerprint()
-    assert report.load_ledger()["bugs"][fp]["status"] == "open"
+    # A1 (Tier A): a newly-seen SUBJECTIVE finding now enters `pending` (confirm-on-
+    # repeat), not `open`. (Was `open` pre-A1.) This test's actual invariant — that a
+    # retired finding is NOT reopened by re-detection — is asserted below and unchanged.
+    assert report.load_ledger()["bugs"][fp]["status"] == "pending"
     report.retire_verified_fixed(fp, commit="c", tests="t", note="n", verified_by="v")
     report.merge_findings([f], "run-2")                       # re-detection
     entry = report.load_ledger()["bugs"][fp]

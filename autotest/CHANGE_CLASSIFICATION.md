@@ -8,48 +8,87 @@
 
 ## Why this exists
 
-The merge policy depends on what KIND of change a fix is:
+The merge policy depends on what KIND of change a fix is. The operator directed
+(2026-06-02) that the **autotest feature is fully autonomous** — the loop auto-merges its
+own ordinary harness code, not just product fixes — and that **autotest is the only place
+auto-merge is expanded to**. The LLM Council pressure-tested *how* to do that safely
+(verdict: `docs/adr/0005-autotest-governed-auto-merge.md`). The result is a **3-way**
+classification:
 
-- **product change** → may auto-merge on green CI (the operator's standing instruction).
-- **harness / governance change** → requires a **human merge** (council Q4: a human
-  clicks merge for trust-boundary code).
+- **product change** → may auto-merge on green CI (operator's standing instruction).
+- **harness change** (ordinary autotest machinery) → may auto-merge on green CI (the new
+  autonomy).
+- **self-governance change** → requires a **HUMAN merge**. The loop must never auto-merge a
+  change to the files that GOVERN it — including this classifier itself, or it would simply
+  reclassify its own diff as ordinary code.
 
 If the loop decided that classification itself, it would be self-governing its own trust
-boundary. So the boundary is defined HERE, by a human, not inferred by the loop.
+boundary. So the boundary is defined HERE, by a human, not inferred by the loop — and it is
+enforced in **two layers** (see *Enforcement* below), because an in-repo guard is run by the
+same identity that writes the code.
 
 ## The rule (path-based — deterministic, not a judgement)
 
-A change is **HARNESS / GOVERNANCE** (human merge required) if its diff touches ANY of:
+A change is **SELF-GOVERNANCE** (human merge required) if its diff touches ANY of
+(`gitops.SELF_GOVERNANCE`):
 
-- `autotest/**` — the testing/build/fix harness, the judges, the council, the ledger,
-  and these governance artifacts themselves.
-- `.github/workflows/**` — CI / automation policy.
+- `autotest/gitops.py` — the merge gate, the protected-engine guard, the scope caps, and
+  THIS classifier.
+- `autotest/fix_loop.py` — the fixer's decision logic (attempt cap, the A6 corroboration gate).
+- `autotest/STOP` — the kill switch.
+- `autotest/CHANGE_CLASSIFICATION.md`, `autotest/AUTONOMY_BOUNDARY.md`,
+  `autotest/PROOF_CRITERION.md`, `autotest/PROOF_VERIFIER.md` — the governance/autonomy docs.
+- `tests/test_autonomy_tripwire.py`, `tests/test_autotest_change_classification.py` — the
+  deterministic safety tripwire and the classifier's own tests.
+- `.github/workflows/**`, `.github/CODEOWNERS` — CI / automation policy + the platform boundary.
 - `CLAUDE.md`, `**/CLAUDE.md` — the project operating rules.
-- `autotest/PROOF_CRITERION.md`, `autotest/CHANGE_CLASSIFICATION.md` — these artifacts.
 - `render.yaml`, `Dockerfile`, `pyproject.toml`, `requirements*.txt` — deploy/dependency
-  surface (supply-chain / runtime trust boundary).
+  supply-chain.
 
-A change is a **PRODUCT** change (auto-merge eligible) if and only if its diff touches
-NONE of the above — i.e. it is confined to product code/assets (`src/mediahub/**` minus
-the protected deterministic engine, templates, static assets) and/or `tests/**` for
-that product code.
+A change is a **HARNESS** change (auto-merge eligible) if it touches `autotest/**` but NONE
+of the self-governance set — ordinary machinery: finders, judges, the council, the report
+lifecycle, metrics, the coverage finders (a11y/visual/contract), the ledger/reports.
+
+A change is a **PRODUCT** change (auto-merge eligible) if its diff touches none of the
+above — confined to product code/assets (`src/mediahub/**` minus the protected engine) and
+`tests/**`.
 
 ## Protected engine (unchanged, still hard-blocked)
 
 Independent of merge policy, the deterministic engine remains un-editable by the loop
-(`gitops.PROTECTED`): parsers, detectors, the ranker, colour-science. A diff touching
-those aborts the attempt regardless of classification.
+(`gitops.PROTECTED`): parsers, detectors, the ranker, colour-science. A diff touching those
+aborts the attempt regardless of classification.
 
 ## Mixed diffs
 
-If a single change touches BOTH product and harness/governance paths, it is classified
-**harness/governance** (the stricter policy wins) → human merge.
+Stricter wins: if a single change touches ANY self-governance path, the whole diff is
+**self-governance** → human merge. An **empty / unknown** change set also fails safe to
+self-governance (never auto-merge an unknown change).
 
 ## How the loop consumes this
 
-`autotest/gitops.py` reads this rule (the path lists above) to decide, for a given
-fix's changed-file set, whether to arm auto-merge (product) or stop at PR-opened for a
-human merge (harness/governance). The loop never overrides it.
+`autotest/gitops.py` (`classify_change` + `_merge_to_main`) reads this rule to decide, for a
+fix's changed-file set, whether to arm auto-merge (product / harness) or stop at PR-opened
+for a human merge (self-governance). The loop never overrides it.
+
+## Enforcement — two layers (the in-repo guard alone is not enough)
+
+The council's decisive blind-spot catch: a self-checked guard is run by the same identity
+that writes the code, so "green CI" is exactly what an optimiser produces — a PR that disarms
+a safety net *and* deletes the test checking it, all green. So the boundary is enforced twice:
+
+1. **In-repo (deterministic):** the 3-way `classify_change` above + `tests/test_autonomy_tripwire.py`,
+   which fails CI if any safety net (kill switch, protected list, scope caps, A6 gate, the
+   self-governance set, CODEOWNERS) is removed, or if the test suite is silently shrunk.
+2. **Platform (the real stop):** GitHub branch protection on `main` + `.github/CODEOWNERS`
+   require a human code-owner review on every self-governance path, and the autotest bot
+   identity holds **no bypass**. So even a green PR touching the constitution set cannot be
+   merged by the loop — only by a human. **The operator must enable this** (see CODEOWNERS
+   header + the ADR); without it, layer 1 is advisory.
+
+The **bootstrap** — the PR that first grants this auto-merge authority — is itself a
+self-governance change and is **human-merged** (a grant of authority can't ratify itself),
+exactly as this artifact was authored once and human-merged, then applied mechanically.
 
 ## Versioned AI-judgement-surface changes
 

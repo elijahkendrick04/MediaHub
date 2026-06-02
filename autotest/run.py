@@ -298,11 +298,18 @@ class Tester:
         self.page = page
         self.col = collector
         self.max_pages = max_pages
+        self.engine = "chromium"             # B1: set by the launcher (engine[:device])
         self.findings: list[Finding] = []
         self.routes_probed = 0
         self.pages_crawled = 0
         self.visited: list[dict] = []        # (route, status) coverage for the judges
         self.artifacts: dict = {}            # captured for the semantic subagents
+        # A4: exercised-ness of each captured artifact, keyed by raw capture point.
+        # A flow we DIDN'T run this sweep (e.g. sign-up with AUTOTEST_SIGNUP=0) leaves
+        # its artifact empty-by-absence; marked exercised=False here, it is dropped
+        # before any judge sees it (semantic.filter_artifacts) — so a page that is
+        # empty only because we skipped its flow can never become a finding.
+        self.artifact_meta: dict[str, dict] = {}
 
     # screenshot a finding's page state, keyed by fingerprint
     def _shoot(self, f: Finding) -> None:
@@ -315,6 +322,10 @@ class Tester:
             pass
 
     def _add(self, f: Finding, shoot: bool = True) -> None:
+        # B1: on a non-default engine, tag the finding so its fingerprint doesn't
+        # collapse with the chromium run's (a WebKit-only layout break is its own bug).
+        if self.engine and self.engine != "chromium" and f.is_bug:
+            f.evidence = (f.evidence or "") + f"\n[engine={self.engine}]"
         if shoot and f.is_bug:
             self._shoot(f)
         self.findings.append(f)
@@ -326,8 +337,41 @@ class Tester:
             path = SCREENSHOT_DIR / f"surface-{name}.png"
             self.page.screenshot(path=str(path), full_page=True)
             self.artifacts[f"{name}_screenshot"] = os.path.relpath(path, REPO_ROOT)
+            self._run_visual(name, str(path))   # B3: deterministic baseline diff
         except Exception:
             pass
+
+    def _run_visual(self, surface: str, screenshot_path: str) -> None:
+        """B3: diff this surface against its committed visual baseline — a DETERMINISTIC
+        ``visual_regression`` finding. Honest-skips when no baseline exists yet (the
+        deterministic backbone for the vision judge)."""
+        if os.environ.get("AUTOTEST_VISUAL", "1") == "0":
+            return
+        try:
+            from autotest import visual_regression
+            for f in visual_regression.check(surface, screenshot_path,
+                                             getattr(self, "engine", "chromium")):
+                self._add(f, shoot=False)
+        except Exception:
+            pass
+
+    def reconcile_artifact_meta(self) -> None:
+        """A4: after the content journey, mark the canonical judge-facing artifacts
+        whose flow was NOT exercised this sweep. A key absent from ``self.artifacts``
+        is empty-by-absence (its flow didn't run, e.g. sign-up with AUTOTEST_SIGNUP=0)
+        — mark it ``exercised=False`` so semantic.filter_artifacts drops it before any
+        judge sees it. A genuinely-empty artifact from a flow that DID run is present
+        (even if blank) and stays judge-eligible (a real empty state can be a finding)."""
+        not_run = {
+            "home_text": "home page not captured this sweep",
+            "signup_text": "sign-up / onboarding flow not exercised this sweep",
+            "review_text": "no review page inspected this sweep",
+            "export_json": "no content pack produced or captured this sweep",
+        }
+        for key, reason in not_run.items():
+            if key not in self.artifacts:
+                self.artifact_meta.setdefault(
+                    key, {"exercised": False, "skipped_reason": reason})
 
     def ensure_signed_in(self, profile_id: str) -> bool:
         """Pin the seeded org into the browser session (gate-exempt API), so
@@ -583,6 +627,8 @@ class Tester:
 
         new_log = self.server.log_since(log_pos) if self.server else ""
         self._evaluate(route, url, label, status, html, new_log, from_link)
+        if status and status < 400:
+            self._run_a11y(route)   # B2: deterministic axe-core pass on the rendered DOM
         self.visited.append({"route": route, "status": status})
         links = self._extract_links(html) if status and status < 400 else []
         return status, html, links
@@ -663,6 +709,19 @@ class Tester:
                 expected="All same-origin sub-requests succeed",
                 actual=f"{fr.get('type')} → {st}: {fr.get('url')}",
                 evidence=json.dumps(fr, indent=2), repro=[f"Open {url}"]), shoot=False)
+
+    def _run_a11y(self, route: str) -> None:
+        """B2: run axe-core against the just-rendered page and record WCAG violations
+        as DETERMINISTIC ``a11y`` findings. Honest-skips when axe isn't available (no
+        crash, no invented findings) — exactly like the AI judges with no key."""
+        if os.environ.get("AUTOTEST_A11Y", "1") == "0":
+            return
+        try:
+            from autotest import a11y
+            for f in a11y.run(self.page, route):
+                self._add(f, shoot=False)
+        except Exception:
+            pass
 
     # pageerror buffer is on the collector
     def page_errors_snapshot(self) -> list[str]:
@@ -921,6 +980,26 @@ class Tester:
                     queue.append(ln)
 
 
+def _launch_browser(pw, headless: bool):
+    """B1: pick the Playwright engine (AUTOTEST_BROWSER = chromium|firefox|webkit)
+    and an optional mobile device descriptor (AUTOTEST_DEVICE, e.g. 'iPhone 13').
+    Returns (browser, context, engine_label). Falls back to chromium / no-device on
+    an unknown value, so a typo degrades instead of crashing the sweep."""
+    name = os.environ.get("AUTOTEST_BROWSER", "chromium").strip().lower()
+    engine = name if name in ("chromium", "firefox", "webkit") else "chromium"
+    btype = {"firefox": pw.firefox, "webkit": pw.webkit}.get(engine, pw.chromium)
+    browser = btype.launch(headless=headless)
+    ctx_kwargs: dict = {"ignore_https_errors": True}
+    device = os.environ.get("AUTOTEST_DEVICE", "").strip()
+    if device:
+        try:
+            ctx_kwargs = {**pw.devices[device], **ctx_kwargs}
+            engine = f"{engine}:{device}"
+        except Exception:
+            pass   # unknown device → desktop context, engine label unchanged
+    return browser, browser.new_context(**ctx_kwargs), engine
+
+
 def _resolve_base() -> tuple[str, AppServer | None]:
     external = os.environ.get("AUTOTEST_BASE_URL", "").strip()
     if external:
@@ -958,12 +1037,12 @@ def _run(run_id: str) -> int:
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=headless)
-            context = browser.new_context(ignore_https_errors=True)
+            browser, context, engine = _launch_browser(pw, headless)
             page = context.new_page()
             col = Collector(base)
             col.attach(page)
             tester = Tester(server, base, page, col, max_pages)
+            tester.engine = engine   # B1: tag findings + run_meta with the engine/device
 
             # 0) sign in so the gated content routes are reachable, then capture
             #    the signed-in home text for the user-brain judge.
@@ -1023,13 +1102,17 @@ def _run(run_id: str) -> int:
             #    banners). It runs on the existing media_ai.llm vision capability
             #    (Gemini/Anthropic) — no GPU, honest-skip with no key. Both feed
             #    the SAME council adjudication so there's one verdict per sweep.
+            # A4: flag artifacts from flows we didn't run this sweep as unexercised,
+            # so they are dropped before any judge sees them (no false findings on a
+            # page that is empty only because we skipped its flow).
+            tester.reconcile_artifact_meta()
             _judgeable = any(tester.artifacts.get(k) for k in
                              ("export_json", "home_text", "signup_text", "review_text"))
             try:
                 ai_findings: list[Finding] = []
                 if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
                     from autotest import semantic
-                    ai_findings += semantic.evaluate(tester.artifacts)
+                    ai_findings += semantic.evaluate(tester.artifacts, tester.artifact_meta)
                 if os.environ.get("AUTOTEST_VISION", "1") != "0":
                     from autotest import vision
                     ai_findings += vision.evaluate(tester.artifacts)
@@ -1038,7 +1121,7 @@ def _run(run_id: str) -> int:
                 if candidates and os.environ.get("AUTOTEST_COUNCIL", "1") != "0":
                     from autotest import council
                     candidates, council_verdict = council.adjudicate(
-                        candidates, tester.artifacts)
+                        candidates, tester.artifacts, tester.artifact_meta)
                 tester.findings.extend(passthrough + candidates)
             except Exception:
                 pass
@@ -1079,7 +1162,7 @@ def _run(run_id: str) -> int:
     stats = report.merge_findings(tester.findings, run_id)
     run_meta = {"run_id": run_id, "base_url": base, "routes_probed": tester.routes_probed,
                 "pages_crawled": tester.pages_crawled, "flow_result": flow_result,
-                "council_verdict": council_verdict}
+                "council_verdict": council_verdict, "engine": getattr(tester, "engine", "chromium")}
     report.write_report(run_meta)
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)

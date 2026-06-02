@@ -166,11 +166,15 @@ def deliberate(framed_question: str) -> dict[str, Any] | None:
 
 
 # --- tester integration: adjudicate the subagents' findings ------------------
-def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[list[Finding], str]:
+def adjudicate(candidates: list[Finding], artifacts: dict[str, Any],
+               artifact_meta: dict[str, Any] | None = None) -> tuple[list[Finding], str]:
     """Pressure-test the semantic subagents' candidate findings. Returns
     (adjusted_findings, verdict_summary). Findings the council judges to be
     noise are demoted to non-bugs (kept in the report, out of the open list);
-    blind spots the council surfaces are added as new findings."""
+    blind spots the council surfaces are added as new findings.
+
+    ``artifact_meta`` (A4) is the tester's exercised-ness map; an artifact from a
+    flow not exercised this sweep is structurally excluded from the framing too."""
     if not candidates or not available():
         return candidates, ""
 
@@ -218,7 +222,7 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
     # Passing allowed={TESTER_CONTROL, TESTER_SUMMARY} structurally excludes
     # rendered_page artifacts and makes the token's provenance explicit in code —
     # not via a hand-written label the model could override (the b07572c63c13 class).
-    safe = filter_artifacts(artifacts, _COUNCIL_ALLOWED)
+    safe = filter_artifacts(artifacts, _COUNCIL_ALLOWED, artifact_meta)
     flow_token = safe.get("flow_result", "(none)")
     framed = (
         "An automated tester swept MediaHub — a tool that turns swimming-meet result "
@@ -255,6 +259,12 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
         return candidates, _verdict_summary(verdict)
 
     decisions = {int(d["id"]): d for d in triage.get("decisions", []) if "id" in d}
+    # A5: the council panel that deliberated (which advisors + the chairman). Recorded
+    # on each kept finding so a human auditor sees the verdict was an N-advisor +
+    # chairman consensus after anonymised peer review — not a single sycophantic judge.
+    # The full per-advisor text is in the transcript under autotest/reports/council/.
+    panel = sorted(session.get("advisors", {}).keys())
+    panel_note = f"[{len(panel)}-advisor council ({', '.join(panel)}) + chairman] " if panel else ""
     out: list[Finding] = []
     for i, c in enumerate(listed):
         d = decisions.get(i)
@@ -267,7 +277,8 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any]) -> tuple[li
             if d.get("severity") in ("low", "medium", "high"):
                 c.severity = d["severity"]
             if d.get("reason"):
-                c.rationale = str(d["reason"])[:2000]   # OPEN-PR: persist the WHY for the PR body
+                # OPEN-PR: persist the WHY (+ the panel that confirmed it) for the PR body.
+                c.rationale = (panel_note + str(d["reason"]))[:2000]
         out.append(c)
     out += candidates[10:]
 

@@ -41,29 +41,54 @@ PROTECTED = (
     "src/mediahub/media_library/selector.py",
 )
 
-# Harness / governance paths — a change touching ANY of these is NOT a product
-# change and must NOT auto-merge; it requires a human merge (council Q4). This is
-# the HUMAN-AUTHORED classification rule (autotest/CHANGE_CLASSIFICATION.md) — the
-# loop applies it mechanically, it does NOT classify its own changes. Keep this in
-# sync with that doc.
-HARNESS_GOVERNANCE_PATHS = (
-    "autotest/", ".github/workflows/", "CLAUDE.md", "render.yaml", "Dockerfile",
+# Self-governance ("constitution") set — the files that GOVERN the autonomous loop:
+# its merge gate + guards + THIS classifier (gitops.py), the fixer's decision logic
+# (fix_loop.py: attempt cap, the A6 corroboration gate), the kill switch, the
+# governance docs, CI policy, the deploy/dependency supply-chain, the CODEOWNERS
+# boundary, and the deterministic tripwire test. A change touching ANY of these
+# requires a HUMAN merge (council 2026-06-02) — the loop must NEVER auto-merge a
+# change to the files that decide what the loop may do (including the classifier
+# itself, or it would just reclassify its own diff as ordinary code).
+#
+# This is the IN-REPO half of a TWO-LAYER boundary. The real stop is platform-side:
+# GitHub branch protection on `main` + `.github/CODEOWNERS` requiring a human review
+# on these paths, with the bot identity holding NO bypass — because an in-repo guard
+# is run by the same identity that writes the code (the council peer-review blind spot).
+# See autotest/CHANGE_CLASSIFICATION.md + docs/adr/0005-autotest-governed-auto-merge.md.
+SELF_GOVERNANCE = (
+    "autotest/gitops.py", "autotest/fix_loop.py", "autotest/STOP",
+    "autotest/CHANGE_CLASSIFICATION.md", "autotest/AUTONOMY_BOUNDARY.md",
+    "autotest/PROOF_CRITERION.md", "autotest/PROOF_VERIFIER.md",
+    "tests/test_autonomy_tripwire.py", "tests/test_autotest_change_classification.py",
+    ".github/workflows/", ".github/CODEOWNERS",
+    "CLAUDE.md", "render.yaml", "Dockerfile",
     "pyproject.toml", "requirements.txt", "requirements-dev.txt",
 )
 
 
+def _is_self_governance(f: str) -> bool:
+    return any(f == p or f.startswith(p) or (p == "CLAUDE.md" and f.endswith("CLAUDE.md"))
+               for p in SELF_GOVERNANCE)
+
+
 def classify_change(files: list[str]) -> str:
-    """Apply the human-authored product-vs-harness rule to a changed-file set.
-    Returns 'product' (auto-merge eligible) or 'harness' (human merge required).
-    A mixed diff classifies as 'harness' (the stricter policy wins). An empty set
-    is 'harness' (fail safe — never auto-merge an unknown change)."""
+    """Apply the human-authored 3-way classification (autotest/CHANGE_CLASSIFICATION.md)
+    to a changed-file set. Returns:
+      * ``self_governance`` — touches a file that GOVERNS the loop → HUMAN merge required
+        (also enforced platform-side via branch protection + CODEOWNERS).
+      * ``harness`` — ordinary autotest machinery (finders, judges, the report lifecycle,
+        metrics) → auto-merge eligible (the autonomy the operator armed, council 2026-06-02).
+      * ``product`` — src/mediahub product code / tests → auto-merge eligible.
+    The loop applies this mechanically; it does NOT classify its own changes. Stricter
+    wins: ANY self-governance file makes the whole diff ``self_governance``. An empty or
+    unknown set fails safe to ``self_governance`` (never auto-merge an unknown change)."""
     if not files:
+        return "self_governance"
+    stripped = [f.strip() for f in files]
+    if any(_is_self_governance(f) for f in stripped):
+        return "self_governance"
+    if any(f.startswith("autotest/") for f in stripped):
         return "harness"
-    for f in files:
-        f = f.strip()
-        if any(f == p or f.startswith(p) or ("CLAUDE.md" in p and f.endswith("CLAUDE.md"))
-               for p in HARNESS_GOVERNANCE_PATHS):
-            return "harness"
     return "product"
 MAX_FILES = int(os.environ.get("AUTOTEST_BUILD_MAX_FILES", "25"))
 MAX_INSERTIONS = int(os.environ.get("AUTOTEST_BUILD_MAX_INSERTIONS", "2000"))
@@ -159,19 +184,23 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
     needs a real PR, so this no-ops honestly when none was opened, and verifies
     the command actually succeeded instead of assuming it did.
 
-    Governance gate (council Q4 + CHANGE_CLASSIFICATION.md): auto-merge is armed
-    ONLY for a PRODUCT change. A harness/governance change opens the PR but stops
-    for a HUMAN merge — the loop never auto-lands a change to its own harness, CI,
-    deploy surface, or these governance rules."""
+    Governance gate (council 2026-06-02 + CHANGE_CLASSIFICATION.md): auto-merge is
+    armed for a PRODUCT change AND for an ordinary HARNESS change (the operator armed
+    the autotest harness as the autonomous zone). It is NEVER armed for a SELF-GOVERNANCE
+    change — the loop must not auto-land a change to its own merge/guard logic, kill
+    switch, classifier, CI policy, deploy surface, or governance docs. That boundary is
+    ALSO enforced platform-side (branch protection + CODEOWNERS), which is the real stop."""
     import shutil
     if os.environ.get("AUTOTEST_BUILD_MERGE") != "1":
         return "merge not armed (set AUTOTEST_BUILD_MERGE=1 to auto-merge to main on green CI)"
     if not has_pr:
         return "no PR opened — auto-merge NOT armed (nothing will land; see the PR error)"
     kind = classify_change(files or [])
-    if kind != "product":
-        return ("auto-merge NOT armed: this is a harness/governance change "
-                "(CHANGE_CLASSIFICATION.md) — it requires a HUMAN merge. PR opened; left for review.")
+    if kind == "self_governance":
+        return ("auto-merge NOT armed: this is a SELF-GOVERNANCE change "
+                "(CHANGE_CLASSIFICATION.md) — the loop may not auto-merge a change to the "
+                "files that govern it; it requires a HUMAN merge (also enforced by GitHub "
+                "branch protection + CODEOWNERS). PR opened; left for review.")
     if not shutil.which("gh"):
         return "gh CLI not found — cannot enable CI-gated auto-merge"
     # --delete-branch tidies the loop-owned branch once the auto-merge lands, so
