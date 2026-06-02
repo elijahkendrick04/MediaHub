@@ -76,7 +76,7 @@ hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `cc004f59d` · Merge pull request #216 from elijahkendrick04/claude/beautiful-brown-oAjpg
+**Last updated:** 2026-06-02 · `6cf83bea0` · Merge pull request #215 from elijahkendrick04/claude/autotester-ground-truth
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -85,8 +85,10 @@ hand in a commit message:
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-02 | `b72348d07` | docs(readme): align with multi-sport, autonomy-first direction; fix stale facts |
+| 2026-06-02 | `4c43dbe77` | feat(autotest): ground-truth oracle — activate the dormant golden baseline (Council item 4) |
 | 2026-06-02 | `cf2610c58` | docs: refresh test-count notes to post-merge figure (2836 passed / 1 skipped) |
 | 2026-06-02 | `f139f4931` | docs(roadmap): note roadmap directives are human-authored (autobuilder removed in #214) |
+| 2026-06-01 | `bc864a498` | fix(autotest): stop the coder no-op bleed — quarantine clean no-edit runs instead of retrying foreve |
 | 2026-06-01 | `8572c4ec4` | Add trailing newline to renamed research report (pre-commit EOF hook) |
 | 2026-06-01 | `d40d673c6` | Remove the autobuilder; extract shared git/PR plumbing to gitops |
 | 2026-06-01 | `49fd619e4` | Add roadmap-rebuild CHANGES summary + next-session backlog |
@@ -94,8 +96,6 @@ hand in a commit message:
 | 2026-06-01 | `30c6523be` | Add inert sport_profiles scaffolding (typed loader + AutonomyLevel + 2 profiles) |
 | 2026-06-01 | `499a94083` | test: add real /review route regression for the progress-denominator fix |
 | 2026-06-02 | `0e4dbdc04` | Rebuild |
-| 2026-06-01 | `0fa7633ea` | autotest: persist fixer memory [skip ci] |
-| 2026-06-01 | `2f1f20d0e` | fix: 'REVIEWED 3/3 = 100%' contradicts 54 cards still in queue — |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
