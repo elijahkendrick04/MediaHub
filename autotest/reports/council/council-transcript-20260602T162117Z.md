@@ -1,0 +1,231 @@
+# Council transcript
+
+## Framed question
+DECISION: How should MediaHub implement "semantic retrieval / memory" (text embeddings + a vector store) as its next capability?
+
+CONTEXT — MediaHub is a cloud SaaS (deployed on Render) that turns swimming-meet result files into post-ready social content (cards, captions, confidence scores). It is a Flask monolith: synchronous, single Gunicorn worker + threads — NO async, no Celery, no microservices. AI generation is "Gemini-first" behind a provider abstraction. A deterministic engine (parsers, personal-best detectors, ranker, colour-science) is deliberately NOT AI and must stay deterministic. Hard rule: no heuristic/fake fallbacks on AI surfaces — surface an honest error instead. State persists in ONE SQLite file (data.db) on a persistent disk; each module extends it with its own tables. We just shipped Capability 1: a provider-agnostic OpenAI-compatible LLM client (mediahub.ai_core.llm_client) that already includes an embeddings() method hitting /v1/embeddings.
+
+GOAL: cross-run semantic memory — e.g. "recall the closest prior accepted captions/exemplars" for the caption/voice surface, and a foundation for a future "what worked" learning store. Retrieval today is keyword-only.
+
+PROPOSED ARCHITECTURE (pressure-test it):
+- Vector store: sqlite-vec (pure-C SQLite extension, MIT/Apache, exact brute-force KNN) INSIDE the existing data.db — rather than standing up ChromaDB as a separate service. MediaHub is far below the ~100k-1M-vector scale where brute force slows down.
+- Embeddings: default to LOCAL fastembed (ONNX all-MiniLM-L6-v2, 384-dim, CPU). Note: onnxruntime is ALREADY a dependency (rembg cutouts) and the Dockerfile ALREADY preloads a ~170MB ONNX model into the image, so baking a ~50MB embed model is a proven pattern. Also expose Capability 1's remote /v1/embeddings as an alternate backend, behind ONE swappable interface (mediahub.memory.embedder / mediahub.memory.store).
+- DECIDED, do not relitigate: when no embedding backend is reachable, semantic retrieval is simply unavailable and says so — NO keyword "degraded" fallback (per the no-heuristic rule).
+- First slice: build embedder + sqlite-vec store, off-by-default and additive (like Cap 1), and wire ONE real consumer (semantic recall of prior accepted captions in the caption/voice flow).
+
+STAKES: This is a data-model change (new vector tables in the PRODUCTION data.db) + new dependencies (fastembed, sqlite-vec) in a multi-tenant SaaS. A wrong call (an over-heavy/ANN vector DB we don't need; a dependency that bloats the image or breaches the deterministic boundary; embedding the wrong thing first) costs real rework. sqlite-vec is young (v0.1.x).
+
+QUESTIONS:
+1. Is sqlite-vec-in-data.db right, vs ChromaDB, vs deferring vectors entirely?
+2. Is local fastembed worth adding, or should we rely ONLY on Cap-1's remote embeddings (no new model/dep)?
+3. What should we embed FIRST for real value at least risk?
+4. Biggest risk / blind spot for a small sports-club SaaS?
+
+## Advisor responses
+### The Contrarian
+**The cold-start problem kills the first slice before it ships.**
+
+"Recall prior accepted captions" requires a corpus of accepted captions. This is a small sports-club SaaS. How many accepted captions does a typical club have at launch — 40? 80? At that scale, semantic retrieval doesn't surface signal, it surfaces noise dressed up as intelligence. You'll ship a feature that confidently recommends the three most similar captions from a set of twelve, and it will look impressive in demos and be useless in practice. You've optimized retrieval for a dataset that doesn't exist yet.
+
+**sqlite-vec in production data.db is a loaded gun pointed at your only state.**
+
+v0.1.x C extension. One SQLite file. Multi-tenant production data. The extension fails to load on a Render deploy — what happens? Your vector queries throw, but are your error paths clean enough that they don't cascade into the caption surface or, worse, abort a database migration mid-flight? You're betting your entire state store on a library that hasn't shipped a stable API yet. The correct call is a separate `memory.db` file, same disk, same pattern — vector corruption stays isolated.
+
+**fastembed + ONNX on a synchronous single-worker kills your p95 latency.**
+
+onnxruntime for rembg runs on image upload, a discrete async-tolerant path. Embedding runs inline on caption generation — a latency-critical path. CPU-bound ONNX inference inside a threaded Flask worker starves every other concurrent request. You don't have Celery. You don't have async. You will spike to 3-5 second response times under modest concurrency and blame Gemini.
+
+**The real question you're avoiding:** what's the minimum accepted-caption corpus size before retrieval is actually better than random? Answer that before writing a line of vector code.
+
+
+### The Outsider
+**sqlite-vec is fine. The fastembed decision is actually the only real question. But you're burying the actual risk.**
+
+The sqlite-vec choice is obviously correct from outside — you have one SQLite file, you're below scale, you already have ONNX. Anyone arguing for ChromaDB here is solving a problem you don't have yet.
+
+**On fastembed:** you're adding a 50MB model that ships in every container for a feature that's off by default and serves — what, exactly? Before I can answer whether local embedding is worth it, I need to know: how many "accepted captions" does your median customer actually have? If a typical swim club has 200 accepted captions after a season, you could do cosine similarity on the CPU in milliseconds with a flat list. You don't need a vector store at all at that scale. "100k-1M vectors" is the ceiling you mention — but what's the *floor* at launch? My guess: embarrassingly small.
+
+**The blind spot nobody's naming:** you're building recall infrastructure before you have enough signal to recall. Semantic memory is only valuable when the corpus is large enough that keyword search fails. If each club has 30-80 accepted captions in the first six months, exact substring matching probably already works fine. You're optimizing retrieval before the retrieval problem actually exists.
+
+**What to embed first:** don't embed captions. Embed the *source event context* — the meet name, event type, swimmer name pattern. The recall failure you'll actually hit is "show me what worked for similar events," not "find a similar caption." Embedding the output (caption text) before the input (event context) has the causality backwards.
+
+Ship the interface, defer the local model, seed the corpus first.
+
+
+### The Executor
+**Do it. Here's Monday morning.**
+
+**Q1: sqlite-vec is correct.** ChromaDB is a separate process — that's a new service on Render, a new failure domain, and ops overhead you don't need. You're nowhere near the scale where brute-force KNN hurts. sqlite-vec lives in data.db, fits the existing migration pattern, zero infra change. Ship it.
+
+**Q2: Start remote-only, hold fastembed.** Cap 1's `/v1/embeddings` already works. Adding fastembed means a new dep, a new ONNX model in the image, and new cold-start memory — all before you know if semantic recall is actually useful. First Monday: wire sqlite-vec + the remote embedder, ship the caption consumer, validate the UX. Add fastembed in week 3 if latency or cost bites you. Don't load two new risks simultaneously.
+
+**Q3: Embed accepted captions, prefixed with context.** Format: `"{athlete_name} | {event} | {meet_name}: {caption_text}"` — then store the vector with the caption_id. That prefix is cheap, pulls the KNN toward relevance, and the signal is clean (accepted = human-confirmed good). This is your first row in the store and your first real retrieval. Start there.
+
+**Q4: Biggest risk is sqlite-vec's C extension loading on Render.** It needs the `.so` to load at import time. Test this in your Dockerfile build NOW — `python -c "import sqlite_vec"` as a build step. If it fails silently in production, your store initializes as a no-op and you get mysterious empty recalls, not an error. The second risk: concurrent writes during a live meet. Single SQLite file + WAL mode + vector inserts = verify your write path is serialized through the same connection pool as everything else.
+
+**First PR: sqlite-vec migration + remote embedder + one caption consumer. Nothing else.**
+
+
+### The First Principles Thinker
+The surface question is "which vector stack?" The actual question is: **what predicts caption quality, and is semantic similarity the right signal for it?**
+
+Strip the proposal back. You want to retrieve prior accepted captions to improve new ones. But captions are *outputs* — embedding outputs to retrieve similar outputs to inform new outputs is circular feedback on surface form, not on what made them *good*. The signal that predicts caption quality isn't "sounds like this text" — it's structured context: event type, achievement tier (PB, podium, relay anchor), athlete age group, club voice register. These are largely categorical. You're proposing a semantic search engine for what is partly a lookup problem.
+
+**On the architecture questions:**
+
+sqlite-vec-in-data.db is correct. ChromaDB is a service boundary you don't need and can't justify at this scale. The "young library" risk is contained — it's read-path only, retrieval failure is already defined as graceful unavailability.
+
+Local fastembed is worth it, *but* there's a hidden bomb: ONNX model loading in a synchronous Gunicorn worker blocks the thread on first request. You need eager loading at app startup, not lazy init. Miss this and you'll see 10-second request hangs in production.
+
+**What to embed first:** Not the caption text. Embed the *structured event context* + accepted caption as a paired unit. Retrieval key = "swim meet context for this moment." Retrieved value = "what caption voice worked here." That's retrieval-augmented generation done right — not style-matching outputs, but mapping contexts to proven responses.
+
+**Biggest blind spot:** Multi-tenancy. "Accepted captions" from Club A's casual voice will poison Club B's formal tone. Your vector store *must* be tenant-scoped at the schema level from day one. Retrofitting that boundary costs more than getting it right now.
+
+
+### The Expansionist
+**sqlite-vec is exactly right — and the architecture undersells itself.**
+
+The proposed stack isn't just "good enough for now." It's actually the ceiling-raiser. Here's why:
+
+**On sqlite-vec vs. ChromaDB:** sqlite-vec wins on more than operational simplicity. Keeping vectors in data.db means every query is a JOIN. That's not a consolation prize — that's a superpower. You can ask "give me the 5 most semantically similar accepted captions *for this athlete's event type, in this club's voice*" in one query with no inter-service round trips. ChromaDB can't filter on relational context that cheaply. The moment you add per-club voice profiles or per-event-type tuning, sqlite-vec compounds in value.
+
+**On local fastembed:** Ship it. The ONNX pattern is already proven in your image. all-MiniLM-L6-v2 at 50MB is nothing. The real upside is *zero-latency, zero-cost embeddings at generation time* — meaning you can embed aggressively: every accepted caption, every rejected caption with its confidence score, every parsed result summary. That breadth of data is what makes the memory surface genuinely smart 12 months from now, not just a demo.
+
+**What to embed first:** Accepted captions, tagged with event type + athlete + club. Not rejected ones yet — signal quality matters more than volume at the start. But design the schema to store outcome labels from day one, because that's your future "what worked" learning store.
+
+**The undervalued upside nobody's saying:** Once you have semantic recall of accepted captions, you have the skeleton of a *club-specific voice fingerprint* — retrievable, refinable, ownable. That's a differentiation moat that keyword search can never build. Swim it.
+
+
+## Peer reviews (anonymisation: A=The First Principles Thinker, B=The Outsider, C=The Executor, D=The Contrarian, E=The Expansionist)
+### Review 1
+## Council Review
+
+**1. Strongest: Response A**
+
+A delivers the most actionable, non-obvious insights. It correctly reframes the embed target (structured event context + caption as a pair, not caption text alone), catches the ONNX cold-start blocking hazard in a synchronous Gunicorn worker, and — most critically — raises multi-tenancy as a schema-level requirement from day one. That last point is the highest-consequence call in the entire decision and only A names it clearly.
+
+**2. Biggest blind spot: Response E**
+
+E is the most enthusiastic but skips every hard risk. It doesn't mention multi-tenancy at all (Club A's casual voice poisoning Club B is fatal), ignores the corpus cold-start problem B and D correctly flag, and waves away the ONNX threading concern. The "superpower JOIN" framing is valid but incomplete without the tenant-scoping caveat that makes it actually safe to build.
+
+**3. What all responses missed**
+
+**Embedding model versioning.** Every stored vector is coupled to the specific model that produced it. If MediaHub ever swaps fastembed for a remote backend (or upgrades the model), all existing vectors become silently incompatible — cosine similarity against mixed-model vectors returns garbage with no error. None of the responses recommend storing an `embedder_id` or `model_version` alongside each vector, which is a mandatory schema requirement from day one.
+
+
+### Review 2
+## Council Review
+
+**1. Strongest: Response A**
+
+A identifies the most consequential architectural flaw — embedding caption *outputs* to retrieve similar outputs is circular feedback on surface form, not on what made captions good. This reframes the entire design. It also uniquely names multi-tenancy as a schema-level constraint (Club A's casual voice poisoning Club B's formal tone), which is the single highest-impact correctness risk for a multi-tenant SaaS and goes unaddressed until retrofit time. The context+caption pairing recommendation follows logically from its own reasoning, which C and B echo without the same analytical grounding.
+
+**2. Biggest Blind Spot: Response E**
+
+E is the most enthusiastic and least critical. It never mentions multi-tenancy isolation, corpus size floor, synchronous ONNX blocking, or C extension loading stability. Its "embed aggressively" recommendation is the opposite of D's (correct) caution that a thin corpus makes semantic retrieval worse than random. E's "voice fingerprint moat" framing is compelling product thinking but obscures the technical risks that could prevent shipping at all.
+
+**3. What the Entire Council Missed**
+
+**Embedding backend dimension mismatch.** fastembed/all-MiniLM-L6-v2 is 384-dim; Cap-1's remote `/v1/embeddings` (likely OpenAI or Gemini) is typically 1536-dim. If you ever swap backends, every stored vector becomes semantically incompatible. No one flagged that the swappable interface must also version-lock the dimension in the schema, or that a backend switch requires full re-embedding — a potentially blocking migration on production data.
+
+
+### Review 3
+**1. Strongest: Response A**
+
+A is the only one that correctly identifies the core architectural mistake — embedding caption *outputs* to retrieve similar outputs is circular feedback on surface form, not on what made captions *good*. The fix it proposes (embed structured event context *paired with* the accepted caption, use context as retrieval key) is architecturally sound and directly applicable. It also surfaces two critical production concerns the others underweight: ONNX eager-loading (a specific, concrete bug), and multi-tenancy scoping as a schema-level requirement from day one. The framing is tightest.
+
+**2. Biggest Blind Spot: Response E**
+
+E is the most bullish but essentially cheerleads the proposal back at the team. It never mentions multi-tenancy, ignores the corpus cold-start problem, and hand-waves v0.1.x risks. The "JOIN superpower" framing is real but overstated — the value only materializes once there's meaningful data. It tells the team what they want to hear rather than what they need to hear.
+
+**3. What All Responses Missed**
+
+**Embedding model versioning and re-indexing.** If MediaHub swaps fastembed for a remote backend, upgrades the ONNX model, or changes dimensionality, every stored vector in data.db becomes semantically incompatible with new queries — silently. The schema needs a `embedder_model_id` column from day one, and there must be a re-embedding migration path before any model switch. None of the responses addressed this data lifecycle problem.
+
+
+### Review 4
+**1. Strongest: Response A**
+
+A is the sharpest because it identifies the core conceptual flaw the others accept uncritically: embedding caption *outputs* to retrieve similar outputs is circular feedback on surface form, not on what made captions *good*. Its fix — embed structured event context paired with the accepted caption — is architecturally correct. It also catches the ONNX-blocking-first-request issue (eager loading) and raises multi-tenancy as a day-one schema requirement, not an afterthought.
+
+**2. Biggest blind spot: Response E**
+
+E recommends embedding "aggressively — every accepted caption, every rejected caption" from day one, without addressing the cold-start corpus problem (B and D both catch), multi-tenancy poisoning (only A catches), or the ONNX latency issue on a sync worker. It reads as advocacy for the proposed architecture rather than a pressure-test of it.
+
+**3. What all five missed: embedding model versioning**
+
+Every response assumes the embedding model is stable. None address what happens when you swap fastembed for a remote model (or upgrade all-MiniLM to a larger model): stored 384-dim vectors are incompatible with new-dimension vectors. The schema needs a model-version column from day one, or a corpus re-embedding becomes a silent data corruption event — especially dangerous in a single shared production `data.db`.
+
+
+### Review 5
+## Council Review
+
+### 1. Strongest: Response A
+
+A delivers the sharpest architectural insight: embedding caption *outputs* to retrieve similar caption outputs is circular — it pattern-matches surface form, not quality signal. The correct unit is a paired (event-context → accepted-caption) tuple, which is retrieval-augmented generation done correctly. A also catches two production hazards no one else names as clearly: the ONNX model blocking the synchronous Gunicorn thread on cold init, and the multi-tenancy boundary — Club A's casual voice poisoning Club B's formal tone is a day-one schema problem, not a later concern.
+
+### 2. Biggest Blind Spot: Response E
+
+E is the most enthusiastic and the least rigorous. It recommends shipping fastembed immediately and embedding aggressively (including rejected captions), while ignoring the synchronous-worker blocking risk (raised by A and D), the corpus-size problem (B and D), and sqlite-vec's immaturity. The JOIN-as-superpower argument is genuinely correct but used to hand-wave past real risks.
+
+### 3. What All Responses Missed
+
+**Embedding model versioning / vector invalidation.** If MediaHub later swaps fastembed for a remote model, or upgrades `all-MiniLM-L6-v2`, all stored vectors become dimensionally or semantically incompatible and must be re-embedded. None of the responses address storing a `model_id`/`model_version` alongside each vector row — a schema omission that would force a painful retroactive migration on a live production database.
+
+
+## Chairman verdict
+## Where the Council Agrees
+
+**sqlite-vec over ChromaDB, full stop.** Every advisor rejects ChromaDB. You're nowhere near the scale where brute-force KNN hurts, a second service is unwarranted ops overhead, and the JOIN-with-relational-context argument (Expansionist) is genuinely correct, not just convenient.
+
+**Start remote-only on embeddings.** Executor and Outsider both land here: Cap-1's `/v1/embeddings` already works. Adding fastembed before you've validated that semantic recall produces UX value loads two unknowns simultaneously. Defer the local model.
+
+**The corpus cold-start problem is real.** Contrarian, Outsider, and First Principles all name it independently: 30–80 accepted captions is not a corpus that benefits from KNN. Semantic retrieval at that scale retrieves noise with confidence. This isn't a reason not to build — it's a reason to set expectations honestly and not ship this as a marquee feature until clubs have a season of data behind them.
+
+**Multi-tenancy is a day-one schema requirement, not a later concern.** First Principles names it; all five peer reviews elevate it as the highest-consequence call in the decision. Club A's casual voice will poison Club B's formal tone. Every vector row must carry a `tenant_id` scoping column. Retrofitting this on a shared production `data.db` is painful. There is no debate here.
+
+---
+
+## Where the Council Clashes
+
+**What to embed first — caption text vs. event context.** Executor says embed accepted captions prefixed with context. First Principles and Outsider say embed the structured event context *as the retrieval key*, with the accepted caption as the retrieved value. This is the most substantive disagreement.
+
+First Principles wins. Embedding caption text to retrieve similar caption text is circular feedback on surface form — you're pattern-matching outputs, not mapping the conditions that made captions succeed. The correct architecture is: retrieval key = "this type of meet moment," retrieved value = "what caption voice worked for it." Executor's prefix format (`"{athlete_name} | {event} | {meet_name}: {caption_text}"`) is a reasonable approximation but conflates key and value in a single blob. Separate them cleanly.
+
+**Separate `memory.db` vs. same `data.db`.** Contrarian argues isolation: a v0.1.x C extension that fails to load on your only state file is a loaded gun. Executor says stay in `data.db` to fit the migration pattern. Contrarian is right on the risk framing, wrong on the conclusion. The correct answer is: use `data.db` for the relational metadata (caption_id, tenant_id, event_context, embedder_model_id), use a **separate `memory.db`** on the same persistent disk for the `vec0` virtual tables. Extension load failure isolates to the vector surface, not your entire state store.
+
+**Ship fastembed now vs. defer.** Expansionist says ship it; Executor and Outsider say defer. Defer. The case for shipping it now rests on "the ONNX pattern is proven" — but as First Principles correctly flags, model loading in a synchronous Gunicorn worker blocks the thread on first request unless you eager-load at startup. That's a concrete production bug, not a theoretical concern. Validate the remote path first. Add fastembed in week 3 if remote latency or cost is unacceptable.
+
+---
+
+## Blind Spots the Council Caught
+
+All five peer reviews independently flagged **one critical omission the entire advisor panel missed**: embedding model versioning.
+
+Every stored vector is coupled to the model that produced it. `all-MiniLM-L6-v2` is 384-dim; a typical remote `/v1/embeddings` backend (OpenAI, Gemini) is 1536-dim. If you ever swap backends, upgrade the ONNX model, or switch dimensionality, existing vectors become silently incompatible — cosine similarity against mixed-model vectors returns garbage with no error.
+
+The schema needs an `embedder_model_id` column on every vector row from day one. A backend switch requires a full re-embedding migration on production data. This is not optional hygiene; it is a hard requirement before you write a single migration.
+
+---
+
+## The Recommendation
+
+**Build this. The architecture is sound with three corrections.**
+
+1. **sqlite-vec, but in a separate `memory.db` on the same persistent disk.** Relational metadata stays in `data.db`; `vec0` virtual tables live in `memory.db`. Extension load failure stays isolated.
+
+2. **Embed structured event context as the retrieval key, accepted caption as the retrieved value.** Schema: `(tenant_id, embedder_model_id, event_context_embedding, caption_id)`. Retrieval looks up the most semantically similar prior *moment*, returns the caption that worked for it. Do not conflate key and value.
+
+3. **Four mandatory schema columns from day one:** `tenant_id` (multi-tenancy isolation), `embedder_model_id` (model versioning), `embedding_dim` (dimension validation guard), `created_at` (re-indexing audit). Missing any of these requires a painful retroactive migration on production data.
+
+**Start remote-only.** Wire sqlite-vec + Cap-1's `/v1/embeddings`, ship the caption consumer, validate UX with real clubs. Add fastembed in week 3 only if remote latency or cost forces it — and when you do, eager-load the model at app startup, not on first request.
+
+**Set honest expectations on cold-start.** Don't present semantic recall as a power feature to clubs with fewer than ~200 accepted captions. Surface it gradually. The corpus has to exist before retrieval is better than random.
+
+---
+
+## The One Thing to Do First
+
+Before writing a line of application code: **prove sqlite-vec loads on Render in your actual Dockerfile.**
+
+Add `RUN python -c "import sqlite_vec; print('sqlite-vec OK')"` as a build step. If the C extension fails to load in your container environment, everything else is moot. This takes 20 minutes and eliminates the highest-probability blocking risk. Do it today.

@@ -38,6 +38,11 @@ RUN pip install --upgrade pip \
  && pip install -r /app/requirements.txt \
  && pip install gunicorn
 
+# Fail the build LOUDLY if the sqlite-vec extension can't load in this image
+# (Capability 2 / semantic memory). It is a young v0.1.x C extension; a load
+# failure must surface at build time, never as a silent runtime degrade.
+RUN python -c "import sqlite3, sqlite_vec; db=sqlite3.connect(':memory:'); db.enable_load_extension(True); sqlite_vec.load(db); print('sqlite-vec OK', db.execute('select vec_version()').fetchone()[0])"
+
 # Preload rembg's u2net ONNX model (~170 MB) into the image so the
 # first cutout request doesn't hang on a GitHub download — Render's
 # outbound is slow on cold start and a missed download falls through
