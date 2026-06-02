@@ -7701,10 +7701,12 @@ def create_app() -> Flask:
             ("error", "Failed", unfiltered_counts.get("error", 0)),
         ]
         for val, label, count in seg_specs:
-            active_cls = " is-active" if status_q == val else ""
+            is_active = status_q == val
+            active_cls = " is-active" if is_active else ""
             url_arg = f"?status={val}" if val else ""
             seg_buttons += (
-                f'<a class="{active_cls.strip()}" href="{url_for("activity_page")}{url_arg}">'
+                f'<a role="tab" aria-selected="{"true" if is_active else "false"}"'
+                f' class="{active_cls.strip()}" href="{url_for("activity_page")}{url_arg}">'
                 f'{label}<span class="count">{count}</span></a>'
             )
         toolbar_html = (
