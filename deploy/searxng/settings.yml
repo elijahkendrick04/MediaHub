@@ -1,0 +1,38 @@
+# MediaHub in-container SearXNG config (Capability 3).
+#
+# This file is CONFIG ONLY. SearXNG itself is the stock, UNMODIFIED upstream
+# project (installed via pip in the Dockerfile). Providing a settings file is
+# not "modifying the program" — SearXNG stays AGPL-clean, run stock and queried
+# only over localhost. https://github.com/searxng/searxng
+#
+# Two things here matter for MediaHub:
+#   * server.bind_address / port — localhost ONLY. This SearXNG is never exposed
+#     to the public internet; only MediaHub (same container) can reach it.
+#   * search.formats includes `json` — MediaHub reads results as JSON, which is
+#     OFF in stock SearXNG, so we enable it here.
+use_default_settings: true
+
+server:
+  bind_address: "127.0.0.1"
+  port: 8888
+  # Session/CSRF secret for an INTERNAL localhost-only instance. Not an API key
+  # and grants access to nothing — the service isn't reachable from outside the
+  # container. Fine to keep in the repo.
+  secret_key: "mediahub-internal-localhost-searxng"
+  # The limiter (bot/abuse protection) needs Redis; unnecessary for a private
+  # localhost instance behind MediaHub's own 30-day result cache.
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+  default_lang: "en"
+
+# Keep upstream-engine timeouts tight so a slow engine can't hang MediaHub's
+# research loop (MediaHub also has its own per-request timeout + DuckDuckGo
+# fallback).
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0

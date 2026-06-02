@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import logging
 import re
 import subprocess
 import time
@@ -26,6 +27,8 @@ import urllib.parse
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 
 # Cache lives in a .cache dir next to the package root
@@ -138,8 +141,26 @@ class WebResearcher:
 
         results: list[SearchResult] = []
 
-        # Try pplx first
-        if self._check_pplx():
+        # Cap 3: SearXNG metasearch is the PREFERRED backend when configured
+        # (multi-engine, free, far sturdier than DDG HTML scraping). On any
+        # failure we fall back to the existing pplx/DDG path (logged degraded)
+        # so research never just stops. Off-by-default: with
+        # MEDIAHUB_SEARCH_ENDPOINT unset this block is skipped and behaviour is
+        # byte-for-byte unchanged — and MediaHub never provisions or hosts
+        # SearXNG, so it adds no running cost.
+        try:
+            from mediahub.web_research import searxng_client
+
+            if searxng_client.is_configured():
+                try:
+                    results = searxng_client.search(query, num)
+                except searxng_client.SearxngUnavailable as e:
+                    log.warning("SearXNG unavailable, falling back to DuckDuckGo: %s", e)
+        except Exception:
+            pass
+
+        # Try pplx (dev/local only)
+        if not results and self._check_pplx():
             try:
                 results = self._search_pplx(query, num)
             except Exception:

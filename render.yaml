@@ -72,6 +72,17 @@ services:
         generateValue: true
       - key: FLASK_ENV
         value: production
+      # --- In-container SearXNG metasearch (Capability 3, OPTIONAL) ---
+      # Runs stock SearXNG as a localhost-only process INSIDE this container —
+      # no new service, no extra cost. It uses ~150-250 MB RAM; Playwright /
+      # Chromium already spike during video renders, so if you ever see memory
+      # pressure (/healthz/memory) or worker restarts, set MEDIAHUB_RUN_SEARXNG
+      # to "0" to turn it off (MediaHub then uses free DuckDuckGo, unchanged).
+      # Non-fatal either way. See docs/SEARXNG.md.
+      - key: MEDIAHUB_RUN_SEARXNG
+        value: "1"
+      - key: MEDIAHUB_SEARCH_ENDPOINT
+        value: http://127.0.0.1:8888
     disk:
       name: mediahub-data
       mountPath: /var/mediahub

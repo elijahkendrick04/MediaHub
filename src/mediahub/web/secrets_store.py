@@ -79,6 +79,7 @@ _SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
     "mediahub_llm_model_cheap": ("MEDIAHUB_LLM_MODEL_CHEAP",),
     "mediahub_llm_model_premium": ("MEDIAHUB_LLM_MODEL_PREMIUM",),
     "mediahub_llm_model_overrides": ("MEDIAHUB_LLM_MODEL_OVERRIDES",),
+    "mediahub_search_endpoint": ("MEDIAHUB_SEARCH_ENDPOINT",),
 }
 
 

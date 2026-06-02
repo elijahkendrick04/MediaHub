@@ -74,12 +74,30 @@ COPY legacy/ /app/legacy/
 COPY samples/ /app/samples/
 COPY scripts/ /app/scripts/
 COPY pyproject.toml /app/pyproject.toml
+COPY deploy/ /app/deploy/
 
 # Install MediaHub itself in editable mode so the console script is wired.
 RUN pip install -e /app
 
 # Install Remotion node modules so /api/.../motion + /reel render MP4s.
 RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
+
+# --- Optional in-container SearXNG metasearch (Capability 3) -----------------
+# Stock, UNMODIFIED SearXNG installed into an ISOLATED virtualenv so its pinned
+# dependencies can never clash with MediaHub's. NON-FATAL: if the install fails
+# the image still builds and MediaHub just uses DuckDuckGo. SearXNG only RUNS
+# when MEDIAHUB_RUN_SEARXNG=1 (see scripts/docker-entrypoint.sh); off => 0 RAM.
+# SearXNG is AGPL-3.0 — installed stock, queried only over localhost HTTP, never
+# modified. Pin SEARXNG_REF to a specific commit for full reproducibility.
+ARG SEARXNG_REF=master
+ENV SEARXNG_VENV=/opt/searxng-venv \
+    SEARXNG_SETTINGS_PATH=/app/deploy/searxng/settings.yml
+RUN python -m venv "$SEARXNG_VENV" \
+ && ( "$SEARXNG_VENV/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel \
+   && "$SEARXNG_VENV/bin/pip" install --no-cache-dir \
+        "git+https://github.com/searxng/searxng.git@${SEARXNG_REF}" \
+   && "$SEARXNG_VENV/bin/python" -c "import searx; print('searxng OK')" ) \
+ || echo "WARN: in-container SearXNG install failed; MediaHub will use DuckDuckGo."
 
 # Create runtime dirs (mounted volumes will overlay these).
 RUN mkdir -p /app/runs_v4 /app/uploads_v4 /app/.cache \

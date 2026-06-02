@@ -17,6 +17,19 @@ via `requests` already declared in `requirements.txt`.
 
 No additional third-party notices are required for this layer.
 
+## In-container SearXNG metasearch (optional, Capability 3)
+
+When `MEDIAHUB_RUN_SEARXNG=1`, the deployment installs and runs **SearXNG**
+(https://github.com/searxng/searxng), a metasearch engine, as a **stock,
+unmodified** process inside the container, queried only over localhost HTTP.
+MediaHub does not modify, fork, or link against SearXNG — it only sends it
+search queries.
+
+- **SearXNG** — © SearXNG contributors — **AGPL-3.0-or-later**. Run unmodified
+  at the pinned `SEARXNG_REF`; per AGPL-3.0 the corresponding source is the
+  upstream repository (https://github.com/searxng/searxng) at that ref. Its
+  transitive dependencies carry their own licenses via their distributions.
+
 ---
 
 _When a future change vendors third-party source (as opposed to a registry

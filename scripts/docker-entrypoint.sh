@@ -74,6 +74,21 @@ fi
 #   --access-logformat ...
 #                       Include request time so a single hung route
 #                       shows up in logs.
+# --- Optional in-container SearXNG metasearch (Capability 3) ---
+# Start stock SearXNG as a localhost-only background process when enabled.
+# Non-fatal: any problem just means MediaHub uses DuckDuckGo. Off unless
+# MEDIAHUB_RUN_SEARXNG=1 (zero RAM when off). See docs/SEARXNG.md + render.yaml.
+SEARXNG_VENV="${SEARXNG_VENV:-/opt/searxng-venv}"
+if [ "${MEDIAHUB_RUN_SEARXNG:-0}" = "1" ]; then
+  if [ -x "$SEARXNG_VENV/bin/python" ] && "$SEARXNG_VENV/bin/python" -c "import searx" 2>/dev/null; then
+    echo "Starting in-container SearXNG on 127.0.0.1:8888 ..."
+    SEARXNG_SETTINGS_PATH="${SEARXNG_SETTINGS_PATH:-/app/deploy/searxng/settings.yml}" \
+      "$SEARXNG_VENV/bin/python" -m searx.webapp >/tmp/searxng.log 2>&1 &
+  else
+    echo "MEDIAHUB_RUN_SEARXNG=1 but SearXNG is not installed; using DuckDuckGo."
+  fi
+fi
+
 exec gunicorn mediahub.web:app \
   --bind "0.0.0.0:${PORT}" \
   --workers 2 \
