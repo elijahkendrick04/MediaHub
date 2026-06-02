@@ -73,6 +73,11 @@ _SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
     "replicate_api_token":     ("REPLICATE_API_TOKEN",),
     "mediahub_cutout_provider": ("MEDIAHUB_CUTOUT_PROVIDER",),
     "mediahub_llm_provider":   ("MEDIAHUB_LLM_PROVIDER",),
+    "mediahub_llm_api_key":    ("MEDIAHUB_LLM_API_KEY",),
+    "mediahub_llm_endpoints":  ("MEDIAHUB_LLM_ENDPOINTS",),
+    "mediahub_llm_model_cheap":     ("MEDIAHUB_LLM_MODEL_CHEAP",),
+    "mediahub_llm_model_premium":   ("MEDIAHUB_LLM_MODEL_PREMIUM",),
+    "mediahub_llm_model_overrides": ("MEDIAHUB_LLM_MODEL_OVERRIDES",),
 }
 
 

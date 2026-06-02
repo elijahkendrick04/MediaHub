@@ -140,33 +140,54 @@ def _redact_key(text: str, key: Optional[str]) -> str:
 
 
 def _preferred_provider() -> str:
-    """Return 'anthropic' if explicitly preferred via env, else 'gemini'."""
+    """Return the operator's preferred provider key.
+
+    'openai'    when MEDIAHUB_LLM_PROVIDER=openai
+    'anthropic' when =anthropic or =claude (alias)
+    'gemini'    otherwise (empty, 'gemini', 'auto', unknown).
+    """
     pref = (os.environ.get("MEDIAHUB_LLM_PROVIDER") or "").strip().lower()
-    if pref == "anthropic":
+    if pref == "openai":
+        return "openai"
+    if pref in ("anthropic", "claude"):
         return "anthropic"
-    # Everything else (empty, 'gemini', 'auto', unknown) defaults to Gemini.
     return "gemini"
+
+
+def _is_openai_on() -> bool:
+    """True when an OpenAI-compatible endpoint is configured. Lazy import keeps
+    media_ai.llm importable even if the adapter module is ever absent."""
+    try:
+        from mediahub.media_ai.llm_providers import is_openai_configured
+        return is_openai_configured()
+    except Exception:
+        return False
 
 
 def is_available() -> bool:
     """True if any real LLM provider is reachable."""
-    return _has_gemini_key() or _has_anthropic_key()
+    return _has_gemini_key() or _has_anthropic_key() or _is_openai_on()
 
 
 def active_provider() -> str:
     """Return the user-friendly name of the active LLM provider.
 
-    Returns one of: 'anthropic-api', 'gemini-api', 'heuristic'.
+    Returns one of: 'openai-api', 'anthropic-api', 'gemini-api', 'heuristic'.
     The 'heuristic' label is the historical placeholder for "no provider
     configured"; callers that branch on it should treat it as
     "AI features unavailable".
     """
-    if _preferred_provider() == "anthropic" and _has_anthropic_key():
+    pref = _preferred_provider()
+    if pref == "openai" and _is_openai_on():
+        return "openai-api"
+    if pref == "anthropic" and _has_anthropic_key():
         return "anthropic-api"
     if _has_gemini_key():
         return "gemini-api"
     if _has_anthropic_key():
         return "anthropic-api"
+    if _is_openai_on():
+        return "openai-api"
     return "heuristic"
 
 
@@ -633,10 +654,19 @@ def _provider_order() -> tuple[str, ...]:
 
     Default: gemini first, then anthropic as fallback.
     MEDIAHUB_LLM_PROVIDER=anthropic: anthropic first, then gemini.
+    MEDIAHUB_LLM_PROVIDER=openai: openai first, then gemini, then anthropic.
+
+    The 'openai' provider only joins the order when an OpenAI-compatible
+    endpoint is actually configured; otherwise the order is unchanged and the
+    feature is inert.
     """
-    if _preferred_provider() == "anthropic":
-        return ("anthropic", "gemini")
-    return ("gemini", "anthropic")
+    pref = _preferred_provider()
+    base = ("anthropic", "gemini") if pref == "anthropic" else ("gemini", "anthropic")
+    if not _is_openai_on():
+        return base
+    if pref == "openai":
+        return ("openai",) + base
+    return base + ("openai",)
 
 
 def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 1024,
@@ -653,6 +683,9 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
             out = _call_gemini(msgs, system, max_tokens)
         elif provider == "anthropic":
             out = _call_anthropic(msgs, system, max_tokens)
+        elif provider == "openai":
+            from mediahub.media_ai.llm_providers import call_openai
+            out = call_openai(msgs, system, max_tokens)
         else:
             continue
         if out:
