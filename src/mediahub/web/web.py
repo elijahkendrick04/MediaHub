@@ -824,6 +824,10 @@ _active_runs: BoundedCache = BoundedCache(max_size=64)
 # time (the pack is already persisted to disk by save_pack), so each
 # entry stays small.
 _turn_into_jobs: BoundedCache = BoundedCache(max_size=32)
+# Web-research console jobs (Capability 3c). Same small-record shape as
+# Turn-Into — status + the cited answer + source URLs — held in memory for
+# fast same-worker polls and mirrored to disk for the other worker.
+_research_jobs: BoundedCache = BoundedCache(max_size=32)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -1022,32 +1026,31 @@ def _maybe_evict_turn_into_jobs() -> None:
         _turn_into_jobs.pop(jid, None)
 
 
-# ---- Cross-worker Turn-Into job state --------------------------------
+# ---- Cross-worker async-job state (shared disk store) ----------------
 #
-# gunicorn runs --workers 2, so the worker that creates an async
-# Turn-Into job (and holds it in the in-memory _turn_into_jobs cache) is
-# usually NOT the worker a later status poll round-robins to. Without a
-# shared store the poll on the other worker sees nothing and the UI shows
-# "Failed: job not found". Runs already dodge this by falling back to the
-# SQLite row; Turn-Into jobs get the same treatment via a tiny JSON file
-# per job on the shared DATA_DIR disk. Records are small (status +
-# pack_url + a few counts) and short-lived, so a flat directory of
-# <job_id>.json files is enough — no schema, no migration.
+# gunicorn runs --workers 2, so the worker that creates an async job (and
+# holds it in an in-memory BoundedCache) is usually NOT the worker a later
+# status poll round-robins to. Without a shared store the poll on the other
+# worker sees nothing and the UI shows "job not found". Runs dodge this via
+# their SQLite row; the lighter async jobs (Turn-Into packs, web-research
+# answers) get the same treatment via a tiny JSON file per job on the shared
+# DATA_DIR disk. Records are small and short-lived, so a flat directory of
+# <subdir>/<job_id>.json files is enough — no schema, no migration.
 
 
-def _ti_jobs_dir() -> Path:
-    d = DATA_DIR / "turn_into_jobs"
+def _job_records_dir(subdir: str) -> Path:
+    d = DATA_DIR / subdir
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _ti_job_write(job_id: str, record: dict) -> None:
-    """Persist a job record so any gunicorn worker can read it. Atomic
-    (temp file + os.replace) so a concurrent poll never reads a half-
-    written file. Best-effort — a disk hiccup must not break generation,
-    since the in-memory cache still serves same-worker polls."""
+def _job_record_write(subdir: str, job_id: str, record: dict) -> None:
+    """Persist a job record under DATA_DIR/<subdir> so any gunicorn worker
+    can read it. Atomic (temp file + os.replace) so a concurrent poll never
+    reads a half-written file. Best-effort — a disk hiccup must not break the
+    job, since the in-memory cache still serves same-worker polls."""
     try:
-        path = _ti_jobs_dir() / f"{job_id}.json"
+        path = _job_records_dir(subdir) / f"{job_id}.json"
         tmp = path.with_name(f"{job_id}.json.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(record, default=str))
         os.replace(tmp, path)
@@ -1055,10 +1058,10 @@ def _ti_job_write(job_id: str, record: dict) -> None:
         pass
 
 
-def _ti_job_read(job_id: str) -> Optional[dict]:
+def _job_record_read(subdir: str, job_id: str) -> Optional[dict]:
     """Read a persisted job record, or None if absent/unreadable."""
     try:
-        path = _ti_jobs_dir() / f"{job_id}.json"
+        path = _job_records_dir(subdir) / f"{job_id}.json"
         if not path.exists():
             return None
         return json.loads(path.read_text())
@@ -1066,14 +1069,13 @@ def _ti_job_read(job_id: str) -> Optional[dict]:
         return None
 
 
-def _prune_ti_job_files(max_age_secs: int = 21_600) -> None:
+def _prune_job_records(subdir: str, max_age_secs: int = 21_600) -> None:
     """Delete job-status files older than max_age_secs (default 6h). Jobs
-    finish in well under two minutes, so anything older is long done and
-    its pack (if any) is already persisted separately under
-    turn_into_packs/."""
+    finish in well under two minutes, so anything older is long done and any
+    durable artefact (a pack, say) is already persisted separately."""
     try:
         now = time.time()
-        for f in _ti_jobs_dir().glob("*.json"):
+        for f in _job_records_dir(subdir).glob("*.json"):
             try:
                 if now - f.stat().st_mtime > max_age_secs:
                     f.unlink()
@@ -1081,6 +1083,157 @@ def _prune_ti_job_files(max_age_secs: int = 21_600) -> None:
                 continue
     except Exception:
         pass
+
+
+# Turn-Into jobs were the first user of the shared store; keep their original
+# helper names as thin wrappers so existing call sites are unchanged.
+def _ti_job_write(job_id: str, record: dict) -> None:
+    _job_record_write("turn_into_jobs", job_id, record)
+
+
+def _ti_job_read(job_id: str) -> Optional[dict]:
+    return _job_record_read("turn_into_jobs", job_id)
+
+
+def _prune_ti_job_files(max_age_secs: int = 21_600) -> None:
+    _prune_job_records("turn_into_jobs", max_age_secs)
+
+
+def _research_console_enabled() -> bool:
+    """The web-research console (Capability 3c) is OFF by default. The operator
+    opts in with MEDIAHUB_RESEARCH_UI=1 — it triggers LLM + network activity,
+    so it must never be exposed by accident. Read at request time so the flag
+    flips without a code change (matches how the search endpoint resolves)."""
+    return os.environ.get("MEDIAHUB_RESEARCH_UI", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+# Console page body (Capability 3c). A plain string — NOT an f-string — so the
+# JS braces stay literal; the route swaps __SUBMIT_URL__ for the real endpoint.
+# Results are rendered with textContent / createElement only (never innerHTML),
+# because answer text and source URLs come from the model + the open web and
+# must not be trusted as markup.
+_WEB_RESEARCH_CONSOLE_BODY = """
+<section class="panel" style="max-width:840px;margin:28px auto">
+  <h1 style="margin-top:0">Web research</h1>
+  <p style="color:var(--muted);line-height:1.5">
+    Ask a question and MediaHub runs a bounded, cited web search &mdash; a few
+    targeted searches and page reads, then a source-grounded answer. Sources on
+    authoritative domains are flagged. If the loop can't verify an answer within
+    its bound it says so and asserts nothing &mdash; partial results are discarded.
+  </p>
+  <form id="rform" data-no-loader="1" style="margin-top:16px">
+    <textarea id="rq" name="question" rows="3" maxlength="500" required
+      placeholder="e.g. What were the headline results at the 2024 county championships for the City Aquatics club?"
+      style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
+    <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button class="btn" type="submit" id="rbtn">Research</button>
+      <span id="rhint" style="color:var(--muted);font-size:13px"></span>
+    </div>
+  </form>
+  <div id="rresult" style="display:none;margin-top:24px">
+    <div id="rstatus" style="font-size:13px;color:var(--muted);margin-bottom:12px"></div>
+    <div id="ranswer" style="white-space:pre-wrap;line-height:1.55"></div>
+    <div id="rsources" style="margin-top:20px"></div>
+    <div id="rmeta" style="margin-top:14px;font-size:12px;color:var(--muted)"></div>
+  </div>
+</section>
+<script>
+(function(){
+  var SUBMIT_URL = "__SUBMIT_URL__";
+  var form = document.getElementById('rform');
+  var btn = document.getElementById('rbtn');
+  var hint = document.getElementById('rhint');
+  var result = document.getElementById('rresult');
+  var statusEl = document.getElementById('rstatus');
+  var answerEl = document.getElementById('ranswer');
+  var sourcesEl = document.getElementById('rsources');
+  var metaEl = document.getElementById('rmeta');
+  var timer = null;
+
+  function clearOut(){ answerEl.textContent=''; sourcesEl.textContent=''; metaEl.textContent=''; }
+  function done(){ if(timer){clearInterval(timer); timer=null;} btn.classList.remove('loading'); btn.disabled=false; hint.textContent=''; }
+
+  function render(d){
+    statusEl.textContent = d.complete
+      ? 'Done.'
+      : 'Inconclusive \\u2014 the research loop could not verify an answer within its bound, so nothing is asserted.';
+    answerEl.textContent = d.answer || (d.complete ? '' : '(no verified answer)');
+    var auth = {};
+    (d.authority_sources || []).forEach(function(u){ auth[u] = 1; });
+    var srcs = d.sources || [];
+    if (srcs.length){
+      var head = document.createElement('div');
+      head.textContent = 'Sources'; head.style.fontWeight = '600'; head.style.marginBottom = '8px';
+      sourcesEl.appendChild(head);
+      var ul = document.createElement('ul');
+      ul.style.margin = '0'; ul.style.paddingLeft = '18px';
+      srcs.forEach(function(u){
+        var li = document.createElement('li'); li.style.marginBottom = '6px';
+        var a = document.createElement('a');
+        a.textContent = u;
+        var ok = (typeof u === 'string') && (u.indexOf('http://') === 0 || u.indexOf('https://') === 0);
+        if (ok){ a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        a.style.color = 'var(--lane,var(--accent,#8ab4ff))'; a.style.wordBreak = 'break-all';
+        li.appendChild(a);
+        if (auth[u]){
+          var b = document.createElement('span');
+          b.textContent = 'authority';
+          b.style.cssText = 'margin-left:8px;font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(94,227,154,0.15);color:#5EE39A;border:1px solid rgba(94,227,154,0.35)';
+          li.appendChild(b);
+        }
+        ul.appendChild(li);
+      });
+      sourcesEl.appendChild(ul);
+    }
+    metaEl.textContent = 'rounds: ' + (d.rounds || 0) + ' \\u00b7 tool calls: ' + (d.tool_calls || 0);
+  }
+
+  function poll(url){
+    fetch(url, {cache:'no-store'})
+      .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+      .then(function(o){
+        if (o.j && o.j.status === 'running') return;
+        done();
+        if (o.s >= 500 || (o.j && o.j.status === 'error')){
+          statusEl.textContent = 'Research failed: ' + ((o.j && o.j.error) || 'unknown error');
+          return;
+        }
+        render(o.j || {});
+      })
+      .catch(function(){ /* transient — keep polling */ });
+  }
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var q = document.getElementById('rq').value.trim();
+    if (!q) return;
+    if (timer){ clearInterval(timer); timer = null; }
+    clearOut();
+    result.style.display = 'block';
+    statusEl.textContent = 'Researching\\u2026 this can take up to a minute.';
+    btn.classList.add('loading'); btn.disabled = true; hint.textContent = 'Working\\u2026';
+    fetch(SUBMIT_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})})
+      .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+      .then(function(o){
+        if (!o.j || !o.j.ok || !o.j.status_url){
+          done();
+          statusEl.textContent = 'Could not start research: ' + ((o.j && (o.j.message || o.j.error)) || ('HTTP ' + o.s));
+          return;
+        }
+        var su = o.j.status_url;
+        timer = setInterval(function(){ poll(su); }, 1800);
+        poll(su);
+      })
+      .catch(function(){ done(); statusEl.textContent = 'Could not start research (network error).'; });
+  });
+})();
+</script>
+"""
 
 
 def _db():
@@ -5834,6 +5987,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     {% if signed_in %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
@@ -6605,6 +6759,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         body=body,
         active=active,
         health_url=url_for("healthz"),
+        research_enabled=_research_console_enabled(),
         signed_in=bool(signed_in_pid),
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
@@ -18080,6 +18235,113 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "ok": True,
                 "status": "done",
                 **{k: v for k, v in job.items() if k not in ("pack", "status")},
+            }
+        )
+
+    # ---- Web-research console (Capability 3c) ------------------------
+    #
+    # Interactive surface over the bounded deep-research loop. Per the
+    # Capability 3 council verdict, deep-research is NEVER run inline: the
+    # loop can take 30-90s and would monopolise one of only two gunicorn
+    # workers. The console submits a question, runs deep_research() in a
+    # daemon thread, and the browser polls for the result. Off by default
+    # (MEDIAHUB_RESEARCH_UI) and, in production, behind the sign-in gate, so
+    # only an authenticated organisation can trigger LLM/network activity.
+    # £0: rides the existing Gemini free tier + in-container search.
+
+    @app.route("/web-research")
+    def web_research_console():
+        """Render the interactive web-research console (off by default)."""
+        if not _research_console_enabled():
+            off = (
+                '<section class="panel" style="max-width:720px;margin:32px auto">'
+                '<h1 style="margin-top:0">Web research</h1>'
+                "<p>The web-research console is turned off on this deployment. "
+                "An operator can enable it by setting "
+                "<code>MEDIAHUB_RESEARCH_UI=1</code>.</p></section>"
+            )
+            return _layout("Web research", off, active="research"), 404
+        body = _WEB_RESEARCH_CONSOLE_BODY.replace(
+            "__SUBMIT_URL__", url_for("api_web_research_submit")
+        )
+        return _layout("Web research", body, active="research")
+
+    @app.route("/api/web-research", methods=["POST"])
+    def api_web_research_submit():
+        """Start a background deep-research job; return a job_id to poll.
+
+        Never runs the loop inline (it can take ~a minute and would block one
+        of two gunicorn workers — the council verdict)."""
+        if not _research_console_enabled():
+            return jsonify({"ok": False, "error": "research_console_disabled"}), 404
+        payload = request.get_json(silent=True) or {}
+        question = (payload.get("question") or "").strip()
+        if not question:
+            return jsonify({"ok": False, "error": "empty_question"}), 400
+        question = question[:500]
+        pid = _active_profile_id()
+
+        def _do_research(job_id: str, q: str) -> None:
+            try:
+                with app.app_context():
+                    from mediahub.web_research.deep_research import deep_research
+
+                    res = deep_research(q)
+                record = {
+                    "status": "done",
+                    "profile_id": pid,
+                    "answer": res.answer,
+                    "complete": res.complete,
+                    "sources": res.sources,
+                    "authority_sources": res.authority_sources,
+                    "rounds": res.rounds,
+                    "tool_calls": res.tool_calls,
+                }
+            except Exception as e:
+                record = {"status": "error", "profile_id": pid, "error": str(e)}
+            _research_jobs[job_id] = record
+            _job_record_write("research_jobs", job_id, record)
+
+        import uuid as _uuid
+
+        job_id = _uuid.uuid4().hex
+        with _active_lock:
+            _prune_job_records("research_jobs")
+        running = {"status": "running", "profile_id": pid}
+        _research_jobs[job_id] = running
+        _job_record_write("research_jobs", job_id, running)
+        threading.Thread(target=_do_research, args=(job_id, question), daemon=True).start()
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": "running",
+                "status_url": url_for("api_web_research_status", job_id=job_id),
+            }
+        )
+
+    @app.route("/api/web-research/<job_id>", methods=["GET"])
+    def api_web_research_status(job_id: str):
+        """Poll a web-research job: running | done | error."""
+        if not _research_console_enabled():
+            return jsonify({"ok": False, "error": "research_console_disabled"}), 404
+        job = _research_jobs.get(job_id) or _job_record_read("research_jobs", job_id)
+        if job is None:
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
+        # IDOR: a research job belongs to the org that created it. The job_id is
+        # an unguessable uuid4, but still don't let another signed-in org read it.
+        owner = job.get("profile_id")
+        if owner and owner != _active_profile_id():
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
+        if job.get("status") == "running":
+            return jsonify({"status": "running"})
+        if job.get("status") == "error":
+            return jsonify({"status": "error", "error": job.get("error", "unknown")}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "status": "done",
+                **{k: v for k, v in job.items() if k not in ("profile_id", "status")},
             }
         )
 
