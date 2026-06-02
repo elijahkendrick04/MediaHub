@@ -10,6 +10,7 @@ Each returned card is the RankedAchievement dict extended with:
   - 'active_caption': captions for the profile's selected tone
   - 'scheduled_for': free-text label (from workflow edits, if set)
 """
+
 from __future__ import annotations
 
 import json
@@ -59,6 +60,7 @@ def build_content_pack(
     # Load brand settings
     try:
         from mediahub.brand.store import load_brand
+
         kit, tone, caption_templates = load_brand(profile_id)
     except Exception:
         kit = None
@@ -84,6 +86,7 @@ def build_content_pack(
             if kit is not None and tone is not None:
                 try:
                     from mediahub.brand.apply import apply_brand
+
                     card = apply_brand(card, kit, tone, "meet_recap", caption_templates)
                 except Exception:
                     pass
@@ -102,8 +105,27 @@ def build_content_pack(
             notes = wf.notes or ""
             scheduled_for = ""
             if notes.startswith("scheduled:"):
-                scheduled_for = notes[len("scheduled:"):]
+                scheduled_for = notes[len("scheduled:") :]
             card["scheduled_for"] = scheduled_for.strip()
+
+            # Cap 2b: remember this approved card's accepted caption (event
+            # context -> caption) so future caption generation can recall what
+            # worked for similar moments. Off-by-default + best-effort: a no-op
+            # unless an embedding backend is configured, and it never raises
+            # into pack building.
+            try:
+                from mediahub.memory import learning as _mem
+
+                _bc = card.get("brand_captions") or {}
+                _active = _bc.get(tone) if isinstance(_bc, dict) else None
+                if isinstance(_active, dict):
+                    _cap = " ".join(
+                        str(v).strip() for v in _active.values() if isinstance(v, str) and v.strip()
+                    )
+                    if _cap:
+                        _mem.capture(profile_id, ach, _cap, card_id=card_id, run_id=run_id)
+            except Exception:
+                pass
 
             approved.append((ra.get("priority", 0.0), card))
 

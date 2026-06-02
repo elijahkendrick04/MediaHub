@@ -9101,9 +9101,7 @@ def create_app() -> Flask:
             # Offer a direct re-run link so the volunteer can act on the warning.
             _has_input = (RUNS_DIR / run_id / "input.bin").exists()
             _rerun_url = (
-                url_for("upload_configure", run_id=run_id)
-                if _has_input
-                else url_for("upload")
+                url_for("upload_configure", run_id=run_id) if _has_input else url_for("upload")
             )
             _rerun_label = "Re-run this meet" if _has_input else "Re-upload with PB fetching"
             pb_audit_html = (
@@ -9204,8 +9202,9 @@ def create_app() -> Flask:
             _bulk_approve_btn = (
                 '<button type="button" class="btn secondary" id="mh-bulk-approve"'
                 ' title="Approve every card currently shown in the queue">'
-                'Approve all in queue</button>'
-                if _wf_pct < 100 else ""
+                "Approve all in queue</button>"
+                if _wf_pct < 100
+                else ""
             )
 
             workflow_summary_card = f"""
@@ -10038,13 +10037,14 @@ function copyWhyCard(btn, taId) {{
 
         from mediahub.media_ai.llm import is_available as _llm_available
 
-        # Route the meet-recap caption through the unified content engine's
-        # single-caption front door (it delegates to the shared
-        # ai_caption.generate_caption_for_tone writer, preserving behaviour).
-        from mediahub.content_engine import generate_caption as _gen_tone
+        # Caption writer: the shared ai_caption.generate_caption_for_tone
+        # primitive (the very writer content_engine.generate_caption delegates
+        # to). Called directly so Cap-2b semantic recall can pass
+        # few_shot_examples through without widening the content_engine API.
         from mediahub.web.ai_caption import (
             KNOWN_AI_TONES as _AI_TONES,
             ClaudeUnavailableError as _ClaudeUE,  # type: ignore[attr-defined]
+            generate_caption_for_tone as _gen_tone,
         )
 
         if tone in _AI_TONES:
@@ -10095,6 +10095,19 @@ function copyWhyCard(btn, taId) {{
                 # it actively writes something different on each regenerate.
                 _recent_captions = _v9_load_caption_history(run_id, swim_id_dec)
 
+                # Cap 2b: semantic recall — captions that worked for similar
+                # past moments for this club, injected as few-shot voice
+                # examples so generation is conditioned on the club's own proven
+                # voice. Off-by-default ([] unless an embedding backend is
+                # configured and the club's corpus passes the cold-start floor);
+                # best-effort, never breaks caption generation.
+                try:
+                    from mediahub.memory import learning as _mem
+
+                    _mem_examples = _mem.recall(run_profile_id, ach_dict)
+                except Exception:
+                    _mem_examples = []
+
                 def _gen_one():
                     try:
                         return _gen_tone(
@@ -10104,6 +10117,7 @@ function copyWhyCard(btn, taId) {{
                             voice_profile=_run_voice_profile,
                             club_profile=club_profile_obj,
                             recent_captions=_recent_captions,
+                            few_shot_examples=_mem_examples,
                         )
                     except _ClaudeUE:
                         # Terminal-shaped errors must propagate so the

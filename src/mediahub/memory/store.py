@@ -238,6 +238,29 @@ def count(*, tenant_id: str, model_id: Optional[str] = None) -> int:
             conn.close()
 
 
+def get_caption(*, tenant_id: str, entry_id: str) -> Optional[str]:
+    """Return the stored caption for ``(tenant_id, entry_id)``, or ``None``.
+
+    Used by the capture layer's redundancy guard — skip a re-embed when a card's
+    caption is unchanged. Looks up by the deterministic rowid across dimensions.
+    """
+    rid = _entry_rowid(str(tenant_id), str(entry_id))
+    with _lock:
+        conn = _connect()
+        try:
+            for d in _known_dims(conn):
+                tbl = _table_for_dim(d)
+                row = conn.execute(
+                    f"SELECT caption FROM {tbl} WHERE rowid=? AND tenant_id=?",
+                    (rid, str(tenant_id)),
+                ).fetchone()
+                if row is not None:
+                    return row[0] or ""
+        finally:
+            conn.close()
+    return None
+
+
 def clear(*, tenant_id: Optional[str] = None) -> None:
     """Delete memories — a single tenant's, or all. Admin/test helper."""
     with _lock:
@@ -262,5 +285,6 @@ __all__ = [
     "upsert",
     "query",
     "count",
+    "get_caption",
     "clear",
 ]
