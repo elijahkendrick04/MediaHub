@@ -76,7 +76,7 @@ hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `617d7f5a1` · Merge pull request #213 from elijahkendrick04/claude/beautiful-brown-oAjpg
+**Last updated:** 2026-06-02 · `cc004f59d` · Merge pull request #216 from elijahkendrick04/claude/beautiful-brown-oAjpg
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -84,6 +84,7 @@ hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-02 | `b72348d07` | docs(readme): align with multi-sport, autonomy-first direction; fix stale facts |
 | 2026-06-02 | `cf2610c58` | docs: refresh test-count notes to post-merge figure (2836 passed / 1 skipped) |
 | 2026-06-02 | `f139f4931` | docs(roadmap): note roadmap directives are human-authored (autobuilder removed in #214) |
 | 2026-06-01 | `8572c4ec4` | Add trailing newline to renamed research report (pre-commit EOF hook) |
@@ -95,7 +96,6 @@ hand in a commit message:
 | 2026-06-02 | `0e4dbdc04` | Rebuild |
 | 2026-06-01 | `0fa7633ea` | autotest: persist fixer memory [skip ci] |
 | 2026-06-01 | `2f1f20d0e` | fix: 'REVIEWED 3/3 = 100%' contradicts 54 cards still in queue — |
-| 2026-06-01 | `828cdcb8a` | autotest: refresh bug report [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
