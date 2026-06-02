@@ -5,13 +5,13 @@ The original ask: the testing loop finds bugs and writes BUGS.md; this loop is
 what "puts the bugs into Claude Code" automatically. It reads the dedup ledger,
 takes the top open bugs that don't already have a fix in flight, and for each
 runs headless Claude Code (`claude -p`) with the bug's fix-ready detail on its
-own branch — then reuses the builder's gates (protected-path guard, scope cap,
-green test suite) and merge policy (full-auto-to-`main`, armed by
+own branch — then reuses the shared gitops gates (protected-path guard, scope
+cap, green test suite) and merge policy (full-auto-to-`main`, armed by
 AUTOTEST_BUILD_MERGE=1) to land the fix. The ledger entry is moved to
 ``fixing`` with its PR so the finder won't re-file it and this loop won't
 re-fix it.
 
-This shares all of its git/test/merge machinery with autotest.builder, so the
+This shares all of its git/test/merge machinery with autotest.gitops, so the
 safety nets are identical. Run:  python -m autotest.fix_loop
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 
-from autotest import builder, report
+from autotest import gitops, report
 from autotest._env import load_dotenv
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -174,8 +174,8 @@ def _persist_to_main() -> None:
     and it loops on the same bug every run."""
     if not _JOURNAL:
         return
-    builder._git("checkout", "-f", builder.BASE_BRANCH)
-    builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
+    gitops._git("checkout", "-f", gitops.BASE_BRANCH)
+    gitops._git("reset", "--hard", f"origin/{gitops.BASE_BRANCH}")
     ledger = report.load_ledger()
     changed = False
     for fp, fields in _JOURNAL.items():
@@ -186,11 +186,11 @@ def _persist_to_main() -> None:
     if not changed:
         return
     report.save_ledger(ledger)
-    builder._git("add", "autotest/reports/ledger.json")
-    rc, _ = builder._git("commit", "-m", "autotest: persist fixer memory [skip ci]")
+    gitops._git("add", "autotest/reports/ledger.json")
+    rc, _ = gitops._git("commit", "-m", "autotest: persist fixer memory [skip ci]")
     if rc == 0:
-        builder._git("pull", "--rebase", "--autostash", "origin", builder.BASE_BRANCH)
-        builder._git("push", "origin", builder.BASE_BRANCH)
+        gitops._git("pull", "--rebase", "--autostash", "origin", gitops.BASE_BRANCH)
+        gitops._git("push", "origin", gitops.BASE_BRANCH)
 
 
 def _give_up_or_retry(bug: dict, attempts: int, reason: str) -> dict:
@@ -282,21 +282,21 @@ def _mark_fixing(fingerprint: str, branch: str, pr: str) -> None:
 def fix_one(bug: dict) -> dict:
     fp = bug["fingerprint"]
     branch = f"autotest/fix-{fp}"
-    if builder.STOP_FILE.exists():
+    if gitops.STOP_FILE.exists():
         return {"halted": "kill switch"}
     attempts = int(bug.get("fix_attempts", 0)) + 1
     _update(fp, fix_attempts=attempts)   # record before trying, so a crash still counts
-    builder._git("fetch", "origin", builder.BASE_BRANCH)
-    rc, _ = builder._git("checkout", "-B", branch, f"origin/{builder.BASE_BRANCH}")
+    gitops._git("fetch", "origin", gitops.BASE_BRANCH)
+    rc, _ = gitops._git("checkout", "-B", branch, f"origin/{gitops.BASE_BRANCH}")
     if rc != 0:
-        builder._git("checkout", "-B", branch)
+        gitops._git("checkout", "-B", branch)
 
     # Implement + iterate to green: a gate failure is fed back to the coder to
     # fix the root cause (repo skills), not abandoned on the first miss.
-    ok, files, ins, info = builder.implement_until_green(
+    ok, files, ins, info = gitops.implement_until_green(
         _fix_prompt(bug), complex=False, label=f"bug {fp}")
     if not ok:
-        builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
+        gitops._git("reset", "--hard", f"origin/{gitops.BASE_BRANCH}")
         # The "coder error" alarm is ONLY for true infrastructure failures (CLI
         # missing, auth/crash). A coder that RAN but didn't land a clean fix
         # (timed out, hit max-turns, or the gate stayed red) is a normal failed
@@ -324,29 +324,29 @@ def fix_one(bug: dict) -> dict:
                               "pending a ground-truth repro (not retried, not closed)"}
         return _give_up_or_retry(bug, attempts, info)
 
-    builder._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
+    gitops._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
                  f"finding {fp} ({bug.get('category')}).")
     # Advisory regression-proof (council FIX rule): did the coder's new test
     # actually exercise the bug (fail on PRE-fix source, pass after)? Hollow/no
     # test isn't fatal — many real fixes can't have a failing-first test — so it
     # only hard-blocks under AUTOTEST_REQUIRE_REGRESSION_PROOF=1; otherwise it's
     # surfaced in the PR body + result for the operator to weigh.
-    reg_status, reg_detail = builder.prove_regression()
+    reg_status, reg_detail = gitops.prove_regression()
     if os.environ.get("AUTOTEST_REQUIRE_REGRESSION_PROOF") == "1" and reg_status in ("hollow", "no-test"):
-        builder._git("reset", "--hard", f"origin/{builder.BASE_BRANCH}")
+        gitops._git("reset", "--hard", f"origin/{gitops.BASE_BRANCH}")
         return _give_up_or_retry(bug, attempts, f"regression proof {reg_status}: {reg_detail}")
     # Force: the fix branch is loop-owned and rebuilt fresh from main each
     # attempt, so a leftover from a prior attempt (or a stranded no-PR push)
     # must be overwritten — a plain push would be rejected non-fast-forward,
     # which would then open the PR against the STALE branch content.
-    builder._git("push", "-u", "--force", "origin", branch)
-    pr_url, pr_err = builder._open_pr(
+    gitops._git("push", "-u", "--force", "origin", branch)
+    pr_url, pr_err = gitops._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
         _pr_body(bug, fp, reg_status, reg_detail))
     # Governance gate: pass the changed files so _merge_to_main can apply the
     # human-authored product-vs-harness rule (CHANGE_CLASSIFICATION.md) — a product
     # fix may auto-merge; a harness/governance change stops for a human merge.
-    merge = builder._merge_to_main(branch, has_pr=bool(pr_url), files=files)
+    merge = gitops._merge_to_main(branch, has_pr=bool(pr_url), files=files)
     if pr_err:
         # Branch is pushed with the fix, but no PR opened → nothing landed and
         # nothing is in flight. Leave the bug OPEN so the next cycle retries it

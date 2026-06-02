@@ -1,0 +1,95 @@
+# MediaHub sport profile — Swimming
+#
+# A "sport profile" is the human-authored plan for what a sport should post. For
+# each post type it records: is it enabled, what data feeds it, which template set
+# renders it, and how autonomous it may be by default.
+#
+# This is read-only shipped config (like data/ontology/ and data/voices/seed/).
+# It is loaded by `mediahub.sport_profiles.load_sport_profile("swimming")`.
+# As of the Phase-1 scaffolding it is INERT — nothing in the running product
+# imports it yet. Later roadmap phases consume it.
+#
+#   Schema ............ docs/SPORT_PROFILES.md
+#   Post-type taxonomy  docs/POST_TYPE_TAXONOMY.md
+#   Autonomy levels ... docs/AUTONOMY_MODEL.md   (draft_only | approval_required | fully_autonomous)
+#
+# Autonomy is GATED BY DEFAULT: no post type ships as `fully_autonomous`. A
+# workspace may later flip a low-risk, source-grounded type (e.g. fixtures,
+# final scores) to `fully_autonomous` itself — see AUTONOMY_MODEL.md.
+
+sport: swimming
+display_name: Swimming
+engine_sport: swimming            # the recognition.registry.register_sport() name
+governing_bodies:
+  - British Swimming
+  - Swim England
+  - World Aquatics
+
+post_types:
+
+  # --- Sport-specific ------------------------------------------------------
+  meet_recap:                     # maps to club_platform ContentType.MEET_RECAP
+    enabled: true
+    data_inputs: [hytek_hy3, sdif_sd3, pdf_results, html_results]
+    template_namespace: swim/meet_recap
+    default_autonomy: approval_required
+
+  pb_spotlight:
+    enabled: true
+    data_inputs: [parsed_results, pb_ledger]
+    template_namespace: swim/pb_spotlight
+    default_autonomy: approval_required
+
+  heat_lane_preview:
+    enabled: true
+    data_inputs: [entry_list, heat_sheet]
+    template_namespace: swim/heat_preview
+    default_autonomy: approval_required
+
+  relay_splits:
+    enabled: true
+    data_inputs: [parsed_results]
+    template_namespace: swim/relay_splits
+    default_autonomy: approval_required
+
+  club_record_board:
+    enabled: true
+    data_inputs: [parsed_results, club_records]
+    template_namespace: swim/record_board
+    default_autonomy: approval_required
+
+  # --- Universal (sport-agnostic) -----------------------------------------
+  athlete_spotlight:              # maps to ContentType.ATHLETE_SPOTLIGHT
+    enabled: true
+    data_inputs: [parsed_results, pb_ledger, media_library]
+    template_namespace: universal/athlete_spotlight
+    default_autonomy: approval_required
+
+  fixture_announcement:           # prime candidate to flip to fully_autonomous
+    enabled: true
+    data_inputs: [fixtures, manual_entry]
+    template_namespace: universal/fixture
+    default_autonomy: approval_required
+
+  milestone_celebration:
+    enabled: true
+    data_inputs: [manual_entry, athlete_history]
+    template_namespace: universal/milestone
+    default_autonomy: approval_required
+
+  season_recap:
+    enabled: true
+    data_inputs: [parsed_results, season_history]
+    template_namespace: universal/season_recap
+    default_autonomy: approval_required
+
+  sponsor_activation:             # brand-contractual: hand-placed by default
+    enabled: true
+    data_inputs: [manual_entry, sponsor_kit]
+    template_namespace: universal/sponsor
+    default_autonomy: draft_only
+
+notes: >
+  Swimming is MediaHub's first reference sport — the deterministic detectors,
+  ranker, and PB verification already ship via recognition_swim. This profile is
+  the strategy-side config layered on top of that engine; it does not replace it.

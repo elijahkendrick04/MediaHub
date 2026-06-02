@@ -80,5 +80,3 @@ autotest/cache/
 autotest/STOP
 autotest/reports/council/*
 !autotest/reports/council/.gitkeep
-autotest/reports/last_run.json
-autotest/handover/*/*.json

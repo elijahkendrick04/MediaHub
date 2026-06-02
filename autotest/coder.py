@@ -1,4 +1,4 @@
-"""Pluggable coding agent for the autonomous builder/fixer.
+"""Pluggable coding agent for the autonomous fixer.
 
 By default the coder is **Claude Code on a flat Pro/Max subscription** — it
 authenticates from CLAUDE_CODE_OAUTH_TOKEN (a subscription token, NOT an API

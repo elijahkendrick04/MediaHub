@@ -1,7 +1,7 @@
-"""Tests for the autotest PR-open / auto-merge honesty (builder._open_pr,
-builder._merge_to_main).
+"""Tests for the autotest PR-open / auto-merge honesty (gitops._open_pr,
+gitops._merge_to_main).
 
-Regression guard for the silent-failure bug: the fixer/builder pushed a fix
+Regression guard for the silent-failure bug: the fixer pushed a fix
 branch, then ran `gh pr merge --auto` without a PR and ignored `gh pr create`'s
 exit code — so a blocked creation produced an empty `pr` *and* a false
 "auto-merge enabled", stranding the branch with nothing landing. These tests
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autotest import builder
+from autotest import gitops
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -34,9 +34,9 @@ def gh_present(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_open_pr_success_returns_url_no_error(monkeypatch, gh_present):
     url = "https://github.com/acme/repo/pull/42"
-    monkeypatch.setattr(builder.subprocess, "run",
+    monkeypatch.setattr(gitops.subprocess, "run",
                         lambda *a, **k: _completed(0, stdout=url + "\n"))
-    got, err = builder._open_pr("autotest/fix-abc", "fix: x", "body")
+    got, err = gitops._open_pr("autotest/fix-abc", "fix: x", "body")
     assert got == url
     assert err == ""
 
@@ -46,9 +46,9 @@ def test_open_pr_denied_surfaces_actionable_error(monkeypatch, gh_present):
     not an empty url that the caller mistakes for success."""
     stderr = ("pull request create failed: GraphQL: GitHub Actions is not "
               "permitted to create or approve pull requests (createPullRequest)")
-    monkeypatch.setattr(builder.subprocess, "run",
+    monkeypatch.setattr(gitops.subprocess, "run",
                         lambda *a, **k: _completed(1, stdout="", stderr=stderr))
-    got, err = builder._open_pr("autotest/fix-abc", "fix: x", "body")
+    got, err = gitops._open_pr("autotest/fix-abc", "fix: x", "body")
     assert got == ""
     assert err  # non-empty
     assert "not permitted to create" in err.lower()
@@ -70,8 +70,8 @@ def test_open_pr_already_exists_recovers_url(monkeypatch, gh_present):
             return _completed(0, stdout=existing + "\n")
         return _completed(0)
 
-    monkeypatch.setattr(builder.subprocess, "run", fake_run)
-    got, err = builder._open_pr("autotest/fix-abc", "fix: x", "body")
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    got, err = gitops._open_pr("autotest/fix-abc", "fix: x", "body")
     assert got == existing
     assert err == ""
     assert any(c[:3] == ["gh", "pr", "view"] for c in calls)  # actually recovered
@@ -80,7 +80,7 @@ def test_open_pr_already_exists_recovers_url(monkeypatch, gh_present):
 def test_open_pr_no_gh_is_reported(monkeypatch):
     import shutil
     monkeypatch.setattr(shutil, "which", lambda _name: None)
-    got, err = builder._open_pr("b", "t", "x")
+    got, err = gitops._open_pr("b", "t", "x")
     assert got == ""
     assert "gh CLI not found" in err
 
@@ -90,13 +90,13 @@ def test_open_pr_no_gh_is_reported(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_merge_not_armed_without_flag(monkeypatch):
     monkeypatch.delenv("AUTOTEST_BUILD_MERGE", raising=False)
-    assert "not armed" in builder._merge_to_main("b", has_pr=True)
+    assert "not armed" in gitops._merge_to_main("b", has_pr=True)
 
 
 def test_merge_refuses_without_a_pr(monkeypatch):
     """The core fix: armed but no PR must NOT claim auto-merge was enabled."""
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
-    msg = builder._merge_to_main("b", has_pr=False)
+    msg = gitops._merge_to_main("b", has_pr=False)
     assert "NOT armed" in msg
     assert "no PR" in msg.lower() or "no pr" in msg.lower()
 
@@ -104,10 +104,10 @@ def test_merge_refuses_without_a_pr(monkeypatch):
 def test_merge_armed_with_pr_enables(monkeypatch, gh_present):
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
     calls = []
-    monkeypatch.setattr(builder.subprocess, "run",
+    monkeypatch.setattr(gitops.subprocess, "run",
                         lambda cmd, *a, **k: (calls.append(cmd), _completed(0))[1])
     # A PRODUCT change is auto-merge eligible (governance gate: CHANGE_CLASSIFICATION.md).
-    assert "auto-merge to main enabled" in builder._merge_to_main(
+    assert "auto-merge to main enabled" in gitops._merge_to_main(
         "b", has_pr=True, files=["src/mediahub/web/web.py"])
     # The throwaway branch is tidied once the auto-merge lands.
     assert any("--delete-branch" in c for c in calls), f"merge should delete the branch: {calls}"
@@ -116,8 +116,8 @@ def test_merge_armed_with_pr_enables(monkeypatch, gh_present):
 def test_merge_armed_with_pr_reports_gh_failure(monkeypatch, gh_present):
     """If `gh pr merge` itself fails, say so — don't claim success."""
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
-    monkeypatch.setattr(builder.subprocess, "run",
+    monkeypatch.setattr(gitops.subprocess, "run",
                         lambda *a, **k: _completed(1, stderr="required checks missing"))
-    msg = builder._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
+    msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
     assert "NOT armed" in msg
     assert "required checks missing" in msg

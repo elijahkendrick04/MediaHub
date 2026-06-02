@@ -8,7 +8,9 @@ heading badges so hand-written prose is never touched:
   2. **Recent-activity feed** — the last N non-bot commits as a small table.
   3. **Status directives** — any ``roadmap: <ID> <status>`` line found in the
      pushed commit messages flips the status badge on the matching roadmap
-     heading.
+     heading. (These directives are now **human-authored**: the autonomous
+     roadmap builder/acceptance loop that used to emit them has been removed;
+     this script still applies any you write by hand in a commit message.)
 
 Directive convention (put one per line in any commit message)::
 

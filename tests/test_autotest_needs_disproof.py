@@ -22,7 +22,7 @@ import json
 
 import pytest
 
-from autotest import builder, coder, report
+from autotest import gitops, coder, report
 
 
 # --- coder.py: parse the stream-json result frame ---------------------------
@@ -71,12 +71,12 @@ def test_run_coder_surfaces_conclusion_and_marker_not_metadata(monkeypatch):
     assert ok is True                                         # clean completion counts as ok
 
 
-# --- builder.py: tag a clean no-edit run distinctly from a failure ----------
+# --- gitops.py: tag a clean no-edit run distinctly from a failure ----------
 def test_implement_until_green_tags_clean_noedit(monkeypatch):
     monkeypatch.setattr(coder, "write_code",
                         lambda *a, **k: (True, "No change needed.\n<<CODER_RESULT is_error=false subtype=success turns=4>>"))
-    monkeypatch.setattr(builder, "_changed_files", lambda: ([], 0))
-    ok, files, ins, info = builder.implement_until_green("task", label="bug x")
+    monkeypatch.setattr(gitops, "_changed_files", lambda: ([], 0))
+    ok, files, ins, info = gitops.implement_until_green("task", label="bug x")
     assert ok is False and files == []
     assert info.startswith("coder-noedit-complete"), info
 
@@ -85,8 +85,8 @@ def test_implement_until_green_tags_error_noedit_as_failed(monkeypatch):
     # An ERROR/timeout no-edit (is_error=true) must stay "coder-failed" → retried.
     monkeypatch.setattr(coder, "write_code",
                         lambda *a, **k: (False, "timed out\n<<CODER_RESULT is_error=true subtype=error turns=1>>"))
-    monkeypatch.setattr(builder, "_changed_files", lambda: ([], 0))
-    ok, files, ins, info = builder.implement_until_green("task", label="bug x")
+    monkeypatch.setattr(gitops, "_changed_files", lambda: ([], 0))
+    ok, files, ins, info = gitops.implement_until_green("task", label="bug x")
     assert ok is False
     assert info.startswith("coder-failed"), info
 

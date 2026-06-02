@@ -209,7 +209,7 @@ See `.env.example` for the full list.
 environment (loaded from the gitignored `.env`), never written as a literal in
 any source file, test, comment, commit, log line, or pushed artifact. The
 operator rotates the key by editing `.env` alone — no code change. This holds
-for the autonomous tester/builder too: they load `.env` via `autotest/_env.py`.
+for the autonomous tester/fixer too: they load `.env` via `autotest/_env.py`.
 A key committed to the repo is a leak even if later removed.
 
 ## Running Tests
