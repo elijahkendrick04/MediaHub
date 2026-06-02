@@ -11392,6 +11392,21 @@ Relay team broke club record"></textarea>
             }
         )
 
+    @app.route("/healthz/search")
+    def healthz_search():
+        """Report which web-search backend is live (SearXNG vs DuckDuckGo).
+
+        Lets the operator confirm whether the in-container SearXNG actually
+        started — if it's unreachable, MediaHub silently falls back to
+        DuckDuckGo, and this endpoint says so.
+        """
+        try:
+            from mediahub.web_research import searxng_client
+
+            return jsonify({"ok": True, **searxng_client.health()})
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"search_health_unavailable: {e}"}), 500
+
     @app.route("/healthz/usage")
     def healthz_usage():
         from mediahub.observability import llm_usage as _u

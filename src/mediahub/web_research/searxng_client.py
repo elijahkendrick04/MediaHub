@@ -125,4 +125,44 @@ def search(query: str, num: int = 5) -> "list[SearchResult]":
     return out
 
 
-__all__ = ["SearxngUnavailable", "search", "is_configured", "endpoint"]
+def health() -> dict:
+    """Report which search backend is actually live, with a lightweight probe.
+
+    Returns a dict describing whether SearXNG is configured and reachable. When
+    it isn't reachable, MediaHub falls back to DuckDuckGo, so ``engine`` reflects
+    what searches will really use right now. Cheap + safe (short timeout, never
+    raises) — suitable for a /healthz endpoint.
+    """
+    base = endpoint()
+    if not base:
+        return {
+            "engine": "duckduckgo",
+            "searxng_configured": False,
+            "searxng_reachable": False,
+            "detail": "MEDIAHUB_SEARCH_ENDPOINT not set",
+        }
+    reachable = False
+    detail = ""
+    try:
+        import requests  # noqa: PLC0415
+
+        r = requests.get(
+            f"{base}/search",
+            params={"q": "ping", "format": "json"},
+            headers={"Accept": "application/json"},
+            timeout=min(5.0, _timeout()),
+        )
+        reachable = r.status_code == 200
+        if not reachable:
+            detail = f"HTTP {r.status_code} (is json format enabled?)"
+    except Exception as e:
+        detail = str(e)[:160]
+    return {
+        "engine": "searxng" if reachable else "duckduckgo",
+        "searxng_configured": True,
+        "searxng_reachable": reachable,
+        "detail": detail or "ok",
+    }
+
+
+__all__ = ["SearxngUnavailable", "search", "is_configured", "endpoint", "health"]
