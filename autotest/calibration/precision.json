@@ -1,0 +1,9 @@
+{
+  "precision": null,
+  "recall": null,
+  "n_labelled": 81,
+  "n_curated": 0,
+  "n_scored": 81,
+  "computed_at": "2026-06-02T01:23:25+00:00",
+  "note": "not published: only 0/20 labels are human-curated \u2014 using defaults (precision=null) to avoid blind trust"
+}

@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,7 +25,10 @@ REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 LEDGER_PATH = REPORTS_DIR / "ledger.json"
 BUGS_MD_PATH = REPORTS_DIR / "BUGS.md"
 
-SCHEMA_VERSION = 1
+# Schema v2 (Tier A): per-finding lifecycle fields — confirmations / pending
+# tracking (A1), absent_streak + auto_closed_at (A2). ``load_ledger`` backfills
+# them onto pre-v2 entries so an old ledger.json keeps working unchanged.
+SCHEMA_VERSION = 2
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 # Statuses the fix loop owns. The finder (run.py) must never downgrade these
@@ -42,6 +46,91 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 # fix-owned so the noisy live finder cannot silently reopen it; only a deliberate
 # ground-truth sweep or a human audit should.
 FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix", "verified-fixed", "needs_disproof"}
+
+
+# --- finding lifecycle (Tier A: trust) ---------------------------------------
+# A SUBJECTIVE finding is a judgement call — an LLM judge (``semantic:*``), the
+# vision judge (``vision:*``), or the council (``council:*``). These get the
+# pending→open *confirm-on-repeat* gate (A1) and faster decay (A2): a single AI
+# sighting is too noisy to open a bug on (the report's core finding — mirrors
+# Prometheus ``for:`` / Grafana "Pending period"). Everything else is
+# DETERMINISTIC (code-produced: http_5xx, server_traceback, broken_link,
+# ground_truth_*, baseline:*, and the new a11y / contract / visual_regression
+# classes) → inserts straight to ``open`` and decays only slowly.
+SUBJECTIVE_PREFIXES = ("semantic", "vision", "council")
+
+# A3 — a defect that recurs after being closed is a REGRESSION: reopened and
+# surfaced at the top of BUGS.md. ``verified-fixed`` is deliberately EXCLUDED: it
+# is a terminal, evidence-backed audit state (often a *confirmed false-positive*),
+# and the noisy finder must never resurrect it — that preserves the council Q3
+# invariant and ``test_redetection_does_not_reopen_a_retired_finding``. ``wontfix``
+# / ``needs_disproof`` are human / ground-truth-owned, likewise not finder-reopened.
+_REGRESSION_REOPEN_FROM = {"fixed", "auto-closed"}
+
+# Only actionable states decay (A2); terminal / fix-owned / quarantine states never do.
+_DECAYABLE = {"open", "pending"}
+
+# Ledger fields added in schema v2 (A1–A3). ``load_ledger`` backfills these onto
+# every pre-v2 entry, so an old ledger.json loads unchanged.
+_V2_DEFAULTS: dict[str, Any] = {
+    "confirmations": 0,
+    "first_pending_run_id": None,
+    "first_pending_at": None,
+    "absent_streak": 0,
+    "auto_closed_at": None,
+}
+
+
+def is_subjective(category: str) -> bool:
+    """True for an AI/judgement finding — gets the A1 confirm gate + A2 fast decay."""
+    return (category or "").startswith(SUBJECTIVE_PREFIXES)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _confirm_sweeps() -> int:
+    """Extra sweeps a *subjective* finding must recur before pending→open (A1).
+    Default 2 → seen in 3 sweeps total. 0 disables the gate (straight to open)."""
+    return _env_int("AUTOTEST_CONFIRM_SWEEPS", 2)
+
+
+def _decay_sweeps(subjective: bool) -> int:
+    """Consecutive absent sweeps before a finding auto-closes (A2). 0 disables decay."""
+    return (_env_int("AUTOTEST_DECAY_SWEEPS_SUBJECTIVE", 3) if subjective
+            else _env_int("AUTOTEST_DECAY_SWEEPS_DETERMINISTIC", 6))
+
+
+def council_precision() -> float | None:
+    """The council's measured precision vs the human calibration set, if computed
+    (``autotest/metrics.py`` writes ``calibration/precision.json``). None when
+    unknown → callers fall back to default behaviour. Used to scale the A1 confirm
+    gate (low precision → demand more confirmations) and to print the BUGS.md
+    "🔬 Judge trust" line (A5)."""
+    path = REPORTS_DIR.parent / "calibration" / "precision.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        p = data.get("precision")
+        return float(p) if p is not None else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def effective_confirm_sweeps(base: int, precision: float | None) -> int:
+    """Scale the A1 confirm gate by measured council precision (A5, optional):
+    lower precision → trust the judges less → require more confirmations. Falls
+    back to ``base`` when precision is unknown or the gate is already disabled."""
+    if precision is None or base <= 0:
+        return base
+    if precision >= 0.8:
+        return base
+    if precision >= 0.6:
+        return base + 1
+    return base + 2
 
 
 def _now_iso() -> str:
@@ -148,10 +237,23 @@ def load_ledger() -> dict[str, Any]:
             data = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
             data.setdefault("bugs", {})
             data.setdefault("skipped", {})
-            return data
+            return _migrate(data)
         except (ValueError, OSError):
             pass
     return {"schema": SCHEMA_VERSION, "generated_at": None, "bugs": {}, "skipped": {}}
+
+
+def _migrate(ledger: dict[str, Any]) -> dict[str, Any]:
+    """Backfill schema-v2 lifecycle fields (A1–A3) onto old entries so a pre-v2
+    ledger keeps loading. Idempotent; NEVER changes an entry's status (existing
+    ``open`` findings stay open — the pending gate applies only to NEWLY seen
+    subjective findings, so a migrated ledger isn't retroactively re-gated)."""
+    for bucket in ("bugs", "skipped"):
+        for entry in ledger.get(bucket, {}).values():
+            for k, v in _V2_DEFAULTS.items():
+                entry.setdefault(k, v)
+    ledger["schema"] = SCHEMA_VERSION
+    return ledger
 
 
 def save_ledger(ledger: dict[str, Any]) -> None:
@@ -164,28 +266,41 @@ def save_ledger(ledger: dict[str, Any]) -> None:
 def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
     """Fold this run's findings into the ledger. Returns summary counts.
 
-    New defects are inserted (status ``open``); already-known defects have
-    ``last_seen`` / ``seen_count`` bumped without disturbing fix-loop state.
-    Defects not seen this run are flagged ``present_last_run = False`` but are
-    NOT auto-closed — detection can be non-deterministic, so closure is the fix
-    loop's job (on merge) or a human's.
+    Finding lifecycle (Tier A — trust):
+      * A1 confirm-on-repeat — a newly-seen **subjective** finding enters
+        ``pending`` (not ``open``); each sweep it recurs bumps ``confirmations``;
+        at ``AUTOTEST_CONFIRM_SWEEPS`` it transitions ``pending → open``. A
+        **deterministic** finding inserts straight to ``open``.
+      * A2 decay — a finding not seen this run has ``absent_streak`` incremented;
+        when it crosses the (subjective vs deterministic) decay threshold an
+        ``open``/``pending`` finding transitions to ``auto-closed`` (the record is
+        KEPT, never deleted, so a recurrence can reopen it). Terminal / fix-owned
+        states never decay.
+      * A3 regression — a fingerprint in ``fixed``/``auto-closed`` that recurs is
+        reopened as ``regressed`` and surfaced at the top of BUGS.md.
+
+    Fix-owned statuses are never downgraded by the finder (only ``fixed`` and
+    ``auto-closed`` reopen, as regressions — ``verified-fixed`` stays terminal).
     """
     ledger = load_ledger()
     now = _now_iso()
     seen_fps: set[str] = set()
     new_bugs = 0
+    confirm_target = effective_confirm_sweeps(_confirm_sweeps(), council_precision())
 
     for f in findings:
         fp = f.fingerprint()
         seen_fps.add(fp)
         bucket = "bugs" if f.is_bug else "skipped"
         store = ledger[bucket]
+        subjective = is_subjective(f.category)
         if fp in store:
             entry = store[fp]
             entry["last_seen"] = now
             entry["seen_count"] = int(entry.get("seen_count", 0)) + 1
             entry["last_run_id"] = run_id
             entry["present_last_run"] = True
+            entry["absent_streak"] = 0   # A2: a recurrence resets the decay clock
             # Refresh the volatile detail (latest evidence wins) but never
             # touch fix-loop-owned fields or first_seen.
             entry["severity"] = f.severity
@@ -199,7 +314,22 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
             entry["repro"] = f.repro
             if f.screenshot:
                 entry["screenshot"] = f.screenshot
+            # --- lifecycle transitions on recurrence (bugs only) ---
+            if f.is_bug:
+                status = entry.get("status")
+                if status in _REGRESSION_REOPEN_FROM:
+                    entry["status"] = "regressed"          # A3: it came back
+                    entry["regressed_at"] = now
+                elif status == "pending":
+                    entry["confirmations"] = int(entry.get("confirmations", 0)) + 1
+                    if entry["confirmations"] >= confirm_target:
+                        entry["status"] = "open"           # A1: confirmed
+                        entry["opened_at"] = now
+                # open / fixing / fixed-owned / regressed: unchanged.
         else:
+            # A1: a new SUBJECTIVE bug starts ``pending`` (confirm-on-repeat);
+            # deterministic bugs and all skipped/info entries start ``open``.
+            pending = bool(f.is_bug and subjective and confirm_target > 0)
             store[fp] = {
                 "fingerprint": fp,
                 "category": f.category,
@@ -213,7 +343,7 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
                 "rationale": (f.rationale or "")[:2000],
                 "repro": f.repro,
                 "screenshot": f.screenshot,
-                "status": "open",
+                "status": "pending" if pending else "open",
                 "first_seen": now,
                 "last_seen": now,
                 "seen_count": 1,
@@ -221,30 +351,50 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
                 "present_last_run": True,
                 "fix_pr": None,
                 "fix_branch": None,
+                "confirmations": 0,
+                "first_pending_run_id": run_id if pending else None,
+                "first_pending_at": now if pending else None,
+                "absent_streak": 0,
+                "auto_closed_at": None,
             }
             if f.is_bug:
                 new_bugs += 1
 
-    # Mark everything not seen this run.
+    # Mark everything not seen this run, then decay (A2) the ones that have been
+    # absent too long. The record is kept (status flips to ``auto-closed``), so a
+    # later recurrence reopens it as a regression (A3).
     for bucket in ("bugs", "skipped"):
         for fp, entry in ledger[bucket].items():
-            if fp not in seen_fps:
-                entry["present_last_run"] = False
+            if fp in seen_fps:
+                continue
+            entry["present_last_run"] = False
+            entry["absent_streak"] = int(entry.get("absent_streak", 0)) + 1
+            if bucket != "bugs" or entry.get("status") not in _DECAYABLE:
+                continue
+            threshold = _decay_sweeps(is_subjective(entry.get("category", "")))
+            if threshold and entry["absent_streak"] >= threshold:
+                entry["status"] = "auto-closed"
+                entry["auto_closed_at"] = now
+                entry["archived_reason"] = (
+                    f"decayed: not reproduced for {entry['absent_streak']} consecutive sweeps")
 
     ledger["schema"] = SCHEMA_VERSION
     ledger["generated_at"] = now
     save_ledger(ledger)
 
-    open_bugs = [b for b in ledger["bugs"].values() if b.get("status") == "open"]
+    def _n(status: str) -> int:
+        return sum(1 for b in ledger["bugs"].values() if b.get("status") == status)
+
     return {
-        "open": len(open_bugs),
+        "open": _n("open"),
+        "pending": _n("pending"),
+        "regressed": _n("regressed"),
+        "auto_closed": _n("auto-closed"),
         "new": new_bugs,
-        "fixing": sum(1 for b in ledger["bugs"].values() if b.get("status") == "fixing"),
-        "fixed": sum(1 for b in ledger["bugs"].values() if b.get("status") == "fixed"),
-        "verified_fixed": sum(1 for b in ledger["bugs"].values()
-                              if b.get("status") == "verified-fixed"),
-        "needs_disproof": sum(1 for b in ledger["bugs"].values()
-                              if b.get("status") == "needs_disproof"),
+        "fixing": _n("fixing"),
+        "fixed": _n("fixed"),
+        "verified_fixed": _n("verified-fixed"),
+        "needs_disproof": _n("needs_disproof"),
         "skipped": len(ledger["skipped"]),
         "total_bugs": len(ledger["bugs"]),
     }
@@ -301,6 +451,25 @@ def _sev_rank(entry: dict[str, Any]) -> tuple[int, str]:
     return (SEVERITY_ORDER.get(entry.get("severity", "low"), 3), entry.get("last_seen", ""))
 
 
+def _trust_line() -> str:
+    """The "🔬 Judge trust" line (A5): the council's measured precision/recall vs
+    the human calibration set, if computed. Empty when not yet measured."""
+    path = REPORTS_DIR.parent / "calibration" / "precision.json"
+    try:
+        m = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    p, r, n = m.get("precision"), m.get("recall"), m.get("n_labelled")
+    if p is None:
+        return ""
+    parts = [f"**🔬 Judge trust:** council precision `{p:.2f}`"]
+    if r is not None:
+        parts.append(f"recall `{r:.2f}`")
+    parts.append(f"(vs {n if n is not None else '?'} human-labelled findings; "
+                 "`python -m autotest.metrics`)")
+    return " · ".join(parts)
+
+
 def _render_bug(entry: dict[str, Any]) -> str:
     sev = entry.get("severity", "low").upper()
     lines = [
@@ -332,7 +501,12 @@ def _render_bug(entry: dict[str, Any]) -> str:
 def render_markdown(run_meta: dict[str, Any]) -> str:
     ledger = load_ledger()
     bugs = list(ledger["bugs"].values())
+    regressed = sorted((b for b in bugs if b.get("status") == "regressed"), key=_sev_rank)
     open_bugs = sorted((b for b in bugs if b.get("status") == "open"), key=_sev_rank)
+    pending = sorted((b for b in bugs if b.get("status") == "pending"),
+                     key=lambda b: (_sev_rank(b), -int(b.get("confirmations", 0))))
+    auto_closed = sorted((b for b in bugs if b.get("status") == "auto-closed"),
+                         key=lambda b: b.get("auto_closed_at", ""), reverse=True)
     fixing = sorted((b for b in bugs if b.get("status") == "fixing"), key=_sev_rank)
     fixed = sorted((b for b in bugs if b.get("status") == "fixed"),
                    key=lambda b: b.get("last_seen", ""), reverse=True)
@@ -362,14 +536,32 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
     sev_summary = ", ".join(f"{n} {s}" for s, n in
                             sorted(by_sev.items(), key=lambda kv: SEVERITY_ORDER.get(kv[0], 9))) or "none"
     out.append(f"- **Open bugs:** {len(open_bugs)} ({sev_summary}) · "
+               f"**Regressed:** {len(regressed)} · **Pending confirmation:** {len(pending)} · "
                f"**In progress:** {len(fixing)} · **Fixed:** {len(fixed)} · "
                f"**Verified-fixed (retired):** {len(verified)} · "
+               f"**Auto-closed (decayed):** {len(auto_closed)} · "
                f"**Needs-disproof (quarantined):** {len(needs_disproof)} · "
                f"**Skipped (expected/infra):** {len(skipped)}")
+    trust = _trust_line()
+    if trust:
+        out.append(f"- {trust}")
     if run_meta.get("council_verdict"):
         out.append(f"- **🏛️ {run_meta['council_verdict']}** "
                    "(full transcript under `autotest/reports/council/`)")
     out.append("")
+
+    if regressed:
+        out.append("## 🔁 Regressed (a closed defect came back — fix first)")
+        out.append("")
+        out.append("_These were previously fixed or auto-closed and have RE-APPEARED. "
+                   "A recurrence after closure is the highest-signal finding here._")
+        out.append("")
+        for b in regressed:
+            prior = b.get("fix_pr") or b.get("fix_branch")
+            out.append(_render_bug(b))
+            if prior:
+                out.append(f"- **Prior fix:** `{prior}` (regressed {b.get('regressed_at', '?')})")
+                out.append("")
 
     out.append("## 🔴 Open bugs")
     out.append("")
@@ -378,6 +570,22 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
             out.append(_render_bug(b))
     else:
         out.append("_No open bugs detected in the latest run._")
+        out.append("")
+
+    if pending:
+        out.append("## ⏳ Pending confirmation (subjective — not yet a bug)")
+        out.append("")
+        out.append("_AI/judge findings seen too few times to open. The fixer IGNORES "
+                   "these; each sweep they recur bumps the count, and at "
+                   f"`AUTOTEST_CONFIRM_SWEEPS` they become open bugs. One-shot noise "
+                   "decays out instead._")
+        out.append("")
+        for b in pending:
+            conf = int(b.get("confirmations", 0))
+            out.append(f"- [{b.get('severity', '?').upper()}] {b.get('title', '?')} · "
+                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — confirmed "
+                       f"{conf}× since `{b.get('first_pending_at', '?')}`"
+                       + ("" if b.get("present_last_run", True) else " · not in latest run"))
         out.append("")
 
     if fixing:
@@ -408,6 +616,23 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                        f"`{vf.get('commit', '?')}` ({vf.get('tests', '?')}); "
                        f"{vf.get('note', '')} — by {vf.get('verified_by', '?')} "
                        f"at {vf.get('at', '?')}")
+        out.append("")
+        out.append("</details>")
+        out.append("")
+
+    if auto_closed:
+        out.append("<details><summary>🗃️ Auto-closed — decayed, not reproduced for N "
+                   f"sweeps ({len(auto_closed)})</summary>")
+        out.append("")
+        out.append("_Findings that stopped recurring and aged out (A2 decay). The record "
+                   "is KEPT — if the same fingerprint recurs it reopens at the top as a "
+                   "regression (A3). This is how one-shot noise leaves the open list "
+                   "without being lost._")
+        out.append("")
+        for b in auto_closed[:80]:
+            out.append(f"- [{b.get('severity', '?').upper()}] {b.get('title', '?')} · "
+                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — "
+                       f"{b.get('archived_reason', 'decayed')} (closed {b.get('auto_closed_at', '?')})")
         out.append("")
         out.append("</details>")
         out.append("")

@@ -121,8 +121,12 @@ def _open_bugs(limit: int) -> list[dict]:
     about the tester itself (not product code the coder can fix). Priority is set
     by ORDER, not by exclusion (see below)."""
     ledger = report.load_ledger()
+    # ``open`` = confirmed-and-actionable (deterministic, or a subjective finding that
+    # passed the A1 confirm gate). ``regressed`` = a closed defect that came back (A3)
+    # — equally actionable. ``pending`` is deliberately EXCLUDED: an unconfirmed
+    # subjective finding is not yet a bug, so the fixer must ignore it (A6).
     bugs = [b for b in ledger["bugs"].values()
-            if b.get("status") == "open" and not b.get("fix_pr")
+            if b.get("status") in ("open", "regressed") and not b.get("fix_pr")
             and not _is_meta_finding(b)]
     # NEVER-SKIP ordering (not exclusion). A bounded "verified-critical" tier
     # jumps the queue FIRST (real security/data bugs beat cosmetics), but only
@@ -214,6 +218,18 @@ def _give_up_or_retry(bug: dict, attempts: int, reason: str) -> dict:
 
 def _fix_prompt(bug: dict) -> str:
     repro = "\n".join(f"  {i}. {s}" for i, s in enumerate(bug.get("repro", []), 1)) or "  (see evidence)"
+    # A6 corroboration: a SUBJECTIVE finding (semantic/vision/council) is only an AI
+    # judge's call. Before touching product code the coder MUST first write a
+    # DETERMINISTIC test that fails on the current code — that is the gate that turns
+    # an opinion into a reproducible defect. If it can't be reproduced, change nothing.
+    corroboration = (
+        "\nCORROBORATION GATE (this is a SUBJECTIVE / AI-judge finding): FIRST write a "
+        "deterministic test (pytest under tests/, or a Playwright assertion) that "
+        "REPRODUCES this problem and FAILS on the current code. If you cannot make a test "
+        "fail on the current code, the finding is NOT corroborated — make NO product "
+        "change and stop; it will be escalated to a human. Only once the failing test "
+        "exists, fix the root cause so it passes.\n"
+        if report.is_subjective(bug.get("category", "")) else "")
     return (
         "You are an autonomous engineer fixing ONE bug in MediaHub. Fix exactly this and "
         "nothing else.\n\n"
@@ -221,7 +237,8 @@ def _fix_prompt(bug: dict) -> str:
         f"Where: {bug.get('route')}\n"
         f"Suspected source: {bug.get('suspect') or '(unknown)'}\n"
         f"Expected: {bug.get('expected')}\nActual: {bug.get('actual')}\n"
-        f"Repro:\n{repro}\n\nEvidence:\n{bug.get('evidence', '')[:2500]}\n\n"
+        f"Repro:\n{repro}\n\nEvidence:\n{bug.get('evidence', '')[:2500]}\n"
+        f"{corroboration}\n"
         "Constraints (CLAUDE.md): keep the full test suite green and add a regression test; "
         "do NOT touch the deterministic engine (parsers/detectors/ranker/colour-science); "
         "AI surfaces via media_ai.llm/ai_core.llm; never hard-code keys; minimal diff. "
@@ -332,9 +349,24 @@ def fix_one(bug: dict) -> dict:
     # only hard-blocks under AUTOTEST_REQUIRE_REGRESSION_PROOF=1; otherwise it's
     # surfaced in the PR body + result for the operator to weigh.
     reg_status, reg_detail = gitops.prove_regression()
-    if os.environ.get("AUTOTEST_REQUIRE_REGRESSION_PROOF") == "1" and reg_status in ("hollow", "no-test"):
+    # A6 corroboration gate: a SUBJECTIVE finding must be backed by a deterministic,
+    # failing-first reproduction before product code lands — an LLM verdict alone is
+    # not enough to touch the codebase (the report's A6; the Shortest lesson that LLM
+    # tests lack determinism for CI gating). This REUSES prove_regression:
+    # "hollow"/"no-test" means the coder produced no real repro → block, leave the
+    # finding open, retry/escalate. "proven" passes; "unproven" passes too (the proof
+    # harness itself couldn't run — fail-open, rare). Toggle with
+    # AUTOTEST_FIX_REQUIRE_REPRO (default 1). Deterministic findings keep the existing
+    # advisory behaviour (only the legacy AUTOTEST_REQUIRE_REGRESSION_PROOF blocks them).
+    require_repro = os.environ.get("AUTOTEST_FIX_REQUIRE_REPRO", "1") == "1"
+    subjective = report.is_subjective(bug.get("category", ""))
+    if reg_status in ("hollow", "no-test") and (
+            (require_repro and subjective)
+            or os.environ.get("AUTOTEST_REQUIRE_REGRESSION_PROOF") == "1"):
         gitops._git("reset", "--hard", f"origin/{gitops.BASE_BRANCH}")
-        return _give_up_or_retry(bug, attempts, f"regression proof {reg_status}: {reg_detail}")
+        why = ("A6: subjective finding needs a failing-first deterministic repro"
+               if (require_repro and subjective) else "regression proof")
+        return _give_up_or_retry(bug, attempts, f"{why} ({reg_status}: {reg_detail})")
     # Force: the fix branch is loop-owned and rebuilt fresh from main each
     # attempt, so a leftover from a prior attempt (or a stranded no-PR push)
     # must be overwritten — a plain push would be rejected non-fast-forward,

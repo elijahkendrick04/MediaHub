@@ -1,0 +1,69 @@
+# B1 — nightly cross-browser / mobile sweep. The 6h autotest.yml runs Chromium and
+# owns the ledger; this is a SEPARATE nightly matrix (Firefox, WebKit, a mobile
+# viewport) that runs the DETERMINISTIC finder only (AI judges off) and uploads its
+# findings as artifacts. It deliberately does NOT commit to main or run the fixer, so
+# it never races the main ledger — cross-engine defects are surfaced for a human to
+# triage. Findings are engine-tagged (run.py) so a WebKit-only break is its own bug.
+
+name: Autotest — cross-browser matrix
+
+on:
+  schedule:
+    - cron: "45 2 * * *"   # nightly, offset from the 6h sweep + Lighthouse
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autotest-crossbrowser
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { browser: firefox, device: "",          label: "firefox-desktop" }
+          - { browser: webkit,  device: "",          label: "webkit-desktop" }
+          - { browser: chromium, device: "Pixel 7",  label: "chromium-pixel7" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install MediaHub + the matrix browser
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,render]"
+          python -m playwright install --with-deps ${{ matrix.browser }}
+          npm install axe-core || echo "::warning::axe-core not installed — a11y pass will skip"
+      - name: Deterministic cross-browser finder (read-only, AI judges off)
+        env:
+          AUTOTEST_BASE_URL: https://mediahub-gzwc.onrender.com
+          AUTOTEST_ALLOW_PROD: "1"
+          AUTOTEST_SIGNUP: "0"
+          AUTOTEST_BROWSER: ${{ matrix.browser }}
+          AUTOTEST_DEVICE: ${{ matrix.device }}
+          AUTOTEST_SEMANTIC: "0"     # cross-engine pass is about rendering/JS, not meaning
+          AUTOTEST_COUNCIL: "0"
+          AUTOTEST_VISION: "0"
+          AUTOTEST_A11Y: "1"
+          AUTOTEST_MAX_PAGES: "25"
+        run: python -m autotest.run || echo "::notice::cross-browser finder reported issues"
+      - name: Upload findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossbrowser-${{ matrix.label }}
+          path: |
+            autotest/reports/BUGS.md
+            autotest/reports/ledger.json
+            autotest/screenshots/
+          if-no-files-found: warn
+          retention-days: 14
