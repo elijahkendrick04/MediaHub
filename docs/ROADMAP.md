@@ -76,7 +76,7 @@ hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `1d61e7b68` · Merge pull request #217 from elijahkendrick04/claude/epic-wozniak-V2X5T
+**Last updated:** 2026-06-02 · `c8b2de4f7` · Merge pull request #218 from elijahkendrick04/autotest/fix-202e6f197299
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -88,6 +88,7 @@ hand in a commit message:
 | 2026-06-02 | `131f8abf7` | autotest: persist fixer memory [skip ci] |
 | 2026-06-02 | `17f2efde2` | autotest: refresh bug report [skip ci] |
 | 2026-06-02 | `25d1137f5` | autotest: persist fixer memory [skip ci] |
+| 2026-06-02 | `75791ea97` | fix: 'Re-run to see the full audit' warning with no Re-run button |
 | 2026-06-02 | `85707faf2` | autotest: refresh bug report [skip ci] |
 | 2026-06-02 | `8d6271810` | autotest(contract): pin schemathesis to its 3.x API + harden against version drift |
 | 2026-06-02 | `260e10dcb` | docs(autotest): benchmark report, implementation prompt, change log + index links |
@@ -95,7 +96,6 @@ hand in a commit message:
 | 2026-06-02 | `b72348d07` | docs(readme): align with multi-sport, autonomy-first direction; fix stale facts |
 | 2026-06-02 | `4c43dbe77` | feat(autotest): ground-truth oracle — activate the dormant golden baseline (Council item 4) |
 | 2026-06-02 | `cf2610c58` | docs: refresh test-count notes to post-merge figure (2836 passed / 1 skipped) |
-| 2026-06-02 | `f139f4931` | docs(roadmap): note roadmap directives are human-authored (autobuilder removed in #214) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
