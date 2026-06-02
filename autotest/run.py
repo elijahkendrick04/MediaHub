@@ -1090,20 +1090,20 @@ def _run(run_id: str) -> int:
     except Exception:
         pass
 
-    # FIND baseline-diff (council): catch a SILENT primary-flow regression on the
-    # fixed golden input the subagents don't think to flag (e.g. 12 cards -> 3).
-    # Deterministic, so it bypasses council triage. Never break the sweep over it.
+    # Ground-truth oracle (LLM Council 2026-06-01): the live sweep has NO ground
+    # truth — it judges whatever runs exist on prod, so it can't tell a real defect
+    # from correct behaviour (the "0 cards" empty state got flagged as a bug). So
+    # ALSO run the canonical sample meet through the REAL pipeline with a club that
+    # matches it, and diff the deterministic output (parser count, club match, V5->V3
+    # bridge, card/achievement magnitude via the human-blessed baseline) against the
+    # committed golden baseline. This is the falsifiable, reproducible regression
+    # signal the live-prod judges can never give. It supersedes the old artifact-based
+    # golden check, which never fired in the live CI sweep (golden=False) and whose
+    # seeded org didn't match the meet anyway. Deterministic → bypasses council
+    # triage. Never break the sweep over it.
     try:
-        from autotest import baseline as _baseline
-        _arts = tester.artifacts
-        _fr = str(_arts.get("flow_result", ""))
-        _golden = (not _fr.startswith("live") and not _arts.get("live_run_id")
-                   and str(_arts.get("input_file", "")).endswith(
-                       _baseline.GOLDEN_INPUT.rsplit("/", 1)[-1]))
-        _bf = _baseline.check(_baseline.metrics_from_artifacts(_arts),
-                              completed=_fr.startswith("passed"), golden=_golden)
-        if _bf:
-            tester.findings.append(_bf)
+        from autotest import ground_truth as _ground_truth
+        tester.findings.extend(_ground_truth.check())
     except Exception:
         pass
     stats = report.merge_findings(tester.findings, run_id)
