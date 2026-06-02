@@ -1,21 +1,25 @@
 # MediaHub
 
-> Sport content automation. Upload meet results → get social-ready captions, content cards, and rendered graphics.
+> A content-strategy brain for sports teams — it works out what a team should post, drafts it, brands it, and (where allowed) publishes it. Swimming results → content is the shipped wedge; multi-sport and autonomy-first are the direction (see the [roadmap](docs/ROADMAP.md)).
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)
-[![Tests](https://img.shields.io/badge/tests-287%20passing-brightgreen.svg)](docs/AUDIT_REPORTS.md)
+[![Tests](https://img.shields.io/badge/tests-2836%20passing-brightgreen.svg)](docs/AUDIT_REPORTS.md)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 > **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
 > plain-English tour of the project. Confused by a word? See
 > **[GLOSSARY.md](GLOSSARY.md)**.
 >
-> **In plain words:** MediaHub takes a file of swim results and turns it into
-> ready-to-post pictures and captions for a club's social media — it spots the
-> special moments (like personal bests) and writes them up for you.
+> **In plain words:** MediaHub helps a sports team work out what to post on social
+> media, writes it, and makes the pictures — then a human checks it before it goes
+> out. Today it does this from swim-meet results (spotting personal bests and
+> medals); more sports and more "decide-and-post-for-me" automation are on the way
+> (see the [roadmap](docs/ROADMAP.md)).
 
-MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs.
+**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack that is **truly free to self-host with no hidden fees**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 0–5); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
+
+**What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
 
 ---
 
@@ -64,7 +68,12 @@ Upload  →  Interpreter  →  Pipeline  →  Recognition  →  Content Pack
 | [`UPLOAD_TO_CARDS.md`](docs/UPLOAD_TO_CARDS.md) | End-to-end request walkthrough |
 | [`EXTENSION_GUIDE.md`](docs/EXTENSION_GUIDE.md) | Add a new sport / layout / voice / cutout provider |
 | [`DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Render, Fly, Docker, VPS |
-| [`ROADMAP.md`](docs/ROADMAP.md) | Planned versions |
+| [`ROADMAP.md`](docs/ROADMAP.md) | The Phase 0–5 multi-sport, autonomy-first plan |
+| [`ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md) | Hub-and-spoke target architecture (mapped onto today's modules) |
+| [`POST_TYPE_TAXONOMY.md`](docs/POST_TYPE_TAXONOMY.md) | Universal vs sport-specific post types (swimming, football, basketball, running) |
+| [`SPORT_PROFILES.md`](docs/SPORT_PROFILES.md) | The sport-profile concept + how to add a new sport |
+| [`AUTONOMY_MODEL.md`](docs/AUTONOMY_MODEL.md) | Per-content-type autonomy levels + guardrails |
+| [`DEPENDENCY_LICENSING.md`](docs/DEPENDENCY_LICENSING.md) | No-hidden-fees register + free substitutes |
 | [`KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Current rough edges |
 | [`TECHNICAL_DEBT.md`](docs/TECHNICAL_DEBT.md) | Legacy modules + cleanup priorities |
 | [`CHANGELOG.md`](docs/CHANGELOG.md) | V1 → V8.2 release notes |
@@ -82,10 +91,11 @@ src/mediahub/        live, supported package
   pb_discovery/      web-verified PB engine
   graphic_renderer/  HTML/CSS → PNG via Playwright
   voice/             learned caption styles
+  sport_profiles/    sport config + autonomy levels (roadmap scaffolding, inert)
   …
 legacy/              read-only historical packages (V1–V5 + early V6)
-data/                ontology, voices, brand kits, discovered cache
-tests/               pytest suite (287 collected)
+data/                ontology, voices, brand kits, sport profiles, discovered cache
+tests/               pytest suite (2837 collected)
 docs/                long-form documentation
 samples/             tiny representative meet corpus
 scripts/             build + maintenance scripts
