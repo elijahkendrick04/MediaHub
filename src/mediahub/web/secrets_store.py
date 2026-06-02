@@ -27,6 +27,7 @@ of the codebase imports, so callers don't break. Its job is now:
 
 The on-disk fallback will be deleted in the next major release.
 """
+
 from __future__ import annotations
 
 import json
@@ -66,13 +67,18 @@ def secrets_path() -> Path:
 # even a generic `get_secret("photoroom_api_key")` call hits the env
 # first. The names match the existing on-disk JSON keys.
 _SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
-    "anthropic_api_key":       ("ANTHROPIC_API_KEY",),
-    "gemini_api_key":          ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "buffer_access_token":     ("BUFFER_ACCESS_TOKEN",),
-    "photoroom_api_key":       ("PHOTOROOM_API_KEY",),
-    "replicate_api_token":     ("REPLICATE_API_TOKEN",),
+    "anthropic_api_key": ("ANTHROPIC_API_KEY",),
+    "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "buffer_access_token": ("BUFFER_ACCESS_TOKEN",),
+    "photoroom_api_key": ("PHOTOROOM_API_KEY",),
+    "replicate_api_token": ("REPLICATE_API_TOKEN",),
     "mediahub_cutout_provider": ("MEDIAHUB_CUTOUT_PROVIDER",),
-    "mediahub_llm_provider":   ("MEDIAHUB_LLM_PROVIDER",),
+    "mediahub_llm_provider": ("MEDIAHUB_LLM_PROVIDER",),
+    "mediahub_llm_api_key": ("MEDIAHUB_LLM_API_KEY",),
+    "mediahub_llm_endpoints": ("MEDIAHUB_LLM_ENDPOINTS",),
+    "mediahub_llm_model_cheap": ("MEDIAHUB_LLM_MODEL_CHEAP",),
+    "mediahub_llm_model_premium": ("MEDIAHUB_LLM_MODEL_PREMIUM",),
+    "mediahub_llm_model_overrides": ("MEDIAHUB_LLM_MODEL_OVERRIDES",),
 }
 
 
@@ -142,7 +148,8 @@ def get_secret(key: str) -> Optional[str]:
                 "the equivalent env var (%s) on this deployment to "
                 "silence this warning. Disk fallback will be removed "
                 "in the next major release.",
-                key, "/".join(env_names) or "?",
+                key,
+                "/".join(env_names) or "?",
             )
         return val.strip()
     return None
@@ -163,13 +170,15 @@ def set_secret(key: str, value: Optional[str]) -> None:
                 "credentials are env-var-only since the settings-page "
                 "removal. Configure %s in the deployment environment "
                 "instead.",
-                key, "/".join(env_names) or "the relevant env var",
+                key,
+                "/".join(env_names) or "the relevant env var",
             )
 
 
 # ---------------------------------------------------------------------------
 # Typed helpers (back-compat — kept for callers across the codebase)
 # ---------------------------------------------------------------------------
+
 
 def get_anthropic_key() -> Optional[str]:
     return get_secret("anthropic_api_key")
@@ -194,9 +203,12 @@ def set_buffer_access_token(token: Optional[str]) -> None:
 
 __all__ = [
     "save_secrets",
-    "get_secret", "set_secret",
-    "get_anthropic_key", "has_anthropic_key",
-    "get_buffer_access_token", "has_buffer_access_token",
+    "get_secret",
+    "set_secret",
+    "get_anthropic_key",
+    "has_anthropic_key",
+    "get_buffer_access_token",
+    "has_buffer_access_token",
     "set_buffer_access_token",
     "secrets_path",
 ]

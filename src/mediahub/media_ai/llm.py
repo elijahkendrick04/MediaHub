@@ -24,6 +24,7 @@ a provider is configured, and raise ``ClaudeUnavailableError`` when
 none is. The error name is kept for backward compatibility with
 existing callers.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,6 +41,7 @@ log = logging.getLogger(__name__)
 # Public errors
 # ---------------------------------------------------------------------------
 
+
 class ClaudeUnavailableError(RuntimeError):
     """Raised when no LLM provider can answer. Name kept for back-compat."""
 
@@ -55,18 +57,30 @@ class ClaudeUnavailableError(RuntimeError):
 # data point.
 # ---------------------------------------------------------------------------
 
-def _log_call(*, provider: str, ok: bool, model: Optional[str] = None,
-              tokens_in: Optional[int] = None, tokens_out: Optional[int] = None,
-              duration_ms: Optional[float] = None,
-              error_kind: Optional[str] = None,
-              error_message: Optional[str] = None) -> None:
+
+def _log_call(
+    *,
+    provider: str,
+    ok: bool,
+    model: Optional[str] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    duration_ms: Optional[float] = None,
+    error_kind: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
     try:
         from mediahub.observability import llm_usage as _u
+
         _u.record_call(
-            provider=provider, ok=ok, model=model,
-            tokens_in=tokens_in, tokens_out=tokens_out,
+            provider=provider,
+            ok=ok,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
             duration_ms=duration_ms,
-            error_kind=error_kind, error_message=error_message,
+            error_kind=error_kind,
+            error_message=error_message,
         )
     except Exception:
         pass
@@ -85,12 +99,14 @@ ALT_MODEL = "claude-haiku-4-5"
 # slated for removal in the next major.
 # ---------------------------------------------------------------------------
 
+
 def _resolve_anthropic_key() -> Optional[str]:
     env = os.environ.get("ANTHROPIC_API_KEY")
     if env and env.strip():
         return env.strip()
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = get_secret("anthropic_api_key")
         return v if v else None
     except Exception:
@@ -109,6 +125,7 @@ def _resolve_gemini_key() -> Optional[str]:
             return env.strip()
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = get_secret("gemini_api_key")
         return v if v else None
     except Exception:
@@ -135,38 +152,61 @@ def _redact_key(text: str, key: Optional[str]) -> str:
         out = out.replace(key, "***REDACTED***")
     # Catch other shapes (URL-encoded, leftover ?key=…&… fragments)
     import re as _re  # noqa: PLC0415
+
     out = _re.sub(r"(?i)(\?|&)key=[^&\s'\")]+", r"\1key=***REDACTED***", out)
     return out
 
 
 def _preferred_provider() -> str:
-    """Return 'anthropic' if explicitly preferred via env, else 'gemini'."""
+    """Return the operator's preferred provider key.
+
+    'openai'    when MEDIAHUB_LLM_PROVIDER=openai
+    'anthropic' when =anthropic or =claude (alias)
+    'gemini'    otherwise (empty, 'gemini', 'auto', unknown).
+    """
     pref = (os.environ.get("MEDIAHUB_LLM_PROVIDER") or "").strip().lower()
-    if pref == "anthropic":
+    if pref == "openai":
+        return "openai"
+    if pref in ("anthropic", "claude"):
         return "anthropic"
-    # Everything else (empty, 'gemini', 'auto', unknown) defaults to Gemini.
     return "gemini"
+
+
+def _is_openai_on() -> bool:
+    """True when an OpenAI-compatible endpoint is configured. Lazy import keeps
+    media_ai.llm importable even if the adapter module is ever absent."""
+    try:
+        from mediahub.media_ai.llm_providers import is_openai_configured
+
+        return is_openai_configured()
+    except Exception:
+        return False
 
 
 def is_available() -> bool:
     """True if any real LLM provider is reachable."""
-    return _has_gemini_key() or _has_anthropic_key()
+    return _has_gemini_key() or _has_anthropic_key() or _is_openai_on()
 
 
 def active_provider() -> str:
     """Return the user-friendly name of the active LLM provider.
 
-    Returns one of: 'anthropic-api', 'gemini-api', 'heuristic'.
+    Returns one of: 'openai-api', 'anthropic-api', 'gemini-api', 'heuristic'.
     The 'heuristic' label is the historical placeholder for "no provider
     configured"; callers that branch on it should treat it as
     "AI features unavailable".
     """
-    if _preferred_provider() == "anthropic" and _has_anthropic_key():
+    pref = _preferred_provider()
+    if pref == "openai" and _is_openai_on():
+        return "openai-api"
+    if pref == "anthropic" and _has_anthropic_key():
         return "anthropic-api"
     if _has_gemini_key():
         return "gemini-api"
     if _has_anthropic_key():
         return "anthropic-api"
+    if _is_openai_on():
+        return "openai-api"
     return "heuristic"
 
 
@@ -192,6 +232,7 @@ def _get_anthropic():
         return _anthropic_client
     try:
         import anthropic
+
         _anthropic_client = anthropic.Anthropic(api_key=key)
         _anthropic_client_key = key
     except Exception as e:
@@ -201,8 +242,9 @@ def _get_anthropic():
     return _anthropic_client if _anthropic_client else None
 
 
-def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int,
-                    model: Optional[str] = None) -> Optional[str]:
+def _call_anthropic(
+    messages: list[dict], system: Optional[str], max_tokens: int, model: Optional[str] = None
+) -> Optional[str]:
     if not _has_anthropic_key():
         return None
     client = _get_anthropic()
@@ -227,8 +269,11 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
             tin = getattr(usage, "input_tokens", None) if usage else None
             tout = getattr(usage, "output_tokens", None) if usage else None
             _log_call(
-                provider="anthropic", ok=bool(text), model=attempt_model,
-                tokens_in=tin, tokens_out=tout,
+                provider="anthropic",
+                ok=bool(text),
+                model=attempt_model,
+                tokens_in=tin,
+                tokens_out=tout,
                 duration_ms=(time.monotonic() - started) * 1000.0,
                 error_kind=None if text else "empty_response",
                 error_message=None if text else "Anthropic returned no text",
@@ -239,7 +284,9 @@ def _call_anthropic(messages: list[dict], system: Optional[str], max_tokens: int
             last_err = e
             log.warning("anthropic call failed (%s): %s", attempt_model, e)
             _log_call(
-                provider="anthropic", ok=False, model=attempt_model,
+                provider="anthropic",
+                ok=False,
+                model=attempt_model,
                 duration_ms=(time.monotonic() - started) * 1000.0,
                 error_kind=type(e).__name__,
                 error_message=str(e),
@@ -293,6 +340,7 @@ def _gemini_generation_config(max_tokens: int) -> dict:
         cfg["thinkingConfig"] = {"thinkingBudget": budget}
     return cfg
 
+
 # ---------------------------------------------------------------------------
 # Gemini overload circuit breaker
 # ---------------------------------------------------------------------------
@@ -315,16 +363,12 @@ def _gemini_generation_config(max_tokens: int) -> dict:
 # fine — we'd rather not bring in Redis just for this signal.
 import threading as _bt
 
-_GEMINI_BREAKER_THRESHOLD = int(
-    os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3")
-)
-_GEMINI_BREAKER_COOLDOWN_S = float(
-    os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60")
-)
+_GEMINI_BREAKER_THRESHOLD = int(os.environ.get("MEDIAHUB_GEMINI_BREAKER_THRESHOLD", "3"))
+_GEMINI_BREAKER_COOLDOWN_S = float(os.environ.get("MEDIAHUB_GEMINI_BREAKER_COOLDOWN_S", "60"))
 _gemini_breaker_lock = _bt.Lock()
 _gemini_breaker_state: dict[str, float] = {
     "consecutive_failures": 0.0,  # float so it round-trips through env
-    "tripped_until": 0.0,         # time.monotonic() value
+    "tripped_until": 0.0,  # time.monotonic() value
 }
 
 
@@ -338,13 +382,8 @@ def _gemini_breaker_record_failure() -> None:
     """Count a failure; trip the breaker when the threshold is hit."""
     with _gemini_breaker_lock:
         _gemini_breaker_state["consecutive_failures"] += 1
-        if (
-            _gemini_breaker_state["consecutive_failures"]
-            >= _GEMINI_BREAKER_THRESHOLD
-        ):
-            _gemini_breaker_state["tripped_until"] = (
-                time.monotonic() + _GEMINI_BREAKER_COOLDOWN_S
-            )
+        if _gemini_breaker_state["consecutive_failures"] >= _GEMINI_BREAKER_THRESHOLD:
+            _gemini_breaker_state["tripped_until"] = time.monotonic() + _GEMINI_BREAKER_COOLDOWN_S
 
 
 def _gemini_breaker_record_success() -> None:
@@ -368,9 +407,7 @@ def gemini_breaker_snapshot() -> dict:
         tripped_until = _gemini_breaker_state["tripped_until"]
         return {
             "open": now < tripped_until,
-            "consecutive_failures": int(
-                _gemini_breaker_state["consecutive_failures"]
-            ),
+            "consecutive_failures": int(_gemini_breaker_state["consecutive_failures"]),
             "seconds_until_reset": max(0.0, round(tripped_until - now, 1)),
             "threshold": _GEMINI_BREAKER_THRESHOLD,
             "cooldown_seconds": _GEMINI_BREAKER_COOLDOWN_S,
@@ -393,10 +430,14 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
     if not key:
         return None
     if _gemini_breaker_is_open():
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=0.0, error_kind="breaker_open",
-                  error_message="Gemini circuit breaker is open; "
-                                "skipping to next provider")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=0.0,
+            error_kind="breaker_open",
+            error_message="Gemini circuit breaker is open; " "skipping to next provider",
+        )
         return None
     try:
         import requests
@@ -407,10 +448,12 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         role = m.get("role", "user")
         content = m.get("content", "")
         # Gemini uses 'user' / 'model' role names.
-        contents.append({
-            "role": "model" if role == "assistant" else "user",
-            "parts": [{"text": str(content)}],
-        })
+        contents.append(
+            {
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": str(content)}],
+            }
+        )
     payload: dict[str, Any] = {
         "contents": contents,
         "generationConfig": _gemini_generation_config(max_tokens),
@@ -433,7 +476,9 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         safe_err = _redact_key(str(e), key)
         log.warning("gemini transport failed: %s", safe_err)
         _log_call(
-            provider="gemini", ok=False, model=_GEMINI_MODEL,
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
             duration_ms=(time.monotonic() - started) * 1000.0,
             error_kind="transport",
             error_message=safe_err,
@@ -441,21 +486,36 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         return None
     dur_ms = (time.monotonic() - started) * 1000.0
     if r.status_code in (401, 403):
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="auth",
-                  error_message=f"HTTP {r.status_code}")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="auth",
+            error_message=f"HTTP {r.status_code}",
+        )
         return None
     if r.status_code == 429:
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="rate_limited",
-                  error_message="HTTP 429")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="rate_limited",
+            error_message="HTTP 429",
+        )
         return None
     if not r.ok:
         body_safe = _redact_key((r.text or "")[:300], key)
         log.warning("gemini non-ok (%s): %s", r.status_code, body_safe)
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind=f"http_{r.status_code}",
-                  error_message=body_safe)
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind=f"http_{r.status_code}",
+            error_message=body_safe,
+        )
         # 5xx / overload signals warrant tripping the breaker so the
         # next call this request doesn't waste another round-trip.
         # 4xx (other than 429, handled above) are usually our fault
@@ -466,28 +526,48 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
     try:
         data = r.json()
     except ValueError:
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="parse",
-                  error_message="response was not JSON")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="parse",
+            error_message="response was not JSON",
+        )
         return None
     candidates = data.get("candidates") if isinstance(data, dict) else None
     if not candidates:
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="no_candidates",
-                  error_message="response had no candidates")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="no_candidates",
+            error_message="response had no candidates",
+        )
         return None
     first = candidates[0] if isinstance(candidates, list) else None
     if not isinstance(first, dict):
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="malformed",
-                  error_message="first candidate not a dict")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="malformed",
+            error_message="first candidate not a dict",
+        )
         return None
     content = first.get("content") or {}
     parts = content.get("parts") if isinstance(content, dict) else None
     if not isinstance(parts, list):
-        _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-                  duration_ms=dur_ms, error_kind="malformed",
-                  error_message="content.parts not a list")
+        _log_call(
+            provider="gemini",
+            ok=False,
+            model=_GEMINI_MODEL,
+            duration_ms=dur_ms,
+            error_kind="malformed",
+            error_message="content.parts not a list",
+        )
         return None
     texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
     out = "".join(texts).strip()
@@ -496,19 +576,29 @@ def _call_gemini(messages: list[dict], system: Optional[str], max_tokens: int) -
         tin = (usage or {}).get("promptTokenCount") if isinstance(usage, dict) else None
         tout = (usage or {}).get("candidatesTokenCount") if isinstance(usage, dict) else None
         _log_call(
-            provider="gemini", ok=True, model=_GEMINI_MODEL,
-            tokens_in=tin, tokens_out=tout, duration_ms=dur_ms,
+            provider="gemini",
+            ok=True,
+            model=_GEMINI_MODEL,
+            tokens_in=tin,
+            tokens_out=tout,
+            duration_ms=dur_ms,
         )
         _gemini_breaker_record_success()
         return out
-    _log_call(provider="gemini", ok=False, model=_GEMINI_MODEL,
-              duration_ms=dur_ms, error_kind="empty_response",
-              error_message="Gemini returned no text")
+    _log_call(
+        provider="gemini",
+        ok=False,
+        model=_GEMINI_MODEL,
+        duration_ms=dur_ms,
+        error_kind="empty_response",
+        error_message="Gemini returned no text",
+    )
     return None
 
 
-def _call_gemini_vision(image_paths: list[str], prompt: str,
-                        system: Optional[str], max_tokens: int) -> Optional[str]:
+def _call_gemini_vision(
+    image_paths: list[str], prompt: str, system: Optional[str], max_tokens: int
+) -> Optional[str]:
     """Gemini multimodal generateContent — same REST endpoint, inline_data parts.
 
     Honours the same overload circuit breaker as ``_call_gemini`` so a
@@ -572,9 +662,11 @@ def _call_gemini_vision(image_paths: list[str], prompt: str,
 # Vision helpers
 # ---------------------------------------------------------------------------
 
+
 def _read_image_for_vision(path: str) -> tuple[Optional[str], Optional[str]]:
     """Return (base64_data, mime_type) for an image path, or (None, None)."""
     import base64
+
     try:
         with open(path, "rb") as f:
             data = base64.b64encode(f.read()).decode("ascii")
@@ -593,8 +685,9 @@ def _read_image_for_vision(path: str) -> tuple[Optional[str], Optional[str]]:
     return (data, mt)
 
 
-def _call_anthropic_vision(image_paths: list[str], prompt: str,
-                           system: Optional[str], max_tokens: int) -> Optional[str]:
+def _call_anthropic_vision(
+    image_paths: list[str], prompt: str, system: Optional[str], max_tokens: int
+) -> Optional[str]:
     client = _get_anthropic()
     if not client:
         return None
@@ -603,10 +696,12 @@ def _call_anthropic_vision(image_paths: list[str], prompt: str,
         data, mt = _read_image_for_vision(p)
         if data is None:
             continue
-        content_blocks.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": mt, "data": data},
-        })
+        content_blocks.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": mt, "data": data},
+            }
+        )
     content_blocks.append({"type": "text", "text": prompt})
     try:
         kwargs: dict = {
@@ -628,19 +723,34 @@ def _call_anthropic_vision(image_paths: list[str], prompt: str,
 # Public API — generate / generate_json / generate_vision
 # ---------------------------------------------------------------------------
 
+
 def _provider_order() -> tuple[str, ...]:
     """Return providers to attempt, in order, based on operator preference.
 
     Default: gemini first, then anthropic as fallback.
     MEDIAHUB_LLM_PROVIDER=anthropic: anthropic first, then gemini.
+    MEDIAHUB_LLM_PROVIDER=openai: openai first, then gemini, then anthropic.
+
+    The 'openai' provider only joins the order when an OpenAI-compatible
+    endpoint is actually configured; otherwise the order is unchanged and the
+    feature is inert.
     """
-    if _preferred_provider() == "anthropic":
-        return ("anthropic", "gemini")
-    return ("gemini", "anthropic")
+    pref = _preferred_provider()
+    base = ("anthropic", "gemini") if pref == "anthropic" else ("gemini", "anthropic")
+    if not _is_openai_on():
+        return base
+    if pref == "openai":
+        return ("openai",) + base
+    return base + ("openai",)
 
 
-def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 1024,
-             messages: Optional[list[dict]] = None) -> str:
+def generate(
+    prompt: str,
+    *,
+    system: Optional[str] = None,
+    max_tokens: int = 1024,
+    messages: Optional[list[dict]] = None,
+) -> str:
     """Generate plain text via the configured LLM provider.
 
     Raises ClaudeUnavailableError when no provider is configured —
@@ -653,6 +763,10 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
             out = _call_gemini(msgs, system, max_tokens)
         elif provider == "anthropic":
             out = _call_anthropic(msgs, system, max_tokens)
+        elif provider == "openai":
+            from mediahub.media_ai.llm_providers import call_openai
+
+            out = call_openai(msgs, system, max_tokens)
         else:
             continue
         if out:
@@ -664,17 +778,20 @@ def generate(prompt: str, *, system: Optional[str] = None, max_tokens: int = 102
     )
 
 
-def generate_json(prompt: str, *, system: Optional[str] = None, max_tokens: int = 1024,
-                  fallback: Optional[dict] = None) -> dict:
+def generate_json(
+    prompt: str,
+    *,
+    system: Optional[str] = None,
+    max_tokens: int = 1024,
+    fallback: Optional[dict] = None,
+) -> dict:
     """Generate a JSON dict from a prompt.
 
     Raises ClaudeUnavailableError when no provider is reachable.
     ``fallback`` is used only when the provider DID answer but produced
     unparseable output (rare); never to mask a missing provider.
     """
-    sys_with_json = (system or "") + (
-        "\n\nReturn ONLY a JSON object. No prose, no fences."
-    )
+    sys_with_json = (system or "") + ("\n\nReturn ONLY a JSON object. No prose, no fences.")
     raw = generate(prompt, system=sys_with_json.strip(), max_tokens=max_tokens)
     parsed = _extract_json(raw)
     if parsed is not None:
@@ -682,8 +799,9 @@ def generate_json(prompt: str, *, system: Optional[str] = None, max_tokens: int 
     return fallback if fallback is not None else {}
 
 
-def generate_vision(image_paths: list[str], prompt: str, *, system: Optional[str] = None,
-                    max_tokens: int = 1024) -> str:
+def generate_vision(
+    image_paths: list[str], prompt: str, *, system: Optional[str] = None, max_tokens: int = 1024
+) -> str:
     """Vision generation — analyses one or more local images.
 
     Provider order respects ``MEDIAHUB_LLM_PROVIDER`` the same way
@@ -710,6 +828,7 @@ def generate_vision(image_paths: list[str], prompt: str, *, system: Optional[str
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_json(raw: str) -> Optional[dict]:
     """Pull a JSON object out of an LLM response (strips fences if any)."""
@@ -742,16 +861,14 @@ def _extract_json(raw: str) -> Optional[dict]:
 # Back-compat shim — V8 Live Caption API used `call_claude(system, user)`
 # ---------------------------------------------------------------------------
 
-def call_claude(system: str, user: str, model: Optional[str] = None,
-                max_tokens: int = 512) -> str:
+
+def call_claude(system: str, user: str, model: Optional[str] = None, max_tokens: int = 512) -> str:
     """Back-compat wrapper. Routes through generate(). Always raises
     ClaudeUnavailableError when no provider is configured — no
     heuristic substitute.
     """
     if not is_available():
-        raise ClaudeUnavailableError(
-            "AI features are unavailable on this deployment."
-        )
+        raise ClaudeUnavailableError("AI features are unavailable on this deployment.")
     result = generate(user, system=system, max_tokens=max_tokens)
     if not result or result.startswith("Generated content unavailable"):
         raise ClaudeUnavailableError("LLM returned empty or heuristic fallback")
@@ -761,8 +878,13 @@ def call_claude(system: str, user: str, model: Optional[str] = None,
 
 
 __all__ = [
-    "generate", "generate_json", "generate_vision", "is_available",
-    "active_provider", "call_claude",
+    "generate",
+    "generate_json",
+    "generate_vision",
+    "is_available",
+    "active_provider",
+    "call_claude",
     "ClaudeUnavailableError",
-    "DEFAULT_MODEL", "ALT_MODEL",
+    "DEFAULT_MODEL",
+    "ALT_MODEL",
 ]

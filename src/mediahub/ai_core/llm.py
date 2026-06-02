@@ -15,6 +15,7 @@ won't answer, the caller is told and surfaces it to the user.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -55,11 +56,13 @@ class ToolConversation:
 # Provider registry
 # ---------------------------------------------------------------------------
 
-# Provider order: Gemini first (free default), Claude as paid quality option.
-# OpenAI was deliberately removed in the operator-config rewrite — the
-# product is Gemini-first per the dissertation's cost model, with Anthropic
-# as an explicit operator override via MEDIAHUB_LLM_PROVIDER=claude.
-_PROVIDERS = ("gemini", "claude")
+# Provider order: Gemini first (free default), Claude as the paid quality
+# option, then an optional OpenAI-compatible endpoint (Groq / OpenRouter /
+# Together / vLLM / Ollama / …) that only joins the chain when
+# MEDIAHUB_LLM_ENDPOINTS is configured. The product stays Gemini-first;
+# Anthropic or an OpenAI-compatible endpoint are explicit operator overrides
+# via MEDIAHUB_LLM_PROVIDER=claude|anthropic|openai.
+_PROVIDERS = ("gemini", "claude", "openai")
 
 
 def _resolve_key(env_names: tuple[str, ...], secret_name: str) -> Optional[str]:
@@ -81,18 +84,36 @@ def _key_for(provider: str) -> Optional[str]:
         return _resolve_key(("ANTHROPIC_API_KEY",), "anthropic_api_key")
     if provider == "gemini":
         return _resolve_key(("GEMINI_API_KEY", "GOOGLE_API_KEY"), "gemini_api_key")
+    if provider == "openai":
+        # An OpenAI-compatible endpoint is "configured" whenever an endpoint
+        # URL is set; the bearer key is optional (keyless local servers). Return
+        # the key, or a sentinel so the provider still joins the fallback chain.
+        from mediahub.ai_core import llm_client
+
+        if not llm_client.endpoints_from_env():
+            return None
+        return llm_client.resolve_openai_key() or "configured-keyless"
     return None
 
 
 def _preferred_pref() -> str:
-    """Read the user's preferred provider. 'auto' = use the first configured."""
-    env = os.environ.get("MEDIAHUB_LLM_PROVIDER", "").strip().lower()
+    """Read the user's preferred provider. 'auto' = use the first configured.
+
+    `anthropic` is accepted as an alias for `claude` so MEDIAHUB_LLM_PROVIDER
+    carries the same meaning here as it does in media_ai.llm.
+    """
+
+    def _norm(v: str) -> str:
+        v = (v or "").strip().lower()
+        return "claude" if v == "anthropic" else v
+
+    env = _norm(os.environ.get("MEDIAHUB_LLM_PROVIDER", ""))
     if env in _PROVIDERS + ("auto",):
         return env
     try:
         from mediahub.web.secrets_store import get_secret
 
-        v = (get_secret("mediahub_llm_provider") or "").strip().lower()
+        v = _norm(get_secret("mediahub_llm_provider") or "")
         if v in _PROVIDERS + ("auto",):
             return v
     except Exception:
@@ -138,7 +159,7 @@ def _anthropic_client_for(key: str):
 
 
 def _anthropic_model() -> str:
-    return os.environ.get("MEDIAHUB_LLM_MODEL", "claude-sonnet-4-5-20250929")
+    return os.environ.get("MEDIAHUB_LLM_MODEL", "claude-sonnet-4-6")
 
 
 def _ask_claude(system: str, user: str, max_tokens: int) -> str:
@@ -404,12 +425,136 @@ def _ask_gemini_with_tools(
 
 
 # ---------------------------------------------------------------------------
+# OpenAI-compatible endpoints (Groq / OpenRouter / Together / vLLM / Ollama)
+# Transport lives in ai_core.llm_client; these wrap it into the ask() /
+# ask_with_tools() provider contract with the same fallback semantics.
+# ---------------------------------------------------------------------------
+def _openai_client():
+    from mediahub.ai_core import llm_client
+
+    client = llm_client.client_from_env()
+    if client is None:
+        raise ProviderNotConfigured("No OpenAI-compatible endpoint configured.")
+    return client
+
+
+def _openai_default_model() -> Optional[str]:
+    """Pick the model for ask()-style calls, reusing the media_ai routing
+    knobs so both LLM wrappers resolve the same model name."""
+    try:
+        from mediahub.media_ai.model_select import models_from_env
+
+        cheap, premium, _ = models_from_env()
+        return cheap or premium
+    except Exception:
+        return None
+
+
+def _ask_openai(system: str, user: str, max_tokens: int) -> str:
+    from mediahub.ai_core import llm_client
+
+    client = _openai_client()
+    try:
+        result = client.chat(
+            [{"role": "user", "content": user}],
+            model=_openai_default_model(),
+            system=system,
+            max_completion_tokens=max_tokens,
+        )
+    except llm_client.OpenAICompatError as e:
+        raise ProviderError(f"OpenAI-compatible call failed: {e}") from e
+    return (result.text or "").strip()
+
+
+def _ask_openai_with_tools(
+    system: str,
+    user: str,
+    tools: list[dict],
+    on_tool_call: Callable[[str, dict], str],
+    max_tokens: int,
+    max_rounds: int,
+) -> ToolConversation:
+    """OpenAI function-calling loop. The Anthropic-shape `tools` list is
+    translated to OpenAI's schema on the fly so callers pass the same list
+    whichever provider is active. Endpoints that don't advertise tool support
+    answer in plain text instead."""
+    from mediahub.ai_core import llm_client
+
+    client = _openai_client()
+    model = _openai_default_model()
+    convo = ToolConversation(text="", provider="openai")
+    use_tools = None
+    if client.supports_tools(model):
+        use_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema")
+                    or t.get("parameters")
+                    or {"type": "object", "properties": {}},
+                },
+            }
+            for t in tools
+        ]
+    messages: list[dict] = [{"role": "user", "content": user}]
+    for _ in range(max_rounds):
+        try:
+            result = client.chat(
+                messages,
+                model=model,
+                system=system,
+                max_completion_tokens=max_tokens,
+                tools=use_tools,
+            )
+        except llm_client.OpenAICompatError as e:
+            raise ProviderError(f"OpenAI-compatible tool call failed: {e}") from e
+        choices = (result.raw or {}).get("choices") or []
+        msg = (choices[0].get("message") if choices else {}) or {}
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            convo.text = (result.text or "").strip()
+            return convo
+        # Echo the assistant turn (with its tool_calls) back into history.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": msg.get("content") or "",
+                "tool_calls": tool_calls,
+            }
+        )
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = fn.get("name", "")
+            raw_args = fn.get("arguments")
+            if isinstance(raw_args, str):
+                try:
+                    args = json.loads(raw_args) if raw_args.strip() else {}
+                except json.JSONDecodeError:
+                    args = {}
+            else:
+                args = raw_args or {}
+            try:
+                r_str = on_tool_call(name, args)
+            except Exception as e:
+                r_str = f"(tool {name!r} failed: {e})"
+            convo.tool_calls.append(
+                ToolCallRecord(name=name, input=args, result=r_str, provider="openai")
+            )
+            messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": r_str})
+    convo.text = "(the model is still gathering evidence; try a smaller question.)"
+    return convo
+
+
+# ---------------------------------------------------------------------------
 # Public dispatch
 # ---------------------------------------------------------------------------
 
 _DISPATCH = {
     "claude": (_ask_claude, _ask_claude_with_tools),
     "gemini": (_ask_gemini, _ask_gemini_with_tools),
+    "openai": (_ask_openai, _ask_openai_with_tools),
 }
 
 
