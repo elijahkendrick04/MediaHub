@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "generated_at": "2026-06-02T10:34:23+00:00",
+  "schema": 2,
+  "generated_at": "2026-06-02T14:40:53+00:00",
   "bugs": {
     "e6f9dc3b346d": {
       "fingerprint": "e6f9dc3b346d",
@@ -22,7 +22,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e883e6f0bbc7": {
       "fingerprint": "e883e6f0bbc7",
@@ -52,7 +57,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "71e02f586c45": {
       "fingerprint": "71e02f586c45",
@@ -82,7 +92,12 @@
         "note": "The real UX gap this finding requested \u2014 clear, actionable feedback when no cards are generated \u2014 is exactly what #196 shipped ('No swims matched your club', shows parsed count, links to re-run).",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5cebfcb079da": {
       "fingerprint": "5cebfcb079da",
@@ -104,7 +119,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "55093f7335f8": {
       "fingerprint": "55093f7335f8",
@@ -126,7 +146,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "76196fe6a36b": {
       "fingerprint": "76196fe6a36b",
@@ -149,7 +174,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ca523d57abfe": {
       "fingerprint": "ca523d57abfe",
@@ -169,12 +199,17 @@
       "screenshot": "autotest/screenshots/ca523d57abfe.png",
       "status": "open",
       "first_seen": "2026-05-29T13:28:44+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 22,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 23,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "37d87cf5f107": {
       "fingerprint": "37d87cf5f107",
@@ -194,9 +229,9 @@
       "screenshot": "autotest/screenshots/37d87cf5f107.png",
       "status": "verified-fixed",
       "first_seen": "2026-05-29T13:28:44+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 22,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 23,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -207,7 +242,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "c078dfe0fd10": {
       "fingerprint": "c078dfe0fd10",
@@ -232,7 +272,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1a292d42c2a2": {
       "fingerprint": "1a292d42c2a2",
@@ -257,7 +302,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ee92220cff28": {
       "fingerprint": "ee92220cff28",
@@ -287,7 +337,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e9e98e5f2b67": {
       "fingerprint": "e9e98e5f2b67",
@@ -312,7 +367,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "510d8919d03e": {
       "fingerprint": "510d8919d03e",
@@ -337,7 +397,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b07572c63c13": {
       "fingerprint": "b07572c63c13",
@@ -361,7 +426,12 @@
       "present_last_run": false,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3f77367bbf6c": {
       "fingerprint": "3f77367bbf6c",
@@ -384,7 +454,12 @@
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ec0d0cf5d7ca": {
       "fingerprint": "ec0d0cf5d7ca",
@@ -407,7 +482,12 @@
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8ee1cbc395d9": {
       "fingerprint": "8ee1cbc395d9",
@@ -429,7 +509,12 @@
       "present_last_run": false,
       "fix_attempts": 0,
       "invalidated_reason": "invalid: a council:blind_spot finding about the TESTER/adjudication methodology (no real product route), now filtered by _is_meta_finding (PR #197). Not a product bug.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f07b0a820cda": {
       "fingerprint": "f07b0a820cda",
@@ -451,7 +536,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1db920390f08": {
       "fingerprint": "1db920390f08",
@@ -476,7 +566,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a95a57febaa6": {
       "fingerprint": "a95a57febaa6",
@@ -501,7 +596,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "bfc627098c98": {
       "fingerprint": "bfc627098c98",
@@ -531,7 +631,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "c9862d27b7c0": {
       "fingerprint": "c9862d27b7c0",
@@ -554,7 +659,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "6302a837808c": {
       "fingerprint": "6302a837808c",
@@ -576,7 +686,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e8455cdfdedb": {
       "fingerprint": "e8455cdfdedb",
@@ -606,7 +721,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7c66fb1350e3": {
       "fingerprint": "7c66fb1350e3",
@@ -636,7 +756,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "aff50d6aa9db": {
       "fingerprint": "aff50d6aa9db",
@@ -661,7 +786,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b47311d05103": {
       "fingerprint": "b47311d05103",
@@ -684,7 +814,12 @@
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0413ec40fb66": {
       "fingerprint": "0413ec40fb66",
@@ -709,7 +844,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7eeacfc2cb14": {
       "fingerprint": "7eeacfc2cb14",
@@ -732,7 +872,12 @@
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "790ea7991d21": {
       "fingerprint": "790ea7991d21",
@@ -755,7 +900,12 @@
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0787c98d002c": {
       "fingerprint": "0787c98d002c",
@@ -777,7 +927,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7d64d57158d0": {
       "fingerprint": "7d64d57158d0",
@@ -802,7 +957,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f39cf22df1f0": {
       "fingerprint": "f39cf22df1f0",
@@ -827,7 +987,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0622ce8f5bb6": {
       "fingerprint": "0622ce8f5bb6",
@@ -850,7 +1015,12 @@
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "32e3e2ce9aed": {
       "fingerprint": "32e3e2ce9aed",
@@ -875,7 +1045,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1e132430ab96": {
       "fingerprint": "1e132430ab96",
@@ -898,7 +1073,12 @@
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3cb7a29ed79c": {
       "fingerprint": "3cb7a29ed79c",
@@ -921,7 +1101,12 @@
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3a74a2b73e5b": {
       "fingerprint": "3a74a2b73e5b",
@@ -944,7 +1129,12 @@
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "bce612f4854c": {
       "fingerprint": "bce612f4854c",
@@ -970,7 +1160,12 @@
       "fix_branch": null,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5e0405b2f9bd": {
       "fingerprint": "5e0405b2f9bd",
@@ -993,7 +1188,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5573f9dfec5f": {
       "fingerprint": "5573f9dfec5f",
@@ -1015,7 +1215,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "35ff22e13091": {
       "fingerprint": "35ff22e13091",
@@ -1041,7 +1246,12 @@
       "fix_branch": null,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8ab0ccd13904": {
       "fingerprint": "8ab0ccd13904",
@@ -1071,7 +1281,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "76ad189abd62": {
       "fingerprint": "76ad189abd62",
@@ -1096,7 +1311,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e79087027f38": {
       "fingerprint": "e79087027f38",
@@ -1120,7 +1340,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "46a3dad3dccc": {
       "fingerprint": "46a3dad3dccc",
@@ -1143,7 +1368,12 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b34eb10b6ff5": {
       "fingerprint": "b34eb10b6ff5",
@@ -1166,7 +1396,12 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ca523be659fc": {
       "fingerprint": "ca523be659fc",
@@ -1188,7 +1423,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b51047bfbf12": {
       "fingerprint": "b51047bfbf12",
@@ -1211,7 +1451,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "83bce121b5f8": {
       "fingerprint": "83bce121b5f8",
@@ -1234,7 +1479,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ea20d7e182fc": {
       "fingerprint": "ea20d7e182fc",
@@ -1260,7 +1510,12 @@
       "fix_branch": null,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e0fa559c5718": {
       "fingerprint": "e0fa559c5718",
@@ -1283,7 +1538,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "602d4b499e95": {
       "fingerprint": "602d4b499e95",
@@ -1308,7 +1568,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "29a7575d591e": {
       "fingerprint": "29a7575d591e",
@@ -1331,7 +1596,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "399f7db64f97": {
       "fingerprint": "399f7db64f97",
@@ -1354,7 +1624,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ec9c93777b73": {
       "fingerprint": "ec9c93777b73",
@@ -1377,7 +1652,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e38c136559e9": {
       "fingerprint": "e38c136559e9",
@@ -1403,7 +1683,12 @@
       "fix_branch": null,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "33868b7dcd6e": {
       "fingerprint": "33868b7dcd6e",
@@ -1428,7 +1713,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0fa38c738838": {
       "fingerprint": "0fa38c738838",
@@ -1453,7 +1743,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5e3472d6dbaf": {
       "fingerprint": "5e3472d6dbaf",
@@ -1476,7 +1771,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "9625591d5a68": {
       "fingerprint": "9625591d5a68",
@@ -1498,7 +1798,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a70617621ebf": {
       "fingerprint": "a70617621ebf",
@@ -1524,7 +1829,12 @@
       "fix_branch": null,
       "fix_attempts": 1,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3e82b43412ba": {
       "fingerprint": "3e82b43412ba",
@@ -1554,7 +1864,12 @@
         "note": "FALSE-POSITIVE: '/review 200 + 0 cards' is the CORRECT, explained club-mismatch empty state, not a contradiction. The functional judge mis-flagged it because content_summary omitted the swim-match counts; the fix gives the judge those counts so it no longer false-positives.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b3fcfc7348e7": {
       "fingerprint": "b3fcfc7348e7",
@@ -1579,7 +1894,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "02d8cfb3993c": {
       "fingerprint": "02d8cfb3993c",
@@ -1604,7 +1924,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a5b0c6b6d911": {
       "fingerprint": "a5b0c6b6d911",
@@ -1629,7 +1954,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e3829b484a1f": {
       "fingerprint": "e3829b484a1f",
@@ -1652,7 +1982,12 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "dbbd58eaafde": {
       "fingerprint": "dbbd58eaafde",
@@ -1675,7 +2010,12 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "71e7c661e15f": {
       "fingerprint": "71e7c661e15f",
@@ -1698,7 +2038,12 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2bf208b2fc6a": {
       "fingerprint": "2bf208b2fc6a",
@@ -1720,7 +2065,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "4f1d8d41781e": {
       "fingerprint": "4f1d8d41781e",
@@ -1750,17 +2100,22 @@
         "note": "Premise ('confidence threshold silently filtering ALL cards') is falsified \u2014 cards are generated and surfaced. The 0-cards condition is club-mismatch (#196), not threshold filtering.",
         "verified_by": "LLM Council (finder-precision verdict, autotest/reports/council/) + human merge of this harness PR",
         "at": "2026-05-31T16:50:03+00:00"
-      }
+      },
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
       "category": "semantic:functional",
-      "severity": "medium",
-      "title": "'REJECTED' filter tab shows 'J' instead of a count or zero",
+      "severity": "low",
+      "title": "'Create new content \u2192' and 'Start a content pack \u2192' CTAs have no evidence they actually work or where they lead",
       "route": "/make (card generation)",
-      "expected": "The REJECTED tab should show '0' (since 0 cards are rejected) to match the QUEUE (57) and APPROVED (3) tabs",
-      "actual": "REJECTED tab displays the letter 'J' \u2014 appears to be a keyboard-shortcut label leaking into the UI count slot",
-      "evidence": "AI judge (user_brain, confidence high):\nreview_text: 'QUEUE / APPROVED / REJECTED / J K / MOVE \u00b7 A / APPROVE \u00b7 R / REJECT \u00b7 ? / HELP' \u2014 the J and K are vim-style navigation shortcuts that have been rendered inline with the filter tabs, making the REJECTED count unreadable",
+      "expected": "Clicking 'Create new content \u2192' or 'Start a content pack \u2192' should clearly lead to a file upload or content-creation step",
+      "actual": "No destination or confirmation is shown; a first-time user cannot tell whether these buttons open a file picker, a wizard, or a blank page",
+      "evidence": "AI judge (user_brain, confidence medium):\nBoth CTAs appear in home_text but no destination route, modal description, or next-step label accompanies them \u2014 contrast with the workflow section which promises a 30s upload step but doesn't link to it",
       "suspect": "",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
@@ -1768,25 +2123,30 @@
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 13,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 14,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Concrete rendering defect: vim-navigation keybinding tokens (J/K) bleeding into the REJECTED count badge slot.",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Genuine UX friction but non-blocking; backlog",
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "fd111afb7b70": {
       "fingerprint": "fd111afb7b70",
       "category": "semantic:functional",
       "severity": "medium",
-      "title": "/upload/configure returns 404 while /upload is live",
+      "title": "404 on /upload/configure",
       "route": "/upload/configure",
-      "expected": "200 \u2014 if /upload is a functioning page, its configure sub-route should either exist or not be reachable from the UI",
-      "actual": "404 \u2014 route not found",
-      "evidence": "AI judge (functional, confidence high):\nroutes list: '200 /upload' and '404 /upload/configure'; no other /upload/* sub-routes appear, suggesting a broken link or missing route registration",
+      "expected": "Route returns 200 (or a redirect) \u2014 the upload flow exposes a configure step that should be reachable",
+      "actual": "HTTP 404 returned for /upload/configure while /upload itself returns 200, indicating the configure sub-route is missing or was removed without removing the link that leads to it",
+      "evidence": "AI judge (functional, confidence high):\n404 /upload/configure listed in pages alongside 200 /upload \u2014 a reachable parent with a missing child implies a broken navigation path or dead link in the upload flow",
       "suspect": "",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
@@ -1794,41 +2154,51 @@
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 11,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 12,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Separate root cause from [0-2]; 404 mid-flow is a hard dead end in the upload journey, fix next sprint",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] 404 on /upload/configure breaks navigation from a reachable parent route",
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "3dab958fe4dd": {
       "fingerprint": "3dab958fe4dd",
       "category": "semantic:user_brain",
       "severity": "medium",
-      "title": "Flow visited 10 review pages but reports only 6 judged",
+      "title": "No export or posting path visible after approval \u2014 volunteer cannot see how to get content out",
       "route": "review page",
-      "expected": "flow_result label 'judged-6-runs' should match the number of /review/<run_id> pages that completed a judgement; all visited runs should resolve",
-      "actual": "10 distinct /review/<run_id> pages visited (0c899af2ab23, a9ca568a894f, 4b08b51c1a25, 1c008211f6f3, 51020af44616, 9b07ec6f400d, 7f8da9c9af7e, 86b541e57c3d, d66850d9f2cb, c01266bf379c) but only 6 judged per flow_result",
-      "evidence": "AI judge (functional, confidence medium):\nflow_result=live:judged-6-runs; 10 unique /review/ URLs in routes list \u2014 4 runs opened but not judged, indicating silent drop-off mid-flow",
+      "expected": "After approving cards the user should see a clear route to captions, graphics, download, or Buffer scheduling \u2014 the outcome they came for",
+      "actual": "The review page has 'Download export' and 'Open content builder \u2192' but no indication of what format downloads in, whether captions are included, or how to actually post to Instagram/social \u2014 the home page promises 'Export as text, copy to Stories, or download a pack' but none of those options are labelled on the review screen",
+      "evidence": "AI judge (user_brain, confidence medium):\nreview_text top actions: 'Open content builder \u2192' / 'Download export' / 'Delete run' \u2014 'Download export' has no label (CSV? ZIP? images?) and the content builder destination is opaque to a first-time user",
       "suspect": "",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 10,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 11,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "Compounding half of the batch PB defect: legacy mode silently degrades personal-best data across all 57 cards with no user visibility",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Unlabeled export button leaves the final workflow step opaque; real defect per problem statement scope",
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
-      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven"
+      "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "0875b0ed5356": {
       "fingerprint": "0875b0ed5356",
@@ -1851,7 +2221,12 @@
       "last_run_id": "20260530T212832Z-299d",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1008a2a227a4": {
       "fingerprint": "1008a2a227a4",
@@ -1874,7 +2249,12 @@
       "last_run_id": "20260530T212832Z-299d",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "576fbe57f51b": {
       "fingerprint": "576fbe57f51b",
@@ -1898,7 +2278,12 @@
       "last_run_id": "20260531T085021Z-fa0a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8e7c25cd0c3b": {
       "fingerprint": "8e7c25cd0c3b",
@@ -1922,7 +2307,12 @@
       "last_run_id": "20260531T085021Z-fa0a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b768cc1ab2fc": {
       "fingerprint": "b768cc1ab2fc",
@@ -1946,7 +2336,12 @@
       "fix_pr": null,
       "fix_branch": null,
       "fix_attempts": 1,
-      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review."
+      "archived_reason": "council ruling RULE A: council:blind_spot is meta (sweep-coverage observations, not coder-fixable product defects). Preserved for council-layer review.",
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "25cd61befbd6": {
       "fingerprint": "25cd61befbd6",
@@ -1965,13 +2360,18 @@
       "screenshot": "autotest/screenshots/25cd61befbd6.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 7,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/209",
       "fix_branch": "autotest/fix-25cd61befbd6",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "a12292408770": {
       "fingerprint": "a12292408770",
@@ -1990,38 +2390,48 @@
       "screenshot": "autotest/screenshots/a12292408770.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 7,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/210",
       "fix_branch": "autotest/fix-a12292408770",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "0fc5bf4cd758": {
       "fingerprint": "0fc5bf4cd758",
       "category": "semantic:output",
       "severity": "high",
-      "title": "All 12 captions are empty strings",
+      "title": "All captions are empty strings",
       "route": "caption generation",
-      "expected": "Non-empty social media caption text for each card",
-      "actual": "Every card has \"caption\": \"\"",
-      "evidence": "AI judge (output, confidence high):\nAll 12 cards including e.g. Katherine Butcher 50m Backstroke 29.67, Aimee Stokes 50m Freestyle 27.86 \u2014 the primary user-facing content field is blank across the entire content pack",
+      "expected": "Non-empty caption text for each card (social media post text)",
+      "actual": "Empty string \"\" on all 12 cards",
+      "evidence": "AI judge (output, confidence high):\nEvery entry in content_pack has \"caption\": \"\" \u2014 e.g. the Katherine Butcher 50m Backstroke card, the Aimee Stokes 50m Freestyle card, and all remaining 10 cards are identically blank. No caption text was generated for any result.",
       "suspect": "",
-      "rationale": "Pipeline root cause: extraction/enrichment step never populated caption template, producing content-shaped voids across all 12 cards; blocker for core value proposition",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] All captions empty; core product promise broken; must deploy together with [6]",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the output aspect described above"
       ],
       "screenshot": "",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 5,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 6,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/211",
       "fix_branch": "autotest/fix-0fc5bf4cd758",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "a31b1bda242d": {
       "fingerprint": "a31b1bda242d",
@@ -2046,7 +2456,12 @@
       "present_last_run": false,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/212",
       "fix_branch": "autotest/fix-a31b1bda242d",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "343e7a7dbbd7": {
       "fingerprint": "343e7a7dbbd7",
@@ -2070,7 +2485,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f51fbb0c9424": {
       "fingerprint": "f51fbb0c9424",
@@ -2095,7 +2515,12 @@
       "present_last_run": false,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/219",
       "fix_branch": "autotest/fix-f51fbb0c9424",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "97ee0fe53ae7": {
       "fingerprint": "97ee0fe53ae7",
@@ -2119,7 +2544,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "cc71c8b724ba": {
       "fingerprint": "cc71c8b724ba",
@@ -2143,7 +2573,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "920acc9f0419": {
       "fingerprint": "920acc9f0419",
@@ -2167,7 +2602,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5d62a7525066": {
       "fingerprint": "5d62a7525066",
@@ -2189,7 +2629,12 @@
       "last_run_id": "20260601T042046Z-1030",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "961f3c781a38": {
       "fingerprint": "961f3c781a38",
@@ -2211,7 +2656,12 @@
       "last_run_id": "20260601T042046Z-1030",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "c71e245dab24": {
       "fingerprint": "c71e245dab24",
@@ -2236,7 +2686,12 @@
       "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "59f0888a0a93": {
       "fingerprint": "59f0888a0a93",
@@ -2260,7 +2715,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d00dc9fe1c07": {
       "fingerprint": "d00dc9fe1c07",
@@ -2284,7 +2744,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "894fb4034079": {
       "fingerprint": "894fb4034079",
@@ -2308,7 +2773,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "486a5b34b6ae": {
       "fingerprint": "486a5b34b6ae",
@@ -2332,7 +2802,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f7497b68bcee": {
       "fingerprint": "f7497b68bcee",
@@ -2356,7 +2831,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "fde5c09058e7": {
       "fingerprint": "fde5c09058e7",
@@ -2380,7 +2860,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7ff51a201c69": {
       "fingerprint": "7ff51a201c69",
@@ -2404,7 +2889,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "4eeade90bf40": {
       "fingerprint": "4eeade90bf40",
@@ -2428,7 +2918,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "cb0a4f6a5ef5": {
       "fingerprint": "cb0a4f6a5ef5",
@@ -2452,7 +2947,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f1120cdc4011": {
       "fingerprint": "f1120cdc4011",
@@ -2476,7 +2976,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "893066418e54": {
       "fingerprint": "893066418e54",
@@ -2500,7 +3005,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a7bf971f553b": {
       "fingerprint": "a7bf971f553b",
@@ -2522,7 +3032,12 @@
       "last_run_id": "20260601T114019Z-02d6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d3b558b555ee": {
       "fingerprint": "d3b558b555ee",
@@ -2546,7 +3061,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5f0a2deb6258": {
       "fingerprint": "5f0a2deb6258",
@@ -2570,7 +3090,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8994285b09c7": {
       "fingerprint": "8994285b09c7",
@@ -2594,7 +3119,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "6a3469e32508": {
       "fingerprint": "6a3469e32508",
@@ -2618,7 +3148,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "aa52a539fdb5": {
       "fingerprint": "aa52a539fdb5",
@@ -2642,7 +3177,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7636d7989793": {
       "fingerprint": "7636d7989793",
@@ -2666,7 +3206,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "63ea06415138": {
       "fingerprint": "63ea06415138",
@@ -2690,7 +3235,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a5e0736fd802": {
       "fingerprint": "a5e0736fd802",
@@ -2714,7 +3264,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "846256cc6667": {
       "fingerprint": "846256cc6667",
@@ -2738,7 +3293,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "26bf6c9e87b4": {
       "fingerprint": "26bf6c9e87b4",
@@ -2762,7 +3322,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "484a9864cc64": {
       "fingerprint": "484a9864cc64",
@@ -2784,7 +3349,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "46cbe598877f": {
       "fingerprint": "46cbe598877f",
@@ -2808,7 +3378,12 @@
       "last_run_id": "20260601T213618Z-fca6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "a96495d01c59": {
       "fingerprint": "a96495d01c59",
@@ -2830,9 +3405,14 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 2,
       "last_run_id": "20260602T102907Z-3bda",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2f7987aa5e05": {
       "fingerprint": "2f7987aa5e05",
@@ -2854,7 +3434,12 @@
       "last_run_id": "20260601T213618Z-fca6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "4fe01d0e3bb7": {
       "fingerprint": "4fe01d0e3bb7",
@@ -2876,7 +3461,12 @@
       "last_run_id": "20260601T213618Z-fca6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f59bd5466e32": {
       "fingerprint": "f59bd5466e32",
@@ -2900,32 +3490,42 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "202e6f197299": {
       "fingerprint": "202e6f197299",
       "category": "semantic:user_brain",
       "severity": "high",
-      "title": "'Re-run to see the full audit' warning with no Re-run button visible",
+      "title": "Meet level shown as 'NATIONAL' but the meet name says 'Regional' \u2014 contradictory metadata a volunteer will distrust",
       "route": "/review \u2014 Meet Context panel",
-      "expected": "A 'Re-run' or 'Refresh PB data' button directly next to or below the warning so the volunteer can act on it",
-      "actual": "The warning text appears but no actionable button is present in the UI text provided, leaving the volunteer with degraded PB data and no path to fix it",
-      "evidence": "AI judge (user_brain, confidence high):\nreview_text: 'PB fetching used legacy mode. Re-run to see the full audit.' \u2014 no Re-run control follows",
+      "expected": "Meet level classification should match the meet name so the volunteer trusts the auto-generated content",
+      "actual": "MEET CONTEXT shows 'Meet level: NATIONAL' but the meet is 'West Wales Regional SC Championships 2024' \u2014 a regional championship is not a national meet",
+      "evidence": "AI judge (user_brain, confidence high):\nMeet title: 'WEST WALES REGIONAL SC CHAMPIONSHIPS 2024'; Meet level field: 'NATIONAL' \u2014 all 57 cards are labelled 'national-level meet' in their descriptions, meaning every caption will overstate the competition level",
       "suspect": "",
-      "rationale": "Missing Re-run button is the only remediation path for degraded PB data on all 57 cards; absence makes the data-quality failure permanent for the run",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] NATIONAL classification on a regional meet corrupts all 57 captions; must deploy together with [0]",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "fixing",
       "first_seen": "2026-06-02T04:18:54+00:00",
-      "last_seen": "2026-06-02T04:18:54+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T041309Z-14b1",
-      "present_last_run": false,
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/218",
       "fix_branch": "autotest/fix-202e6f197299",
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "de60580f5f59": {
       "fingerprint": "de60580f5f59",
@@ -2949,7 +3549,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "9a0edb76786e": {
       "fingerprint": "9a0edb76786e",
@@ -2973,7 +3578,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "06475bbba257": {
       "fingerprint": "06475bbba257",
@@ -2997,7 +3607,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5ef02955a015": {
       "fingerprint": "5ef02955a015",
@@ -3019,7 +3634,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "9f26a216eca5": {
       "fingerprint": "9f26a216eca5",
@@ -3041,9 +3661,14 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 3,
       "last_run_id": "20260602T102907Z-3bda",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "9e1765c00753": {
       "fingerprint": "9e1765c00753",
@@ -3065,9 +3690,14 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 2,
       "last_run_id": "20260602T102907Z-3bda",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "780ae74617d0": {
       "fingerprint": "780ae74617d0",
@@ -3089,9 +3719,1659 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T102907Z-3bda",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "8ec8f4aa37fe": {
+      "fingerprint": "8ec8f4aa37fe",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Certain ARIA roles must contain particular children (aria-required-children)",
+      "route": "/activity",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'aria-required-children' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: aria-required-children\nhelp: Certain ARIA roles must contain particular children\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/aria-required-children?application=axeAPI\nexample targets:\n  .mh-segmented",
+      "suspect": "axe:aria-required-children",
+      "rationale": "",
+      "repro": [
+        "Open /activity",
+        "Run axe-core; rule 'aria-required-children' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "8641be41aab0": {
+      "fingerprint": "8641be41aab0",
+      "category": "a11y",
+      "severity": "low",
+      "title": "a11y: Table header text should not be empty (empty-table-header)",
+      "route": "/activity",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'empty-table-header' violation (minor) on 1 element(s)",
+      "evidence": "axe-core rule: empty-table-header\nhelp: Table header text should not be empty\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/empty-table-header?application=axeAPI\nexample targets:\n  th:nth-child(7)",
+      "suspect": "axe:empty-table-header",
+      "rationale": "",
+      "repro": [
+        "Open /activity",
+        "Run axe-core; rule 'empty-table-header' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "721af17931e3": {
+      "fingerprint": "721af17931e3",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Heading levels should only increase by one (heading-order)",
+      "route": "/add-input",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'heading-order' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: heading-order\nhelp: Heading levels should only increase by one\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/heading-order?application=axeAPI\nexample targets:\n  .mh-template-primary > div:nth-child(2) > h3",
+      "suspect": "axe:heading-order",
+      "rationale": "",
+      "repro": [
+        "Open /add-input",
+        "Run axe-core; rule 'heading-order' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "a5def4156656": {
+      "fingerprint": "a5def4156656",
+      "category": "a11y",
+      "severity": "low",
+      "title": "a11y: Table header text should not be empty (empty-table-header)",
+      "route": "/drafts",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'empty-table-header' violation (minor) on 1 element(s)",
+      "evidence": "axe-core rule: empty-table-header\nhelp: Table header text should not be empty\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/empty-table-header?application=axeAPI\nexample targets:\n  th:nth-child(5)",
+      "suspect": "axe:empty-table-header",
+      "rationale": "",
+      "repro": [
+        "Open /drafts",
+        "Run axe-core; rule 'empty-table-header' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "5b371ce0203f": {
+      "fingerprint": "5b371ce0203f",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Form elements must have labels (label)",
+      "route": "/free-text/quick",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'label' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: label\nhelp: Form elements must have labels\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/label?application=axeAPI\nexample targets:\n  input",
+      "suspect": "axe:label",
+      "rationale": "",
+      "repro": [
+        "Open /free-text/quick",
+        "Run axe-core; rule 'label' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "cea6db4058b3": {
+      "fingerprint": "cea6db4058b3",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/health",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /health",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "b4466c5a9efc": {
+      "fingerprint": "b4466c5a9efc",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/health",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /health",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "58cc0c4e2605": {
+      "fingerprint": "58cc0c4e2605",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/health",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /health",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "dae4bcb5725e": {
+      "fingerprint": "dae4bcb5725e",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/health",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /health",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "55db7a5bc79b": {
+      "fingerprint": "55db7a5bc79b",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/health",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /health",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "091768f0d07d": {
+      "fingerprint": "091768f0d07d",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/healthz",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /healthz",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "77078ef4bde7": {
+      "fingerprint": "77078ef4bde7",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/healthz",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /healthz",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "133799a35e41": {
+      "fingerprint": "133799a35e41",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/healthz",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /healthz",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "4abbccd21c96": {
+      "fingerprint": "4abbccd21c96",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/healthz",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /healthz",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "1703b9233dfb": {
+      "fingerprint": "1703b9233dfb",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/healthz",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /healthz",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "c34388e45fd5": {
+      "fingerprint": "c34388e45fd5",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/healthz/breaker",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/breaker",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "6b114241a414": {
+      "fingerprint": "6b114241a414",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/healthz/breaker",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/breaker",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "d81346b47be2": {
+      "fingerprint": "d81346b47be2",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/healthz/breaker",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/breaker",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "d080da81ac7c": {
+      "fingerprint": "d080da81ac7c",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/healthz/breaker",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/breaker",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "cbc715dbe1ad": {
+      "fingerprint": "cbc715dbe1ad",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/healthz/breaker",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/breaker",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "6df9d960412d": {
+      "fingerprint": "6df9d960412d",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/healthz/deps",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/deps",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3ba63675f5f2": {
+      "fingerprint": "3ba63675f5f2",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/healthz/deps",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/deps",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "c62d43432c5d": {
+      "fingerprint": "c62d43432c5d",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/healthz/deps",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/deps",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3814f87710eb": {
+      "fingerprint": "3814f87710eb",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/healthz/deps",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/deps",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "808f831894f3": {
+      "fingerprint": "808f831894f3",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/healthz/deps",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/deps",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "229a3ab12916": {
+      "fingerprint": "229a3ab12916",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/healthz/memory",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/memory",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "2fa837885695": {
+      "fingerprint": "2fa837885695",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/healthz/memory",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/memory",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "c0645bb59a6a": {
+      "fingerprint": "c0645bb59a6a",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/healthz/memory",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/memory",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "56575a19ceb8": {
+      "fingerprint": "56575a19ceb8",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/healthz/memory",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/memory",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "b2e402fb9bce": {
+      "fingerprint": "b2e402fb9bce",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/healthz/memory",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/memory",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "e43f373a325a": {
+      "fingerprint": "e43f373a325a",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/healthz/ping",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/ping",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "eb835afcc1b5": {
+      "fingerprint": "eb835afcc1b5",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/healthz/ping",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/ping",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "8f4f1a24a43d": {
+      "fingerprint": "8f4f1a24a43d",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/healthz/ping",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/ping",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "c4ec2db638cf": {
+      "fingerprint": "c4ec2db638cf",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/healthz/ping",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/ping",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "1d2b0c50a0ff": {
+      "fingerprint": "1d2b0c50a0ff",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/healthz/ping",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /healthz/ping",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "40861e0a0aa1": {
+      "fingerprint": "40861e0a0aa1",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Heading levels should only increase by one (heading-order)",
+      "route": "/make",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'heading-order' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: heading-order\nhelp: Heading levels should only increase by one\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/heading-order?application=axeAPI\nexample targets:\n  .mh-template-primary > div:nth-child(2) > h3",
+      "suspect": "axe:heading-order",
+      "rationale": "",
+      "repro": [
+        "Open /make",
+        "Run axe-core; rule 'heading-order' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "fbdaa523b016": {
+      "fingerprint": "fbdaa523b016",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Form elements must have labels (label)",
+      "route": "/organisation",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'label' violation (critical) on 2 element(s)",
+      "evidence": "axe-core rule: label\nhelp: Form elements must have labels\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/label?application=axeAPI\nexample targets:\n  #org-brand-primary\n  #org-brand-secondary",
+      "suspect": "axe:label",
+      "rationale": "",
+      "repro": [
+        "Open /organisation",
+        "Run axe-core; rule 'label' flags 2 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3d7b7df57b3f": {
+      "fingerprint": "3d7b7df57b3f",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Select element must have an accessible name (select-name)",
+      "route": "/organisation",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'select-name' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: select-name\nhelp: Select element must have an accessible name\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/select-name?application=axeAPI\nexample targets:\n  select",
+      "suspect": "axe:select-name",
+      "rationale": "",
+      "repro": [
+        "Open /organisation",
+        "Run axe-core; rule 'select-name' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "c70b951085f4": {
+      "fingerprint": "c70b951085f4",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Heading levels should only increase by one (heading-order)",
+      "route": "/organisation/setup",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'heading-order' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: heading-order\nhelp: Heading levels should only increase by one\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/heading-order?application=axeAPI\nexample targets:\n  h3",
+      "suspect": "axe:heading-order",
+      "rationale": "",
+      "repro": [
+        "Open /organisation/setup",
+        "Run axe-core; rule 'heading-order' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3705c0f119a5": {
+      "fingerprint": "3705c0f119a5",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Select element must have an accessible name (select-name)",
+      "route": "/organisation/setup",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'select-name' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: select-name\nhelp: Select element must have an accessible name\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/select-name?application=axeAPI\nexample targets:\n  select",
+      "suspect": "axe:select-name",
+      "rationale": "",
+      "repro": [
+        "Open /organisation/setup",
+        "Run axe-core; rule 'select-name' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "9d45e4aa28aa": {
+      "fingerprint": "9d45e4aa28aa",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Form elements must have labels (label)",
+      "route": "/session-update",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'label' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: label\nhelp: Form elements must have labels\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/label?application=axeAPI\nexample targets:\n  input[type=\"file\"]",
+      "suspect": "axe:label",
+      "rationale": "",
+      "repro": [
+        "Open /session-update",
+        "Run axe-core; rule 'label' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "6cb6c25455c7": {
+      "fingerprint": "6cb6c25455c7",
+      "category": "a11y",
+      "severity": "low",
+      "title": "a11y: Table header text should not be empty (empty-table-header)",
+      "route": "/settings",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'empty-table-header' violation (minor) on 1 element(s)",
+      "evidence": "axe-core rule: empty-table-header\nhelp: Table header text should not be empty\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/empty-table-header?application=axeAPI\nexample targets:\n  th:nth-child(7)",
+      "suspect": "axe:empty-table-header",
+      "rationale": "",
+      "repro": [
+        "Open /settings",
+        "Run axe-core; rule 'empty-table-header' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "6c1e4fe1fd49": {
+      "fingerprint": "6c1e4fe1fd49",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Form elements must have labels (label)",
+      "route": "/sponsor-post",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'label' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: label\nhelp: Form elements must have labels\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/label?application=axeAPI\nexample targets:\n  input[type=\"file\"]",
+      "suspect": "axe:label",
+      "rationale": "",
+      "repro": [
+        "Open /sponsor-post",
+        "Run axe-core; rule 'label' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "eb1cd90c76da": {
+      "fingerprint": "eb1cd90c76da",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Select element must have an accessible name (select-name)",
+      "route": "/spotlight",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'select-name' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: select-name\nhelp: Select element must have an accessible name\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/select-name?application=axeAPI\nexample targets:\n  select",
+      "suspect": "axe:select-name",
+      "rationale": "",
+      "repro": [
+        "Open /spotlight",
+        "Run axe-core; rule 'select-name' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "51671f1cbbc3": {
+      "fingerprint": "51671f1cbbc3",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Form elements must have labels (label)",
+      "route": "/weekend-preview",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'label' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: label\nhelp: Form elements must have labels\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/label?application=axeAPI\nexample targets:\n  input[type=\"file\"]",
+      "suspect": "axe:label",
+      "rationale": "",
+      "repro": [
+        "Open /weekend-preview",
+        "Run axe-core; rule 'label' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "32bd4fde5062": {
+      "fingerprint": "32bd4fde5062",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Certain ARIA roles must contain particular children (aria-required-children)",
+      "route": "/review/<run_id>",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'aria-required-children' violation (critical) on 1 element(s)",
+      "evidence": "axe-core rule: aria-required-children\nhelp: Certain ARIA roles must contain particular children\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/aria-required-children?application=axeAPI\nexample targets:\n  .mh-segmented",
+      "suspect": "axe:aria-required-children",
+      "rationale": "",
+      "repro": [
+        "Open /review/<run_id>",
+        "Run axe-core; rule 'aria-required-children' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "f507e79488ac": {
+      "fingerprint": "f507e79488ac",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Select element must have an accessible name (select-name)",
+      "route": "/review/<run_id>",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'select-name' violation (critical) on 6 element(s)",
+      "evidence": "axe-core rule: select-name\nhelp: Select element must have an accessible name\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/select-name?application=axeAPI\nexample targets:\n  #f-type\n  #f-conf\n  #f-swimmer\n  #f-event\n  #f-band",
+      "suspect": "axe:select-name",
+      "rationale": "",
+      "repro": [
+        "Open /review/<run_id>",
+        "Run axe-core; rule 'select-name' flags 6 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "2de44e84474b": {
+      "fingerprint": "2de44e84474b",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/static/theme/fonts.css",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /static/theme/fonts.css",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "72b7ed57451a": {
+      "fingerprint": "72b7ed57451a",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/static/theme/fonts.css",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /static/theme/fonts.css",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "1543e35d09a7": {
+      "fingerprint": "1543e35d09a7",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/static/theme/fonts.css",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /static/theme/fonts.css",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "23251352dab1": {
+      "fingerprint": "23251352dab1",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/static/theme/fonts.css",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /static/theme/fonts.css",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3aac47d9591b": {
+      "fingerprint": "3aac47d9591b",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/static/theme/fonts.css",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /static/theme/fonts.css",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "0b1fe3b65747": {
+      "fingerprint": "0b1fe3b65747",
+      "category": "semantic:user_brain",
+      "severity": "medium",
+      "title": "Review queue shows 'REJECTED: J' \u2014 looks like a keyboard shortcut label leaked into the data display",
+      "route": "/review \u2014 workflow status panel",
+      "expected": "REJECTED count should be a number (e.g. '0')",
+      "actual": "Displays 'REJECTED\\nJ' where 'J' appears to be the keyboard shortcut hint rendered inside the stat, not a count",
+      "evidence": "AI judge (user_brain, confidence high):\nWORKFLOW panel reads: QUEUE 57 / APPROVED 3 / REJECTED J \u2014 the keyboard legend below confirms J/K are navigation keys, K=MOVE, A=APPROVE, R=REJECT, making 'J' clearly a leaked UI label",
+      "suspect": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Keyboard shortcut label leaks into REJECTED stat; embarrassing and quick to fix",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260602T143545Z-d1f9",
+      "first_pending_at": "2026-06-02T14:40:53+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "01518d3f5513": {
+      "fingerprint": "01518d3f5513",
+      "category": "semantic:user_brain",
+      "severity": "low",
+      "title": "'Re-upload with PB fetching \u2192' dead-end \u2014 PB data warning with no explanation of consequences",
+      "route": "/review \u2014 Research / PB audit section",
+      "expected": "A non-technical volunteer should understand what PB data is, why it matters for content, and what re-uploading will do (overwrite current run? cost time?)",
+      "actual": "Warning says 'PB data was fetched but the full per-swimmer audit wasn't saved. Re-running the meet will generate the complete PB audit.' with a bare link \u2014 no explanation of what's missing from the current 57 cards or whether it's safe to proceed without it",
+      "evidence": "AI judge (user_brain, confidence high):\nRESEARCH section: 'AVAILABLE \u2014 PB data was fetched but the full per-swimmer audit wasn't saved.' A volunteer who doesn't know what a PB audit affects will not know if they should re-upload before approving anything",
+      "suspect": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Genuine UX friction but non-blocking; backlog",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260602T143545Z-d1f9",
+      "first_pending_at": "2026-06-02T14:40:53+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "b6f86c8a8de9": {
+      "fingerprint": "b6f86c8a8de9",
+      "category": "council:blind_spot",
+      "severity": "high",
+      "title": "45 of 57 cards silently dropped before caption generation \u2014 only 12 reach content_pack",
+      "route": "functional/pipeline",
+      "expected": "All 57 cards in the review queue should be present in content_pack when caption generation runs",
+      "actual": "AI judge evidence for [0] cites 12 cards in content_pack; review queue shows 57 cards \u2014 a gap of 45 cards with no error surfaced",
+      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nChairman blind-spot analysis: [0] evidence references 12 content_pack entries while QUEUE shows 57; if only 12 cards reach the generation step the upstream pipeline is silently discarding 45 results before caption writing ever executes",
+      "suspect": "",
+      "rationale": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260602T143545Z-d1f9",
+      "first_pending_at": "2026-06-02T14:40:53+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
     }
   },
   "skipped": {
@@ -3114,7 +5394,12 @@
       "last_run_id": "20260529T093553Z-67b3",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1623e36e552d": {
       "fingerprint": "1623e36e552d",
@@ -3135,7 +5420,12 @@
       "last_run_id": "20260529T104246Z-5fa4",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ee03ff2dd60f": {
       "fingerprint": "ee03ff2dd60f",
@@ -3158,7 +5448,12 @@
       "last_run_id": "20260529T114007Z-6617",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "22cedc9ab58e": {
       "fingerprint": "22cedc9ab58e",
@@ -3181,7 +5476,12 @@
       "last_run_id": "20260529T114007Z-6617",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b01ec07d798f": {
       "fingerprint": "b01ec07d798f",
@@ -3204,7 +5504,12 @@
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8c7e2f131136": {
       "fingerprint": "8c7e2f131136",
@@ -3227,7 +5532,12 @@
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2e8206e8d413": {
       "fingerprint": "2e8206e8d413",
@@ -3250,7 +5560,12 @@
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "239ef8737bff": {
       "fingerprint": "239ef8737bff",
@@ -3273,7 +5588,12 @@
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8f631e60cb24": {
       "fingerprint": "8f631e60cb24",
@@ -3296,7 +5616,12 @@
       "last_run_id": "20260529T132713Z-5cb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "803f7ead5bd4": {
       "fingerprint": "803f7ead5bd4",
@@ -3319,7 +5644,12 @@
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d9e34eb08529": {
       "fingerprint": "d9e34eb08529",
@@ -3342,7 +5672,12 @@
       "last_run_id": "20260529T181604Z-4ce5",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "de59899fef57": {
       "fingerprint": "de59899fef57",
@@ -3365,7 +5700,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7473a4492b44": {
       "fingerprint": "7473a4492b44",
@@ -3388,7 +5728,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "644fc7499a4c": {
       "fingerprint": "644fc7499a4c",
@@ -3411,7 +5756,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7a51dcd95351": {
       "fingerprint": "7a51dcd95351",
@@ -3434,7 +5784,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2f70e2b4c101": {
       "fingerprint": "2f70e2b4c101",
@@ -3457,7 +5812,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "275f6d4f3c15": {
       "fingerprint": "275f6d4f3c15",
@@ -3480,7 +5840,12 @@
       "last_run_id": "20260529T191353Z-d9f7",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "32d69a65464d": {
       "fingerprint": "32d69a65464d",
@@ -3503,7 +5868,12 @@
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "9ffb1407aa9a": {
       "fingerprint": "9ffb1407aa9a",
@@ -3526,7 +5896,12 @@
       "last_run_id": "20260529T202946Z-4827",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3ade0339374f": {
       "fingerprint": "3ade0339374f",
@@ -3549,7 +5924,12 @@
       "last_run_id": "20260530T033849Z-81a2",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7a7277e72a08": {
       "fingerprint": "7a7277e72a08",
@@ -3572,7 +5952,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "eaf548e4779d": {
       "fingerprint": "eaf548e4779d",
@@ -3595,7 +5980,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d58c7a1e26cc": {
       "fingerprint": "d58c7a1e26cc",
@@ -3618,7 +6008,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ba01044e7a74": {
       "fingerprint": "ba01044e7a74",
@@ -3641,7 +6036,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d608851b2781": {
       "fingerprint": "d608851b2781",
@@ -3664,7 +6064,12 @@
       "last_run_id": "20260530T083136Z-7b15",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d41c878a26ff": {
       "fingerprint": "d41c878a26ff",
@@ -3687,7 +6092,12 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f29e70937168": {
       "fingerprint": "f29e70937168",
@@ -3710,7 +6120,12 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "cca6366a7284": {
       "fingerprint": "cca6366a7284",
@@ -3733,7 +6148,12 @@
       "last_run_id": "20260530T134415Z-94a0",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "24c7592e551f": {
       "fingerprint": "24c7592e551f",
@@ -3756,7 +6176,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5f1dc5573bb4": {
       "fingerprint": "5f1dc5573bb4",
@@ -3779,7 +6204,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "7ce7d896bdc1": {
       "fingerprint": "7ce7d896bdc1",
@@ -3802,7 +6232,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b9b1d1489eab": {
       "fingerprint": "b9b1d1489eab",
@@ -3825,7 +6260,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2ed05fd31fdc": {
       "fingerprint": "2ed05fd31fdc",
@@ -3848,7 +6288,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "dbf1ef9c7960": {
       "fingerprint": "dbf1ef9c7960",
@@ -3871,7 +6316,12 @@
       "last_run_id": "20260530T141834Z-cc16",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "c648d657b9f2": {
       "fingerprint": "c648d657b9f2",
@@ -3894,7 +6344,12 @@
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "88143d7dbdc3": {
       "fingerprint": "88143d7dbdc3",
@@ -3917,7 +6372,12 @@
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "8cbd6ee668e7": {
       "fingerprint": "8cbd6ee668e7",
@@ -3940,7 +6400,12 @@
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "ca7e3aa815e1": {
       "fingerprint": "ca7e3aa815e1",
@@ -3963,7 +6428,12 @@
       "last_run_id": "20260530T145013Z-784a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0e5a6362deea": {
       "fingerprint": "0e5a6362deea",
@@ -3986,7 +6456,12 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "6948abc641ad": {
       "fingerprint": "6948abc641ad",
@@ -4009,7 +6484,12 @@
       "last_run_id": "20260530T161433Z-1a65",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "78b7d2ae36ae": {
       "fingerprint": "78b7d2ae36ae",
@@ -4032,7 +6512,12 @@
       "last_run_id": "20260530T192048Z-4d7e",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e17b439b1876": {
       "fingerprint": "e17b439b1876",
@@ -4055,7 +6540,12 @@
       "last_run_id": "20260530T192048Z-4d7e",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
@@ -4078,7 +6568,12 @@
       "last_run_id": "20260602T102907Z-3bda",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "348b520bd1a9": {
       "fingerprint": "348b520bd1a9",
@@ -4101,7 +6596,12 @@
       "last_run_id": "20260530T192048Z-4d7e",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "94cce88fa8c6": {
       "fingerprint": "94cce88fa8c6",
@@ -4124,7 +6624,12 @@
       "last_run_id": "20260530T192048Z-4d7e",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f780498f188c": {
       "fingerprint": "f780498f188c",
@@ -4147,7 +6652,12 @@
       "last_run_id": "20260530T212832Z-299d",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "d9624ec031b8": {
       "fingerprint": "d9624ec031b8",
@@ -4169,7 +6679,12 @@
       "last_run_id": "20260531T040513Z-a389",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "0010aae6b21e": {
       "fingerprint": "0010aae6b21e",
@@ -4191,7 +6706,12 @@
       "last_run_id": "20260531T040513Z-a389",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f1d03a4691ef": {
       "fingerprint": "f1d03a4691ef",
@@ -4213,7 +6733,12 @@
       "last_run_id": "20260531T040513Z-a389",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "511b4b91e7f1": {
       "fingerprint": "511b4b91e7f1",
@@ -4237,7 +6762,12 @@
       "last_run_id": "20260531T085021Z-fa0a",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "34b79a72ffb7": {
       "fingerprint": "34b79a72ffb7",
@@ -4259,7 +6789,12 @@
       "last_run_id": "20260531T134952Z-9f11",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "f2a8cc025083": {
       "fingerprint": "f2a8cc025083",
@@ -4281,7 +6816,12 @@
       "last_run_id": "20260601T213618Z-fca6",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "2409e04b1b7c": {
       "fingerprint": "2409e04b1b7c",
@@ -4303,7 +6843,12 @@
       "last_run_id": "20260531T134952Z-9f11",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "cf8cbff2d486": {
       "fingerprint": "cf8cbff2d486",
@@ -4320,12 +6865,17 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-31T13:50:54+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 8,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 9,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "8d111246cee9": {
       "fingerprint": "8d111246cee9",
@@ -4349,7 +6899,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "35902274d0f3": {
       "fingerprint": "35902274d0f3",
@@ -4373,7 +6928,12 @@
       "last_run_id": "20260531T192113Z-ca95",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "1b99ae947072": {
       "fingerprint": "1b99ae947072",
@@ -4397,7 +6957,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "565de4f13ed8": {
       "fingerprint": "565de4f13ed8",
@@ -4421,7 +6986,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "b715d3fafaea": {
       "fingerprint": "b715d3fafaea",
@@ -4445,7 +7015,12 @@
       "last_run_id": "20260601T174550Z-7fb9",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "89482f637688": {
       "fingerprint": "89482f637688",
@@ -4467,9 +7042,14 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 4,
       "last_run_id": "20260602T102907Z-3bda",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "3dab958fe4dd": {
       "fingerprint": "3dab958fe4dd",
@@ -4493,7 +7073,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     },
     "1d3b3c7e8998": {
       "fingerprint": "1d3b3c7e8998",
@@ -4517,7 +7102,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "5a31ed912673": {
       "fingerprint": "5a31ed912673",
@@ -4541,7 +7131,12 @@
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": false,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
     },
     "e47516eb477b": {
       "fingerprint": "e47516eb477b",
@@ -4563,9 +7158,99 @@
       "last_seen": "2026-06-02T10:34:23+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T102907Z-3bda",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "fa62e12448e1": {
+      "fingerprint": "fa62e12448e1",
+      "category": "visual_skipped",
+      "severity": "info",
+      "title": "Visual baseline missing for home (chromium)",
+      "route": "(home screen)",
+      "expected": "A committed baseline at autotest/baseline/visual/chromium/home.png",
+      "actual": "No baseline yet \u2014 capture & human-review one to enable regression diffing.",
+      "evidence": "Visual-regression check is the deterministic backbone for vision.py; baselines are human-committed, never auto-written.",
+      "suspect": "",
+      "rationale": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
       "present_last_run": true,
       "fix_pr": null,
-      "fix_branch": null
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "f1666d61adc0": {
+      "fingerprint": "f1666d61adc0",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "high",
+      "title": "No sign-up or onboarding flow visible anywhere",
+      "route": "/ (home) and auth",
+      "expected": "A first-time visitor should see a clear sign-up button, account creation flow, or onboarding wizard to create their org, upload their brand assets, and get started",
+      "actual": "The home page shows a fully-loaded logged-in state (Swansea University Swimming Team, pinned org, 02 organisations, 033 total runs) with no sign-up CTA, no registration link, and no onboarding path visible",
+      "evidence": "AI judge (user_brain, confidence high):\nHome nav shows only: HOME / CREATE / ORGANISATION / MEDIA LIBRARY / SETTINGS / SWITCH ORG / SIGN OUT \u2014 no 'Sign up', 'Get started', or 'Create account' option anywhere\n\n[council triage] demoted \u2014 Sweep ran authenticated; no sign-up CTA is expected behaviour, not a bug",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "15afd4cb1ec9": {
+      "fingerprint": "15afd4cb1ec9",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "low",
+      "title": "'Open content builder \u2192' appears three times before any cards are approved \u2014 prematurely surfaces the next step",
+      "route": "/review \u2014 above-the-fold and workflow panel",
+      "expected": "Content builder CTA should activate or become prominent only after cards are approved, to guide the user through the intended sequence",
+      "actual": "'Open content builder \u2192' is shown at the very top of the page, again in the workflow panel, before the user has done anything \u2014 with only 3/57 reviewed this creates confusion about whether approvals are required first",
+      "evidence": "AI judge (user_brain, confidence medium):\nreview_text shows 'Open content builder \u2192' immediately after the run metadata, then again in STEP 1 instructions, then again in the WORKFLOW panel \u2014 the STEP 1 copy says 'Approved cards flow into the Content builder' but the button is already clickable with 54 cards still unreviewed\n\n[council triage] demoted \u2014 Product philosophy preference, not a defect",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T14:40:53+00:00",
+      "last_seen": "2026-06-02T14:40:53+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
     }
   }
 }
