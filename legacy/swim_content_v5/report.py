@@ -41,7 +41,7 @@ def _normalise_meet_level(level: Optional[str]) -> Optional[str]:
     low = level.lower()
     if any(t in low for t in ("international", "world", "olympic", "european")):
         return "international"
-    if any(t in low for t in ("national", "british", "level 1", "level 2", "championships")):
+    if any(t in low for t in ("national", "british", "level 1", "level 2")):
         return "national"
     if any(t in low for t in ("university", "varsity", "bucs")):
         return "university"
