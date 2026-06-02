@@ -118,7 +118,7 @@ between a bad AI change and production, and they are strict:
 |---|---|
 | Kill switch | `touch autotest/STOP` halts the loop immediately |
 | Protected paths | a fix touching the deterministic engine (parsers, detectors, ranker, colour-science) aborts before merge |
-| Harness/governance gate | a fix touching `autotest/`, CI, deploy, or governance paths opens the PR but stops for a HUMAN merge (`CHANGE_CLASSIFICATION.md`) — the loop never auto-lands a change to its own harness |
+| Self-governance gate | a fix is classified 3 ways (`CHANGE_CLASSIFICATION.md`, council 2026-06-02): **product** + ordinary **harness** code auto-merge on green CI; a **self-governance** change (the files that govern the loop — `gitops.py`/`fix_loop.py` merge+guard logic, the `STOP` kill switch, the classifier, CI/deploy/deps, governance docs, the tripwire) stops for a HUMAN merge. Enforced in-repo (`classify_change` + `tests/test_autonomy_tripwire.py`) AND platform-side (branch protection + `.github/CODEOWNERS`, bot token without bypass — the real stop) |
 | Scope cap | `AUTOTEST_BUILD_MAX_FILES` (25) / `AUTOTEST_BUILD_MAX_INSERTIONS` (2000) |
 | Test gate | the full suite must stay green or nothing merges |
 | Iterate-to-green | a gate failure is fed back to the coder to fix the ROOT CAUSE (repo skills), up to `AUTOTEST_GATE_MAX_ITERS`, then it stops — it may not delete/weaken tests to pass |

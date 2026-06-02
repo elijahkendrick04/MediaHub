@@ -1,0 +1,42 @@
+# CODEOWNERS — the platform-enforced human-review boundary for the autonomous loop
+# (council 2026-06-02; docs/adr/0005-autotest-governed-auto-merge.md).
+#
+# The autotest loop may auto-merge ordinary harness CODE and product fixes on green CI.
+# It must NEVER auto-merge a change to the files that GOVERN it — its merge/guard logic,
+# the kill switch, the classifier, the safety tripwire, CI policy, the deploy/dependency
+# supply-chain, or the governance docs. An in-repo guard (gitops.classify_change +
+# tests/test_autonomy_tripwire.py) is NECESSARY but not sufficient, because it is run by
+# the same identity that writes the code. THIS file is the real stop: it requires a human
+# code-owner review on the constitution set.
+#
+# REQUIRED operator setup for this to actually bind (do once):
+#   1. Settings → Branches → branch protection on `main`: enable "Require a pull request
+#      before merging" + "Require review from Code Owners" + "Require status checks to pass".
+#   2. Ensure the autotest bot identity (GITHUB_TOKEN / AUTOTEST_GH_PAT) is NOT an admin and
+#      does NOT have "bypass branch protections". Then the loop literally cannot merge these
+#      paths — only a human code-owner can. (See monitoring/README.md analogue + the ADR.)
+
+# The loop's own decision + guard logic
+/autotest/gitops.py                              @elijahkendrick04
+/autotest/fix_loop.py                            @elijahkendrick04
+/autotest/STOP                                   @elijahkendrick04
+
+# Governance / autonomy docs
+/autotest/CHANGE_CLASSIFICATION.md               @elijahkendrick04
+/autotest/AUTONOMY_BOUNDARY.md                   @elijahkendrick04
+/autotest/PROOF_CRITERION.md                     @elijahkendrick04
+/autotest/PROOF_VERIFIER.md                      @elijahkendrick04
+/CLAUDE.md                                       @elijahkendrick04
+CLAUDE.md                                        @elijahkendrick04
+
+# The deterministic safety tripwire + the classifier's own tests
+/tests/test_autonomy_tripwire.py                 @elijahkendrick04
+/tests/test_autotest_change_classification.py    @elijahkendrick04
+
+# CI / automation policy (incl. this CODEOWNERS file itself) + deploy + dependency supply-chain
+/.github/                                        @elijahkendrick04
+/render.yaml                                     @elijahkendrick04
+/Dockerfile                                      @elijahkendrick04
+/pyproject.toml                                  @elijahkendrick04
+/requirements.txt                                @elijahkendrick04
+/requirements-dev.txt                            @elijahkendrick04

@@ -21,9 +21,12 @@ own seeding) — stated, not hidden.
   The human writes ZERO product code.
 - **VERIFY (internal)** — the full pytest gate + `prove_regression` run inside the loop.
 - **OPEN PR** — the loop pushes the branch and opens the PR.
-- **MERGE decision** — for a PRODUCT change, auto-merge on green CI (operator's standing
-  instruction); for a harness/governance change, the loop STOPS for a human merge
-  (CHANGE_CLASSIFICATION.md). The classification is applied mechanically by the loop.
+- **MERGE decision** — a 3-way mechanical classification (CHANGE_CLASSIFICATION.md;
+  council 2026-06-02): a PRODUCT change and an ordinary HARNESS change both auto-merge on
+  green CI; a SELF-GOVERNANCE change (the files that govern the loop — its merge/guard
+  logic, kill switch, classifier, CI/deploy/deps, governance docs) STOPS for a human merge,
+  enforced in-repo AND by GitHub branch protection + CODEOWNERS. The classification is
+  applied mechanically by the loop; it never auto-merges a change to its own boundary.
 
 ## HUMAN PRECONDITIONS (set up once, before the run — NOT part of the per-bug autonomy)
 
@@ -34,7 +37,8 @@ own seeding) — stated, not hidden.
   filter on whether the proof is *evaluable*, not a selection of the fix.
 - **Before-assertion authorship** — the human writes the external symptom-absent assertion
   (committed RED before the run) so it can't be reverse-fitted to the coder's output.
-- **The merge click** for harness/governance changes (by policy).
+- **The merge click** for SELF-GOVERNANCE changes (by policy + CODEOWNERS) — ordinary
+  harness code and product fixes auto-merge without it.
 
 ## No-valid-patch behaviour (council prereq — the most likely outcome on a hard bug)
 
