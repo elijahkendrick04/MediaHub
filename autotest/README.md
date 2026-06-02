@@ -136,6 +136,56 @@ between a bad AI change and production, and they are strict:
 | `AUTOTEST_VISION` | `1` | enable the screenshot vision judge (`vision.py`) — skips cleanly with no provider key |
 | `AUTOTEST_DISCOVER` | unset | let `claude` find more test files on the web |
 
+### Trust & coverage flags (Tier A–D — see `docs/autotest/`)
+
+| Flag | Default | Effect |
+|---|---|---|
+| `AUTOTEST_CONFIRM_SWEEPS` | `2` | A1: extra sweeps a *subjective* finding must recur before `pending → open` (0 disables the gate) |
+| `AUTOTEST_DECAY_SWEEPS_SUBJECTIVE` | `3` | A2: absent sweeps before a subjective finding auto-closes |
+| `AUTOTEST_DECAY_SWEEPS_DETERMINISTIC` | `6` | A2: absent sweeps before a deterministic finding auto-closes |
+| `AUTOTEST_FIX_REQUIRE_REPRO` | `1` | A6: fixer must write a failing-first deterministic test before touching product code for a *subjective* finding |
+| `AUTOTEST_CALIBRATION_MIN_CURATED` | `20` | A5: human-curated labels needed before the measured council precision is published |
+| `AUTOTEST_A11Y` | `1` | B2: axe-core accessibility pass on each rendered page (deterministic) |
+| `AUTOTEST_VISUAL` | `1` | B3: Playwright visual-snapshot regression on key surfaces (deterministic) |
+| `AUTOTEST_CONTRACT` | `1` | B5: Schemathesis API contract tests for `/api` (deterministic, pytest-native) |
+| `AUTOTEST_BROWSER` | `chromium` | B1: `chromium` \| `firefox` \| `webkit` |
+| `AUTOTEST_DEVICE` | _(unset)_ | B1: optional Playwright device name for a mobile pass (e.g. `iPhone 13`, `Pixel 7`) |
+
+### Finding lifecycle (Tier A — trust)
+
+Findings now have a lifecycle instead of opening on a single sighting and never
+ageing out (the noise problem the benchmark report flagged):
+
+```
+            (subjective)                          (deterministic)
+new finding ───► pending ──confirm×N──► open ◄──────── new finding
+                    │                     │
+              (absent×K) decay      fix loop picks it up
+                    │                     ▼
+                    ▼                  fixing ──► fixed ──recurs──► regressed (top of BUGS.md)
+              auto-closed ──recurs──► regressed        verified-fixed (terminal, never reopened)
+```
+
+- **Subjective** findings (`semantic:*`, `vision:*`, `council:*`) enter **`pending`**
+  and only become **`open`** after recurring `AUTOTEST_CONFIRM_SWEEPS` times — a single
+  AI sighting is not a bug. **Deterministic** findings (crashes, 5xx, broken links,
+  ground-truth, a11y/contract/visual) open immediately.
+- A finding not reproduced for the decay window **`auto-closed`** (record kept, never
+  deleted); if it recurs it reopens as **`regressed`** at the top of the report.
+- The fixer only acts on `open`/`regressed`, ignores `pending`, and (A6) needs a
+  deterministic failing-first repro before changing product code for a subjective one.
+- `python -m autotest.metrics` measures the council's precision/recall vs the
+  human-curated calibration set (`autotest/calibration/`) and prints a 🔬 Judge-trust
+  line; low precision tightens the confirm gate.
+
+## Benchmark & roadmap
+
+The trust + coverage work in this harness follows a public-repo benchmark and gap
+analysis: **[`docs/autotest/AUTOTEST_BENCHMARK_AND_GAPS.md`](../docs/autotest/AUTOTEST_BENCHMARK_AND_GAPS.md)**
+(the *why*), with the implementation spec in
+[`docs/autotest/IMPLEMENTATION_PROMPT.md`](../docs/autotest/IMPLEMENTATION_PROMPT.md) and
+the change log in [`docs/autotest/AUTOTEST_CHANGES.md`](../docs/autotest/AUTOTEST_CHANGES.md).
+
 > `AUTOTEST_BUILD_MERGE` keeps its historical name (the deployed workflow sets it)
 > so re-homing the auto-merge code from the old builder into `gitops.py` didn't
 > change the operator's configured behaviour. It arms the **fixer's** auto-merge.
