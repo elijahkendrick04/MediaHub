@@ -3033,6 +3033,16 @@ def _start_run(
                 "error" if run.error else "done",
                 run.error if run.error else None,
             )
+            if not run.error:
+                # "Pack ready for review" ping. Inert (no-op) unless an operator
+                # configured a notification channel; runs in its own thread so it
+                # never delays the run, and never raises.
+                try:
+                    from mediahub.notify import notify_pack_ready
+
+                    notify_pack_ready(run_id)
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 

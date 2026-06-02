@@ -30,6 +30,18 @@ search queries.
   upstream repository (https://github.com/searxng/searxng) at that ref. Its
   transitive dependencies carry their own licenses via their distributions.
 
+## Notifications — ntfy (`mediahub.notify`)
+
+The notifier sends "pack ready for review" pings via **ntfy**
+(https://ntfy.sh) and/or a generic webhook. MediaHub **vendors no ntfy source**
+— it only POSTs messages to the ntfy HTTP API (the public server or a
+self-hosted one), so the network-copyleft does not reach MediaHub. The HTTP
+client is original MediaHub code on the existing `requests` dependency.
+
+- **ntfy** — © Philipp C. Heckel and ntfy contributors — dual
+  **Apache-2.0 / GPL-2.0** (https://github.com/binwiederhier/ntfy). Used
+  unmodified over its HTTP API; no ntfy code is bundled or linked.
+
 ---
 
 _When a future change vendors third-party source (as opposed to a registry
