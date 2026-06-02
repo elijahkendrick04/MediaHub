@@ -9198,6 +9198,13 @@ def create_app() -> Flask:
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
             _wf_grand_total = len(ranked_achs) or _wf_n_total or 0
             _wf_pct = int(round(100 * _wf_decided / _wf_grand_total)) if _wf_grand_total else 0
+            # Only show bulk-approve when cards remain unreviewed; hide at 100%.
+            _bulk_approve_btn = (
+                '<button type="button" class="btn secondary" id="mh-bulk-approve"'
+                ' title="Approve every card currently shown in the queue">'
+                'Approve all in queue</button>'
+                if _wf_pct < 100 else ""
+            )
 
             workflow_summary_card = f"""
 <div class="card" style="border-left:3px solid var(--accent);display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
@@ -9229,10 +9236,7 @@ def create_app() -> Flask:
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <button type="button" class="btn secondary" id="mh-bulk-approve"
-              title="Approve every card currently shown in the queue">
-        Approve all in queue
-      </button>
+      {_bulk_approve_btn}
       <a class="btn" href="{_pack_url}" style="align-self:flex-end">Open content builder &rarr;</a>
     </div>
   </div>

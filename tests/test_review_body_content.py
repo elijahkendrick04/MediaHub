@@ -437,3 +437,86 @@ class TestReviewLegacyPbAuditHasRerunButton:
         assert "/upload" in body, (
             "Fallback must link to the upload page when input.bin is not on disk"
         )
+
+
+class TestBulkApproveButtonVisibility:
+    """Regression guard: 'Approve all in queue' must not appear at 100% reviewed.
+
+    Before the fix the button was rendered unconditionally, producing the
+    contradictory UI described in the bug report: 'REVIEWED 3/3 = 100%'
+    immediately above 'Approve all in queue'.
+    """
+
+    def test_bulk_approve_hidden_when_all_reviewed(self, review_env):
+        wm = review_env["wm"]
+        client = review_env["client"]
+        achievements = [
+            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
+             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            for i in range(3)
+        ]
+        payload = _make_run_payload("org-test", achievements)
+        run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
+
+        from mediahub.workflow.status import CardStatus
+        ws = wm._get_wf_store()
+        ws.set_status(run_id, "swim-0", CardStatus.APPROVED)
+        ws.set_status(run_id, "swim-1", CardStatus.APPROVED)
+        ws.set_status(run_id, "swim-2", CardStatus.REJECTED)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        # Progress strip must show 100%.
+        assert 'mh-progress-strip-label">100%<' in body, "3/3 reviewed must read 100%"
+        # BUG SIGNATURE must be ABSENT: button element must be hidden at 100%.
+        # Note: the JS always references getElementById('mh-bulk-approve'), so we
+        # check for the HTML attribute id="mh-bulk-approve" (double-quote form),
+        # which only appears when the button element is actually rendered.
+        assert 'id="mh-bulk-approve"' not in body, "Approve all button must be hidden when fully reviewed"
+        assert 'Approve all in queue' not in body
+
+    def test_bulk_approve_visible_when_cards_remain(self, review_env):
+        wm = review_env["wm"]
+        client = review_env["client"]
+        achievements = [
+            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
+             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            for i in range(3)
+        ]
+        payload = _make_run_payload("org-test", achievements)
+        run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
+
+        from mediahub.workflow.status import CardStatus
+        ws = wm._get_wf_store()
+        # Approve only 1 of 3 — two still in queue.
+        ws.set_status(run_id, "swim-0", CardStatus.APPROVED)
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        # Button element must be present while unreviewed cards remain.
+        assert 'id="mh-bulk-approve"' in body, "Approve all button must appear when cards are pending"
+        assert 'Approve all in queue' in body
+
+    def test_bulk_approve_visible_with_no_workflow_state(self, review_env):
+        wm = review_env["wm"]
+        client = review_env["client"]
+        achievements = [
+            {"swim_id": f"swim-{i}", "swimmer_name": f"Swimmer {i}",
+             "event": "100m Freestyle", "headline": f"PB #{i}"}
+            for i in range(3)
+        ]
+        payload = _make_run_payload("org-test", achievements)
+        run_id = _seed_run(review_env["tmp_path"], wm, "org-test", payload)
+        # No workflow state at all — all cards are implicitly in queue (0% reviewed).
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        # Button element must be present when nothing has been reviewed yet.
+        assert 'id="mh-bulk-approve"' in body, "Approve all button must appear at 0% reviewed"
+        assert 'Approve all in queue' in body
