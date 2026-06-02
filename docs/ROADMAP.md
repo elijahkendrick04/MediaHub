@@ -76,7 +76,7 @@ hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `6cf83bea0` · Merge pull request #215 from elijahkendrick04/claude/autotester-ground-truth
+**Last updated:** 2026-06-02 · `1d61e7b68` · Merge pull request #217 from elijahkendrick04/claude/epic-wozniak-V2X5T
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -84,18 +84,18 @@ hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-02 | `2384c9835` | autotest: governed auto-merge — 3-way classification + self-governance boundary (ADR 0005) |
+| 2026-06-02 | `131f8abf7` | autotest: persist fixer memory [skip ci] |
+| 2026-06-02 | `17f2efde2` | autotest: refresh bug report [skip ci] |
+| 2026-06-02 | `25d1137f5` | autotest: persist fixer memory [skip ci] |
+| 2026-06-02 | `85707faf2` | autotest: refresh bug report [skip ci] |
+| 2026-06-02 | `8d6271810` | autotest(contract): pin schemathesis to its 3.x API + harden against version drift |
+| 2026-06-02 | `260e10dcb` | docs(autotest): benchmark report, implementation prompt, change log + index links |
+| 2026-06-02 | `ed74e5429` | autotest: trust lifecycle (Tier A) + deterministic coverage (Tier B-D) |
 | 2026-06-02 | `b72348d07` | docs(readme): align with multi-sport, autonomy-first direction; fix stale facts |
 | 2026-06-02 | `4c43dbe77` | feat(autotest): ground-truth oracle — activate the dormant golden baseline (Council item 4) |
 | 2026-06-02 | `cf2610c58` | docs: refresh test-count notes to post-merge figure (2836 passed / 1 skipped) |
 | 2026-06-02 | `f139f4931` | docs(roadmap): note roadmap directives are human-authored (autobuilder removed in #214) |
-| 2026-06-01 | `bc864a498` | fix(autotest): stop the coder no-op bleed — quarantine clean no-edit runs instead of retrying foreve |
-| 2026-06-01 | `8572c4ec4` | Add trailing newline to renamed research report (pre-commit EOF hook) |
-| 2026-06-01 | `d40d673c6` | Remove the autobuilder; extract shared git/PR plumbing to gitops |
-| 2026-06-01 | `49fd619e4` | Add roadmap-rebuild CHANGES summary + next-session backlog |
-| 2026-06-01 | `bf46b5217` | Rebuild ROADMAP around Phase 0-5 multi-sport, autonomy-first strategy |
-| 2026-06-01 | `30c6523be` | Add inert sport_profiles scaffolding (typed loader + AutonomyLevel + 2 profiles) |
-| 2026-06-01 | `499a94083` | test: add real /review route regression for the progress-denominator fix |
-| 2026-06-02 | `0e4dbdc04` | Rebuild |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
