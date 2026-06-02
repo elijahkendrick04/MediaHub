@@ -2916,14 +2916,15 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "open",
+      "status": "fixing",
       "first_seen": "2026-06-02T04:18:54+00:00",
       "last_seen": "2026-06-02T04:18:54+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T041309Z-14b1",
       "present_last_run": true,
-      "fix_pr": null,
-      "fix_branch": null
+      "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/218",
+      "fix_branch": "autotest/fix-202e6f197299",
+      "fix_attempts": 1
     },
     "de60580f5f59": {
       "fingerprint": "de60580f5f59",
