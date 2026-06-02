@@ -34,7 +34,14 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 # fix that eliminates a false-positive) and retired with a commit/test/signature
 # record — NOT a loop-authored fix. It is fix-owned so a re-detection cannot
 # reopen it.
-FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix", "verified-fixed"}
+# ``needs_disproof`` is a QUARANTINE state (council 2026-06-01): the coder
+# investigated the finding, completed cleanly, and DECLINED to edit (a likely
+# false-positive / already-correct behaviour). It is removed from the fix loop so
+# we stop the infinite-retry bleed, but it is NOT a close — it awaits a
+# deterministic ground-truth repro to either reopen (real) or confirm false. It is
+# fix-owned so the noisy live finder cannot silently reopen it; only a deliberate
+# ground-truth sweep or a human audit should.
+FIX_OWNED_STATUSES = {"fixing", "fixed", "wontfix", "verified-fixed", "needs_disproof"}
 
 
 def _now_iso() -> str:
@@ -236,6 +243,8 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
         "fixed": sum(1 for b in ledger["bugs"].values() if b.get("status") == "fixed"),
         "verified_fixed": sum(1 for b in ledger["bugs"].values()
                               if b.get("status") == "verified-fixed"),
+        "needs_disproof": sum(1 for b in ledger["bugs"].values()
+                              if b.get("status") == "needs_disproof"),
         "skipped": len(ledger["skipped"]),
         "total_bugs": len(ledger["bugs"]),
     }
@@ -259,6 +268,29 @@ def retire_verified_fixed(fingerprint: str, *, commit: str, tests: str, note: st
     entry["verified_fixed"] = {
         "commit": commit, "tests": tests, "note": note,
         "verified_by": verified_by, "at": _now_iso(),
+    }
+    save_ledger(ledger)
+    return True
+
+
+def quarantine_needs_disproof(fingerprint: str, *, conclusion: str, coder_attempts: int) -> bool:
+    """Quarantine a finding to ``needs_disproof`` (council 2026-06-01). Use when the
+    coder investigated the finding, completed cleanly, and made NO edits — i.e. it
+    DECLINED to change anything (a likely false-positive / already-correct
+    behaviour). This removes the finding from the fix loop so we stop burning ~900s
+    per never-ending retry, WITHOUT closing it (not ``wontfix`` — the accused coder
+    does not get to self-acquit): it awaits a deterministic ground-truth repro to
+    reopen (real) or confirm false. Records the coder's own conclusion for audit.
+    Returns False for an unknown fingerprint."""
+    ledger = load_ledger()
+    entry = ledger["bugs"].get(fingerprint)
+    if not entry:
+        return False
+    entry["status"] = "needs_disproof"
+    entry["needs_disproof"] = {
+        "coder_conclusion": (conclusion or "")[:1500],
+        "coder_attempts": coder_attempts,
+        "at": _now_iso(),
     }
     save_ledger(ledger)
     return True
@@ -306,6 +338,8 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                    key=lambda b: b.get("last_seen", ""), reverse=True)
     verified = sorted((b for b in bugs if b.get("status") == "verified-fixed"),
                       key=lambda b: (b.get("verified_fixed") or {}).get("at", ""), reverse=True)
+    needs_disproof = sorted((b for b in bugs if b.get("status") == "needs_disproof"),
+                            key=lambda b: (b.get("needs_disproof") or {}).get("at", ""), reverse=True)
     skipped = sorted(ledger["skipped"].values(), key=_sev_rank)
 
     by_sev: dict[str, int] = {}
@@ -330,6 +364,7 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
     out.append(f"- **Open bugs:** {len(open_bugs)} ({sev_summary}) · "
                f"**In progress:** {len(fixing)} · **Fixed:** {len(fixed)} · "
                f"**Verified-fixed (retired):** {len(verified)} · "
+               f"**Needs-disproof (quarantined):** {len(needs_disproof)} · "
                f"**Skipped (expected/infra):** {len(skipped)}")
     if run_meta.get("council_verdict"):
         out.append(f"- **🏛️ {run_meta['council_verdict']}** "
@@ -373,6 +408,25 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                        f"`{vf.get('commit', '?')}` ({vf.get('tests', '?')}); "
                        f"{vf.get('note', '')} — by {vf.get('verified_by', '?')} "
                        f"at {vf.get('at', '?')}")
+        out.append("")
+        out.append("</details>")
+        out.append("")
+
+    if needs_disproof:
+        out.append("<details><summary>🔬 Needs-disproof — coder investigated &amp; "
+                   f"declined to edit; awaiting a ground-truth repro ({len(needs_disproof)})</summary>")
+        out.append("")
+        out.append("_The coder completed cleanly but made no edits — a likely "
+                   "false-positive / already-correct behaviour. Quarantined from the fix "
+                   "loop (no more retries) but NOT closed: a deterministic seeded sweep or "
+                   "a human audit reopens it if real._")
+        out.append("")
+        for b in needs_disproof:
+            nd = b.get("needs_disproof") or {}
+            concl = " ".join((nd.get("coder_conclusion") or "").split())[:240]
+            out.append(f"- [{b.get('severity', '?').upper()}] {b['title']} · "
+                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — after "
+                       f"{nd.get('coder_attempts', '?')} attempt(s): {concl}")
         out.append("")
         out.append("</details>")
         out.append("")

@@ -202,10 +202,18 @@ def implement_until_green(task: str, *, complex: bool = False,
         ok, log = coder.write_code(prompt, complex=(complex and attempt == 1), cwd=REPO_ROOT)
         files, ins = _changed_files()
         if not files:
-            # No edits at all → a true infra error (CLI/auth) or the model gave
-            # up without touching anything. Surface the log so fix_one can tell
-            # an infra error from a normal give-up.
-            return False, files, ins, f"coder-failed (iter {attempt}): {log[-300:]}"
+            # No edits at all. Two very different cases, told apart by the coder's
+            # own completion frame (coder._parse_stream_json_result, surfaced as a
+            # trailing <<CODER_RESULT ...>> marker):
+            #   • CLEAN completion, no edits → the coder investigated and DECLINED
+            #     to edit (the finding is likely a false-positive / already-correct).
+            #     fix_one quarantines this to needs_disproof instead of retrying it
+            #     forever (council 2026-06-01: surface, don't self-acquit).
+            #   • error / timeout / CLI-missing → genuine infra failure or give-up →
+            #     retry (never-skip), as before.
+            clean_noedit = "<<CODER_RESULT" in log and "is_error=false" in log
+            tag = "coder-noedit-complete" if clean_noedit else "coder-failed"
+            return False, files, ins, f"{tag} (iter {attempt}): {log[-400:]}"
         # The coder MADE edits. Judge them by the TEST GATE, not the CLI exit
         # code: `claude -p` exits non-zero on max-turns/stream quirks even when it
         # produced a perfectly good, suite-passing fix — don't throw that away.

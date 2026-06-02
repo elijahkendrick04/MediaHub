@@ -14,12 +14,35 @@ opt-in for anyone who prefers the free tier over a Claude subscription.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _parse_stream_json_result(raw: str) -> dict | None:
+    """Extract the final ``{"type":"result", ...}`` frame from a `claude -p
+    --output-format stream-json` run (the output is JSONL — one event per line).
+    That frame carries the assistant's CLOSING TEXT in ``result`` and whether the
+    run completed cleanly in ``is_error`` / ``subtype``. Returns the dict, or None
+    if the output isn't parseable stream-json (older CLI, a crash, or the gemini
+    backend). This is what lets the fixer tell "the coder fixed it" from "the
+    coder investigated and concluded there is nothing to fix"."""
+    found = None
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{") or '"type"' not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "result":
+            found = obj  # keep the LAST result frame
+    return found
 
 
 def backend() -> str:
@@ -85,7 +108,28 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         # CI and hangs reading stdin before producing anything.
         p = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True,
                            stdin=subprocess.DEVNULL, timeout=timeout)
-        out = (p.stdout or "")[-2000:] + (p.stderr or "")[-1000:]
+        stdout, stderr = p.stdout or "", p.stderr or ""
+        # Surface the coder's ACTUAL conclusion, not CLI metadata. With
+        # --output-format stream-json the final {"type":"result",...} frame carries
+        # the assistant's closing text + whether it completed cleanly. The old code
+        # kept only stdout[-2000:] — the JSON metadata tail (service_tier/
+        # terminal_reason) — which is useless for telling "the coder fixed it" from
+        # "the coder investigated and found nothing to fix". (Council 2026-06-01.)
+        if be == "claude":
+            res = _parse_stream_json_result(stdout)
+            if res is not None:
+                conclusion = str(res.get("result") or "").strip()
+                is_err = bool(res.get("is_error"))
+                clean = (not is_err) and str(res.get("subtype") or "success") == "success"
+                # A trailing, truncation-proof marker the fixer reads to tell a
+                # CLEAN no-edit completion (investigated, declined → a candidate
+                # false-positive) from an error/timeout (genuine give-up → retry).
+                marker = (f"<<CODER_RESULT is_error={'true' if is_err else 'false'} "
+                          f"subtype={res.get('subtype', 'success')} turns={res.get('num_turns', '?')}>>")
+                body = (conclusion or stdout[-1500:])[-2400:]
+                tail = ("\n" + stderr[-500:]) if (stderr and is_err) else ""
+                return (p.returncode == 0 or clean), f"{body}{tail}\n{marker}"
+        out = stdout[-2000:] + stderr[-1000:]
         return p.returncode == 0, out
     except subprocess.TimeoutExpired as exc:
         # Surface whatever the coder emitted before we killed it: "produced

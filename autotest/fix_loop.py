@@ -310,6 +310,18 @@ def fix_one(bug: dict) -> dict:
                 f"The Claude coder could not run for bug `{fp}`. {info}\n\n"
                 "Check CLAUDE_CODE_OAUTH_TOKEN and that the claude CLI is installed.")
             return {"fp": fp, "result": "coder-failed", "detail": info}
+        # Council 2026-06-01: the coder completed CLEANLY but made no edits — it
+        # investigated and DECLINED to change anything, i.e. the finding is a likely
+        # false-positive / already-correct behaviour (the logs showed this burning
+        # ~900s/tick and retrying the SAME non-bug forever). Quarantine to
+        # needs_disproof — surface the coder's own conclusion, drop it out of the fix
+        # loop — instead of retrying. NOT wontfix: the accused coder does not get to
+        # self-acquit; a deterministic ground-truth repro must reopen or confirm it.
+        if info.startswith("coder-noedit-complete"):
+            report.quarantine_needs_disproof(fp, conclusion=info, coder_attempts=attempts)
+            return {"fp": fp, "result": "needs-disproof",
+                    "detail": "coder completed cleanly with no edits — quarantined "
+                              "pending a ground-truth repro (not retried, not closed)"}
         return _give_up_or_retry(bug, attempts, info)
 
     gitops._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
