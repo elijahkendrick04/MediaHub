@@ -9095,11 +9095,23 @@ def create_app() -> Flask:
   <a class="btn secondary" href="{_audit_url}">Show all per-swimmer audits &#x25BE;</a>
 </div>"""
         elif data.get("pb_fetch_ok") and data.get("pb_fetch_ok") > 0 and not data.get("pb_audit"):
-            # Run did some PB fetching but produced no audit
+            # Run did some PB fetching but produced no audit (legacy mode path).
+            # Offer a direct re-run link so the volunteer can act on the warning.
+            _has_input = (RUNS_DIR / run_id / "input.bin").exists()
+            _rerun_url = (
+                url_for("upload_configure", run_id=run_id)
+                if _has_input
+                else url_for("upload")
+            )
+            _rerun_label = "Re-run this meet" if _has_input else "Re-upload with PB fetching"
             pb_audit_html = (
-                '<div class="card"><p class="muted">'
-                "PB fetching used legacy mode. Re-run to see the full audit."
-                "</p></div>"
+                '<div class="card">'
+                '<p class="muted" style="margin-bottom:var(--sp-3)">'
+                "PB data was fetched but the full per-swimmer audit wasn&#x2019;t saved. "
+                "Re-running the meet will generate the complete PB audit."
+                "</p>"
+                f'<a class="btn secondary" href="{_rerun_url}">{_rerun_label} &rarr;</a>'
+                "</div>"
             )
 
         # Sources panel
