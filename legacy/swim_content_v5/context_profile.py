@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _NATIONAL_KEYWORDS = [
-    "national", "nationals", "championship", "championships",
+    "national", "nationals",
     "british", "gb open", "great britain", "world", "european",
     "international", "olympic", "commonwealth",
 ]

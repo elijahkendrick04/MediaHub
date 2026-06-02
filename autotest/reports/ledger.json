@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated_at": "2026-06-02T14:40:53+00:00",
+  "generated_at": "2026-06-02T16:43:29+00:00",
   "bugs": {
     "e6f9dc3b346d": {
       "fingerprint": "e6f9dc3b346d",
@@ -26,7 +26,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e883e6f0bbc7": {
@@ -61,7 +61,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "71e02f586c45": {
@@ -96,7 +96,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5cebfcb079da": {
@@ -123,7 +123,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "55093f7335f8": {
@@ -150,7 +150,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "76196fe6a36b": {
@@ -178,7 +178,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ca523d57abfe": {
@@ -199,9 +199,9 @@
       "screenshot": "autotest/screenshots/ca523d57abfe.png",
       "status": "open",
       "first_seen": "2026-05-29T13:28:44+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 23,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 24,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -229,9 +229,9 @@
       "screenshot": "autotest/screenshots/37d87cf5f107.png",
       "status": "verified-fixed",
       "first_seen": "2026-05-29T13:28:44+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 23,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 24,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -276,7 +276,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1a292d42c2a2": {
@@ -306,7 +306,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ee92220cff28": {
@@ -341,7 +341,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e9e98e5f2b67": {
@@ -371,7 +371,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "510d8919d03e": {
@@ -401,7 +401,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b07572c63c13": {
@@ -430,7 +430,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3f77367bbf6c": {
@@ -458,7 +458,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ec0d0cf5d7ca": {
@@ -486,7 +486,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8ee1cbc395d9": {
@@ -513,7 +513,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f07b0a820cda": {
@@ -540,7 +540,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1db920390f08": {
@@ -570,7 +570,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a95a57febaa6": {
@@ -600,7 +600,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "bfc627098c98": {
@@ -635,7 +635,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "c9862d27b7c0": {
@@ -663,7 +663,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "6302a837808c": {
@@ -690,7 +690,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e8455cdfdedb": {
@@ -725,7 +725,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7c66fb1350e3": {
@@ -760,7 +760,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "aff50d6aa9db": {
@@ -790,7 +790,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b47311d05103": {
@@ -818,7 +818,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0413ec40fb66": {
@@ -848,7 +848,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7eeacfc2cb14": {
@@ -876,7 +876,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "790ea7991d21": {
@@ -904,7 +904,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0787c98d002c": {
@@ -931,7 +931,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7d64d57158d0": {
@@ -961,7 +961,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f39cf22df1f0": {
@@ -991,7 +991,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0622ce8f5bb6": {
@@ -1019,7 +1019,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "32e3e2ce9aed": {
@@ -1049,7 +1049,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1e132430ab96": {
@@ -1077,7 +1077,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3cb7a29ed79c": {
@@ -1105,7 +1105,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3a74a2b73e5b": {
@@ -1133,7 +1133,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "bce612f4854c": {
@@ -1164,7 +1164,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5e0405b2f9bd": {
@@ -1192,7 +1192,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5573f9dfec5f": {
@@ -1219,7 +1219,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "35ff22e13091": {
@@ -1250,7 +1250,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8ab0ccd13904": {
@@ -1285,7 +1285,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "76ad189abd62": {
@@ -1315,7 +1315,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e79087027f38": {
@@ -1344,7 +1344,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "46a3dad3dccc": {
@@ -1372,7 +1372,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b34eb10b6ff5": {
@@ -1400,7 +1400,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ca523be659fc": {
@@ -1427,7 +1427,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b51047bfbf12": {
@@ -1455,7 +1455,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "83bce121b5f8": {
@@ -1483,7 +1483,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ea20d7e182fc": {
@@ -1514,7 +1514,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e0fa559c5718": {
@@ -1542,7 +1542,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "602d4b499e95": {
@@ -1572,7 +1572,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "29a7575d591e": {
@@ -1600,7 +1600,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "399f7db64f97": {
@@ -1628,7 +1628,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ec9c93777b73": {
@@ -1656,7 +1656,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e38c136559e9": {
@@ -1687,7 +1687,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "33868b7dcd6e": {
@@ -1717,7 +1717,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0fa38c738838": {
@@ -1747,7 +1747,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5e3472d6dbaf": {
@@ -1775,7 +1775,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "9625591d5a68": {
@@ -1802,7 +1802,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a70617621ebf": {
@@ -1833,7 +1833,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3e82b43412ba": {
@@ -1868,7 +1868,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b3fcfc7348e7": {
@@ -1898,7 +1898,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "02d8cfb3993c": {
@@ -1928,7 +1928,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a5b0c6b6d911": {
@@ -1958,7 +1958,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e3829b484a1f": {
@@ -1986,7 +1986,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "dbbd58eaafde": {
@@ -2014,7 +2014,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "71e7c661e15f": {
@@ -2042,7 +2042,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2bf208b2fc6a": {
@@ -2069,7 +2069,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "4f1d8d41781e": {
@@ -2104,7 +2104,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d5e8229ef41c": {
@@ -2141,12 +2141,12 @@
     "fd111afb7b70": {
       "fingerprint": "fd111afb7b70",
       "category": "semantic:functional",
-      "severity": "medium",
-      "title": "404 on /upload/configure",
+      "severity": "high",
+      "title": "/upload/configure returns 404 \u2014 upload workflow is broken at the configure step",
       "route": "/upload/configure",
-      "expected": "Route returns 200 (or a redirect) \u2014 the upload flow exposes a configure step that should be reachable",
-      "actual": "HTTP 404 returned for /upload/configure while /upload itself returns 200, indicating the configure sub-route is missing or was removed without removing the link that leads to it",
-      "evidence": "AI judge (functional, confidence high):\n404 /upload/configure listed in pages alongside 200 /upload \u2014 a reachable parent with a missing child implies a broken navigation path or dead link in the upload flow",
+      "expected": "After uploading a file via /upload (200), the configure step at /upload/configure should be reachable and return 200",
+      "actual": "GET /upload/configure \u2192 404; the parent route /upload returns 200, indicating the upload UI exists but its next step is dead",
+      "evidence": "AI judge (functional, confidence high):\npages list: '200 /upload' followed by '404 /upload/configure' \u2014 only non-2xx response in the entire route manifest",
       "suspect": "",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
@@ -2154,9 +2154,9 @@
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 12,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 13,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -2173,25 +2173,25 @@
       "fingerprint": "3dab958fe4dd",
       "category": "semantic:user_brain",
       "severity": "medium",
-      "title": "No export or posting path visible after approval \u2014 volunteer cannot see how to get content out",
+      "title": "10 /review/<run_id> pages visited but flow reports only 6 judged runs",
       "route": "review page",
-      "expected": "After approving cards the user should see a clear route to captions, graphics, download, or Buffer scheduling \u2014 the outcome they came for",
-      "actual": "The review page has 'Download export' and 'Open content builder \u2192' but no indication of what format downloads in, whether captions are included, or how to actually post to Instagram/social \u2014 the home page promises 'Export as text, copy to Stories, or download a pack' but none of those options are labelled on the review screen",
-      "evidence": "AI judge (user_brain, confidence medium):\nreview_text top actions: 'Open content builder \u2192' / 'Download export' / 'Delete run' \u2014 'Download export' has no label (CSV? ZIP? images?) and the content builder destination is opaque to a first-time user",
+      "expected": "Number of successfully-loaded review pages should match the judged-run count reported by the flow (live:judged-6-runs \u2192 6)",
+      "actual": "10 distinct /review/<run_id> routes all returned 200 (0c899af2ab23, a9ca568a894f, 4b08b51c1a25, 1c008211f6f3, 51020af44616, 9b07ec6f400d, 7f8da9c9af7e, 86b541e57c3d, d66850d9f2cb, c01266bf379c), but the flow only counts 6 judged runs \u2014 4 review pages loaded without a corresponding completed judgment",
+      "evidence": "AI judge (functional, confidence medium):\nflow_result='live:judged-6-runs'; pages list contains 10 unique /review/<run_id> 200 responses \u2014 a 10 vs 6 discrepancy that may indicate stale/orphaned run pages being served without actual judgment completion",
       "suspect": "",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 11,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 15,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Unlabeled export button leaves the final workflow step opaque; real defect per problem statement scope",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Keyboard shortcut label 'J' leaked into the REJECTED count badge; unambiguous rendering defect",
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
       "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
       "confirmations": 0,
@@ -2225,7 +2225,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1008a2a227a4": {
@@ -2253,7 +2253,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "576fbe57f51b": {
@@ -2282,7 +2282,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8e7c25cd0c3b": {
@@ -2311,7 +2311,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b768cc1ab2fc": {
@@ -2340,7 +2340,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "25cd61befbd6": {
@@ -2360,9 +2360,9 @@
       "screenshot": "autotest/screenshots/25cd61befbd6.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 8,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 9,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/209",
       "fix_branch": "autotest/fix-25cd61befbd6",
@@ -2390,9 +2390,9 @@
       "screenshot": "autotest/screenshots/a12292408770.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 8,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 9,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/210",
       "fix_branch": "autotest/fix-a12292408770",
@@ -2407,22 +2407,22 @@
       "fingerprint": "0fc5bf4cd758",
       "category": "semantic:output",
       "severity": "high",
-      "title": "All captions are empty strings",
+      "title": "All captions are empty",
       "route": "caption generation",
-      "expected": "Non-empty caption text for each card (social media post text)",
-      "actual": "Empty string \"\" on all 12 cards",
-      "evidence": "AI judge (output, confidence high):\nEvery entry in content_pack has \"caption\": \"\" \u2014 e.g. the Katherine Butcher 50m Backstroke card, the Aimee Stokes 50m Freestyle card, and all remaining 10 cards are identically blank. No caption text was generated for any result.",
+      "expected": "Non-empty social caption text for each achievement card",
+      "actual": "Every one of the 12 cards has caption: \"\"",
+      "evidence": "AI judge (output, confidence high):\nCards for Katherine Butcher (50m Backstroke), Aimee Stokes (50m/100m/200m Freestyle), Millie Patterson (800m Freestyle), Jacob Lee (50m Butterfly/200m Freestyle), Luke Clegg (200m IM), Hayam Ukkash (100m Breaststroke), Alex Keeble (400m/800m Freestyle) all have caption: \"\"",
       "suspect": "",
-      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] All captions empty; core product promise broken; must deploy together with [6]",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Caption pipeline confirmed broken; scope must be verified across all 57 cards (not just the 12 West Wales cards) before root cause can be determined",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the output aspect described above"
       ],
       "screenshot": "",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 7,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/211",
       "fix_branch": "autotest/fix-0fc5bf4cd758",
@@ -2460,7 +2460,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "343e7a7dbbd7": {
@@ -2489,66 +2489,66 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f51fbb0c9424": {
       "fingerprint": "f51fbb0c9424",
       "category": "semantic:user_brain",
-      "severity": "high",
-      "title": "'Approve all in queue' button and 100% reviewed indicator are simultaneously visible \u2014 logically contradictory",
+      "severity": "low",
+      "title": "'Open content builder \u2192' appears three times before any cards are approved, with no warning that only 3/57 are reviewed",
       "route": "review queue",
-      "expected": "'Approve all in queue' should only appear when cards remain unreviewed; or the 100% indicator should not appear while the queue has items",
-      "actual": "Both 'REVIEWED: 3/3 = 100%' and 'Approve all in queue' are displayed at the same time",
-      "evidence": "AI judge (user_brain, confidence high):\n'REVIEWED: 3/3 = 100%' immediately followed by 'Approve all in queue \u2192'",
+      "expected": "The CTA should either be disabled/greyed out until meaningful approvals exist, or clearly state 'You have 3 approved cards \u2014 continue?' so the volunteer knows what they're working with",
+      "actual": "Three separate 'Open content builder \u2192' links appear with no contextual warning that only 5% of cards have been reviewed; a rushed volunteer will click through thinking all 57 cards are ready",
+      "evidence": "AI judge (user_brain, confidence high):\n'REVIEWED 3/57 \u2014 5%' is shown but the three 'Open content builder \u2192' CTAs carry no qualification or confirmation step",
       "suspect": "",
-      "rationale": "Logically contradictory UI state \u2014 third symptom of the same counter/scoping bug as [4] and [5]",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Borderline real; adding approved-count to CTA label is low-cost and prevents a volunteer from exporting with only 5% reviewed",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-05-31T19:29:01+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260531T192113Z-ca95",
-      "present_last_run": false,
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/219",
       "fix_branch": "autotest/fix-f51fbb0c9424",
       "fix_attempts": 1,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 0,
       "auto_closed_at": null
     },
     "97ee0fe53ae7": {
       "fingerprint": "97ee0fe53ae7",
       "category": "semantic:user_brain",
-      "severity": "low",
-      "title": "Governing body and Age groups fields show a bare dash with no explanation",
+      "severity": "high",
+      "title": "Meet level shows 'NATIONAL' but the meet name says 'Regional' \u2014 unexplained contradiction",
       "route": "review queue / meet context",
-      "expected": "'Not detected' or 'Unknown' with a short note on why it matters or how to set it",
-      "actual": "Both fields display '\u2014' with no context or action offered",
-      "evidence": "AI judge (user_brain, confidence medium):\n'Governing body: \u2014' and 'Age groups: \u2014'",
+      "expected": "Meet level classification should match or the discrepancy should be explained so the volunteer trusts the data",
+      "actual": "Meet context panel says 'Meet level: NATIONAL' while the meet is named 'West Wales Regional SC Championships 2024' \u2014 a volunteer will doubt whether results are being interpreted correctly",
+      "evidence": "AI judge (user_brain, confidence medium):\nHeader: 'WEST WALES REGIONAL SC CHAMPIONSHIPS 2024'; Meet context panel: 'Meet level NATIONAL'",
       "suspect": "",
-      "rationale": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] NATIONAL/Regional contradiction in the same UI panel undermines volunteer trust in the data; same root cause as [1]",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-05-31T19:29:01+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260531T192113Z-ca95",
-      "present_last_run": false,
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 0,
       "auto_closed_at": null
     },
     "cc71c8b724ba": {
@@ -2577,7 +2577,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "920acc9f0419": {
@@ -2606,7 +2606,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5d62a7525066": {
@@ -2633,7 +2633,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "961f3c781a38": {
@@ -2660,7 +2660,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "c71e245dab24": {
@@ -2690,7 +2690,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "59f0888a0a93": {
@@ -2719,7 +2719,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d00dc9fe1c07": {
@@ -2748,7 +2748,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "894fb4034079": {
@@ -2777,7 +2777,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "486a5b34b6ae": {
@@ -2806,7 +2806,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f7497b68bcee": {
@@ -2835,7 +2835,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "fde5c09058e7": {
@@ -2864,7 +2864,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7ff51a201c69": {
@@ -2893,7 +2893,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "4eeade90bf40": {
@@ -2922,7 +2922,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "cb0a4f6a5ef5": {
@@ -2951,7 +2951,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f1120cdc4011": {
@@ -2980,7 +2980,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "893066418e54": {
@@ -3009,7 +3009,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a7bf971f553b": {
@@ -3036,7 +3036,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d3b558b555ee": {
@@ -3065,7 +3065,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5f0a2deb6258": {
@@ -3094,7 +3094,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8994285b09c7": {
@@ -3123,7 +3123,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "6a3469e32508": {
@@ -3152,7 +3152,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "aa52a539fdb5": {
@@ -3181,7 +3181,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7636d7989793": {
@@ -3210,7 +3210,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "63ea06415138": {
@@ -3239,7 +3239,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a5e0736fd802": {
@@ -3268,7 +3268,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "846256cc6667": {
@@ -3297,7 +3297,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "26bf6c9e87b4": {
@@ -3326,7 +3326,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "484a9864cc64": {
@@ -3353,7 +3353,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "46cbe598877f": {
@@ -3382,7 +3382,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "a96495d01c59": {
@@ -3411,7 +3411,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2f7987aa5e05": {
@@ -3438,7 +3438,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "4fe01d0e3bb7": {
@@ -3465,7 +3465,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f59bd5466e32": {
@@ -3494,7 +3494,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "202e6f197299": {
@@ -3517,14 +3517,14 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 2,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/218",
       "fix_branch": "autotest/fix-202e6f197299",
       "fix_attempts": 1,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "de60580f5f59": {
@@ -3553,7 +3553,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "9a0edb76786e": {
@@ -3582,7 +3582,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "06475bbba257": {
@@ -3611,7 +3611,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5ef02955a015": {
@@ -3638,7 +3638,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "9f26a216eca5": {
@@ -3667,7 +3667,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "9e1765c00753": {
@@ -3696,7 +3696,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "780ae74617d0": {
@@ -3725,7 +3725,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8ec8f4aa37fe": {
@@ -3749,13 +3749,13 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 2,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "8641be41aab0": {
@@ -3776,9 +3776,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3806,9 +3806,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3836,9 +3836,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3866,9 +3866,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3896,9 +3896,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3926,9 +3926,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3956,9 +3956,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3986,9 +3986,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4016,9 +4016,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4046,9 +4046,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4076,9 +4076,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4106,9 +4106,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4136,9 +4136,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4166,9 +4166,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4196,9 +4196,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4226,9 +4226,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4256,9 +4256,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4286,9 +4286,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4316,9 +4316,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4346,9 +4346,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4376,9 +4376,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4406,9 +4406,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4436,9 +4436,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4466,9 +4466,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4496,9 +4496,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4526,9 +4526,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4556,9 +4556,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4586,9 +4586,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4616,9 +4616,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4646,9 +4646,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4676,9 +4676,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4706,9 +4706,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4736,9 +4736,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4766,9 +4766,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4796,9 +4796,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4826,9 +4826,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4856,9 +4856,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4886,9 +4886,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4916,9 +4916,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4946,9 +4946,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4976,9 +4976,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 2,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5006,9 +5006,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5036,9 +5036,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5066,9 +5066,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5096,9 +5096,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5126,9 +5126,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5156,9 +5156,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5186,9 +5186,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5216,9 +5216,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5246,9 +5246,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5276,9 +5276,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5308,13 +5308,13 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "01518d3f5513": {
@@ -5337,13 +5337,13 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "b6f86c8a8de9": {
@@ -5364,12 +5364,68 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "0f6e3d0734b5": {
+      "fingerprint": "0f6e3d0734b5",
+      "category": "semantic:output",
+      "severity": "high",
+      "title": "Regional meet misclassified as national-level",
+      "route": "achievement classification",
+      "expected": "regional-level meet or equivalent",
+      "actual": "\"national-level meet (West Wales Regional SC Championships 2024)\" on all 12 cards",
+      "evidence": "AI judge (output, confidence high):\nThe meet name is \"West Wales Regional SC Championships 2024\" \u2014 a regional championship is not a national-level meet. Repeated verbatim across all cards, e.g. \"Katherine Butcher wins gold medal (1st) in 50m Backstroke (SC) \u2014 29.67 at national-level meet (West Wales Regional SC Championships 2024)\"",
+      "suspect": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Regional meet branded as NATIONAL; reputational risk before any post goes live; shares root cause with [8]",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the output aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-02T16:43:29+00:00",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260602T163757Z-5175",
+      "first_pending_at": "2026-06-02T16:43:29+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "e9d842e21100": {
+      "fingerprint": "e9d842e21100",
+      "category": "council:blind_spot",
+      "severity": "high",
+      "title": "Caption emptiness scope unverified across all 57 cards",
+      "route": "semantic:output",
+      "expected": "All 57 cards across all 6 runs audited for empty captions to establish whether the failure is a global pipeline break or isolated to the West Wales run",
+      "actual": "Only the 12 West Wales run cards are confirmed empty; the remaining 45 cards from other runs have not been checked for the same defect",
+      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nCouncil blind spot: issue [0] evidence covers only one run's 12 cards; 57 total cards across 6 runs are reported, leaving 45 cards unaudited \u2014 the two scenarios (global vs per-run failure) have materially different fix scopes",
+      "suspect": "",
+      "rationale": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-02T16:43:29+00:00",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260602T163757Z-5175",
+      "first_pending_at": "2026-06-02T16:43:29+00:00",
       "absent_streak": 0,
       "auto_closed_at": null
     }
@@ -5398,7 +5454,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1623e36e552d": {
@@ -5424,7 +5480,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ee03ff2dd60f": {
@@ -5452,7 +5508,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "22cedc9ab58e": {
@@ -5480,7 +5536,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b01ec07d798f": {
@@ -5508,7 +5564,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8c7e2f131136": {
@@ -5536,7 +5592,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2e8206e8d413": {
@@ -5564,7 +5620,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "239ef8737bff": {
@@ -5592,7 +5648,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8f631e60cb24": {
@@ -5620,7 +5676,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "803f7ead5bd4": {
@@ -5648,7 +5704,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d9e34eb08529": {
@@ -5676,7 +5732,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "de59899fef57": {
@@ -5704,7 +5760,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7473a4492b44": {
@@ -5732,7 +5788,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "644fc7499a4c": {
@@ -5760,7 +5816,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7a51dcd95351": {
@@ -5788,7 +5844,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2f70e2b4c101": {
@@ -5816,7 +5872,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "275f6d4f3c15": {
@@ -5844,7 +5900,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "32d69a65464d": {
@@ -5872,7 +5928,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "9ffb1407aa9a": {
@@ -5900,7 +5956,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3ade0339374f": {
@@ -5928,7 +5984,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7a7277e72a08": {
@@ -5956,7 +6012,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "eaf548e4779d": {
@@ -5984,7 +6040,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d58c7a1e26cc": {
@@ -6012,7 +6068,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ba01044e7a74": {
@@ -6040,7 +6096,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d608851b2781": {
@@ -6068,7 +6124,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d41c878a26ff": {
@@ -6096,7 +6152,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f29e70937168": {
@@ -6124,7 +6180,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "cca6366a7284": {
@@ -6152,7 +6208,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "24c7592e551f": {
@@ -6180,7 +6236,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5f1dc5573bb4": {
@@ -6208,7 +6264,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "7ce7d896bdc1": {
@@ -6236,7 +6292,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b9b1d1489eab": {
@@ -6264,7 +6320,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2ed05fd31fdc": {
@@ -6292,7 +6348,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "dbf1ef9c7960": {
@@ -6320,7 +6376,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "c648d657b9f2": {
@@ -6348,7 +6404,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "88143d7dbdc3": {
@@ -6376,7 +6432,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "8cbd6ee668e7": {
@@ -6404,7 +6460,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "ca7e3aa815e1": {
@@ -6432,7 +6488,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0e5a6362deea": {
@@ -6460,7 +6516,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "6948abc641ad": {
@@ -6488,7 +6544,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "78b7d2ae36ae": {
@@ -6516,7 +6572,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e17b439b1876": {
@@ -6544,18 +6600,18 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
       "category": "semantic:user_brain (council:noise)",
-      "severity": "high",
-      "title": "Sign-up/onboarding page is completely missing",
+      "severity": "medium",
+      "title": "'Create new content \u2192' and 'Start a content pack \u2192' CTAs have no indication of what happens next",
       "route": "home page \u2014 primary actions",
-      "expected": "A sign-up page with account creation steps, email/password fields, and clear onboarding guidance so a first-time volunteer can register and get started",
-      "actual": "signup_text is empty \u2014 no content provided, meaning there is no sign-up or onboarding flow visible to a new user",
-      "evidence": "AI judge (user_brain, confidence high):\nsignup_text field is entirely blank; a first-time user arriving from 'Start a content pack \u2192' or 'Create new content \u2192' has no way to create an account or understand what to do first\n\n[council triage] demoted \u2014 False positive: sweep ran authenticated; empty signup_text is correct behavior for an authenticated session.",
+      "expected": "Clicking the primary CTA should clearly lead to an upload step (e.g. 'Upload your Hytek file here')",
+      "actual": "Both CTAs are present but give no preview of the next step. A first-time volunteer doesn't know if clicking opens a file picker, a form, or something else \u2014 there's no sub-label, tooltip, or breadcrumb trail",
+      "evidence": "AI judge (user_brain, confidence high):\n'Create new content \u2192' and 'Start a content pack \u2192' appear with no descriptive sub-text; the workflow section describes 4 steps but doesn't link them to these buttons\n\n[council triage] demoted \u2014 UX polish at most; noise",
       "suspect": "",
       "repro": [
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
@@ -6563,9 +6619,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-02T10:34:23+00:00",
-      "seen_count": 4,
-      "last_run_id": "20260602T102907Z-3bda",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -6600,7 +6656,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "94cce88fa8c6": {
@@ -6628,7 +6684,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f780498f188c": {
@@ -6656,7 +6712,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "d9624ec031b8": {
@@ -6683,7 +6739,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "0010aae6b21e": {
@@ -6710,7 +6766,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f1d03a4691ef": {
@@ -6737,7 +6793,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "511b4b91e7f1": {
@@ -6766,7 +6822,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "34b79a72ffb7": {
@@ -6793,7 +6849,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "f2a8cc025083": {
@@ -6820,7 +6876,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "2409e04b1b7c": {
@@ -6847,7 +6903,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "cf8cbff2d486": {
@@ -6865,9 +6921,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-31T13:50:54+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 9,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 10,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -6903,7 +6959,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "35902274d0f3": {
@@ -6932,7 +6988,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "1b99ae947072": {
@@ -6961,18 +7017,18 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "565de4f13ed8": {
       "fingerprint": "565de4f13ed8",
       "category": "semantic:output (council:noise)",
       "severity": "low",
-      "title": "Confidence 'medium' on unambiguous gold-medal results at a named national-level meet",
+      "title": "Gold medal wins rated medium confidence",
       "route": "confidence scoring",
-      "expected": "Confidence 'high' for a 1st-place finish with a recorded time at a named championship meet \u2014 the data is deterministic (place, time, event, meet name are all present)",
-      "actual": "\"confidence\": \"medium\" on all 12 cards, including straightforward golds such as \"Aimee Stokes wins gold medal (1st) in 50m Freestyle (SC) \u2014 27.86 at national-level meet (West Wales Regional SC Championships 2024)\"",
-      "evidence": "AI judge (output, confidence medium):\nEvery achievement string contains explicit place (1st), event, time, and meet name \u2014 no ambiguity remains that would justify medium confidence. Medium confidence is appropriate when data is partial or inferred; here it is fully specified.\n\n[council triage] demoted \u2014 Tuning opinion, not a defect \u2014 confidence calibration is subjective; data is deterministic but medium vs high is acceptable",
+      "expected": "high confidence for unambiguous 1st-place finishes",
+      "actual": "confidence: \"medium\" on every card despite each achievement being an explicit 1st-place gold medal result",
+      "evidence": "AI judge (output, confidence medium):\n\"Aimee Stokes wins gold medal (1st) in 50m Freestyle (SC) \u2014 27.86 ... confidence: medium\"; same pattern on all 12 cards. A verified race placement of 1st warrants high confidence, not medium.\n\n[council triage] demoted \u2014 Internal confidence calibration is irrelevant to the volunteer; noise",
       "suspect": "",
       "rationale": "",
       "repro": [
@@ -6981,16 +7037,16 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-01T17:53:57+00:00",
-      "last_seen": "2026-06-01T17:53:57+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260601T174550Z-7fb9",
-      "present_last_run": false,
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 0,
       "auto_closed_at": null
     },
     "b715d3fafaea": {
@@ -7019,7 +7075,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "89482f637688": {
@@ -7048,7 +7104,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "3dab958fe4dd": {
@@ -7106,7 +7162,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "5a31ed912673": {
@@ -7135,7 +7191,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e47516eb477b": {
@@ -7164,7 +7220,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "fa62e12448e1": {
@@ -7182,9 +7238,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-02T14:40:53+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260602T143545Z-d1f9",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -7214,13 +7270,13 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T143545Z-d1f9",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "15afd4cb1ec9": {
@@ -7243,6 +7299,64 @@
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
       "last_run_id": "20260602T143545Z-d1f9",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "16d2f5583b18": {
+      "fingerprint": "16d2f5583b18",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "high",
+      "title": "Sign-up / onboarding flow entirely absent from provided screens",
+      "route": "onboarding / sign-up",
+      "expected": "A first-time volunteer should be able to create an account, set up their club (brand voice, palette, logo), and reach the upload step",
+      "actual": "No sign-up screen, registration form, or onboarding wizard is shown or linked anywhere in home_text or review_text. The home page opens directly into an already-authenticated state for 'Swansea University Swimming Team' with no path shown for a new user",
+      "evidence": "AI judge (user_brain, confidence high):\nHome page shows 'SIGN OUT', 'SWITCH ORG', and 'PINNED ORGANISATION' \u2014 all authenticated-only UI \u2014 with zero mention of 'Sign up', 'Register', 'Create account', or a first-run setup flow\n\n[council triage] demoted \u2014 Tester is already authenticated; absence of signup flow is an architecture assumption, not a live defect",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T16:43:29+00:00",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T163757Z-5175",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "94c7e7123a76": {
+      "fingerprint": "94c7e7123a76",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "low",
+      "title": "Keyboard shortcut legend shown prominently to non-technical volunteers with no opt-out",
+      "route": "review queue",
+      "expected": "Keyboard shortcuts are a power-user feature and should be discoverable via a '?' icon, not displayed inline as 'J K MOVE \u00b7 A APPROVE \u00b7 R REJECT \u00b7 ? HELP'",
+      "actual": "The shortcut bar is displayed between the filter tabs and the card list with no way to dismiss it; a volunteer who doesn't know what 'J K' means will be confused",
+      "evidence": "AI judge (user_brain, confidence high):\n'J K MOVE \u00b7 A APPROVE \u00b7 R REJECT \u00b7 ? HELP' displayed inline in the filter row\n\n[council triage] demoted \u2014 Inline keyboard shortcut legend is a power-user feature; confusing but not a defect; noise",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-02T16:43:29+00:00",
+      "last_seen": "2026-06-02T16:43:29+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260602T163757Z-5175",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
