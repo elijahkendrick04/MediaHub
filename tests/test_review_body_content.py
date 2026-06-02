@@ -358,3 +358,82 @@ class TestReviewProgressUsesRankedTotal:
         # BUG SIGNATURE must be ABSENT: store-total denominator (1) -> 100%.
         assert '1<span class="total">/ 1</span>' not in body
         assert 'mh-progress-strip-label">100%<' not in body
+
+
+class TestReviewLegacyPbAuditHasRerunButton:
+    """Regression guard: legacy-mode PB warning must include an actionable Re-run button.
+
+    Bug: when pb_fetch_ok > 0 but no pb_audit is present, the /review page
+    showed "PB fetching used legacy mode. Re-run to see the full audit." with no
+    button, leaving the volunteer with degraded data and no path to fix it.
+    """
+
+    def _make_legacy_pb_payload(self, profile_id):
+        run_id = "run-legacy-pb-" + uuid.uuid4().hex[:8]
+        return {
+            "run_id": run_id,
+            "profile_id": profile_id,
+            "profile_display": "Test Club",
+            "meet": {"name": "LEGACY PB TEST MEET"},
+            "cards": [],
+            "pb_fetch_ok": 3,
+            "pb_audit": None,
+            "trust": {},
+            "recognition_report": {
+                "ranked_achievements": [],
+                "n_elite": 0,
+                "n_strong": 0,
+                "n_story": 0,
+            },
+            "parse_warnings": [],
+            "self_check": {},
+            "detector_summary": {},
+            "dispatch_log": {},
+        }
+
+    def test_warning_includes_rerun_button_when_input_on_disk(self, review_env):
+        """When input.bin exists, the warning card links to the configure re-run page."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = self._make_legacy_pb_payload("org-test")
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+        run_dir = tmp_path / "runs_v4" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "input.bin").write_bytes(b"dummy")
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        assert "per-swimmer audit" in body, (
+            "Legacy PB warning text must be present in the review page"
+        )
+        assert "upload/configure" in body, (
+            "Legacy PB warning must include a link to upload/configure for re-run"
+        )
+        assert run_id in body, (
+            "The configure link must embed the run_id so the user is taken to the right run"
+        )
+
+    def test_warning_falls_back_to_upload_when_input_missing(self, review_env):
+        """When input.bin is gone, the warning card falls back to the upload page."""
+        wm = review_env["wm"]
+        tmp_path = review_env["tmp_path"]
+        client = review_env["client"]
+
+        payload = self._make_legacy_pb_payload("org-test")
+        run_id = _seed_run(tmp_path, wm, "org-test", payload)
+        # Do NOT create input.bin — simulate an expired upload session.
+
+        r = client.get(f"/review/{run_id}")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+
+        assert "per-swimmer audit" in body, (
+            "Legacy PB warning text must be present even without input.bin"
+        )
+        assert "/upload" in body, (
+            "Fallback must link to the upload page when input.bin is not on disk"
+        )
