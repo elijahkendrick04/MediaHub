@@ -2,42 +2,60 @@
 
 ## In plain words (start here)
 
-A **roadmap** is our plan for what to build next, and *why*. MediaHub's plan has
-three big stages:
+A **roadmap** is our plan for what to build next, and *why*. MediaHub is being
+**redirected**: from "swimming results → social posts" into a **content-strategy
+brain** for sports teams — software that works out *what a team should post*,
+drafts it, and (where a team allows it) publishes it largely on its own. Swimming
+becomes the **first example** of a general pattern, not the whole product.
 
-1. **Catch up** (we call it *Parity*) — make MediaHub as polished as the big,
-   general-purpose tools everyone already knows.
-2. **Stand out** (*Distinction*) — do things for sports clubs that those big,
-   general tools simply can't.
-3. **Lead** (*Leadership*) — become the tool every club, society and team reaches
-   for first.
+The plan now has **six stages, Phase 0 to Phase 5**:
 
-Below, each task carries a little badge so you can see how it's going:
+- **Phase 0 — De-risk:** make sure nothing in the core forces a hidden fee.
+- **Phase 1 — Strategy brain:** the "what should we post?" thinking, the list of
+  post types, and a settings sheet per sport.
+- **Phase 2 — Autonomy:** per-post-type controls for how much MediaHub may post on
+  its own, with strong safety guardrails.
+- **Phase 3 — More sports & inputs:** football, basketball, running, and more.
+- **Phase 4 — Post directly:** publish straight to the platforms (and stop needing
+  the paid Buffer service).
+- **Phase 5 — Free AI everywhere:** run the AI locally so there are no per-use fees.
+
+> These six stages **supersede** the previous three-stage plan (*Parity →
+> Distinction → Leadership*). That older plan's detailed build prompts are kept in
+> the appendices for reference.
+
+Each task carries a little badge so you can see how it's going:
 ✅ done · 🔵 in progress · ⚠️ stuck · ❌ not started yet.
 
 The **"Last updated"** line and the **"Recent activity"** table further down update
 themselves automatically whenever we ship something — you don't edit those by hand.
 
 > New to the team? Read **[../START_HERE.md](../START_HERE.md)** first, then come
-> back here to see what's next. Hit a tricky word? See
-> **[../GLOSSARY.md](../GLOSSARY.md)**.
+> back here. Tricky word? See **[../GLOSSARY.md](../GLOSSARY.md)**. The strategy
+> behind this rebuild lives in five companion docs —
+> **[POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md)** ·
+> **[AUTONOMY_MODEL](AUTONOMY_MODEL.md)** ·
+> **[SPORT_PROFILES](SPORT_PROFILES.md)** ·
+> **[ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md)** ·
+> **[DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md)** — with the evidence base in
+> **[research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md)** and the
+> decision recorded in
+> **[adr/0004-roadmap-rebuild-multisport-autonomy.md](adr/0004-roadmap-rebuild-multisport-autonomy.md)**.
 
 ---
 
-> **Reading this:** the single forward-looking roadmap for MediaHub —
-> Phase 1: Parity → Phase 2: Distinction → Phase 3: Leadership. Only
-> *not-yet-done* work is tracked here; shipped work has been removed to
-> keep this relevant to **now** — the one exception is the just-shipped
-> §1.6, retained with its acceptance audit. Runnable implementation +
-> verification prompts live in the appendices: **Appendix A** (Generative
-> Content Engine v2), **Appendix B** (growth & expansion), and
-> **Appendix C** (Adaptive Theming Engine — acceptance-verification
-> prompts for the now-shipped §1.6).
+> **Reading this:** the single forward-looking roadmap for MediaHub, organised as
+> **Phase 0–5**. Only *not-yet-done* work is tracked in detail; shipped work is
+> summarised under **"Where we are today."** The previous spine's build and
+> verification prompts live in the appendices: **Appendix A** (Generative Content
+> Engine v2), **Appendix B** (growth & expansion — *legacy sequence, superseded*),
+> and **Appendix C** (Adaptive Theming Engine verification).
 
-**Strategic thesis:** preserve the moat (the sport-grounded intelligence
-layer), close the polish gap to the horizontal players, and
-operationalise the niche so thoroughly that no generalist platform can
-credibly serve a club, society or team without going through MediaHub.
+**Strategic thesis:** MediaHub is a **content-strategy brain, not a results
+parser.** The moat is the intelligence layer — ingest → detect → rank → brand →
+generate → approve → export — now **generalised across sports** and made **largely
+autonomous**, on a stack that is **truly free to self-host with no hidden fees.**
+Results ingestion is one spoke among many.
 
 ---
 
@@ -47,12 +65,15 @@ This roadmap stays current automatically. A GitHub Action
 ([`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml),
 backed by [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py))
 refreshes the stamp and activity feed below on **every push to `main`**, and
-flips an item's status badge when a commit message contains a directive line:
+flips an item's status badge when a commit message contains a directive line.
+These directives are **human-authored** — the autonomous roadmap builder that
+used to emit them was removed in #214; the script still applies any you write by
+hand in a commit message:
 
-> `roadmap: <ID> <status>` — where `<ID>` is a phase (`1.6`, `2.1`, …) or an
-> Appendix item (`PAR-1`, `SEQ-1`, `Step 8`), and `<status>` is one of
-> `done` · `wip` · `blocked` · `todo`. Example commit trailer:
-> `roadmap: SEQ-1 done`.
+> `roadmap: <ID> <status>` — where `<ID>` is a new phase (`P0`, `P3`) or item
+> (`P0.1`, `P1.2`), a legacy phase (`1.6`, `2.1`), or an Appendix item (`PAR-1`,
+> `SEQ-1`, `Step 8`); and `<status>` is one of `done` · `wip` · `blocked` · `todo`.
+> Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
 **Last updated:** 2026-06-02 · `2ca4ad0d5` · Merge pull request #214 from elijahkendrick04/claude/awesome-wright-6JCYk
@@ -79,448 +100,348 @@ flips an item's status badge when a commit message contains a directive line:
 
 ---
 
-## Where we are today (May 2026)
+## Where we are today (June 2026)
 
-Two structural facts shape the work ahead:
+Three facts shape the work ahead.
 
-1. **The intelligence layer is the moat and is already ahead.** The
-   sport-grounded pipeline — brand DNA + guidelines ingestion, voice
-   imitation, and the AI-derived operating profile that replaces every
-   hardcoded judgment constant — is shipped and live. No generalist
-   player can replicate it without paying the same vertical
-   data-pipeline cost. The forward work is closing the *polish* gap on
-   top of that moat (theming, then the generative content engine).
+1. **The intelligence layer is the moat and is already ahead — for swimming.**
+   Brand-DNA + guidelines ingestion, voice imitation, the AI-derived operating
+   profile, the Adaptive Theming Engine, swim recognition, and the
+   render/caption/pack pipeline all ship and are live. The reframe does not throw
+   any of this away — it **generalises** it.
 
-2. **The product is operator-managed and turnkey for users.** All
-   configuration (LLM keys, Buffer access token, cutout providers)
-   is set once via env vars at deploy time. There is no user-facing
-   settings UI; the end user lands on the home page, sets up their
-   organisation, and creates content. They never see a knob.
+2. **The product is operator-managed and turnkey.** Configuration (LLM keys, Buffer
+   token, cutout provider) is set once via env vars at deploy time; the end user
+   never sees a settings screen.
 
-The operational layers below the intelligence (publishing,
-reliability, athlete-facing surfaces, sport coverage) remain the
-diagnosed gap. Commercial layer is deliberately deferred until the
-product is genuinely ready for paying customers.
+3. **Most of the new architecture already has a home in the code.** The new
+   concepts map onto existing seams — `recognition.registry.register_sport`,
+   `club_platform.content_types`, `workflow.CardStatus`, `ClubProfile.org_type` —
+   so this is generalisation, not a rewrite. See
+   [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md).
 
-### The deployment model
+**Verified shipped (✅)** — confirmed against the code this rebuild:
 
-MediaHub is now a **single-org-per-deployment** turnkey product:
+- Brand-DNA / guidelines ingestion (`brand/dna_capture.py`, `guidelines.py`),
+  voice imitation (`brand/voice_imitation.py`, `voice/learned/`), and the AI
+  operating profile (`brand/derived.py`).
+- Adaptive Theming Engine (`theming/`, the former §1.6 — see [`THEMING.md`](THEMING.md)
+  and Appendix C); single DTCG palette consumed by web + motion + email + graphic.
+- Swim recognition (`recognition_swim/` on the sport-agnostic `recognition` bus),
+  PB verification (`pb_discovery/`), ranker (deterministic).
+- `graphic_renderer` (Playwright → PNG) and Remotion reels (`remotion/` +
+  `visual/motion.py`).
+- `edge-tts` voiceover (optional, `MEDIAHUB_VOICEOVER=1`, honest-errors when absent).
+- Buffer publishing path (`publishing/buffer.py`; human clicks Schedule — no autopost).
+- Content packs (`content_pack/`, `workflow/pack.py`).
+- **Free cutout by default** — in-process `rembg` (`MEDIAHUB_CUTOUT_PROVIDER=server`);
+  Replicate/PhotoRoom are optional paid alternates. *(This is Phase-5 substitution
+  already done.)*
+- Cross-tenant run isolation invariant (`_can_access_run`,
+  `tests/test_run_route_isolation_invariant.py`) — see
+  [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md).
+- Gemini→Anthropic provider failover (`media_ai/llm.py`, `ai_core/llm.py`).
 
-- The operator (you, or a club's IT person) deploys MediaHub on
-  Render (or any Docker host) and sets two env vars: `GEMINI_API_KEY`
-  (free) and `BUFFER_ACCESS_TOKEN`. Optionally `ANTHROPIC_API_KEY`
-  with `MEDIAHUB_LLM_PROVIDER=anthropic` for paid Claude quality.
-- The end users (the club's social-media volunteers, coaches,
-  parents) reach the deployment URL, set up their organisation,
-  and use the product. They never see a configuration screen.
-- Cost to the operator at default config: ~$25–35/month total
-  (Render Standard + Buffer Essentials + Gemini free tier). Standard
-  is the floor because Remotion's Chromium render needs more than
-  the 512 MB Starter tier offers; the free-tier LLM covers the
-  small-club business model end-to-end.
+**Not yet shipped (❌)** — the reframe's new surface:
 
-Multi-tenant SaaS (multiple clubs sharing one MediaHub instance) is
-Phase 3 work — both architecturally and commercially.
+- The content-strategy brain **as the hub** (today's planner is swim-result-centric).
+- Multi-sport beyond swimming (the `register_sport` seam exists; only swimming is
+  registered; `football.yaml` is config-only).
+- Per-content-type **autonomy toggles** (`AutonomyLevel` is inert scaffolding).
+- **Direct-to-platform** publishing (only Buffer today).
+- The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
+  rembg present).
 
----
+**In progress (🔵):** the Generative Content Engine v2 (decided in
+[`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
+prompts in Appendix A; not yet built) and the sport-profile scaffolding (added this
+rebuild, inert).
 
-## Phase 1 — Parity (target: complete by Aug 2026)
-
-**Goal:** any visiting club can land on the deployment URL, set up
-their organisation, generate content, schedule it through Buffer,
-and trust the uptime — *all in under twenty minutes from a cold
-start.* This is the Holo / Blaze parity benchmark, adapted to the
-operator-managed deployment model.
-
-### 1.6 Adaptive Theming Engine · ✅ **DONE**
-
-> ✅ **Shipped — May 2026.** All ten stages (A–J) have landed and are
-> live by default (`MEDIAHUB_ADAPTIVE_THEME` defaults on). The
-> `theming/` colour-science package (10 modules), the five-layer CSS
-> cascade (`theme-base` / `theme-derive` / `theme-cascade` /
-> `theme-components` / `theme-fallback`), the single-source
-> `theme_store.py` JSON consumed by web + motion + email + static
-> graphic, and `docs/THEMING.md` are all in `main`, with the full
-> `tests/theming/` suite green. The Stage table below is retained as
-> the shipped-scope record (every row ✅). **Acceptance-verification
-> prompts — one per stage — live in Appendix C.** Run them to
-> independently confirm the engine still meets the §1.6 acceptance
-> criteria below.
-
-**The user-facing promise.** When a club's owner clicks
-*"Looks right — start creating"* at the end of organisation setup
-(`web.py:11014`), the entire website re-skins to their brand
-colours in one smooth, animated cascade — backgrounds, panels,
-buttons, focus rings, ink, borders, hover states, status
-colours — and stays that way for every subsequent login.
-
-**The engineering promise (the hard part).** This works for
-*any* hex the club provides. Fluorescent yellow, muddy dark
-green, near-white cream, pure black, two-tone red-on-red: the
-generated theme remains professional, accessible (APCA Lc ≥ 75
-for body text), colour-blind-safe (Machado-simulated ΔE2000 ≥ 10
-between brand and status colours), and visually harmonic — with
-**no hand-tuned per-seed overrides anywhere in the codebase.**
-The intelligence is in the algorithm, not in a giant lookup
-table.
-
-**Why this is Phase 1 polish, not Phase 2 distinction.** Without
-this, MediaHub's brand-DNA capture (1.1) and brand-kit upload
-flow promise more than they deliver: the user sees their colours
-on cards but the *chrome* still looks like our chrome.
-Single-org-per-deployment means every operator is hosting "their
-own MediaHub" — the product should feel like it from the first
-page render, not just inside generated graphics. Polish, not
-distinction.
-
-**Academic foundations.** Seventeen parallel research agents
-audited the relevant literature in May 2026. The architecture
-below draws directly on:
-- Björn Ottosson, *"A perceptual color space for image
-  processing"* (2020) — [OKLab / OKLCH](https://bottosson.github.io/posts/oklab/)
-- Sharma, Wu & Dalal (2005), *"The CIEDE2000 Color-Difference
-  Formula"* — [perceptual distance metric](https://www2.ece.rochester.edu/~gsharma/ciede2000/)
-- Andrew Somers, *SAPC-APCA* — [perceptual contrast that
-  replaces WCAG 2.x's broken luminance ratio](https://github.com/Myndex/SAPC-APCA)
-- Google Material Foundation, *Material 3 Dynamic Color* — the
-  [HCT colour space + 5-palette × 13-tone role-token system](https://m3.material.io/styles/color/dynamic/overview)
-  (`material-color-utilities`, Apache-2.0, Python port on PyPI)
-- Cohen-Or et al. (SIGGRAPH 2006), *"Color Harmonization"* —
-  [Matsuda harmonic templates](https://igl.ethz.ch/projects/color-harmonization/)
-  as a palette-validation oracle
-- O'Donovan, Agarwala & Hertzmann (SIGGRAPH 2011), *"Color
-  Compatibility from Large Datasets"* — [pretrained aesthetic
-  scorer](https://www.dgp.toronto.edu/~donovan/color/) usable as
-  a post-hoc gate
-- Machado, Oliveira & Fernandes (2009), *"A Physiologically-
-  based Model for Simulation of Color Vision Deficiency"* —
-  [the CVD matrices Chrome and Firefox use natively](https://www.inf.ufrgs.br/~oliveira/pubs_files/CVD_Simulation/CVD_Simulation.html)
-- Lalitha A R (arXiv 2512.05067, 2025), *"Perceptually-Minimal
-  Color Optimization for Web Accessibility"* — constrained
-  non-linear optimisation in OKLCH with hue frozen by default
-- W3C CSS Color Module Level 4 §14 gamut mapping, Level 5
-  `color-mix()` and relative-colour syntax, CSS Properties &
-  Values API `@property`, View Transitions API
-- Aslam (2006), Elliot & Maier (2007), Palmer & Schloss (2010),
-  W3C WCAG 1.4.1 — cross-cultural status-colour semantics
-  (status roles stay locked; only brand role flows from the seed)
-
-Provenance for every claim above is preserved in the research
-trail and cited inline in `docs/THEMING.md` (authored in
-Stage J).
-
-**Architecture in one paragraph.** A single brand-seed hex →
-HCT colour space → 5 tonal palettes (primary, secondary,
-tertiary, neutral, neutral-variant) × 13 tones each → ~25
-Material-3-style semantic role tokens for both light and dark
-schemes → CSS custom properties registered via `@property
-syntax: "<color>"` so they interpolate during a View
-Transitions API-driven cascade → cached on `ClubProfile.
-brand_kit.derived_palette` as a DTCG-format JSON file consumed
-by the Flask templates, Remotion compositions, the newsletter
-renderer, and the static graphic renderer. **Python only ships
-the seed and the 5 palette anchors; every derived shade, hover
-state, border, and focus ring is computed at runtime in CSS via
-`color-mix(in oklch, …)` and `oklch(from var(--mh-brand-seed) …)`.**
-QA gates (APCA contrast, CIEDE2000 ∆E, Machado CVD simulation,
-Cohen-Or harmonic template fit) run server-side at save-time
-and emit a quality report into the run audit trail.
-
-**Work breakdown.** Ten stages, deliberately additive — the
-existing `BrandKit` dataclass and `brand/` package are extended,
-never replaced. Each stage is its own PR and is independently
-testable.
-
-| Stage | Sub-item | Status | Notes |
-|---|---|---|---|
-| **A — Token foundation** | A1 Audit every hardcoded colour in `web.py` (~1,400 lines of inline CSS) and migrate to CSS variables | ✅ | Mechanical. No behaviour change. Output: one inventory of every literal `#…` or rgba() in templates |
-| | A2 Adopt 3-tier token system (primitive → semantic role → component) per [W3C Design Tokens DTCG spec](https://www.designtokens.org/TR/drafts/format/); ~25 MD3-style role tokens (`--mh-surface`, `--mh-on-surface`, `--mh-primary`, `--mh-on-primary`, `--mh-primary-container`, `--mh-on-primary-container`, `--mh-secondary`, `--mh-tertiary`, `--mh-outline`, `--mh-outline-variant`, `--mh-error`, `--mh-success`, `--mh-warning`, `--mh-focus`, `--mh-elevation-{1,2,3}`) | ✅ | Single source of truth. Tier 3 (component tokens) deferred per Curtis's "promote on 3+ component reuse" rule |
-| | A3 Register every animatable variable via `@property { syntax: "<color>"; inherits: true; }` so they interpolate smoothly through theme switches | ✅ | Without `@property`, CSS custom properties are untyped strings and `transition` silently snaps |
-| **B — Colour science library** | B1 Add `materialyoucolor` + `coloraide` to `requirements.txt` (both pure-Python, Apache-2.0, no JS runtime); avoid `colorthief` (already replaced by Pillow extractor in Phase 1.5) | ✅ | One known transitive dep (numpy) already present |
-| | B2 New `src/mediahub/theming/` package: `seed_extract.py` (SVG fast-path → rasterise → QuantizerCelebi → Score), `palette.py` (HCT seed → 5×13 tonal palettes), `roles.py` (palettes → MD3 role-token map for light + dark schemes), `contrast.py` (APCA `Lc` + ink-on-surface), `cvd.py` (Machado 2009 matrices for deutan/protan/tritan), `quality.py` (all QA gates → `PaletteQualityReport`), `repair.py` (constraint-satisfaction loop: clamp chroma → sweep L → relax H ±8° → curated-neighbour fallback) | ✅ | ~6 small modules, each independently unit-testable. Ports the relevant `material-color-utilities` paths via the maintained Python package |
-| | B3 Persist resolved palette on `ClubProfile.brand_kit.derived_palette` — compute once on save, never per-request | ✅ | Matches existing `brand/derived.py` operating-profile cache pattern |
-| **C — CSS architecture** | C1 Extract inline CSS from `web.py` (the ~1,400-line `<style>` block starting at `web.py:1363`) into `src/mediahub/web/static/theme-base.css`; content-hashed asset URL for cache-bust | ✅ | Big mechanical change; gated behind a feature flag during cutover |
-| | C2 Build the derivation graph in pure CSS via `color-mix(in oklch, …)` and relative-colour syntax (`oklch(from var(--mh-brand-seed) calc(l ± n) calc(c * f) h)`) — Python ships ~6 anchor values, CSS derives the remaining ~55 shades | ✅ | Drastically reduces the "hardcode surface area" the user mandated. CSS engine is the single source of truth for the cascade |
-| | C3 Add `light-dark()` for surface/ink pairs; honour `prefers-color-scheme: dark/light` so the same seed produces correct light + dark variants without a duplicate stylesheet | ✅ | Spec status: Baseline 2024 |
-| | C4 Add Python-precomputed fallback ramp inside `@supports not (color: oklch(from red l c h))` for Safari ≤ 16.3 (relative-colour syntax landed Mar 2023; the gate catches the remaining ~10% long-tail) | ✅ | No JS polyfill; pure-CSS feature query |
-| **D — Theme delivery (Flask)** | D1 `before_request` middleware loads the active `ClubProfile`'s `derived_palette` into `flask.g.theme` (already partially in place via the org-gate; extend it) | ✅ | Single-org-per-deploy today; one-line extension to subdomain-based multi-tenant lookup for Phase 3 |
-| | D2 Jinja base template emits one inline `<style id="mh-theme-seed">:root { --mh-brand-seed: {{ g.theme.seed }}; --mh-scheme-polarity: {{ g.theme.polarity }}; … }</style>` in `<head>` *before* any external stylesheet — zero FOUC | ✅ | Tiny payload (~250 bytes) vs the cacheable static `theme-base.css` |
-| | D3 Re-render cached pages (sponsor-variant page, sponsor-branded layouts) so they consume the new variables instead of hardcoded hexes | ✅ | Audit pass after C1 |
-| **E — "Looks right" cascade** | E1 Wire the existing button at `web.py:11014` so its click handler: (i) saves the brand kit, (ii) calls `theming.derive_from_seed(seed)` and persists `derived_palette`, (iii) wraps navigation to `/add-input` in `document.startViewTransition(() => location.assign(…))` | ✅ | The user-visible "wow" moment — fires on the exact button the user named |
-| | E2 Add `@view-transition { navigation: auto; }` to `theme-base.css` so cross-document navigation between pages crossfades atomically (Chrome 126+ / Safari 18.2+, Firefox in progress) | ✅ | Pure CSS; degrades to instant nav on older browsers |
-| | E3 Add `:root { transition: --mh-brand-seed 600ms cubic-bezier(.2,.7,.2,1); }` so the colour ripples through the page even when View Transitions isn't available — because every derived var is `color-mix(in oklch, var(--mh-brand-seed) …)`, the entire palette interpolates in lockstep for free | ✅ | One line per animatable token |
-| | E4 Gate animation with `@media (prefers-reduced-motion: reduce)` — instant swap for users who request it | ✅ | WCAG 2.3.3 |
-| **F — Logo intelligence** | F1 Default to a neutral chip behind every uploaded logo (auto-pick white/near-white rounded chip with 12px padding, sized to logo bounding box) — never recolour unknown SVG marks | ✅ | Matches Adobe Spectrum, IBM Carbon, BBC brand-book defaults |
-| | F2 "Safe to drop chip" auto-detection: compute the logo's dominant non-neutral colour vs the active surface in OKLCH; if ΔE2000 ≥ N AND APCA Lc ≥ 45 in both polarities, render bare; otherwise chip | ✅ | Honest about when it's safe to skip the chip |
-| | F3 Author MediaHub's own SVG marks with `fill="currentColor"` so the product chrome auto-adapts to ink colour without recolouring; **never** auto-inject this on uploaded logos | ✅ | Per W3C SVG2 spec; the Material You "ship a monochrome layer if you want it tintable" lesson |
-| **G — Single source of truth for motion + email** | G1 Convert `derived_palette` to DTCG-format JSON at `DATA_DIR/themes/<profile_id>.json` | ✅ | Aligns with the W3C Design Tokens spec; future-proofs against Style Dictionary integration |
-| | G2 `visual/motion.py` reads the JSON and passes it as `inputProps` to `render.js`; Remotion compositions consume the same tokens as the web UI | ✅ | Single source of truth across MP4 + browser |
-| | G3 `brand/newsletter_renderer.py` reads the JSON and Premailer-inlines the resolved hex values into outgoing HTML emails (email clients don't reliably support CSS custom properties) | ✅ | Same JSON, different rendering target |
-| | G4 `graphic_renderer/render.py` reads the same JSON, replacing today's `BrandKit.primary_colour` lookups | ✅ | Closes the loop: web, motion, email, static graphic all share one palette |
-| **H — Explainability + QA** | H1 Every palette derivation logs a `PaletteQualityReport` to the run audit trail: APCA `Lc` scores for every role pair, CIEDE2000 matrix for brand × {neutral-500, success, warning, danger}, Machado-CVD ∆E2000 for the same pairs under deutan/protan/tritan, Cohen-Or harmonic-template fit energy, and a decision trace ("clamped chroma 0.30 → 0.21 to fit sRGB; shifted hue +6° to keep success-green distinct under deuteranopia") | ✅ | Matches MediaHub's standing rule: "every step should be explainable and auditable" |
-| | H2 Add a "Why does my theme look like this?" expandable panel to `/organisation/setup` — committee members see the decisions and contrast scores, can override an individual role colour if they really must, and the override gets logged with a cultural-clash warning if it lowers a status colour's ΔE | ✅ | Trust signal; mirrors the brand-DNA "What MediaHub learned" panel |
-| | H3 Non-blocking warning surface if the hostile-seed repair loop fired: *"Your brand yellow (#DFFF00) was very close to our success-green (#1F9D55); we adjusted the success colour by +8° to keep them distinct for colour-blind viewers."* | ✅ | Never silently rewrite the brand colour; only adjust the *status* colour and tell the user why |
-| **I — Test coverage** | I1 New `tests/theming/` directory: `test_seed_extract.py`, `test_palette.py` (golden-master snapshots for ~30 representative seeds including fluorescent yellow `#DFFF00`, muddy dark green `#2A3A1A`, near-white `#FAFAF7`, near-black `#0C0C0C`, brand red `#A30D2D`, brand navy `#0E2A47`, plus 10 real club colours), `test_contrast.py` (APCA Lc gates), `test_cvd.py` (Machado simulator parity vs known fixtures), `test_quality.py`, `test_repair.py` | ✅ | Snapshots make regressions obvious in PR review |
-| | I2 Playwright/browser-use end-to-end test: upload a logo → land on `/add-input` → assert `getComputedStyle(document.documentElement).getPropertyValue('--mh-surface')` matches the expected derived value | ✅ | Gated on `MEDIAHUB_RUN_BROWSER_TESTS=1` like the existing motion tests |
-| **J — Cutover + polish** | J1 Replace the existing hardcoded palette in `web.py:1363-1462` by reading from `theming/`; gate behind a feature flag (`MEDIAHUB_ADAPTIVE_THEME`) during the rollout window | ✅ | Cutover is reversible while the new pipeline is observed in production |
-| | J2 Run the generic-default `BrandKit` (`#0E2A47` navy / `#C9A227` gold) through the new pipeline so the unconfigured first-run experience also gets the upgrade | ✅ | No regression for fresh deployments before brand DNA is captured |
-| | J3 Author `docs/THEMING.md` documenting the architecture, the role-token table, the CSS variables operators may safely override in a custom `theme-override.css`, and the academic references inline | ✅ | Single canonical doc for future contributors |
-
-**Acceptance criteria (the "definition of done" for 1.6):**
-
-1. A test suite that takes 30 representative seed hexes
-   (including deliberately hostile cases — neon, muddy, near-
-   greyscale, pure primaries) and asserts: APCA `Lc` ≥ 75 for
-   every text-on-surface role pair; CIEDE2000 ≥ 5 between
-   adjacent tonal stops; CIEDE2000 ≥ 15 between brand and each
-   of success/warning/danger; Machado-deuteranopia-simulated
-   ∆E2000 ≥ 10 for the same triples; Cohen-Or template fit
-   energy below threshold.
-2. Live cascade animation works in Chrome, Edge, Safari, and
-   Firefox; degrades gracefully on Firefox ≤ 143 (instant nav,
-   no jank). Reduced-motion users see an instant swap.
-3. No hardcoded brand colour anywhere in the codebase outside
-   `theming/repair.py`'s curated-neighbour fallback table (which
-   only fires in genuinely hostile-seed cases AND emits a user-
-   visible explanation).
-4. Web, motion (Remotion), email (newsletter renderer), and
-   static graphic outputs all consume the same DTCG-format
-   palette JSON — zero drift across media.
-5. Test suite green: the existing 678 passing tests still pass,
-   plus ~80 new theming tests, with zero new structural skips.
-
-**Effort estimate:** 3–4 engineering weeks of focused work,
-front-loaded on Stages A–C (the token plumbing and the colour-
-science package). Stages D–J each fit in 2–3 days once the
-foundation is in place. Independently testable per stage so
-the work can be parallelised across two engineers if needed.
+> **Test baseline (point-in-time):** the full suite is green — **2836 passed, 1
+> skipped** in a fully-provisioned environment after merging `main` (the lone skip
+> is the opt-in render-diff regression). Skips are environmental, never structural.
 
 ---
 
-### 1.7 Generative Content Engine v2 · 🔵 **NEW — PLANNED (the "worth paying for" overhaul)**
+## Phase 0 — De-risk licensing & cost · P0 · 🔵 **IN PROGRESS**
 
-**The promise.** Make "click generate" produce content worth paying for:
-distinctive (not the same card every time), unmistakably on-brand, provably true,
-offered as a *ranked shortlist of options*, in every format. This is the direct
-response to the standing complaint that generation produces "a standard boring
-graphic every time that isn't unique."
+**Goal.** Guarantee the **no-hidden-fees / truly-free self-host** promise holds in
+the critical path *before* building on top of it.
 
-**The diagnosis (grounded in code).** Today's generation selects a tuple from a
-bounded, hand-authored option space dominated by ~6 layout skeletons
-(`creative_brief/generator.py`), with an LLM constrained to *menu-pick* from fixed
-enums (`creative_brief/ai_director.py`) and a renderer that repaints one DOM
-(`graphic_renderer/render.py`). It is parameterised reskinning, not generative
-design. Captions (`web/ai_caption.py`) are the one genuinely generative, already-good
-surface. Full analysis: `docs/research/mediahub-generative-ai-thesis.md` (the plan)
-and `docs/research/generation-engine-competitor-evaluation.md` (how the 2026 field
-generates content — researched by 16 agents, fact-checked by 10).
+**Exit criterion.** Zero **mandatory** paid API or dependency in the critical path;
+every paid option is behind a flag/env var with a documented free default; AGPL
+services are isolated behind a network boundary (never embedded). See
+[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
 
-**The architecture (thesis §5).** Keep the deterministic engine, captions,
-Remotion, and the renderer substrate; *replace the variation mechanism* with: a
-**brand-token contract** (extends §1.6's DTCG tokens with logo lockups, type
-pairing, voice profile, and semantic role descriptions an LLM can read) → an
-**archetype library + layout intelligence** (12–20 structurally distinct templates,
-auto-fit text, saliency crops, varied data-emphasis — Tier A, deterministic, fixes
-"samey" on its own) → an **LLM design-spec director** that emits a structured JSON
-spec a deterministic renderer executes (Tier B, "AI judges, maths renders") →
-**generate-a-pool, rank, and a deterministic brand-compliance check** → optional
-**generative backgrounds** under the deterministic text (Tier C). Video inherits the
-richer brief and gains data-driven scene structure. Generative *video B-roll* stays
-an opt-in premium (the one expensive item).
+### P0.1 — Make the Remotion reel engine optional with a free fallback · ❌ **NOT STARTED**
+Remotion is the single biggest hidden-cost liability. Put it behind a flag and add a
+free **Satori + FFmpeg** reel path so a zero-license deployment still renders reels.
 
-**Relationship to §1.6.** This builds *on* the Adaptive Theming Engine, not beside
-it — §1.6 delivers the token plumbing and single-source-of-truth JSON; §1.7 extends
-that contract and consumes it in the generators. Sequence §1.6 Stage G before, or
-alongside, §1.7 SEQ-0.
+### P0.2 — Keep cutout free-by-default · ✅ **DONE**
+Already shipped: in-process `rembg` is the default (`MEDIAHUB_CUTOUT_PROVIDER=server`);
+Replicate/PhotoRoom are opt-in paid alternates. Retained here as the de-risk record.
 
-**Cost (thesis §6).** Marginal generation ≈ cents/pack (~$0.15–0.50), ~90% gross
-margin; build ≈ 2–3 focused months, with Tier A shippable in the first month;
-dominant cost is human (authoring archetypes), not compute.
+### P0.3 — Flag every paid dependency with a free substitute · 🔵 **IN PROGRESS**
+The register exists ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)). Remaining:
+make each paid path provably optional behind a flag with the free default wired.
 
-**Build breakdown & runnable prompts:** see **Appendix A** at the end of this document — a
-**parallel bucket** (8 additive/inert items runnable now in concurrent sessions →
-PR to `main`) and a **sequential spine** (SEQ-0 tokens → SEQ-1 Tier A → SEQ-2 Tier B
-→ SEQ-3 cutover+gated-removal → SEQ-4 video), each with an implementation and a
-verification prompt. SEQ-3 follows CLAUDE.md's gated removal process (15-step
-breakage check + 15-step verification + dead-code sweep).
+### P0.4 — A local-capable default for every AI call · ❌ **NOT STARTED**
+Precondition for Phase 5: the LLM/TTS/ASR/graphics interfaces must each admit a local
+provider so no cloud key is *required*. (Full local impl is Phase 5.)
 
-| Track | Item | Status |
-|---|---|---|
-| Parallel (now) | PAR-1 caption quality pack · PAR-2 auto-fit · PAR-3 saliency crop · PAR-4 design-spec schema · PAR-5 variant metrics · PAR-6 brand bootstrap · PAR-7 archetype templates (×N) · PAR-8 docs/ADR | ❌ NOT STARTED |
-| Spine | SEQ-0 DesignTokens contract + `MEDIAHUB_GEN_V2` flag | ❌ NOT STARTED |
-| Spine | SEQ-1 Tier A (archetype library + layout intelligence) — *the immediate fix* | ❌ NOT STARTED |
-| Spine | SEQ-2 Tier B (design-spec director + pool/rank/compliance) | ❌ NOT STARTED |
-| Spine | SEQ-3 Cutover + gated removal of the enum/menu-picker engine | ❌ NOT STARTED |
-| Spine | SEQ-4 Video data-driven scene structure (+ optional Tier C) | ❌ NOT STARTED |
+### P0.5 — Isolate any AGPL service behind a network boundary · ❌ **NOT STARTED**
+If/when Postiz/MinIO/MediaCMS are used, run them as separate services called over an
+API; prefer cloud S3 over MinIO. Policy in [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) §3.
 
-**Fastest path to fixing "samey":** PAR-2 + PAR-3 + PAR-7 (parallel, now) → SEQ-0 →
-SEQ-1 (Tier A). No LLM-director work required to resolve the core complaint.
+**Building blocks.** Satori (MPL-2.0, free) + FFmpeg (LGPL/GPL, free) for reels;
+`rembg` (MIT, free) — already default; Ollama (MIT, free) as the local AI default.
+*Avoid* Remotion Company License as a hard requirement; *avoid* embedding AGPL.
+
+**Dependencies.** None upstream. **Feeds every later phase** — especially P4
+(publishing) and P5 (local-AI), whose free defaults this phase guarantees.
 
 ---
 
-## Phase 2 — Distinction (target: Aug 2026 → Feb 2027)
+## Phase 1 — Strategy brain + post-type taxonomy + sport profiles · P1 · 🔵 **IN PROGRESS**
 
-**Goal:** convert MediaHub's vertical advantages into visible,
-marketable product surfaces. Win one geography + one governing body.
+**Goal.** Build the planner that fuses **three-source intelligence** (own + external
++ direct signals) into a ranked content plan; realise the cross-sport **post-type
+taxonomy**; and ship the **sport-profile** config. Ship swimming + one other profile.
 
-### 2.1 Commercial layer · ❌ **DEFERRED to pre-launch**
+**Exit criterion.** A profile-driven planner produces a ranked, explainable content
+plan for **≥2 sport profiles** (swimming + football or basketball), grounded in the
+three sources — not just from a results file.
 
-The deployment model has shifted: MediaHub is now a turnkey
-single-org-per-deployment product. That changes how this work-stream
-looks. Commercial path:
+### P1.1 — Sport-profile schema + loader + AutonomyLevel + 2 profiles · ✅ **DONE**
+Shipped this rebuild as **inert scaffolding**: `mediahub.sport_profiles`
+(`SportProfile`/`PostTypeConfig`, `AutonomyLevel`), `data/sport_profiles/{swimming,
+football}.yaml`, unit tests. Not wired into runtime yet. See
+[`SPORT_PROFILES.md`](SPORT_PROFILES.md).
 
-**Managed hosted SaaS:** stand up a managed
-"club.mediahub.example" service. Each club gets their own subdomain
-+ isolated instance. The operator pays for hosting + Buffer +
-LLM provider costs; charges the club £30–50/mo. Single-org per
-instance means no multi-tenant gymnastics in the app code, and
-customers access the product through their browser — they never
-install or run anything locally.
+### P1.2 — Realise the post-type taxonomy in code · ❌ **NOT STARTED**
+Reconcile the taxonomy ([`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md)) with the
+existing `club_platform.content_types.ContentType` registry (extend vs. layer —
+Council-gated data-model call).
 
-The commercial layer needs to ship near launch:
+### P1.3 — Cross-source planner (the strategy brain) · ❌ **NOT STARTED**
+Extend `content_engine` (planner) + `context_engine` to fuse own/external/direct
+signals into a ranked plan keyed by sport profile. The swim newsworthiness ranker
+generalises into the cross-source prioritiser.
 
-| Sub-item | Status | Next step |
-|---|---|---|
-| Public `/pricing` page (on a marketing site, NOT in the product) | ❌ | Static page on the project landing site; no in-product pricing UI |
-| Tenant provisioning (Path A) | ❌ | One-click "deploy a new club instance" admin tool |
-| Stripe billing for hosted SaaS | ❌ | Stripe subscription per provisioned instance |
-| Free-tier quota enforcement (LLM-call-count) | ❌ | Count Gemini calls per `profile_id`; soft-throttle at quota |
-| Support / SLA tier for governing-body customers | ❌ | Manual onboarding for the first 10 enterprise customers |
+### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · 🔵 **IN PROGRESS**
+The asset-quality stream: replace the enum-permutation variation mechanism with an
+archetype library + design-spec director, keeping the deterministic engine. Decided
+in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
+build prompts in **Appendix A** (PAR-\* / SEQ-\*). Not yet built.
 
-**Deliberately deferred.** Payment options only go in once the app
-is genuinely ready for paying customers. Shipping a paywall before
-the product is finished does more brand damage than running a few
-months without revenue. Schedule: completes Phase 2 right before
-public launch. The operator-managed deployment model means we can
-run pilot clubs at $0 marginal cost while iterating on the product.
+### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
+Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
+`material-color-utilities` (no paid MuAPI). Brand-DNA capture partly exists in
+`brand/`; this generalises and de-paid-API-s it.
 
-### 2.2 Sport expansion · ❌ **NOT STARTED**
+**Building blocks.** crewAI / LangGraph **patterns** (free frameworks — *verify
+MIT-family*) paired with **Ollama** (MIT, free) for the planner;
+`material-color-utilities` (Apache-2.0) — already in use; Satori for graphics
+(Phase 5 overlap). All AI calls must keep the honest-error rule.
 
-| Sub-item | Status | Next step |
-|---|---|---|
-| Architecture supports a second sport | ✅ canonical event vocab is configurable | — |
-| Athletics (track & field) — second sport | ❌ | Quarter-long project: FinishLynx + HyTek MeetPro parsers; canonical event taxonomy; PB / record / qualifier logic; copy templates |
-| Football / rugby — third sport | ❌ | Quarter after athletics |
-| University society generic / non-results inputs | ⚠️ free-text input exists | Promote: weekly digest, committee announcement, training-session highlight |
-
-Publish the sport-expansion roadmap externally on `/sports` so
-buyers see the trajectory (the FanWord lesson from the competitor analysis).
-
-### 2.5 Athlete-facing surfaces · ❌ **NOT STARTED**
-
-| Sub-item | Status | Next step |
-|---|---|---|
-| Per-athlete personal share link | ❌ | `/athlete/<slug>` showing their season's cards |
-| Story-ready card download from athlete view | ❌ | Re-use Remotion 1080×1920 motion variant |
-| Notification when an athlete has new content waiting | ❌ | Email or one-time-link flow; defer push for later |
-
-This is the Greenfly-pattern adapted for small-club scale (§4.10).
-Don't build a mobile app — a personal web link + email is enough.
+**Dependencies.** Needs **P0** (a free AI path). **Feeds P2** (autonomy needs a
+plan to act on) and **P3** (new sports need profiles).
 
 ---
 
-## Phase 3 — Leadership (target: Feb 2027 → Nov 2027)
+## Phase 2 — Autonomy toggles + orchestration backbone · P2 · ❌ **NOT STARTED**
 
-**Goal:** be the default content platform for at least one governing
-body in one sport in one geography.
+**Goal.** Put every content type on a durable workflow with an **optional
+human-approval signal**; implement the guardrails + kill switch + audit trail;
+expose the per-type `autonomy_level` in the workspace.
 
-### 3.1 Integration moat · ⚠️ **PARTIAL**
+**Exit criterion.** A content type can be set to any `AutonomyLevel`;
+`fully_autonomous` publishes **only** when all guardrails + the confidence gate pass;
+the kill switch halts publishing instantly; every autonomous decision is recorded in
+an immutable audit trail. Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
 
-| Sub-item | Status | Next step |
-|---|---|---|
-| HY3 parser | ✅ `interpreter/` | — |
-| PDF result-sheet parser | ✅ | — |
-| SportSystems adapter | ✅ | — |
-| HyTek MeetManager direct import | ❌ | One quarter |
-| Splash Meet Manager direct import | ❌ | One quarter |
-| TeamUnify / SwimClub Manager / ClubBuzz import | ❌ | One quarter each |
-| Live results-feed ingestion during a meet | ❌ | Phase 3.5 stretch |
+### P2.1 — Temporal orchestration adapter · ❌ **NOT STARTED**
+One durable workflow per content type. `workflow.store` is the lightweight precursor.
 
-Each integration is small in isolation but cumulative — the
-defensibility comes from being the easiest place to plug into the
-software clubs already use.
+### P2.2 — Human-approval signal = the autonomy toggle · ❌ **NOT STARTED**
+Gated types pause on the signal; autonomous types skip it. Maps onto the existing
+`workflow.CardStatus` QUEUE → APPROVED → POSTED transition.
 
-### 3.2 Enterprise tier · ❌ **NOT STARTED**
+### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · ❌ **NOT STARTED**
+Built on `context_engine.trust`, `recognition.schema.SafeToPost`, caption
+brand-safety, and `publishing.posting_log`. The safeguarding posture from ADR-0003
+applies to minors' data.
 
-Multi-club orchestration, league-wide content distribution,
-federation engagement analytics, sponsorship reporting, athlete
-tagging at scale. Pricing £250–£500/mo. Two design-partner accounts
-should be secured before public launch.
+### P2.4 — Per-type autonomy controls in the workspace · ❌ **NOT STARTED**
+Surface the toggle; default everything gated; warn before enabling `fully_autonomous`.
 
-### 3.3 Agentic execution · ❌ **NOT STARTED**
+**Building blocks.** **Temporal** (MIT — truly free to self-host; 3,000+ paying
+customers incl. Snap/Netflix/Stripe) for the backbone + human-in-the-loop signal.
+The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as reference.
 
-Conversational caption editing ("make this more energetic", "add
-a thank-you to the parents"). The agent operates over the existing
-content pack and respects the brand profile. Defer until human-in-
-the-loop product is mature; the audience is reputationally cautious
-about unattended publishing.
+**Dependencies.** Needs **P1** (a content plan) and **P0** (free path). Gates **P4**
+(publishing must obey autonomy + guardrails).
 
-### 3.4 Marketplace / community templates · ❌ **NOT STARTED**
+---
 
-Clubs share branded layouts, voice profiles, and content patterns.
-Switching cost moat — once a club invests in templates that exist
-only here, leaving is expensive.
+## Phase 3 — Broaden ingestion spokes · P3 · ❌ **NOT STARTED**
 
-### 3.5 Sponsor-side product · ❌ **NOT STARTED**
+**Goal.** Ingest beyond swimming and normalise every spoke to the canonical schema,
+so a second sport produces real content end-to-end.
 
-Convert the sponsor-tagging + engagement-analytics primitives into
-a sponsor-facing dashboard that proves brand-exposure value. Nota
-and FanWord don't address this at small-club scale.
+**Exit criterion.** **≥1 non-swimming sport** produces real content end-to-end from a
+real data source (football via openfootball, or basketball via nba_api), with a
+registered `recognition_<sport>` adapter and its sport profile wired in.
+
+### P3.1 — Second-sport engine adapter · ❌ **NOT STARTED**
+`recognition_football` or `recognition_basketball` + `register_sport(...)` (the seam
+exists — [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the profile.
+
+### P3.2 — Sports-data API spokes · ❌ **NOT STARTED**
+`nba_api`, `openfootball`, fixture generators; each normalised to `canonical.*`.
+
+### P3.3 — Running/athletics parsers · ❌ **NOT STARTED**
+Chip-timing CSV + client-side Garmin `FIT` parsing (the swim-data-analyser pattern).
+This sport needs custom parsers — open-source coverage is sparse.
+
+### P3.4 — Normalise all spokes to the canonical schema · ❌ **NOT STARTED**
+Separate raw extraction from cleaned canonical data; flag ambiguous rows for review.
+
+**Building blocks.** `swar/nba_api` (open, keyless — *verify*), `openfootball`
+(**public domain**), `ndPPPhz/Fixture-Generator` (MIT). ⚠️ `statsbomb/open-data` is a
+**non-OSS data agreement** (attribution / responsible use) — code-vs-data licence
+split; use openfootball as the free default. ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
+
+**Dependencies.** Needs **P1** (sport profiles + taxonomy). Pairs with **P4** (new
+sports → new audiences → more publishing targets).
+
+---
+
+## Phase 4 — Direct-to-platform publishing · P4 · ❌ **NOT STARTED**
+
+**Goal.** Replace the paid Buffer dependency with direct platform adapters,
+prioritising the genuinely-free targets.
+
+**Exit criterion.** Posts publish via **direct APIs to ≥2 platforms including a
+genuinely-free one** (Bluesky and/or Mastodon), with Buffer demoted to optional.
+
+### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌ **NOT STARTED**
+The free/open posting targets — build these first.
+
+### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌ **NOT STARTED**
+Least-privilege per integration; human connects each account (no auto-connect).
+
+### P4.3 — X adapter (budget pay-per-use) · ❌ **NOT STARTED**
+X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
+
+### P4.4 — Demote Buffer to optional · ❌ **NOT STARTED**
+Keep the Buffer path for those who want it; remove it from the critical path.
+
+**Building blocks.** **Bluesky / Mastodon** (free/open) first; direct platform APIs.
+**Postiz** adapters as a *reference implementation only* (**AGPL** — call over its
+API or read the patterns; never embed — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
+
+**Dependencies.** Needs **P2** (autonomy + guardrails govern what may auto-publish)
+and **P0** (Buffer is a flagged, optional paid path).
+
+---
+
+## Phase 5 — Local-AI substitution everywhere · P5 · ❌ **NOT STARTED**
+
+**Goal.** Give every AI call a zero-cost local path, completing the no-hidden-fees
+guarantee.
+
+**Exit criterion.** With **no cloud keys configured**, the full pipeline (caption,
+cutout, voice, graphics, reels) runs **locally end-to-end** — honest-erroring only
+where a local model is genuinely unavailable.
+
+### P5.1 — Ollama LLM provider · ❌ **NOT STARTED**
+A local backend behind the existing `ai_core.llm` interface — the zero-key default.
+
+### P5.2 — Piper TTS replaces edge-tts · ❌ **NOT STARTED**
+Local neural TTS; drops the undocumented Edge cloud-endpoint dependency.
+
+### P5.3 — whisper.cpp / faster-whisper ASR · ❌ **NOT STARTED**
+Local transcription for reel captions / word-level burn-in.
+
+### P5.4 — Satori graphics fast-path · ❌ **NOT STARTED**
+Lighter card rendering (~100× lighter than headless Chromium); overlaps P0.1.
+
+### P5.5 — rembg / MODNet cutout · ✅ **DONE**
+Already the shipped default (rembg). MODNet is an optional higher-quality matting
+alternative.
+
+**Building blocks.** All **ADOPT-NOW**: Ollama (MIT), Piper (MIT), whisper.cpp /
+faster-whisper (MIT), Satori (MPL-2.0), rembg (MIT), MODNet (Apache-2.0). ⚠️ Avoid
+Coqui **XTTS** weights commercially (CPML, non-commercial) — Piper instead.
+
+**Dependencies.** Set up by **P0** (local-capable interfaces). This phase **completes
+the no-hidden-fees promise** the whole roadmap is built around.
 
 ---
 
 ## Cross-cutting investments (all phases)
 
-These cut across every phase and don't fit cleanly into one
-work-stream.
-
 | Investment | Status | Notes |
 |---|---|---|
-| Product design / UI polish quarter | ❌ | Designer-engineer pairing for one quarter. Targets: Home, Add Input, Content Pack. (Settings no longer exists.) Doesn't require a stack rewrite — Flask + Jinja stay. |
-| End-to-end pipeline observability | ⚠️ partial | Every meet upload produces a structured log of which inputs succeeded, which generations failed, why — surfaced to user and to internal admin |
-| Content marketing programme | ❌ | One piece per fortnight + case studies. Yields the inbound demand for the commercial layer |
-| Test suite stability | ✅ **678 passed / 0 failed at HEAD**; 43 skipped (Playwright browser, sample-corpus, reportlab, MEDIAHUB_RUN_MOTION_TESTS gates — every skip is environmental, none mask a structural failure) | Keep green |
-| Operator deployment template | ✅ `render.yaml` audited + complete; `.env.example` is the canonical reference | One-click Render deploy works |
+| No-hidden-fees discipline | 🔵 | Enforced via [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md); every paid path stays optional with a free default. |
+| Multi-tenancy: org → workspace | ⚠️ partial | Cross-tenant isolation invariant shipped; generalise org to per-team workspace. Reference Postiz/Mixpost schemas over a network boundary (never embed AGPL). |
+| Safeguarding / minors' data | ✅ locked | Isolation invariant per [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md); applies with extra force to autonomous post types. |
+| Explainability & audit trail | 🔵 partial | Every step explainable; extend the run audit trail to autonomous-publish decisions (P2.3). |
+| Product design / UI polish | ❌ | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
+| Test-suite stability | ✅ | Full suite green (2836 passed / 1 skipped after merging main). Keep green. |
+| Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. |
 
 ---
 
 ## Immediate next moves
 
-**The Adaptive Theming Engine (1.6) has shipped** — the brand-DNA work
-and the brand-kit upload flow now actually *feel* like the user's product
-the moment they accept the captured brand; "single-org-per-deployment" is
-a promise the chrome finally keeps. Audit it against the acceptance
-criteria with the prompts in **Appendix C**. **The immediate priority is
-now the Generative Content Engine v2 (1.7)** — its runnable build prompts
-already live in **Appendix A**.
+A recommended ordered backlog — roughly one focused session per phase, each with its
+own exit criterion. (Full backlog in the rebuild's `CHANGES`/PR.)
 
-1. **Generative Content Engine v2 (1.7).** Run the build prompts in
-   **Appendix A**. Fastest path to fixing "samey": the parallel
-   bucket (PAR-2 auto-fit + PAR-3 saliency crop + PAR-7 archetypes,
-   each its own session) → then the spine SEQ-0 (tokens) → SEQ-1
-   (Tier A archetype library). No LLM-director work is required to
-   resolve the core complaint. (Adaptive Theming, 1.6, is done —
-   verify it with Appendix C.)
+1. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
+   *Exit:* a zero-license deployment renders reels. (Biggest hidden-cost win.)
+2. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
+   strategy brain over sport profiles. *Exit:* a ranked plan for ≥2 profiles.
+3. **P1.4 — Generative Content Engine v2.** Run Appendix A (PAR-2/PAR-3/PAR-7 →
+   SEQ-0 → SEQ-1). *Exit:* ≥6 structural archetypes; a ranked pool, not one card.
+4. **P2 — Autonomy on Temporal.** Per-type toggle + guardrails + kill switch +
+   audit. *Exit:* `fully_autonomous` publishes only when guardrails pass.
+5. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real
+   data spoke. *Exit:* one non-swimming sport produces content end-to-end.
+6. **P4 — Free direct publishing.** Bluesky + Mastodon adapters; demote Buffer.
+   *Exit:* publish to ≥2 platforms incl. one free.
+7. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with
+   no cloud keys.
 
-2. **Pilot deployment.** Stand up one production Render instance,
-   set the env vars, invite one real club to use it for a month.
-   This is the first real-world load test of the operator-managed
-   model and will surface every UX hole the audits couldn't find.
-   Operator runbook in [`docs/PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md).
-   *1.6 has landed, so the pilot club's first impression is already
-   the themed product.*
+Run a **pilot** in parallel (one real club, the themed product) to surface UX holes
+the audits can't — see [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md).
 
-3. **Sport expansion (2.2 athletics).** Unlocks the next tranche
-   of buyers (track-and-field clubs). One quarter of work:
-   canonical event taxonomy + result-file parser + PB/record/
-   qualifier logic + copy templates.
+---
 
-4. **Athlete-facing surfaces (2.5).** Per-athlete personal share
-   link (`/athlete/<slug>`) showing their season's cards +
-   story-ready downloads. Long-tail distribution moat.
+## Appendices — status & how they map to Phase 0–5
 
-Commercial layer (2.1) is deliberately scheduled last — only when
-the product is ready for paying customers.
+The previous roadmap revision carried three appendices of runnable build/verification
+prompts. They are **retained** below as execution detail (they preserve live
+`PAR-*` / `SEQ-*` / `Step N` trailer IDs and link real shipped/in-flight code), with
+this lineage note:
+
+- **Appendix A — Generative Content Engine v2.** Current. The build breakdown for
+  **P1.4** above (decided in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md)).
+  Its local `§0–§5` / `PAR-*` / `SEQ-*` numbering is self-contained.
+- **Appendix B — Growth & Expansion (Steps 8–17).** ⚠️ **Legacy sequence,
+  superseded.** Written against the older *Parity → Distinction → Leadership* spine.
+  Its still-relevant steps are absorbed by the new phases (sport expansion → **P3**;
+  publishing → **P4**; agentic/autonomy → **P2**; commercial/enterprise → cross-cutting).
+  Where it conflicts with the new strategy, **the Phase 0–5 spine wins.** Retained for
+  step-level execution detail only.
+- **Appendix C — Adaptive Theming Engine verification.** Current. Verifies the
+  **shipped** theming engine summarised under "Where we are today" (see
+  [`THEMING.md`](THEMING.md)).
+
+> **Lineage in one line:** the new **Phase 0–5** spine supersedes the old **Phase 1
+> Parity → Phase 2 Distinction → Phase 3 Leadership** spine; the appendices below are
+> the older revision's execution detail, kept and re-mapped, not deleted.
 
 ---
 

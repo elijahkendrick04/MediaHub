@@ -35,3 +35,8 @@ edge-tts>=6.1
 materialyoucolor>=3.0
 coloraide>=4.0
 numpy>=1.24
+
+# Sport-profile config loader (mediahub.sport_profiles) reads the human-authored
+# data/sport_profiles/*.yaml files. PyYAML is MIT-licensed and free; the loader is
+# inert scaffolding (not yet wired into the runtime pipeline).
+PyYAML>=6.0

@@ -36,6 +36,9 @@ dependencies = [
   "materialyoucolor>=3.0",
   "coloraide>=4.0",
   "numpy>=1.24",
+  # Sport-profile config loader (mediahub.sport_profiles) parses the
+  # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

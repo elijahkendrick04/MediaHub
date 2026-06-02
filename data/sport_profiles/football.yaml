@@ -1,0 +1,94 @@
+# MediaHub sport profile — Football (association football / soccer)
+#
+# Second reference profile, alongside swimming.yaml, to prove the sport-profile
+# concept generalises. See swimming.yaml's header and docs/SPORT_PROFILES.md for
+# the schema; docs/POST_TYPE_TAXONOMY.md for the post types; docs/AUTONOMY_MODEL.md
+# for the autonomy levels.
+#
+# INERT scaffolding — there is no football detector engine yet. `engine_sport`
+# below names the recognition.registry sport this profile WILL bind to once a
+# `recognition_football` adapter is registered (roadmap Phase 3). Until then the
+# profile loads and validates, but produces nothing at runtime.
+#
+# Data-input licensing note: `openfootball_json` is public-domain fixture/result
+# data (the genuinely-free default). `statsbomb_open_data` is free to access but
+# governed by the StatsBomb Public Data User Agreement (attribution + responsible
+# use), which is NOT an OSS licence and is distinct from any code licence — see
+# docs/DEPENDENCY_LICENSING.md before wiring it in.
+
+sport: football
+display_name: Football
+engine_sport: football            # binds to recognition_football once it exists
+governing_bodies:
+  - The Football Association
+  - UEFA
+  - FIFA
+
+post_types:
+
+  # --- Sport-specific ------------------------------------------------------
+  matchday_lineup:
+    enabled: true
+    data_inputs: [lineup, fixtures, manual_entry]
+    template_namespace: football/matchday_xi
+    default_autonomy: approval_required
+
+  full_time_score:                # prime candidate to flip to fully_autonomous
+    enabled: true
+    data_inputs: [openfootball_json, manual_entry]
+    template_namespace: football/full_time
+    default_autonomy: approval_required
+
+  goal_assist_leader:
+    enabled: true
+    data_inputs: [openfootball_json, statsbomb_open_data]
+    template_namespace: football/scorer
+    default_autonomy: approval_required
+
+  league_table:
+    enabled: true
+    data_inputs: [openfootball_json]
+    template_namespace: football/standings
+    default_autonomy: approval_required
+
+  # --- Universal (sport-agnostic) -----------------------------------------
+  fixture_announcement:
+    enabled: true
+    data_inputs: [fixtures, openfootball_json, manual_entry]
+    template_namespace: universal/fixture
+    default_autonomy: approval_required
+
+  athlete_spotlight:              # "player spotlight"
+    enabled: true
+    data_inputs: [statsbomb_open_data, media_library, manual_entry]
+    template_namespace: universal/athlete_spotlight
+    default_autonomy: approval_required
+
+  season_recap:
+    enabled: true
+    data_inputs: [openfootball_json, season_history]
+    template_namespace: universal/season_recap
+    default_autonomy: approval_required
+
+  behind_the_scenes:
+    enabled: true
+    data_inputs: [media_library, manual_entry]
+    template_namespace: universal/bts
+    default_autonomy: approval_required
+
+  signings_recruitment:           # contractual/sensitive: hand-placed by default
+    enabled: true
+    data_inputs: [manual_entry]
+    template_namespace: universal/signing
+    default_autonomy: draft_only
+
+  sponsor_activation:             # brand-contractual: hand-placed by default
+    enabled: true
+    data_inputs: [manual_entry, sponsor_kit]
+    template_namespace: universal/sponsor
+    default_autonomy: draft_only
+
+notes: >
+  Football has the widest club footprint and the cleanest free data source
+  (openfootball, public domain). It is the canonical "second sport" example for
+  the sport-adapter pattern described in docs/ARCHITECTURE_TARGET.md.
