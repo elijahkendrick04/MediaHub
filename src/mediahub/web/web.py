@@ -8404,9 +8404,21 @@ def create_app() -> Flask:
         if active_prof is not None:
             prof_primary = (getattr(active_prof, "brand_primary", "") or prof_primary).strip()
             prof_secondary = (getattr(active_prof, "brand_secondary", "") or prof_secondary).strip()
-            extracted = getattr(active_prof, "brand_palette_extracted", {}) or {}
-            if isinstance(extracted, dict) and extracted.get("accent"):
-                prof_accent = extracted["accent"]
+            # Accent must honour the user's confirmed override the same way
+            # primary/secondary do. Primary/secondary already read
+            # ``brand_primary``/``brand_secondary``, which the
+            # /organisation/setup save keeps in step with the manual
+            # override via ``effective_palette``. Accent has no such mirror,
+            # so resolve it through the canonical resolver here: the manual
+            # slot wins per-slot, falling back to the AI's extracted pick.
+            from mediahub.brand.palette import effective_palette as _effective_palette
+
+            _resolved_palette = _effective_palette(
+                manual=getattr(active_prof, "brand_palette_manual", {}) or {},
+                extracted=getattr(active_prof, "brand_palette_extracted", {}) or {},
+            )
+            if _resolved_palette.get("accent"):
+                prof_accent = _resolved_palette["accent"]
             logo_url = (getattr(active_prof, "brand_logo_url", "") or "").strip()
             if logo_url:
                 _logo_disp = logo_url[:80] + ("\u2026" if len(logo_url) > 80 else "")
