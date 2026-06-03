@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Skill:** `autotest/skills/llm-council/` (Karpathy LLM Council methodology —
   5 advisors → anonymised peer review → chairman synthesis)
-- **Decision recorded in:** [`../adr/0002-do-not-integrate-agentmemory.md`](../adr/0002-do-not-integrate-agentmemory.md)
+- **Decision recorded in:** [`../adr/0009-do-not-integrate-agentmemory.md`](../adr/0009-do-not-integrate-agentmemory.md)
 - **Verdict:** Unanimous — **do not integrate** `rohitg00/agentmemory` into the
   MediaHub repo in any deployed or committed form.
 
@@ -318,7 +318,7 @@ deserves a *separate* product track.
 ### The recommendation
 
 Reject the integration. Record it as an ADR so it is settled and auditable
-(`docs/adr/0002-do-not-integrate-agentmemory.md`). Treat the "club memory layer"
+(`docs/adr/0009-do-not-integrate-agentmemory.md`). Treat the "club memory layer"
 strictly as a *roadmap candidate to evaluate separately* — explicitly not this
 tool, designed from MediaHub's own data model, and not built as part of this
 decision.

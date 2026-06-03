@@ -1,6 +1,9 @@
 # 2. The Council is the repo's decision authority
 
-- **Status:** Accepted.
+- **Status:** Superseded by [`0010-council-as-advisory-tool.md`](0010-council-as-advisory-tool.md)
+  (2026-06-03). The Council is retained, but its *authority* is narrowed: it is now a tool
+  reached for on a small set of high-stakes, hard-to-reverse decisions rather than a gate on
+  all non-trivial work. The history below is preserved as the original rationale.
 - **Date:** 2026-05-31
 - **Deciders:** MediaHub maintainer (directive: *"the council shouldn't just be there,
   it should dictate all decisions across my whole repo"*).

@@ -1,4 +1,4 @@
-# 2. Do not integrate `agentmemory` into the MediaHub repo
+# 9. Do not integrate `agentmemory` into the MediaHub repo
 
 - **Status:** Accepted — rejected for integration. `rohitg00/agentmemory`
   will **not** be added to the MediaHub repo in any deployed or committed form

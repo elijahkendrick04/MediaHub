@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-31
 - **Skill:** `llm-council` (Karpathy LLM Council methodology)
-- **Decision recorded in:** [`0002-no-jcode-integration.md`](./0002-no-jcode-integration.md)
+- **Decision recorded in:** [`0006-no-jcode-integration.md`](./0006-no-jcode-integration.md)
 
 ## Framed question
 

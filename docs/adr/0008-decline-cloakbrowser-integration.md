@@ -1,4 +1,4 @@
-# ADR 0002 — Decline integrating CloakBrowser (bot-detection-evasion browser)
+# ADR 0008 — Decline integrating CloakBrowser (bot-detection-evasion browser)
 
 **Status:** Accepted · **Date:** 2026-05-31 · **Decided by:** `llm-council` skill (unanimous)
 

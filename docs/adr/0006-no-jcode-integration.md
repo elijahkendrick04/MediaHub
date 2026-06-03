@@ -1,4 +1,4 @@
-# 2. Do not integrate jcode into MediaHub
+# 6. Do not integrate jcode into MediaHub
 
 - **Status:** Accepted — declined. The proposal to integrate
   [`jcode`](https://github.com/1jehuang/jcode) into the MediaHub repository as a
@@ -8,7 +8,7 @@
 - **Deciders:** MediaHub maintainer, via the `llm-council` skill (5 advisors +
   anonymised peer review + chairman synthesis)
 - **Context source:** Full deliberation in
-  [`0002-no-jcode-integration-council-transcript.md`](./0002-no-jcode-integration-council-transcript.md)
+  [`0006-no-jcode-integration-council-transcript.md`](./0006-no-jcode-integration-council-transcript.md)
 
 ## Context
 

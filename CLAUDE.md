@@ -50,34 +50,39 @@ data/                  — Runtime data (DB, runs, cache)
 - **Feature flags** — `_club_platform_ok`, `_v73_ok`, `_v8_ok` guard optional features
 - **Removing routes or data structures is allowed, but gated** — you may remove or replace an existing route or data structure when an update genuinely needs it; don't just pile on additively. When you do, follow the process in *"Changing the engine: removing or replacing routes & data structures"* below — a 15-step breakage check **before** removal, a 15-step verification **after** removal and replacement, and a dead-code sweep at the end of every engine change.
 
-## Decision governance — the Council decides
+## Decision governance — the Council is a tool, not a toll booth
 
-Non-trivial decisions in this repo are made by **the Council**, not by a single
-voice (human or AI) acting on a hunch. The Council is Karpathy's LLM Council
-methodology, wired into Claude Code as the invocable **`/llm-council`** skill
-(`.claude/skills/llm-council` → `autotest/skills/llm-council/SKILL.md`; embedded
-in-process as `autotest/council.py`): five advisors argue from clashing angles,
-peer-review each other anonymously, and a chairman writes a binding verdict. **The
-verdict — not your first instinct — is what you build.** Convene it with `/llm-council`
-or a trigger phrase ("council this", "pressure-test this"). Full policy:
-**`docs/COUNCIL_GOVERNANCE.md`**.
+The default is **just build**. Most work — features, bug fixes, refactors, new
+modules, schema tweaks, route changes — ships on your own judgement without
+ceremony. Reach for **the Council** only for the small set of decisions where being
+wrong is genuinely expensive *and* you can't easily undo it.
 
-- **Convene the Council BEFORE acting** on any council-gated decision: architecture or
-  data-model changes; removing/replacing a route or data structure (the council runs
-  *before* the 15-step breakage check below); roadmap priority/sequencing ("what to
-  build next"); a choice between ≥2 credible approaches where the wrong pick costs more
-  than an afternoon; new AI judgement surfaces or anything touching the
-  deterministic-engine boundary; and anything outward-facing or hard to reverse.
-- **Don't council trivial work** — typo/format/mechanical-refactor fixes, single-
-  obvious-fix bugs, or implementing a step the Council *already* decided (cite that
-  decision instead). Counciling trivia dulls the mechanism for the decisions that matter.
-- **Record the decision.** Every council-gated change writes a transcript +
-  HTML report under `autotest/reports/council/`, and the **PR body links that decision
-  record**. If hands-on work invalidates a premise the Council assumed, write the
-  deviation and its reason *into the verdict* — never deviate silently.
+The Council is Karpathy's LLM Council methodology, wired into Claude Code as the
+invocable **`/llm-council`** skill (`.claude/skills/llm-council` →
+`autotest/skills/llm-council/SKILL.md`; embedded in-process as `autotest/council.py`):
+five advisors argue from clashing angles, peer-review each other anonymously, and a
+chairman writes a verdict. Convene it with `/llm-council` or a trigger phrase
+("council this", "pressure-test this"). Full policy: **`docs/COUNCIL_GOVERNANCE.md`**.
+
+- **Pressure-test before acting** only on a *high-stakes, hard-to-reverse* call:
+  something outward-facing or expensive to unwind (a deployment-shape change, an
+  external integration, a pricing/commercial surface); a major architecture fork where
+  a wrong pick means days — not an afternoon — of rework; or anything that touches the
+  **deterministic-engine boundary** (parsers, detectors, ranker, colour-science). When
+  in doubt on one of those, run it. Everywhere else, trust your judgement and ship.
+- **Don't council ordinary work** — features, bug fixes, refactors, new modules, schema
+  changes, "what to build next" sequencing, and reversible route/data-structure changes
+  are normal engineering. Just do them well (the 15-step checks below still apply to
+  route/data removals). Counciling routine work dulls the mechanism for the rare
+  decision that matters.
+- **Record only what's worth recording.** When you do convene the Council on a genuinely
+  significant call, capture the verdict in a short ADR under `docs/adr/` and link it from
+  the PR. No mandatory transcript/HTML artifact per change — the in-process tester writes
+  those automatically when *it* deliberates; humans don't need to. If hands-on work
+  invalidates a premise the verdict assumed, note the deviation in the ADR.
 - The Council **cannot approve** Gemini-ifying the deterministic engine (parsers,
   detectors, ranker, colour-science) — that still requires explicit user sign-off — but
-  it must be consulted on the framing.
+  it's a good place to pressure-test the framing.
 
 ## Changing the engine: removing or replacing routes & data structures
 
@@ -126,7 +131,7 @@ After any change to the engine (not only removals), remove the clutter and dead 
 ## Explicitly Excluded
 
 - **Google Workspace / GWS** — Do NOT install or use `@googleworkspace/cli`, Gmail, Drive, Calendar, Sheets, Docs, Slides, Chat, or Admin automation. This exclusion is permanent unless the user explicitly requests it.
-- **9router / gray-market LLM proxies** — Do NOT add [9router](https://github.com/decolua/9router) (or any similar AI-coding-tool proxy that routes through unofficial/"free" provider tiers) as a skill, a vendored dependency, a documented dev workflow, or a product component. MediaHub's AI path stays on official env-keyed providers via `ai_core/llm.py` / `media_ai/llm.py`, and customer LLM traffic is never routed through a third-party proxy. Rationale recorded in [`docs/adr/0002-reject-9router-integration.md`](docs/adr/0002-reject-9router-integration.md). This exclusion is permanent unless the user explicitly requests it.
+- **9router / gray-market LLM proxies** — Do NOT add [9router](https://github.com/decolua/9router) (or any similar AI-coding-tool proxy that routes through unofficial/"free" provider tiers) as a skill, a vendored dependency, a documented dev workflow, or a product component. MediaHub's AI path stays on official env-keyed providers via `ai_core/llm.py` / `media_ai/llm.py`, and customer LLM traffic is never routed through a third-party proxy. Rationale recorded in [`docs/adr/0007-reject-9router-integration.md`](docs/adr/0007-reject-9router-integration.md). This exclusion is permanent unless the user explicitly requests it.
 
 ---
 

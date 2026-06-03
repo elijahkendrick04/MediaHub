@@ -1,4 +1,4 @@
-# 2. Reject integrating 9router into MediaHub (as a skill or otherwise)
+# 7. Reject integrating 9router into MediaHub (as a skill or otherwise)
 
 - **Status:** Accepted — rejected. 9router will not be added to the repo as a
   skill, a vendored dependency, a documented dev workflow, or a product
