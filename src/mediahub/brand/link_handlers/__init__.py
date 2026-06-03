@@ -20,6 +20,7 @@ playbook for the domain, re-validates it if stale, and persists the
 outcome. The audit log records every regeneration so the operator can
 explain why a playbook changed.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,6 +42,7 @@ log = logging.getLogger(__name__)
 # Shared HTTP fetcher — reuses the existing helper from social_dna so
 # we don't duplicate the UA / timeout / size-cap config.
 # ---------------------------------------------------------------------------
+
 
 def _fetch_with_strategy(url: str, strat: dict) -> tuple[Optional[str], int, dict]:
     """Issue one fetch with the given strategy.
@@ -76,6 +78,7 @@ def _fetch_with_strategy(url: str, strat: dict) -> tuple[Optional[str], int, dic
 # domain.
 # ---------------------------------------------------------------------------
 
+
 def _expand(template: str, *, handle: str = "", slug: str = "", fallback_url: str = "") -> str:
     if not template:
         return fallback_url
@@ -95,6 +98,7 @@ def _handle_from_url(url: str) -> str:
     if not url:
         return ""
     from urllib.parse import urlparse
+
     try:
         path = urlparse(url if "://" in url else "https://" + url).path
     except Exception:
@@ -112,6 +116,7 @@ def _handle_from_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def process_link(
     platform: str,
@@ -164,12 +169,14 @@ def process_link(
     stale = playbooks.is_stale(pb)
     broken = playbooks.needs_regeneration(pb)
     if stale or broken or not pb.get("strategy"):
-        playbooks.record_audit({
-            "domain": domain,
-            "action": "regenerate",
-            "reason": "stale" if stale else ("broken" if broken else "missing"),
-            "platform": platform,
-        })
+        playbooks.record_audit(
+            {
+                "domain": domain,
+                "action": "regenerate",
+                "reason": "stale" if stale else ("broken" if broken else "missing"),
+                "platform": platform,
+            }
+        )
         # Use a single sample fetch with the default strategy to give
         # the strategy proposer something to read.
         default_strat = strategy_learner.default_strategy(url)
@@ -180,15 +187,19 @@ def process_link(
             "body_excerpt": (body or "")[:8_000],
         }
         pb["strategy"] = strategy_learner.propose_strategy(
-            url, platform_intent=intent, sample=sample,
+            url,
+            platform_intent=intent,
+            sample=sample,
         )
         base["regenerated"] = True
     else:
-        playbooks.record_audit({
-            "domain": domain,
-            "action": "replay",
-            "platform": platform,
-        })
+        playbooks.record_audit(
+            {
+                "domain": domain,
+                "action": "replay",
+                "platform": platform,
+            }
+        )
 
     # Compute current age (days since last_validated_at)
     last = pb.get("last_validated_at")
@@ -200,13 +211,15 @@ def process_link(
             pass
 
     strat = pb.get("strategy") or strategy_learner.default_strategy(url)
-    primary_url = _expand(strat.get("url_template") or url,
-                           handle=handle, fallback_url=url)
+    primary_url = _expand(strat.get("url_template") or url, handle=handle, fallback_url=url)
 
     # ---- Stage 2: execute the strategy ----
     body, code, hdrs = _fetch_with_strategy(primary_url, strat)
     classification = block_detector.classify(
-        primary_url, status_code=code, headers=hdrs, body=body or "",
+        primary_url,
+        status_code=code,
+        headers=hdrs,
+        body=body or "",
     )
     label = classification["label"]
     base["status"] = label
@@ -216,7 +229,7 @@ def process_link(
     if label != "real_content":
         alts = []
         # Replay the strategy's own alt_endpoints first
-        for alt_tmpl in (strat.get("alt_endpoints") or []):
+        for alt_tmpl in strat.get("alt_endpoints") or []:
             alt_url = _expand(alt_tmpl, handle=handle, fallback_url=alt_tmpl)
             if alt_url not in alts:
                 alts.append(alt_url)
@@ -231,10 +244,12 @@ def process_link(
         for alt_url in alts:
             body, code, hdrs = _fetch_with_strategy(alt_url, strat)
             c2 = block_detector.classify(
-                alt_url, status_code=code, headers=hdrs, body=body or "",
+                alt_url,
+                status_code=code,
+                headers=hdrs,
+                body=body or "",
             )
-            playbooks.record_attempt(pb, status=c2["label"], notes=alt_url,
-                                      persist=False)
+            playbooks.record_attempt(pb, status=c2["label"], notes=alt_url, persist=False)
             if c2["label"] == "real_content":
                 base["status"] = "real_content"
                 # Remember the working alternative so the next run
@@ -254,8 +269,25 @@ def process_link(
     # downstream caption prompt for orgs whose website failed to load.
     if base["status"] == "real_content" and body:
         base["dna"] = content_extractor.extract_brand_dna(
-            body, url=primary_url, platform_intent=intent,
+            body,
+            url=primary_url,
+            platform_intent=intent,
         )
+        # Colour-USAGE evidence (frequency-ranked), incl. linked CSS.
+        # The brand-palette decision is made by the cloud LLM from this
+        # evidence; we only gather it here. Best-effort: a CSS-fetch
+        # failure just yields HTML-only counts and never blocks the
+        # crawl. Only meaningful for full web pages (HTML + stylesheets),
+        # so we gate on the body looking like markup.
+        if "<" in body and platform in ("website", "site", "home"):
+            try:
+                from mediahub.brand.dna_capture import colour_usage_evidence
+
+                usage = colour_usage_evidence(body, primary_url)
+                if usage:
+                    base["dna"]["colour_usage"] = [[h, c] for h, c in usage]
+            except Exception as e:
+                log.debug("colour-usage evidence failed for %s: %s", primary_url, e)
 
     # ---- Stage 5: persist ----
     try:
@@ -273,6 +305,7 @@ def process_link(
 # Lazy imports — each platform module only loads the moment it's used.
 # This also lets the per-platform tests stub a handler without dragging
 # in the other five.
+
 
 def get_handler(platform: str):
     p = (platform or "").lower().strip()
@@ -308,8 +341,8 @@ def process_links(
     """
     social_links = social_links or {}
     result = {
-        "state": {},          # platform → {url, status, dna_present, …}
-        "merged_dna": {},     # picked-best fields for ClubProfile.brand_*
+        "state": {},  # platform → {url, status, dna_present, …}
+        "merged_dna": {},  # picked-best fields for ClubProfile.brand_*
         "any_real": False,
     }
 
@@ -340,6 +373,10 @@ def process_links(
             # richest single source, which would otherwise drop colours
             # mentioned only on, say, the Instagram bio.
             "palette_mentions": list(dna.get("palette_mentions") or []),
+            # Frequency-ranked colour-USAGE evidence for the AI palette
+            # resolver: [[hex, count], ...]. Only the website handler
+            # populates it (that's where the real CSS lives).
+            "colour_usage": list(dna.get("colour_usage") or []),
         }
         if entry["status"] == "real_content":
             result["any_real"] = True
