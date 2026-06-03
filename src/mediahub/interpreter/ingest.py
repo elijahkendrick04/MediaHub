@@ -9,9 +9,12 @@ sibling-aggregated layouts are followed
 transparently — purely via shape detection (``<frameset>`` tags + a
 sibling-filename heuristic), never by domain or brand name.
 """
+
 from __future__ import annotations
 
+import csv
 import io
+import json
 import logging
 import pathlib
 import re
@@ -31,6 +34,39 @@ _ZIP_MAGIC = b"PK\x03\x04"
 _HY3_MAGIC = re.compile(rb"^[A-Z]\d", re.MULTILINE)
 
 
+def _is_xlsx(data: bytes) -> bool:
+    """True if ZIP bytes are an Office Open XML spreadsheet (.xlsx).
+
+    An ``.xlsx`` IS a ZIP, so this must be checked before the generic ZIP
+    branch. We only read the central directory (member names) — no bytes are
+    decompressed — so a bomb can't be triggered here.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+    except Exception:
+        return False
+    return "[Content_Types].xml" in names and any(n.startswith("xl/") for n in names)
+
+
+def _looks_like_csv(sample: bytes) -> bool:
+    """Heuristic CSV/TSV sniff for un-hinted bytes: ≥2 lines that share a
+    consistent comma/tab delimiter (≥1 per line). Conservative on purpose so
+    space-aligned text and hy3 record streams are NOT misread as CSV."""
+    try:
+        text = sample.decode("utf-8", "replace")
+    except Exception:
+        return False
+    lines = [ln for ln in text.splitlines() if ln.strip()][:6]
+    if len(lines) < 2:
+        return False
+    for delim in (",", "\t"):
+        counts = [ln.count(delim) for ln in lines]
+        if all(c >= 1 for c in counts) and (max(counts) - min(counts)) <= 1:
+            return True
+    return False
+
+
 def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
     if hint:
         h = hint.lower()
@@ -38,6 +74,13 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
             return "pdf"
         if any(x in h for x in ("html", "htm")):
             return "html"
+        if "json" in h:
+            return "json"
+        # xlsx/xls before generic zip — an .xlsx is a ZIP container.
+        if any(x in h for x in ("xlsx", "xls")):
+            return "xlsx"
+        if any(x in h for x in ("csv", "tsv")):
+            return "csv"
         if "zip" in h:
             return "zip"
         if "hy3" in h:
@@ -47,20 +90,28 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
     if data[:4] == _PDF_MAGIC:
         return "pdf"
     if data[:4] == _ZIP_MAGIC:
-        return "zip"
+        # .xlsx spreadsheets are ZIPs — disambiguate before generic zip handling.
+        return "xlsx" if _is_xlsx(data) else "zip"
     # HTML heuristic
     sample = data[:2000].lower()
     if b"<!doctype html" in sample or b"<html" in sample or b"<table" in sample:
         return "html"
+    # JSON: leading { or [ after optional whitespace
+    if data[:512].lstrip()[:1] in (b"{", b"["):
+        return "json"
     # hy3: many lines starting with a capital letter + digit
     if len(_HY3_MAGIC.findall(data[:4096])) > 3:
         return "hy3"
+    # CSV/TSV: consistent delimiter across the first lines (conservative)
+    if _looks_like_csv(data[:4096]):
+        return "csv"
     return "text"
 
 
 # ---------------------------------------------------------------------------
 # PDF extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
     """Extract a PDF.
@@ -77,7 +128,9 @@ def _extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
         if text or lines or tables:
             log.debug(
                 "spatial pdfplumber extracted %d chars, %d lines, %d tables",
-                len(text), len(lines), len(tables),
+                len(text),
+                len(lines),
+                len(tables),
             )
             return text, lines, tables
         else:
@@ -333,11 +386,10 @@ def _extract_html(
     # 3. If we still have effectively no usable content but the HTML is a
     #    thin landing page sitting next to one or more PDF files, harvest
     #    those PDFs.  Purely structural — no domain or filename special-cases.
-    has_useful_content = any(
-        len(tbl.rows) >= 2 for tbl in tables
-    ) or len(
-        [ln for ln in lines if len(ln.text) > 20]
-    ) >= 10
+    has_useful_content = (
+        any(len(tbl.rows) >= 2 for tbl in tables)
+        or len([ln for ln in lines if len(ln.text) > 20]) >= 10
+    )
     if (not has_useful_content) and source_path is not None:
         try:
             from .pdf_extractor import extract_pdf as _pdfx  # noqa: PLC0415
@@ -377,6 +429,7 @@ def _extract_html(
 # ZIP recursion
 # ---------------------------------------------------------------------------
 
+
 def _extract_zip(
     data: bytes,
     hint: Optional[str] = None,
@@ -385,6 +438,7 @@ def _extract_zip(
     # Member iteration goes through _zip_safety so a compression bomb
     # can't pass arbitrary-size payloads down into nested ingestion.
     from ._zip_safety import safe_iter_members, UnsafeZipError
+
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             all_streams: list[IngestStream] = []
@@ -423,11 +477,11 @@ def _extract_zip(
 # hy3 line-based
 # ---------------------------------------------------------------------------
 
+
 def _extract_hy3(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
     text = data.decode("latin-1", errors="replace")
     lines = [
-        Line(text=ln, page_no=0, y_position=float(i))
-        for i, ln in enumerate(text.splitlines())
+        Line(text=ln, page_no=0, y_position=float(i)) for i, ln in enumerate(text.splitlines())
     ]
     return text, lines, []
 
@@ -436,15 +490,190 @@ def _extract_hy3(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
 # Plain text
 # ---------------------------------------------------------------------------
 
+
 def _extract_text(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
     text = data.decode("utf-8", errors="replace")
     lines = [
-        Line(text=ln, page_no=0, y_position=float(i))
-        for i, ln in enumerate(text.splitlines())
+        Line(text=ln, page_no=0, y_position=float(i)) for i, ln in enumerate(text.splitlines())
     ]
     table_rows = _detect_table_rows(text.splitlines())
     tables = [TableCandidate(rows=table_rows)] if len(table_rows) >= 2 else []
     return text, lines, tables
+
+
+# ---------------------------------------------------------------------------
+# JSON / CSV / XLSX — tabular data formats (deterministic, no domain logic)
+# ---------------------------------------------------------------------------
+
+_MAX_JSON_TABLES = 50
+_MAX_DATA_ROWS = 20000
+
+
+def _json_scalar(value) -> str:
+    """Stringify one JSON value for a table cell."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)[:200]
+        except Exception:
+            return ""
+    return str(value)
+
+
+def _union_keys(dicts: list[dict]) -> list[str]:
+    """Ordered union of all keys across ``dicts`` (first-seen order)."""
+    seen: set = set()
+    order: list[str] = []
+    for d in dicts:
+        for k in d.keys():
+            ks = str(k)
+            if ks not in seen:
+                seen.add(ks)
+                order.append(ks)
+    return order
+
+
+def _find_object_arrays(obj, depth: int = 0):
+    """Yield arrays of homogeneous objects (≥3 dict items sharing ≥3 keys).
+
+    Recurses into nested containers so a results array buried under
+    ``{"data":{"results":[...]}}`` is still found. Shape only — no key names
+    are interpreted, so it works for any sport's API.
+    """
+    if depth > 8:
+        return
+    if isinstance(obj, list):
+        dicts = [x for x in obj if isinstance(x, dict)]
+        if len(dicts) >= 3:
+            common = set(dicts[0].keys())
+            for d in dicts[1:]:
+                common &= set(d.keys())
+            if len(common) >= 3:
+                yield dicts
+        for x in obj:
+            yield from _find_object_arrays(x, depth + 1)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _find_object_arrays(v, depth + 1)
+
+
+def _collect_scalar_text(obj, out: list[str], depth: int = 0) -> None:
+    """Gather scalar metadata (meet name, dates, …) into the text stream."""
+    if depth > 6:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (str, int, float, bool)):
+                out.append(f"{k}: {v}")
+            else:
+                _collect_scalar_text(v, out, depth + 1)
+    elif isinstance(obj, list):
+        for x in obj[:50]:
+            if not isinstance(x, (str, int, float, bool)):
+                _collect_scalar_text(x, out, depth + 1)
+
+
+def _lines_from_text(text: str) -> list[Line]:
+    return [
+        Line(text=ln, page_no=0, y_position=float(i))
+        for i, ln in enumerate(text.splitlines())
+        if ln.strip()
+    ]
+
+
+def _extract_json(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
+    """JSON → tables (arrays of homogeneous objects) + scalar-metadata text.
+
+    SPAs serve results as JSON; this turns each array-of-objects into a
+    ``TableCandidate`` (keys = header row) so schema induction downstream is
+    untouched. Pure shape — no swim/sport vocabulary.
+    """
+    try:
+        parsed = json.loads(data.decode("utf-8", "replace"))
+    except Exception as exc:  # not valid JSON after all → treat as text
+        log.info("JSON parse failed (%s); falling back to text", exc)
+        return _extract_text(data)
+
+    tables: list[TableCandidate] = []
+    for arr in _find_object_arrays(parsed):
+        if len(tables) >= _MAX_JSON_TABLES:
+            break
+        header = _union_keys(arr)
+        if len(header) < 1:
+            continue
+        rows: list[list[str]] = [header]
+        for obj in arr[:_MAX_DATA_ROWS]:
+            rows.append([_json_scalar(obj.get(k)) for k in header])
+        tables.append(TableCandidate(rows=rows))
+
+    text_bits: list[str] = []
+    _collect_scalar_text(parsed, text_bits)
+    text = "\n".join(text_bits)
+    return text, _lines_from_text(text), tables
+
+
+def _sniff_delimiter(sample: str) -> str:
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",\t;|").delimiter
+    except Exception:
+        return "\t" if sample.count("\t") > sample.count(",") else ","
+
+
+def _extract_csv(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
+    """CSV/TSV → one TableCandidate. Delimiter sniffed; pure shape."""
+    text = data.decode("utf-8", "replace")
+    delim = _sniff_delimiter(text[:4096])
+    rows: list[list[str]] = []
+    try:
+        for raw in csv.reader(io.StringIO(text), delimiter=delim):
+            cells = [c.strip() for c in raw]
+            if any(cells):
+                rows.append(cells)
+            if len(rows) >= _MAX_DATA_ROWS:
+                break
+    except Exception as exc:  # malformed CSV → keep the text, drop the table
+        log.info("CSV parse failed (%s)", exc)
+    tables = [TableCandidate(rows=rows)] if rows else []
+    return text, _lines_from_text(text), tables
+
+
+def _extract_xlsx(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
+    """XLSX → one TableCandidate per non-empty sheet (openpyxl, read-only)."""
+    try:
+        import openpyxl  # noqa: PLC0415
+    except Exception as exc:  # dependency missing → honest empty stream
+        log.warning("openpyxl unavailable (%s); cannot read xlsx", exc)
+        return "", [], []
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as exc:
+        log.info("xlsx load failed (%s)", exc)
+        return "", [], []
+
+    tables: list[TableCandidate] = []
+    text_bits: list[str] = []
+    try:
+        for ws in wb.worksheets:
+            rows: list[list[str]] = []
+            for raw in ws.iter_rows(values_only=True):
+                cells = ["" if c is None else str(c) for c in raw]
+                if any(c.strip() for c in cells):
+                    rows.append(cells)
+                if len(rows) >= _MAX_DATA_ROWS:
+                    break
+            if rows:
+                tables.append(TableCandidate(rows=rows))
+                text_bits.append(f"[sheet: {ws.title}]")
+                text_bits.extend("\t".join(r) for r in rows)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+    text = "\n".join(text_bits)
+    return text, _lines_from_text(text), tables
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +702,7 @@ def _detect_table_rows(raw_lines: list[str], min_cols: int = 2) -> list[list[str
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def ingest(
     data: bytes,
@@ -505,6 +735,12 @@ def ingest(
         return _extract_zip(data, content_type_hint, source_path=source_path)
     elif fmt == "hy3":
         text, lines, tables = _extract_hy3(data)
+    elif fmt == "json":
+        text, lines, tables = _extract_json(data)
+    elif fmt == "csv":
+        text, lines, tables = _extract_csv(data)
+    elif fmt == "xlsx":
+        text, lines, tables = _extract_xlsx(data)
     elif fmt == "image":
         log.warning(
             "Image input detected.  OCR (tesseract) is not available in this "

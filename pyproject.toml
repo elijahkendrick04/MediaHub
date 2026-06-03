@@ -30,6 +30,9 @@ dependencies = [
   "pypdf>=4.0",
   "beautifulsoup4>=4.12",
   "lxml>=5.0",
+  # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx): read .xlsx
+  # results deterministically, read-only. MIT-licensed.
+  "openpyxl>=3.1",
   "Pillow>=10.0",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.

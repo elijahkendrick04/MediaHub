@@ -6,6 +6,9 @@ lxml>=5.0
 pypdf>=4.0
 pdfminer.six>=20231228
 pdfplumber>=0.11
+# Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx). Leagues and meets
+# publish results as .xlsx; openpyxl reads them deterministically (read-only).
+openpyxl>=3.1
 
 # V8: media generation engine. Playwright pinned to the version whose
 # bundled Chromium revision matches what's reliably installable on
