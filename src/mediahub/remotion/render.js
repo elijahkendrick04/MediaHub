@@ -114,6 +114,10 @@ async function main() {
     chromiumOptions: {
       disableWebSecurity: true,
     },
+    // Match fonts.ts: the default 30s delayRender budget is too tight for
+    // the MeetReel on a 1-CPU deployment. Python's subprocess timeout is
+    // 600s, so 120s here stays well inside the outer budget.
+    timeoutInMilliseconds: 120000,
     pixelFormat: "yuv420p",
   });
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

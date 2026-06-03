@@ -51,7 +51,27 @@ export function ensureBrandFonts(): void {
   document.head.appendChild(style);
 
   // Hold the render until the faces are actually ready (the guardrail).
-  const handle = delayRender("loading brand fonts");
+  // Remotion's default delayRender budget is 30s; on a contended 1-CPU
+  // box the 15s MeetReel (450 frames, multiple pages) can exceed that
+  // while the lighter 6s StoryCard squeaks through — the reel then dies
+  // with "Remotion render failed (exit 1)" pointing here. Give the hold
+  // a generous explicit budget (the Python wrapper allows 600s) and KICK
+  // every face with document.fonts.load() so loading starts immediately
+  // instead of waiting for first layout use — fonts.ready then settles
+  // deterministically and fast.
+  const handle = delayRender("loading brand fonts", {
+    timeoutInMilliseconds: 120000,
+  });
+  try {
+    if (document.fonts && typeof document.fonts.load === "function") {
+      for (const f of FACES) {
+        const weight = f.weight.split(" ")[0] || "400";
+        document.fonts.load(`${weight} 16px '${f.family}'`).catch(() => {});
+      }
+    }
+  } catch {
+    // best-effort kick only — the ready-await below is the guardrail
+  }
   Promise.resolve(document.fonts ? document.fonts.ready : null)
     .then(() => continueRender(handle))
     .catch(() => continueRender(handle));
