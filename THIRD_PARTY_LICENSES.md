@@ -17,6 +17,21 @@ via `requests` already declared in `requirements.txt`.
 
 No additional third-party notices are required for this layer.
 
+## Semantic memory — sqlite-vec (Capability 2)
+
+The semantic caption memory (`mediahub.memory.store`) stores embedding vectors
+in a `vec0` virtual table inside MediaHub's existing SQLite database, via the
+**sqlite-vec** loadable extension. It is a **registry dependency** (installed
+from PyPI, pinned in `requirements.txt`), not vendored source — its upstream
+notice is retained here:
+
+- **sqlite-vec** — © Alex Garcia, with support from Mozilla Builders — dual
+  **MIT / Apache-2.0** (https://github.com/asg017/sqlite-vec). Loaded as an
+  optional native extension; if it cannot load, semantic recall degrades to
+  unavailable rather than failing a run. (Embeddings themselves are computed via
+  a cloud OpenAI-compatible endpoint, so no `fastembed`/ChromaDB code is vendored
+  or required.)
+
 ## In-container SearXNG metasearch (optional, Capability 3)
 
 When `MEDIAHUB_RUN_SEARXNG=1`, the deployment installs and runs **SearXNG**
