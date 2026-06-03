@@ -34,9 +34,9 @@ def _h(s: Any) -> str:
 _PHOTO_INPUT_HTML = (
     '<div style="margin-bottom:14px;padding:12px;background:rgba(34,211,238,0.05);'
     'border:1px dashed var(--border);border-radius:6px">'
-    '<label style="display:block;margin-bottom:6px;font-weight:600">'
+    '<label for="stub-attached-photo" style="display:block;margin-bottom:6px;font-weight:600">'
     'Attach a photo (optional)</label>'
-    '<input type="file" name="attached_photo" accept="image/*" '
+    '<input id="stub-attached-photo" type="file" name="attached_photo" accept="image/*" '
     'style="font-size:13px"/>'
     '<p class="muted" style="font-size:11px;margin:6px 0 0 0">'
     "We'll use this photo when generating the visual for this post. "
@@ -259,8 +259,8 @@ class FreeTextStub(_StubContentType):
   <p class="dim" style="font-size:13px">Type or paste anything — a result, a training session, a milestone. We'll structure it into platform-ready cards.</p>
   <form method="POST" data-loader-text="Reading your moment" data-loader-sub="Drafting captions across platforms…" style="margin-top:16px">
     <div style="margin-bottom:14px">
-      <label>Your notes (anything goes)</label>
-      <textarea name="free_text" rows="7" required
+      <label for="free-text-notes">Your notes (anything goes)</label>
+      <textarea id="free-text-notes" name="free_text" rows="7" required
                 placeholder="e.g. Last Saturday at the County Champs, Alex broke the club record in 100m backstroke by 0.4 seconds and got a standing ovation from the whole team…"></textarea>
     </div>
     <button type="submit" class="btn">Generate content cards →</button>
