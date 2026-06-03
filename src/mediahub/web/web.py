@@ -4993,6 +4993,18 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 
 BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_RG_CSS
 
+# I4 fix — persona cards ("Built for the people who already post the
+# results"). The inline SVGs use stroke="currentColor", so the icon glyph
+# only shows up if .mh-audience-icon carries a visible `color`. Pin it to
+# the lane accent here, appended last so it is the cascade's final word —
+# this matches the visible .mh-trust-cell svg / step-card accent treatment
+# and keeps the icons legible against the dark --surface card background
+# even if the external components layer drifts.
+BASE_CSS += (
+    "\n.mh-audience-icon { color: var(--lane); }"
+    "\n.mh-audience-icon svg { color: var(--lane); }\n"
+)
+
 
 def _render_markdown(text: str) -> str:
     """Tiny, dependency-free markdown subset for the research page."""
@@ -6739,6 +6751,35 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   // previously it only shipped inside the schedule modal (pack pages only),
   // which left the Review page's Approve/Reject buttons + keyboard shortcuts
   // inert.
+  // I2: recompute the Review page's summary indicators from the live
+  // card pile. Counts every .ach-row[data-status]; cards not yet decided
+  // (status 'queue' / missing) stay in Queue. No-ops on pages without the
+  // progress strip (only the Review page renders it).
+  window.mhRecountReview = function() {
+    var strip = document.getElementById('mh-review-progress');
+    if (!strip) return;
+    var rows = document.querySelectorAll('.ach-row[data-status]');
+    var total = rows.length || parseInt(strip.getAttribute('data-wf-total'), 10) || 0;
+    var nApproved = 0, nRejected = 0, nQueue = 0;
+    rows.forEach(function(r){
+      var st = r.dataset.status;
+      if (st === 'approved') nApproved++;
+      else if (st === 'rejected') nRejected++;
+      else nQueue++;
+    });
+    var reviewed = nApproved + nRejected;
+    var pct = total ? Math.round(100 * reviewed / total) : 0;
+    var set = function(id, val){ var el = document.getElementById(id); if (el) el.textContent = val; };
+    var valEl = document.getElementById('mh-wf-value');
+    if (valEl) valEl.innerHTML = reviewed + '<span class="total">/ ' + total + '</span>';
+    set('mh-wf-pct', pct + '%');
+    set('mh-wf-n-queue', nQueue);
+    set('mh-wf-n-approved', nApproved);
+    set('mh-wf-n-rejected', nRejected);
+    var bar = document.getElementById('mh-wf-bar');
+    if (bar) bar.style.width = pct + '%';
+  };
+
   window.mhWorkflowSet = function(runId, cardId, status) {
     if (!runId || !cardId || !status) return Promise.reject(new Error('mhWorkflowSet: missing arg'));
     var base = window._API_BASE || '';
@@ -6788,6 +6829,10 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     // it in sync so the Queue / Approved / Rejected filter reflects the pile.
     var rowCard = btn.closest('.ach-row');
     if (rowCard) rowCard.dataset.status = status;
+    // I2: recompute the run-level summary indicators (Reviewed N/total strip,
+    // progress bar width/percent, Queue/Approved/Rejected tallies) from the
+    // current card states so they live-update without a page reload.
+    mhRecountReview();
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
     window.mhWorkflowSet(runId, cardId, status).then(function(){
@@ -7094,6 +7139,13 @@ def create_app() -> Flask:
             "api_status_json",
             "healthz_usage",
             "healthz_ping",
+            # Installable-PWA endpoints — the browser fetches the manifest,
+            # service-worker script, and icon on every page load (including
+            # for signed-out users), so they must bypass the gate or the
+            # worker script ends up "behind a redirect" and fails to register.
+            "web_manifest",
+            "service_worker",
+            "favicon",
             "static",
         }
     )
@@ -8180,8 +8232,9 @@ def create_app() -> Flask:
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
       <div class="label"><b>—</b><span></span></div>
     </div>
+    <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-      <button id="mh-upload-submit" class="btn" type="submit" disabled aria-disabled="true">Continue &rarr;</button>
+      <button id="mh-upload-submit" class="btn" type="submit">Continue &rarr;</button>
       <a class="btn ghost" href="{url_for('home')}">Cancel</a>
     </div>
   </form>
@@ -8200,7 +8253,25 @@ def create_app() -> Flask:
   var input = form.querySelector('input[type=file]');
   var btn = document.getElementById('mh-upload-submit');
   var preview = document.getElementById('mh-parse-preview');
+  var errEl = document.getElementById('mh-upload-error');
+  var dropzone = form.querySelector('.mh-dropzone');
   if (!input || !btn) return;
+  function hasFile() {{ return !!(input.files && input.files.length && input.files[0]); }}
+  function clearError() {{
+    if (errEl) {{ errEl.hidden = true; errEl.textContent = ''; }}
+    if (dropzone) {{
+      dropzone.classList.remove('is-invalid');
+      dropzone.style.borderColor = '';
+    }}
+  }}
+  function showError(msg) {{
+    if (errEl) {{ errEl.textContent = msg; errEl.hidden = false; }}
+    if (dropzone) {{
+      dropzone.classList.add('is-invalid');
+      dropzone.style.borderColor = 'var(--bad)';
+    }}
+    try {{ input.focus(); }} catch (e) {{}}
+  }}
   function fmtBytes(n) {{
     if (n < 1024) return n + ' B';
     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
@@ -8217,8 +8288,7 @@ def create_app() -> Flask:
   function refresh() {{
     var f = input.files && input.files[0];
     var has = !!f;
-    btn.disabled = !has;
-    btn.setAttribute('aria-disabled', has ? 'false' : 'true');
+    if (has) clearError();
     if (!has) {{ if (preview) preview.removeAttribute('data-shown'); return; }}
     if (!preview) return;
     var info = inferFormat(f.name);
@@ -8228,6 +8298,12 @@ def create_app() -> Flask:
     labelEl.querySelector('span').textContent = info.note;
   }}
   input.addEventListener('change', refresh);
+  form.addEventListener('submit', function(e) {{
+    if (!hasFile()) {{
+      e.preventDefault();
+      showError('Please choose a results file first.');
+    }}
+  }});
   refresh();
 }})();
 </script>
@@ -9465,20 +9541,20 @@ def create_app() -> Flask:
   </div>
   <a class="btn" href="{_pack_url}" style="align-self:flex-start">Open content builder &rarr;</a>
 </div>
-<div class="mh-progress-strip" role="group" aria-label="Review progress">
+<div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}">
   <span class="mh-progress-strip-label">Reviewed</span>
-  <span class="mh-progress-strip-value">{_wf_decided}<span class="total">/ {_wf_grand_total}</span></span>
-  <span class="mh-progress-strip-bar"><span style="width:{_wf_pct}%"></span></span>
-  <span class="mh-progress-strip-label">{_wf_pct}%</span>
+  <span class="mh-progress-strip-value" id="mh-wf-value">{_wf_decided}<span class="total">/ {_wf_grand_total}</span></span>
+  <span class="mh-progress-strip-bar"><span id="mh-wf-bar" style="width:{_wf_pct}%"></span></span>
+  <span id="mh-wf-pct" class="mh-progress-strip-label">{_wf_pct}%</span>
 </div>
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div>
       <h2 style="margin-bottom:var(--sp-3)">Workflow</h2>
       <div class="stat-block">
-        <div class="stat"><div class="l">Queue</div><div class="v">{_wf_n_queue or len(ranked_achs)}</div></div>
-        <div class="stat good"><div class="l">Approved</div><div class="v">{_wf_n_approved}</div></div>
-        <div class="stat bad"><div class="l">Rejected</div><div class="v">{_wf_n_rejected}</div></div>
+        <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_wf_n_queue or len(ranked_achs)}</div></div>
+        <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_wf_n_approved}</div></div>
+        <div class="stat bad"><div class="l">Rejected</div><div class="v" id="mh-wf-n-rejected">{_wf_n_rejected}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -12523,9 +12599,9 @@ Relay team broke club record"></textarea>
             check = checks.get(name) or {}
             if check.get("ok"):
                 badge = '<span class="tag good" style="font-size:11px">ok</span>'
-                detail = check.get("path") or check.get("version") or "&mdash;"
+                detail = check.get("path") or check.get("version") or "—"
                 if isinstance(detail, list):
-                    detail = ", ".join(str(x) for x in detail[:5]) or "&mdash;"
+                    detail = ", ".join(str(x) for x in detail[:5]) or "—"
                 if isinstance(detail, int):
                     detail = str(detail)
                 check_rows += (
@@ -18267,7 +18343,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" id="pc-{_h(card_id_raw)}" style="margin-bottom:14px;page-break-inside:avoid">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="flex:1">
-      <div style="font-size:13px;font-weight:700">{swimmer}{(" &middot; " + event) if event else ""}</div>
+      <div style="font-size:13px;font-weight:700">{swimmer}{(" · " + event) if event else ""}</div>
       <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
