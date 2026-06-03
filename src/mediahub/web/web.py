@@ -11174,7 +11174,7 @@ Relay team broke club record"></textarea>
         "          + '<title>Offline \\u2014 MediaHub</title>'\n"
         "          + '<body style=\"font-family:system-ui,sans-serif;background:rgb(10,11,17);'\n"
         "          + 'color:rgb(245,242,232);display:flex;align-items:center;justify-content:center;'\n"
-        "          + 'height:100vh;margin:0\"><div style=\"text-align:center;padding:24px\">'\n"
+        '          + \'height:100vh;margin:0"><div style="text-align:center;padding:24px">\'\n'
         "          + '<h1 style=\"margin:0 0 8px\">You are offline</h1>'\n"
         "          + '<p style=\"opacity:.7\">Reconnect to use MediaHub.</p></div></body>',\n"
         "          { headers: { 'Content-Type': 'text/html; charset=utf-8' } });\n"
