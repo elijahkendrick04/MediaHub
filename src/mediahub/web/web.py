@@ -2363,6 +2363,58 @@ function copyActiveTone(btn, cardId) {
   });
 }
 
+// Inline caption assist — revise the ACTIVE tone's caption in place. Never
+// posts/approves; it only rewrites wording via /caption/assist and drops the
+// result back into the editable textarea for the human to review.
+function captionAssistToggle(btn, cardId) {
+  var picker = document.getElementById('wf-' + cardId);
+  if (!picker) return;
+  var row = picker.querySelector('.assist-row[data-card="' + cardId + '"]');
+  if (!row) return;
+  row.style.display = (row.style.display === 'block') ? 'none' : 'block';
+}
+function _assistActivePanel(cardId) {
+  var sel = '.tone-panel[data-card="' + cardId + '"]';
+  return document.querySelector(sel + ':not([style*="none"])') || document.querySelector(sel);
+}
+function captionAssistRun(btn, cardId, transform) {
+  var picker = document.getElementById('wf-' + cardId);
+  if (!picker) return;
+  var row = picker.querySelector('.assist-row[data-card="' + cardId + '"]');
+  var statusEl = row ? row.querySelector('.assist-status') : null;
+  var panel = _assistActivePanel(cardId);
+  if (!panel) return;
+  var ta = panel.querySelector('.caption-textarea');
+  var textEl = panel.querySelector('.caption-text');
+  var current = (ta && ta.value) ? ta.value : (textEl ? textEl.textContent.trim() : '');
+  if (!current) { if (statusEl) statusEl.textContent = 'Generate a caption first, then assist it.'; return; }
+  var tone = panel.dataset.tone || 'warm-club';
+  var custom = '';
+  if (transform === 'custom') {
+    var input = row ? row.querySelector('.assist-custom') : null;
+    custom = input ? input.value.trim() : '';
+    if (!custom) { if (statusEl) statusEl.textContent = 'Type a change first.'; return; }
+  }
+  var captionUrl = picker.dataset.captionUrl;
+  if (!captionUrl) return;
+  if (statusEl) statusEl.textContent = 'Revising…';
+  fetch(captionUrl + '/assist', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({current_caption: current, transform: transform, custom: custom, tone: tone})
+  }).then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+    .then(function(o){
+      var j = o.j || {};
+      if (j.error || !j.caption) {
+        if (statusEl) statusEl.textContent = j.message || 'Could not revise the caption.';
+        return;
+      }
+      if (textEl) textEl.textContent = j.caption;
+      if (ta) ta.value = j.caption;
+      if (statusEl) statusEl.textContent = 'Revised — review and edit as you like.';
+    }).catch(function(){ if (statusEl) statusEl.textContent = 'Network error — try again.'; });
+}
+
 // V8: Lazy visual generation. Cached per (card, format) within session.
 var _visualCache = {};
 function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
@@ -2792,10 +2844,23 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         f'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copyActiveTone(this, \'{card_uuid}\')">Copy caption</button>'
         f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="regenerateCaption(this, {repr(_caption_url)}, \'{card_uuid}\')">&#x21BA; Regenerate caption</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="captionAssistToggle(this, \'{card_uuid}\')">&#10024; Assist&hellip;</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="createGraphic(this, {repr(_create_graphic_url)}, \'{card_uuid}\')">&#x2726; Create graphic</button>'
         f'<button class="btn" style="font-size:11px;padding:4px 10px;background:var(--medal);color:var(--medal-ink);border:none" onclick="generateMotion(this, {repr(_motion_url)}, \'{card_uuid}\')">&#x25B6; Generate motion</button>'
         f"{schedule_btn}"
         f'<span class="caption-timestamp" style="font-size:10px;color:var(--ink-muted)"></span>'
+        f"</div>"
+        f'<div class="assist-row" data-card="{card_uuid}" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px dashed var(--border);border-radius:6px">'
+        f'<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px;letter-spacing:0.5px">Assist &mdash; revise the current caption (AI suggests; you approve)</div>'
+        f'<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'shorter\')">Shorter</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'punchier\')">Punchier</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'add_time\')">Add time</button>'
+        f'<button class="btn secondary" style="font-size:11px;padding:3px 9px" onclick="captionAssistRun(this, \'{card_uuid}\', \'tidy\')">Tidy up</button>'
+        f'<input class="assist-custom" type="text" maxlength="140" placeholder="or type a change&hellip;" style="flex:1;min-width:140px;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit" />'
+        f'<button class="btn" style="font-size:11px;padding:3px 10px;background:var(--lane);color:var(--lane-ink);border:none" onclick="captionAssistRun(this, \'{card_uuid}\', \'custom\')">Apply</button>'
+        f"</div>"
+        f'<div class="assist-status" style="font-size:11px;color:var(--ink-muted);margin-top:6px"></div>'
         f"</div>"
         f'<div class="visual-panel" data-card="{card_uuid}" data-create-url="{_h(_create_graphic_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px"></div>'
         f'<div class="motion-panel" data-card="{card_uuid}" data-motion-url="{_h(_motion_url)}" style="display:none;margin-top:10px;padding:12px;background:rgba(244,213,141,0.04);border:1px solid var(--border);border-radius:8px"></div>'
@@ -10429,6 +10494,131 @@ function copyWhyCard(btn, taId) {{
                     "explanation": explanation,
                 }
             )
+
+    @app.route("/api/runs/<run_id>/swim/<swim_id>/caption/assist", methods=["POST"])
+    def api_caption_assist(run_id, swim_id):
+        """Inline caption assist: REVISE an existing caption (shorter / punchier /
+        add the time / tidy / custom) via the existing writer's `requirements`
+        channel. Never invents facts — it only nudges wording. Mirrors
+        api_live_caption's access + achievement lookup."""
+        import urllib.parse as _up
+        from datetime import datetime
+        from datetime import timezone as _tz
+
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()) or not data:
+            return jsonify({"error": "run not found"}), 404
+
+        payload = request.get_json(silent=True) or {}
+        current_caption = (payload.get("current_caption") or "").strip()
+        transform = (payload.get("transform") or "").strip()
+        custom = (payload.get("custom") or "").strip()
+        tone = (payload.get("tone") or "warm-club").strip()
+        if tone not in ("ai", "warm-club", "hype", "data-led"):
+            tone = "warm-club"
+        if not current_caption:
+            return jsonify(
+                {"error": "empty_caption", "message": "Generate a caption first, then assist it."}
+            ), 400
+
+        from mediahub.web.caption_assist import assist_caption, resolve_instruction
+
+        if not resolve_instruction(transform, custom):
+            return jsonify(
+                {"error": "invalid_transform", "message": "Pick a change or type an instruction."}
+            ), 400
+
+        swim_id_dec = _up.unquote(swim_id)
+        ranked = (data.get("recognition_report") or {}).get("ranked_achievements") or []
+        achievement: dict = {}
+        for ra in ranked:
+            a = ra.get("achievement") or {}
+            if a.get("swim_id") == swim_id_dec or (swim_id_dec and swim_id_dec in (a.get("swim_id") or "")):
+                achievement = a
+                break
+        ach_dict = {
+            "swimmer_name": achievement.get("swimmer_name", ""),
+            "event": achievement.get("event", ""),
+            "time": achievement.get("time", ""),
+            "pb": achievement.get("pb", False),
+            "club": data.get("profile_display", ""),
+            "meet": (data.get("meet") or {}).get("name", ""),
+            "place": achievement.get("place", ""),
+            "type": achievement.get("type", ""),
+            "headline": achievement.get("headline", ""),
+        }
+        club_brand = {
+            "club_name": data.get("profile_display", ""),
+            "meet_name": (data.get("meet") or {}).get("name", ""),
+        }
+        club_profile_obj = None
+        voice_profile = None
+        run_profile_id = data.get("profile_id") or ""
+        if run_profile_id:
+            try:
+                club_profile_obj = load_profile(run_profile_id)
+                if club_profile_obj and club_profile_obj.voice_profile:
+                    voice_profile = club_profile_obj.voice_profile
+            except Exception:
+                club_profile_obj = None
+
+        now_iso = datetime.now(_tz.utc).isoformat()
+        from mediahub.media_ai.llm import is_available as _llm_available
+        from mediahub.web.ai_caption import ClaudeUnavailableError as _ClaudeUE
+
+        if not _llm_available():
+            return jsonify(
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": (
+                        "AI captions are unavailable on this deployment. "
+                        "Contact your administrator to enable them."
+                    ),
+                }
+            ), 200
+        try:
+            revised = assist_caption(
+                ach_dict,
+                current_caption,
+                transform,
+                custom=custom,
+                club_brand=club_brand,
+                club_profile=club_profile_obj,
+                tone=tone,
+                voice_profile=voice_profile,
+            )
+        except _ClaudeUE:
+            return jsonify(
+                {"caption": "", "tone": tone, "live": False, "generated_at": now_iso,
+                 "error": "no_key",
+                 "message": "AI captions are unavailable on this deployment."}
+            ), 200
+        except Exception:
+            return jsonify(
+                {"caption": "", "tone": tone, "live": True, "generated_at": now_iso,
+                 "error": "transient",
+                 "message": "The AI is briefly busy — wait a few seconds and try again."}
+            ), 200
+        revised = (revised or "").strip()
+        if not revised:
+            return jsonify(
+                {"caption": "", "tone": tone, "live": True, "generated_at": now_iso,
+                 "error": "transient", "message": "The AI returned nothing — try again."}
+            ), 200
+        return jsonify(
+            {
+                "caption": revised,
+                "original": current_caption,
+                "tone": tone,
+                "transform": transform or "custom",
+                "live": True,
+                "generated_at": now_iso,
+            }
+        )
 
     # ---- V6 PB AUDIT ROUTES ----------------------------------------
 
