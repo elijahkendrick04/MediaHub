@@ -27,6 +27,7 @@ fallback. The LLM reasons about which sources are deliberate
 (guidelines doc, logo dominant colours) vs incidental (every CSS hex
 on a website) and picks accordingly.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,6 +50,7 @@ ALL_SLOTS: tuple[str, ...] = SLOTS + (FOURTH_SLOT,)
 # ---------------------------------------------------------------------------
 # Hex normalisation helpers
 # ---------------------------------------------------------------------------
+
 
 def _normalise_hex(value: str) -> Optional[str]:
     """Normalise a hex string to lowercase #rrggbb. Returns None if invalid."""
@@ -100,17 +102,72 @@ def _clean_hex_list(items) -> list[str]:
 # Source aggregation
 # ---------------------------------------------------------------------------
 
+
+class _SourcesWithUsage(dict):
+    """A plain ``dict[str, list[str]]`` of labelled colour sources that
+    also carries the raw frequency-ranked usage evidence.
+
+    The visible mapping keeps the historical ``{label: [hex, ...]}`` shape
+    so the resolver's colour ``universe`` and every existing caller keep
+    working untouched. ``.colour_usage`` holds ``{label: [(hex, count), ...]}``
+    for the usage source lines, letting ``_build_llm_prompt`` show the AI
+    each colour WITH its usage count — the decisive brand signal.
+    """
+
+    # Accept the same call signatures as ``dict`` so the object survives
+    # being copied / round-tripped by ``dataclasses.asdict`` (which does
+    # ``type(obj)(iterable)``) without ``colour_usage`` being a required
+    # arg. When reconstructed that way the usage evidence simply resets
+    # to empty — harmless, since the resolver reads it via getattr.
+    def __init__(self, *args, usage: Optional[dict] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.colour_usage: dict[str, list[tuple[str, int]]] = usage or {}
+
+
+_USAGE_SUFFIX = " colours by CSS usage"
+
+
+def _clean_usage_pairs(items) -> list[tuple[str, int]]:
+    """Coerce a ``[(hex, count), ...]``-like into clean, ordered pairs.
+
+    Accepts the raw colour-usage evidence (list of ``(hex, count)`` or
+    ``[hex, count]``), normalises each hex to ``#rrggbb``, drops invalid
+    entries, de-dupes (keeping the first/highest), and preserves the
+    incoming order (the evidence map is already frequency-sorted desc).
+    """
+    if not isinstance(items, (list, tuple)):
+        return []
+    seen: set[str] = set()
+    out: list[tuple[str, int]] = []
+    for pair in items:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        hexv = _normalise_hex(pair[0]) if isinstance(pair[0], str) else None
+        if not hexv or hexv in seen:
+            continue
+        try:
+            count = int(pair[1])
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        seen.add(hexv)
+        out.append((hexv, count))
+    return out
+
+
 def gather_colour_sources(
     *,
     link_palette_signals: Optional[dict] = None,
     brand_guidelines: Optional[dict] = None,
     brand_logos: Optional[list[dict]] = None,
+    colour_usage: Optional[dict] = None,
 ) -> dict[str, list[str]]:
     """Build a labelled mapping of every colour signal collected.
 
     Returns a dict like:
         {
-          "website (palette_mentions)": ["#0a2540", ...],
+          "website colours by CSS usage": ["#1f336c", "#2ea3f2", ...],
           "instagram (palette_mentions)": [...],
           "brand_guidelines (palette_mentions)": [...],
           "logo: navy-on-white.svg (dominant)": [...],
@@ -119,8 +176,27 @@ def gather_colour_sources(
 
     Order of keys is stable; values are de-duped per source. Empty
     sources are omitted.
+
+    ``colour_usage`` carries the frequency-ranked colour-USAGE evidence
+    per platform (``{platform: [(hex, count), ...]}`` from
+    ``dna_capture.build_colour_usage_map``). This is the decisive signal:
+    colours used MANY times across the full site CSS are far more likely
+    to be brand than colours declared once. The raw counts are stashed on
+    the returned dict's ``.colour_usage`` attribute so ``_build_llm_prompt``
+    can show each colour WITH its count; the visible source lists keep the
+    plain ``[hex, ...]`` shape so the universe / existing callers are
+    unaffected.
     """
     sources: dict[str, list[str]] = {}
+    usage_counts: dict[str, list[tuple[str, int]]] = {}
+
+    if isinstance(colour_usage, dict):
+        for platform, pairs in colour_usage.items():
+            cleaned = _clean_usage_pairs(pairs)
+            if cleaned:
+                key = f"{platform}{_USAGE_SUFFIX}"
+                sources[key] = [h for h, _ in cleaned]
+                usage_counts[key] = cleaned
 
     if isinstance(link_palette_signals, dict):
         for platform, hexes in link_palette_signals.items():
@@ -141,17 +217,14 @@ def gather_colour_sources(
             if not cleaned:
                 continue
             label = (
-                logo.get("label")
-                or logo.get("original_filename")
-                or logo.get("logo_id")
-                or "logo"
+                logo.get("label") or logo.get("original_filename") or logo.get("logo_id") or "logo"
             )
             key = f"logo: {str(label)[:80]} (dominant)"
             if key in sources:
                 key = f"logo: {logo.get('logo_id', '')} (dominant)"
             sources[key] = cleaned
 
-    return sources
+    return _SourcesWithUsage(sources, usage=usage_counts)
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +232,43 @@ def gather_colour_sources(
 # ---------------------------------------------------------------------------
 
 _LLM_SYSTEM = (
-    "You are a brand-identity expert. You receive colour samples "
-    "collected from many sources for one organisation and decide which "
-    "colours form the actual brand palette. Be deliberate. Reason "
-    "explicitly about which signals are deliberate (brand guidelines "
-    "document, logo dominant colours) and which are incidental (every "
-    "CSS hex scraped off a marketing page). Pure white and pure black "
-    "should only appear in the chosen palette if they are explicitly "
-    "part of the brand (e.g. called out in the guidelines, or the "
-    "primary logo colour). Never invent colours the inputs don't "
-    "contain."
+    "You are a brand-identity expert. You are given the colour evidence "
+    "collected for ONE organisation and you decide which colours form its "
+    "actual brand palette (primary, secondary, accent, optionally a "
+    "fourth).\n"
+    "\n"
+    "THE DECISIVE SIGNAL IS USAGE FREQUENCY. Website colours arrive WITH a "
+    "usage count, written as `#rrggbb\u00d7N`, where N is how many times that "
+    "colour appears across the site's full CSS. A colour used MANY times "
+    "(navy used 21 times, a blue used 52 times) is almost certainly a brand "
+    "colour. A colour declared only once or twice is almost certainly "
+    "incidental and should be ignored.\n"
+    "\n"
+    "RECOGNISE AND IGNORE GENERIC CMS / PAGE-BUILDER DEFAULT PALETTES. Club "
+    "sites are built on WordPress/Gutenberg, Divi, Elementor, Material and "
+    "Bootstrap, which inline their stock swatches on every page whether or "
+    "not the club uses them. Treat the following as DEFAULTS to ignore "
+    "UNLESS the colour is clearly DOMINANT in usage (a high count), in which "
+    "case it may genuinely be the brand:\n"
+    "  - WordPress/Gutenberg: #cf2e2e #ff6900 #fcb900 #7bdcb5 #00d084 "
+    "#8ed1fc #0693e3 #abb8c3 #eb144c #f78da7 #9900ef\n"
+    "  - Material: #f44336 #e91e63 #9c27b0 #673ab7 #3f51b5 #2196f3 #03a9f4 "
+    "#00bcd4 #009688 #4caf50 #8bc34a #cddc39 #ffeb3b #ffc107 #ff9800 "
+    "#ff5722\n"
+    "  - Divi: #2ea3f2 #7a00df #4721fb #e02b20 #e09900\n"
+    "  - Elementor: #6ec1e4 #61ce70 #f54040 #6c757d\n"
+    "  - Bootstrap: #0d6efd #6610f2 #6f42c1 #d63384 #dc3545 #fd7e14 #198754 "
+    "#20c997 #0dcaf0\n"
+    "\n"
+    "OTHER SOURCES. Colours in the brand-guidelines document and the logo "
+    "dominant colours are DELIBERATE choices; a colour that appears in BOTH "
+    "the high-usage site CSS AND the logo/guidelines is almost certainly the "
+    "primary. Prefer picks that are corroborated across sources.\n"
+    "\n"
+    "RULES. Pick ONLY from the colours supplied below \u2014 never invent a hex "
+    "value. Pure white (#ffffff) and pure black (#000000) belong in the "
+    "palette only when the brand explicitly uses them as a key colour. "
+    "Output lower-case #rrggbb. Return JSON only."
 )
 
 
@@ -178,16 +278,26 @@ def _build_llm_prompt(
     voice_summary: str,
     sources: dict[str, list[str]],
     allow_fourth: bool,
+    usage_counts: Optional[dict[str, list[tuple[str, int]]]] = None,
 ) -> str:
+    usage_counts = usage_counts or {}
     lines = [
         f"Organisation: {org_name or '(unnamed)'}",
         f"Voice summary: {voice_summary or '(none)'}",
         "",
-        "Colour signals collected, labelled by source:",
+        "Colour evidence collected, labelled by source. Website colours are "
+        "shown WITH their usage count across the full site CSS as "
+        "`#rrggbb\u00d7N` (N = times used) \u2014 higher N means more likely to be "
+        "a real brand colour:",
     ]
     if sources:
         for label, hexes in sources.items():
-            lines.append(f"  - {label}: " + ", ".join(hexes[:12]))
+            pairs = usage_counts.get(label)
+            if pairs:
+                rendered = ", ".join(f"{h}\u00d7{c}" for h, c in pairs[:24])
+            else:
+                rendered = ", ".join(hexes[:12])
+            lines.append(f"  - {label}: " + rendered)
     else:
         lines.append("  (no colour signals collected)")
 
@@ -203,23 +313,23 @@ def _build_llm_prompt(
             '  fourth:    string "#rrggbb" OR "" — only set if the org clearly has a 4th brand colour; otherwise empty'
         )
     lines += [
-        '  reasoning: short string (<=240 chars) explaining which sources informed each pick',
+        "  reasoning: short string (<=240 chars) explaining which sources informed each pick",
         "",
         "Guidance:",
-        "  - Colours mentioned EXPLICITLY in the brand-guidelines document outweigh CSS hex scraped from a website.",
-        "  - Colours appearing across multiple independent sources are stronger signals than one-off CSS values.",
-        "  - Logo dominant colours are deliberate (the org chose them); website CSS is often incidental.",
-        "  - If the same colour shows up in the guidelines AND in a logo AND on the site, it is almost certainly the primary.",
+        "  - USAGE COUNT IS DECISIVE: colours used MANY times across the site CSS are far more likely to be brand than colours declared only once or twice.",
+        "  - RECOGNISE AND IGNORE generic CMS / page-builder DEFAULT palettes (WordPress/Gutenberg, Material, Divi, Elementor, Bootstrap) UNLESS such a colour is clearly DOMINANT in usage here \u2014 then it may genuinely be the brand.",
+        "  - Examples of default swatches to ignore unless dominant: WordPress #cf2e2e #ff6900 #fcb900 #00d084 #0693e3 #9900ef; Material #f44336 #e91e63 #9c27b0 #2196f3 #ffeb3b #ff9800; Divi #2ea3f2 #7a00df #4721fb; Elementor #6ec1e4 #61ce70 #f54040; Bootstrap #0d6efd #6610f2 #d63384 #dc3545.",
+        "  - Colours mentioned EXPLICITLY in the brand-guidelines document and the logo dominant colours are deliberate; prefer picks corroborated there.",
+        "  - If the same colour shows high usage AND appears in the guidelines/logo, it is almost certainly the primary.",
         "  - Pure white (#ffffff) and pure black (#000000) only belong in the chosen palette if the brand explicitly uses them as a key colour.",
-        "  - Every chosen colour MUST come from the sources above. Do not invent new hex values.",
+        "  - Every chosen colour MUST come from the colours above. Do not invent new hex values.",
         "  - All hex values lower-case #rrggbb.",
         "No prose, no fences, no commentary — only the JSON object.",
     ]
     return "\n".join(lines)
 
 
-def _validate_picks(raw: object, *, allow_fourth: bool,
-                    universe: set[str]) -> dict:
+def _validate_picks(raw: object, *, allow_fourth: bool, universe: set[str]) -> dict:
     """Coerce the LLM response into a clean palette dict.
 
     The LLM is instructed not to invent colours; we enforce that here by
@@ -286,45 +396,48 @@ def resolve_palette(
     # least one chromatic colour exists, white/grey stay in the
     # universe and remain valid as an accent.
     if not any(_is_chromatic(h) for h in universe):
-        log.debug("palette: all %d candidate colours achromatic; no palette",
-                  len(universe))
+        log.debug("palette: all %d candidate colours achromatic; no palette", len(universe))
         return {}
 
     from mediahub.media_ai.llm import (
-        ClaudeUnavailableError, generate_json, is_available,
+        ClaudeUnavailableError,
+        generate_json,
+        is_available,
     )
+
     if not is_available():
         raise ClaudeUnavailableError(
             "No cloud LLM provider is reachable; cannot resolve brand "
             "palette. Configure GEMINI_API_KEY or ANTHROPIC_API_KEY."
         )
 
+    # The colour-usage counts ride on the sources object (when it came
+    # from gather_colour_sources). Surface them so the prompt can show
+    # each website colour WITH its CSS-usage frequency.
+    usage_counts = getattr(sources, "colour_usage", None) or {}
     prompt = _build_llm_prompt(
         org_name=org_name,
         voice_summary=voice_summary,
         sources=sources,
         allow_fourth=allow_fourth,
+        usage_counts=usage_counts,
     )
     try:
-        raw = generate_json(prompt, system=_LLM_SYSTEM,
-                            max_tokens=600, fallback={})
+        raw = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=600, fallback={})
     except Exception as e:
         log.debug("palette resolver LLM call failed: %s", e)
-        raise ClaudeUnavailableError(
-            f"Palette resolver LLM call failed: {e}"
-        ) from e
+        raise ClaudeUnavailableError(f"Palette resolver LLM call failed: {e}") from e
 
     picks = _validate_picks(raw, allow_fourth=allow_fourth, universe=universe)
     if not picks:
-        raise ClaudeUnavailableError(
-            "The LLM returned no usable palette picks."
-        )
+        raise ClaudeUnavailableError("The LLM returned no usable palette picks.")
     return picks
 
 
 # ---------------------------------------------------------------------------
 # Manual override handling
 # ---------------------------------------------------------------------------
+
 
 def sanitise_manual_palette(
     *,
@@ -391,6 +504,7 @@ def effective_palette(
 # Slot reordering — let the user swap colours between roles
 # ---------------------------------------------------------------------------
 
+
 def present_slots(palette: Optional[dict]) -> list[str]:
     """Return the slots that carry a valid hex, in canonical order.
 
@@ -427,8 +541,7 @@ def reorder_palette(palette: Optional[dict], order: Sequence[str]) -> dict:
     identity = {s: _normalise_hex(palette[s]) for s in present}
     if sorted(clean_order) != sorted(present):
         return identity
-    return {present[i]: _normalise_hex(palette[clean_order[i]])
-            for i in range(len(present))}
+    return {present[i]: _normalise_hex(palette[clean_order[i]]) for i in range(len(present))}
 
 
 def rotate_palette(palette: Optional[dict], steps: int = 1) -> dict:

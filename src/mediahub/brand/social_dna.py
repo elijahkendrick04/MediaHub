@@ -21,6 +21,7 @@ legacy ClubProfile-friendly dict shape.
 Public surface (unchanged):
     capture_from_socials(social_links, website_url, *, force=False) -> dict
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -54,6 +55,7 @@ SUPPORTED_PLATFORMS: tuple[str, ...] = (
 # capture step can be expensive when the LLM is involved, so a stable
 # cache key avoids re-running on every form submit).
 # ---------------------------------------------------------------------------
+
 
 def _cache_dir() -> Path:
     base = os.environ.get("DATA_DIR")
@@ -107,6 +109,7 @@ def _now_iso() -> str:
 # don't need to change.
 # ---------------------------------------------------------------------------
 
+
 def _empty_result(primary_url: str, status: str) -> dict:
     return {
         "brand_voice_summary": "",
@@ -127,6 +130,10 @@ def _empty_result(primary_url: str, status: str) -> dict:
         # (brand.palette) can combine link signals with guidelines doc
         # palette mentions and logo dominant colours.
         "brand_palette_signals": {},
+        # Per-source colour-USAGE evidence (frequency-ranked) so the AI
+        # resolver can weigh each colour by how often the site actually
+        # uses it: {platform: [[hex, count], ...]}.
+        "brand_palette_usage": {},
     }
 
 
@@ -156,9 +163,7 @@ def _map_handlers_output(
     if not handler_out.get("any_real") and not dna:
         # Nothing readable at all.
         out["brand_capture_status"] = "fetch_failed_all"
-        out["social_links_status"] = {
-            k: v.get("status", "unknown") for k, v in state.items()
-        }
+        out["social_links_status"] = {k: v.get("status", "unknown") for k, v in state.items()}
         out["link_capture_state"] = state
         return out
 
@@ -170,24 +175,27 @@ def _map_handlers_output(
     pal = _palette_from_extractor(dna)
     if pal:
         out["brand_palette_extracted"] = pal
-    out["social_links_status"] = {
-        k: v.get("status", "unknown") for k, v in state.items()
-    }
+    out["social_links_status"] = {k: v.get("status", "unknown") for k, v in state.items()}
     out["link_capture_state"] = state
-    out["captions_captured"] = sum(
-        1 for s in state.values() if s.get("voice_digest")
-    )
+    out["captions_captured"] = sum(1 for s in state.values() if s.get("voice_digest"))
     # Per-link palette_mentions (added by link_handlers.process_links).
     # The unified palette resolver merges these with the brand-guidelines
     # palette_mentions and the logos' dominant colours so the final
     # primary/secondary/accent pick is informed by every input source,
     # not just the richest one.
     signals: dict[str, list[str]] = {}
+    usage: dict[str, list] = {}
     for platform, entry in state.items():
-        mentions = entry.get("palette_mentions") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        mentions = entry.get("palette_mentions")
         if isinstance(mentions, list) and mentions:
             signals[platform] = list(mentions)
+        cu = entry.get("colour_usage")
+        if isinstance(cu, list) and cu:
+            usage[platform] = list(cu)
     out["brand_palette_signals"] = signals
+    out["brand_palette_usage"] = usage
     out["brand_capture_status"] = "ok" if handler_out.get("any_real") else "ok_heuristic"
     return out
 
@@ -195,6 +203,7 @@ def _map_handlers_output(
 # ---------------------------------------------------------------------------
 # Public API — unchanged signature, AI-driven internals
 # ---------------------------------------------------------------------------
+
 
 def capture_from_socials(
     social_links: Optional[dict[str, str]] = None,
@@ -211,11 +220,7 @@ def capture_from_socials(
     AI-driven ``link_handlers`` + ``link_learners`` pipeline. No
     hardcoded "if instagram do X" logic remains here.
     """
-    social_links = {
-        k.lower(): (v or "").strip()
-        for k, v in (social_links or {}).items()
-        if v
-    }
+    social_links = {k.lower(): (v or "").strip() for k, v in (social_links or {}).items() if v}
     website_url = (website_url or "").strip()
     if website_url and not re.match(r"^https?://", website_url, re.I):
         website_url = "https://" + website_url

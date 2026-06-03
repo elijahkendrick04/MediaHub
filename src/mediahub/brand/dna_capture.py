@@ -38,6 +38,14 @@ _USER_AGENT = "MediaHubBrandDNA/1.0 (+https://mediahub.example/about)"
 _FETCH_TIMEOUT = 15
 _MAX_HTML_BYTES = 2_000_000  # 2 MB cap to avoid runaway pages
 
+# Bounds for the best-effort linked-stylesheet fetch that enriches the
+# colour-usage evidence. Real brand colours live in external CSS, not the
+# page HTML; we pull a few stylesheets so the AI sees full-site usage.
+_CSS_FETCH_MAX = 3  # at most N stylesheets per page
+_CSS_FETCH_BYTES = 512_000  # ~512 KB cap per stylesheet
+_CSS_FETCH_TIMEOUT = 6  # seconds, per stylesheet
+_COLOUR_USAGE_TOP = 24  # top-N chromatic colours returned as evidence
+
 
 # ---------------------------------------------------------------------------
 # Cache
@@ -156,6 +164,206 @@ def _extract_colours_from_html(html: str) -> list[str]:
         return (is_greyscale, -n)
 
     return [c for c, _ in sorted(counts.items(), key=_key)]
+
+
+# ---------------------------------------------------------------------------
+# Colour-USAGE evidence (with frequency), incl. linked stylesheets
+# ---------------------------------------------------------------------------
+#
+# The brand-palette decision is made by the cloud LLM, but it can only be
+# as good as the evidence it sees. A flat list of "every hex on the page"
+# surfaces the unused DEFAULT swatches that WordPress / Divi / Elementor /
+# Material / Bootstrap inline on every site — and the LLM, given no other
+# signal, picks them. The decisive signal is how OFTEN each colour is
+# actually used across the full CSS: the real brand navy turns up dozens of
+# times; a stray builder default turns up once or twice.
+#
+# These helpers gather that evidence (a [(hex, count), ...] map) — they do
+# NOT choose the palette. The white/black/near-grey filter below is data
+# hygiene (UI tokens flood the count), not a brand decision.
+
+_LINK_CSS_RE = re.compile(
+    r"<link\b[^>]*?>",
+    re.IGNORECASE | re.DOTALL,
+)
+_REL_ATTR_RE = re.compile(r"""rel\s*=\s*["']?([^"'>]+)""", re.IGNORECASE)
+_HREF_ATTR_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+
+def _usage_is_chromatic(r: int, g: int, b: int) -> bool:
+    """Data hygiene: reject pure white/black and near-grey UI tokens.
+
+    Mirrors the filter used by the legacy first-appearance scan. A colour
+    is kept when it carries real hue — the spread between the max and min
+    RGB channel is >= 8 — UNLESS it is an extreme (very-near white/black),
+    which page chrome dumps in bulk. This is evidence hygiene; the AI still
+    decides which of the surviving chromatic colours are the brand.
+    """
+    if max(r, g, b) - min(r, g, b) < 8:
+        # near-grey: keep only the extremes are still noise, drop mid-greys
+        if max(r, g, b) < 240 and min(r, g, b) > 15:
+            return False
+    return True
+
+
+def build_colour_usage_map(
+    text: str,
+    *,
+    top: int = _COLOUR_USAGE_TOP,
+) -> list[tuple[str, int]]:
+    """Count every distinct chromatic ``#rrggbb`` in ``text`` by frequency.
+
+    ``text`` is the combined (page HTML + any fetched stylesheet) blob.
+    Returns ``[(hex, count), ...]`` sorted by count desc (ties broken by
+    hex for determinism), capped at ``top``. Pure white, pure black and
+    near-grey are dropped as data hygiene (see ``_usage_is_chromatic``);
+    this is evidence-gathering for the AI, NOT a brand decision.
+    """
+    if not text:
+        return []
+    counts: dict[str, int] = {}
+    for m in _COLOUR_RE.findall(text):
+        norm = _normalise_hex(m)
+        if len(norm) != 7:  # only count full #rrggbb (3-digit expanded above)
+            continue
+        if norm in ("#ffffff", "#000000"):
+            continue
+        try:
+            r, g, b = int(norm[1:3], 16), int(norm[3:5], 16), int(norm[5:7], 16)
+        except ValueError:
+            continue
+        if not _usage_is_chromatic(r, g, b):
+            continue
+        counts[norm] = counts.get(norm, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ranked[:top]
+
+
+def _stylesheet_hrefs(html: str) -> list[str]:
+    """Extract ``href`` of every ``<link rel="stylesheet">`` in the HTML."""
+    hrefs: list[str] = []
+    for tag in _LINK_CSS_RE.findall(html or ""):
+        rel_m = _REL_ATTR_RE.search(tag)
+        if not rel_m or "stylesheet" not in rel_m.group(1).lower():
+            continue
+        href_m = _HREF_ATTR_RE.search(tag)
+        if not href_m:
+            continue
+        href = href_m.group(1).strip()
+        if href and href not in hrefs:
+            hrefs.append(href)
+    return hrefs
+
+
+def _default_css_fetcher(css_url: str) -> Optional[str]:
+    """Best-effort GET of one stylesheet. Returns text or None. Never raises."""
+    try:
+        import requests
+    except Exception:
+        return None
+    try:
+        r = requests.get(
+            css_url,
+            headers={"User-Agent": _USER_AGENT, "Accept": "text/css,*/*;q=0.1"},
+            timeout=_CSS_FETCH_TIMEOUT,
+            allow_redirects=True,
+            stream=False,
+        )
+    except Exception as e:
+        log.debug("css fetch failed for %s: %s", css_url, e)
+        return None
+    if r.status_code != 200:
+        return None
+    text = r.text or ""
+    if len(text) > _CSS_FETCH_BYTES:
+        text = text[:_CSS_FETCH_BYTES]
+    return text
+
+
+def fetch_linked_css(
+    html: str,
+    base_url: str,
+    *,
+    fetcher=None,
+    max_sheets: int = _CSS_FETCH_MAX,
+) -> str:
+    """Best-effort fetch of up to ``max_sheets`` linked stylesheets.
+
+    Parses ``<link rel="stylesheet" href=...>`` from ``html``, resolves
+    each href against ``base_url``, and fetches it (same-origin first,
+    then obvious CDNs). Returns the concatenated CSS text. Any failure on
+    any sheet is silently ignored — this NEVER raises and NEVER blocks the
+    crawl; missing CSS simply means thinner colour evidence.
+
+    ``fetcher`` is injectable for tests: a callable ``(url) -> str|None``.
+    """
+    if not html:
+        return ""
+    fetch = fetcher or _default_css_fetcher
+    try:
+        base_host = urlparse(base_url).netloc.lower()
+    except Exception:
+        base_host = ""
+    pieces: list[str] = []
+    fetched = 0
+    for href in _stylesheet_hrefs(html):
+        if fetched >= max_sheets:
+            break
+        try:
+            abs_url = urljoin(base_url, href)
+        except Exception:
+            continue
+        if not abs_url.lower().startswith(("http://", "https://")):
+            continue
+        # Prefer same-origin; allow obvious CDN hosts (they serve the
+        # builder/theme CSS where real usage lives).
+        try:
+            host = urlparse(abs_url).netloc.lower()
+        except Exception:
+            continue
+        same_origin = host == base_host
+        looks_cdn = any(
+            tok in host
+            for tok in (
+                "cdn",
+                "jsdelivr",
+                "unpkg",
+                "cloudflare",
+                "cloudfront",
+                "fonts.googleapis",
+                "bootstrapcdn",
+                "staticfile",
+            )
+        )
+        if not (same_origin or looks_cdn):
+            continue
+        css = None
+        try:
+            css = fetch(abs_url)
+        except Exception as e:
+            log.debug("css fetcher raised for %s: %s", abs_url, e)
+            css = None
+        if css:
+            pieces.append(css)
+            fetched += 1
+    return "\n".join(pieces)
+
+
+def colour_usage_evidence(
+    html: str,
+    url: str,
+    *,
+    css_fetcher=None,
+) -> list[tuple[str, int]]:
+    """End-to-end colour-usage evidence for one page.
+
+    Combines the page HTML with up to ``_CSS_FETCH_MAX`` linked
+    stylesheets and returns the frequency-ranked chromatic colour map.
+    Best-effort: a CSS fetch failure just yields HTML-only evidence.
+    """
+    css = fetch_linked_css(html, url, fetcher=css_fetcher)
+    combined = (html or "") + ("\n" + css if css else "")
+    return build_colour_usage_map(combined)
 
 
 def _extract_signals(html: str, url: str) -> dict:
@@ -457,4 +665,9 @@ def capture_brand_dna(website_url: str, *, force: bool = False) -> dict:
     return out
 
 
-__all__ = ["capture_brand_dna"]
+__all__ = [
+    "capture_brand_dna",
+    "build_colour_usage_map",
+    "fetch_linked_css",
+    "colour_usage_evidence",
+]
