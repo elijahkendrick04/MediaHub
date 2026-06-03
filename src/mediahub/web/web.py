@@ -8402,20 +8402,33 @@ def create_app() -> Flask:
         prof_accent = "#FFD86E"
         prof_logo_html = ""
         if active_prof is not None:
-            prof_primary = (getattr(active_prof, "brand_primary", "") or prof_primary).strip()
-            prof_secondary = (getattr(active_prof, "brand_secondary", "") or prof_secondary).strip()
-            # Accent must honour the user's confirmed override the same way
-            # primary/secondary do. Primary/secondary already read
-            # ``brand_primary``/``brand_secondary``, which the
-            # /organisation/setup save keeps in step with the manual
-            # override via ``effective_palette``. Accent has no such mirror,
-            # so resolve it through the canonical resolver here: the manual
-            # slot wins per-slot, falling back to the AI's extracted pick.
+            # Seed the run's palette the same way the site chrome resolves it,
+            # so the colours a run starts from match what the user confirmed at
+            # /organisation/setup. The manual override wins per-slot, falling
+            # back to the AI's extracted pick. Reading the raw
+            # ``brand_primary``/``brand_secondary`` fields directly is unsafe:
+            # for an org whose colours came purely from the AI pick (the user
+            # never did a manual "Save brand colours"), those legacy fields
+            # stay at the ``#A30D2D`` class default, so runs were seeded red
+            # while the chrome correctly showed the brand. Resolve all three
+            # slots through ``effective_palette`` and only fall back to the
+            # legacy fields, then the literal default, when the resolver is
+            # empty for that slot.
             from mediahub.brand.palette import effective_palette as _effective_palette
 
             _resolved_palette = _effective_palette(
                 manual=getattr(active_prof, "brand_palette_manual", {}) or {},
                 extracted=getattr(active_prof, "brand_palette_extracted", {}) or {},
+            )
+            prof_primary = (
+                _resolved_palette.get("primary")
+                or (getattr(active_prof, "brand_primary", "") or "").strip()
+                or prof_primary
+            )
+            prof_secondary = (
+                _resolved_palette.get("secondary")
+                or (getattr(active_prof, "brand_secondary", "") or "").strip()
+                or prof_secondary
             )
             if _resolved_palette.get("accent"):
                 prof_accent = _resolved_palette["accent"]
