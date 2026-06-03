@@ -16492,7 +16492,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '</div>'
             )
 
-        new_org_url = url_for("organisation_setup")
+        new_org_url = url_for("organisation_setup", fresh="1")
         cards_html += (
             f'<a class="mh-new-profile" href="{new_org_url}">'
             '<div><div class="plus">+</div>'
@@ -16584,7 +16584,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ask to re-run it.
     @app.route("/organisation/setup", methods=["GET"])
     def organisation_setup():
-        prof = _active_profile()
+        # "Create new organisation" links here with ?fresh=1. The user has
+        # explicitly asked for a blank slate, so we must NOT pre-fill the
+        # form — or show the "what we learned" preview, the uploaded logo,
+        # or the loaded guidelines document — from whatever org they happen
+        # to be signed in to. Without this, a brand-new org showed another
+        # club's name, links, logo and guidelines on screen (and risked the
+        # user building a new org on top of inherited assets). The active
+        # session org is left untouched; building with a new name creates a
+        # fresh profile as normal.
+        prof = None if request.args.get("fresh") else _active_profile()
         # Pre-fill from any existing profile so refreshing the page doesn't
         # wipe what the user just typed.
         pid = prof.profile_id if prof else ""
