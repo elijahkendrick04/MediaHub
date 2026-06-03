@@ -21017,8 +21017,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     # 2 workers because each due (task, UTC-slot) is fired via a single atomic
     # SQLite claim — see mediahub.scheduler / mediahub.workflow.schedule.
     try:
+        from mediahub.autonomy.app_env import register_autonomy_task
         from mediahub.scheduler import start_scheduler
 
+        # Register the (off-by-default) autonomy task type before the tick loop
+        # starts, so a scheduled "prepare my pack for review" run can fire.
+        register_autonomy_task()
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)

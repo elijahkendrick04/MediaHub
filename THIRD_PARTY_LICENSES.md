@@ -54,6 +54,14 @@ client is original MediaHub code on the existing `requests` dependency.
   **Apache-2.0 / GPL-2.0** (https://github.com/binwiederhier/ntfy). Used
   unmodified over its HTTP API; no ntfy code is bundled or linked.
 
+## Bounded autonomy runner (`mediahub.autonomy`)
+
+The autonomy runner is original MediaHub code built on MediaHub's **own**
+bounded tool-loop (`ai_core.ask_with_tools`, Capability 1) and a fixed,
+narrow tool registry. It **vendors no third-party agent / loop source** — no
+external agent framework is copied or linked — so no upstream notice is
+required for it.
+
 ---
 
 _When a future change vendors third-party source (as opposed to a registry

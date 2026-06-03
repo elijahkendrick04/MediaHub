@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Council verdict — bounded autonomy runner</title>
+<style>
+  :root { --ink:#1a1d24; --muted:#5b6270; --line:#e4e7ec; --bg:#fbfcfd; --accent:#2f6f4f; --warn:#b4541a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.55; }
+  .wrap { max-width:860px; margin:0 auto; padding:40px 24px 80px; }
+  h1 { font-size:25px; margin:0 0 6px; letter-spacing:-0.01em; }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:26px; }
+  .q { background:#fff; border:1px solid var(--line); border-left:3px solid var(--warn); border-radius:10px; padding:16px 18px; margin-bottom:26px; font-size:15px; }
+  .q b { display:block; font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:var(--warn); margin-bottom:6px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.07em; color:var(--muted); margin:32px 0 12px; }
+  .verdict { background:#fff; border:1px solid var(--line); border-radius:12px; padding:8px 22px 18px; }
+  .verdict h3 { font-size:15px; margin:18px 0 8px; }
+  .verdict ul { margin:0 0 4px; padding-left:20px; }
+  .verdict li { margin-bottom:7px; }
+  .first { background:#fdf2ec; border:1px solid #f0d4c4; border-radius:10px; padding:14px 18px; margin-top:14px; font-size:15px; }
+  .first b { color:var(--warn); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:6px 0 4px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13px; }
+  .card .who { font-weight:650; margin-bottom:3px; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  details { background:#fff; border:1px solid var(--line); border-radius:9px; margin-bottom:9px; padding:2px 14px; }
+  summary { cursor:pointer; padding:10px 0; font-weight:600; font-size:14px; }
+  details p { margin:4px 0 12px; font-size:14px; color:#2c313b; }
+  .foot { color:var(--muted); font-size:12px; margin-top:36px; border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bounded autonomy runner &mdash; security-first</h1>
+  <div class="sub">LLM Council verdict &middot; 2026-06-03 &middot; MediaHub Section 6 step 6 (the report's #1 security risk)</div>
+
+  <div class="q">
+    <b>The decision</b>
+    How to build an internal multi-step engine that prepares content on a club's behalf &mdash; with <b style="display:inline">no shell/file/web/MCP substrate</b> and that <b style="display:inline">never auto-publishes</b> (human approval before any external post is non-negotiable). Off by default, £0, multi-tenant. The deterministic engine must not be AI-replaced.
+  </div>
+
+  <h2>Advisor positions</h2>
+  <div class="grid">
+    <div class="card"><div class="who">Contrarian</div>5 structural security gates &mdash; the load-bearing analysis</div>
+    <div class="card"><div class="who">First Principles</div>It's a pipeline, not an agent &mdash; LLM only drafts captions</div>
+    <div class="card"><div class="who">Executor</div>Fixed registry, level-gated, default-off; 6 tests</div>
+    <div class="card"><div class="who">Outsider</div>No posting credentials, ever; verb labels; start tiny</div>
+    <div class="card"><div class="who">Expansionist</div>"Sunday Morning Inbox" north star</div>
+  </div>
+  <div class="sub" style="margin-top:10px">Peer review was unanimous: the Contrarian's threat-model is the verdict &mdash; every other proposal is safe only if its guards hold.</div>
+
+  <h2>Chairman verdict</h2>
+  <div class="verdict">
+    <h3>Agree</h3>
+    <ul>
+      <li><b>The security architecture IS the deliverable.</b> A minimal, <em>post-deterministic</em> runner &mdash; not a general agent. The engine has already decided PBs/ranking/colours before autonomy begins; the LLM only orchestrates + drafts captions, then queues for approval.</li>
+      <li><b>Keep the bounded, named, auditable runner</b> framing (multi-tenancy + audit need it) but with the smallest possible tool set. <b>Default-OFF, bounded, £0.</b></li>
+    </ul>
+    <h3>Structural guarantees (all test-proven)</h3>
+    <ul>
+      <li><b>Fixed allow-list registry</b> &mdash; <code>_dispatch(org_id, name, args)</code> errors on any unknown name (never executed); no exec/getattr.</li>
+      <li><b>No publish, structurally</b> &mdash; no posting credentials, no publish tool; the only write is <code>queue_for_approval</code> &rarr; <code>CardStatus.QUEUE</code> (never APPROVED/POSTED). No <code>schedule_pending_approval</code> &mdash; silence/timeout is NEVER approval.</li>
+      <li><b>Tenant isolation in dispatch</b> &mdash; <code>org_id</code> bound once at session start, immutable, injected into every call, never read from the model; every tool re-verifies ownership.</li>
+      <li><b>Internal-id params only</b> &mdash; no URL/path/template free strings (no SSRF / path-traversal re-entry).</li>
+      <li><b>Untrusted-content containment</b> &mdash; ingested swimmer data + the human-authored goal inserted as inert, delimited, escaped data, never raw instructions.</li>
+      <li><b>No deterministic-engine write-back</b> &mdash; post-rank/post-detection tools only; never pollutes the ranker / PB ledger / confidence.</li>
+      <li><b>Append-only audit log</b> &mdash; per-org, every step recorded before a human sees anything.</li>
+      <li><b>Human-verb levels</b> &mdash; Off / Suggest / Draft / Prepare-for-approval; the human gate fixed at publish for every level.</li>
+    </ul>
+    <div class="first">
+      <b>The one thing to do first:</b> the structural <b>no-publish + tenant-isolation core</b> &mdash; <code>_dispatch</code> binds an immutable <code>org_id</code> and rejects any unknown tool; no tool can set APPROVED/POSTED or touch another org &mdash; proven by tests, <em>before any feature tool is added</em>.
+    </div>
+  </div>
+
+  <h2>Full advisor responses</h2>
+  <details><summary>Contrarian</summary><p>Five failure surfaces: (1) prompt-injection via ingested swimmer names targets a <em>legitimate</em> listed tool &mdash; insert user strings as inert escaped delimited data; (2) <code>schedule_pending_approval</code> is a timing auto-publish bypass &mdash; approval must be positive, timeout never = approved; (3) every tool re-verifies tenant ownership; (4) URL/path/template args re-open SSRF/traversal &mdash; internal-id params only; (5) the structural guard: <code>org_id</code> bound once at session start, immutable, injected into dispatch, never read from the model.</p></details>
+  <details><summary>First Principles</summary><p>Framed wrong &mdash; a pipeline masquerading as an agent. Every real decision is already deterministic; the LLM only drafts captions. The "loop" = run the deterministic pipeline, call <code>draft_captions()</code>, stop. "Autonomy level" = an integer (stages before human confirmation), the gate fixed at publish. The deterministic engine is the product; the LLM is a caption writer.</p></details>
+  <details><summary>Executor</summary><p>Fixed <code>REGISTRY</code> name&rarr;callable; <code>_dispatch</code> errors on unknown names. 5 org-scoped tools, no path/URL args (<code>list_pending_cards</code>, <code>get_card_detail</code>, <code>rewrite_caption</code>, <code>queue_for_approval</code> never APPROVED/POSTED, <code>get_run_summary</code>). AutonomyLevel gates exposed tools. <code>run_autonomy</code> default-OFF, max_rounds-bounded, notify_pack_ready. 6 tests incl. cannot-publish, org-isolation, loop-bounded, off-by-default.</p></details>
+  <details><summary>Outsider</summary><p>Comfort = a "drafted 3 posts, nothing touched, click to review" notification. The gap: approval + scheduling &mdash; the tool must literally not hold posting credentials. Labels as verbs (Off / Show me ideas / Write it for me / Get it ready to post). A wrong post on a small club (real kids) is damaging &mdash; be conservative. Simplest safe v1: results &rarr; a "3 best moments and why" summary, human writes the post.</p></details>
+  <details><summary>Expansionist</summary><p>Flagship: the "Sunday Morning Inbox" &mdash; weekly a fully-drafted pack waiting for one-tap approve. Compounds multiplicatively with caption memory, deep-research, and the scheduler. Autonomy levels as a pricing ladder. Sport-agnostic via tool adapters. Net-new: autonomous retrospectives (approved-vs-rejected patterns &rarr; adjusted ranking weights).</p></details>
+
+  <div class="foot">Methodology: Karpathy's LLM Council (5 advisors &rarr; anonymous peer review &rarr; chairman). Counciled: the bounded autonomy runner (no shell substrate; never auto-publishes). Transcript: council-transcript-20260603T001154Z.md</div>
+</div>
+</body>
+</html>
