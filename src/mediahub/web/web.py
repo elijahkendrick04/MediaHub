@@ -2079,7 +2079,7 @@ def _schedule_modal_js() -> str:
 
     var btn = document.getElementById('mh-sched-send');
     var orig = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Sending&hellip;';
+    btn.disabled = true; btn.textContent = 'Sending\u2026';
 
     fetch(API_BASE + '/api/runs/' + encodeURIComponent(runId)
             + '/card/' + encodeURIComponent(cardId) + '/schedule', {
@@ -2291,7 +2291,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
       var picker = panel.closest('.tone-picker');
       if (picker) {
         var tsEl = picker.querySelector('.caption-timestamp');
-        if (tsEl && ts) tsEl.textContent = 'regenerated just now &middot; ' + ts;
+        if (tsEl && ts) tsEl.textContent = 'regenerated just now \u00b7 ' + ts;
       }
       // Cache named-tone results for this session (not the AI tab &mdash; always fresh)
       if (!isAi) { _captionCache[cacheKey] = {text: text, variants: variants}; }
@@ -2425,7 +2425,7 @@ function createGraphic(btn, createUrl, cardId, fmt, assetId, noPhoto) {
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generating&hellip;';
+  btn.textContent = 'Generating\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Generating graphic&hellip; this may take 5-15 seconds</div>';
@@ -2535,7 +2535,7 @@ function generateMotion(btn, motionUrl, cardId) {
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering motion&hellip;';
+  btn.textContent = 'Rendering motion\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
@@ -2586,7 +2586,7 @@ function generateReel(btn, reelUrl) {
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel&hellip;';
+  btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
@@ -2638,7 +2638,7 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   if (noPhoto) regenBody.no_photo = true;
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Generating 3 options&hellip;';
+  btn.textContent = 'Generating 3 options\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
     'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
@@ -2706,7 +2706,7 @@ function pickVariant(btn, cardId, createUrl) {
 
 function addGraphicToPack(btn, visualId) {
   // Visuals are already persisted on render; this just confirms inclusion.
-  btn.textContent = '&#x2713; Added to pack';
+  btn.textContent = '\u2713 Added to pack';
   btn.disabled = true;
   setTimeout(function() { btn.textContent = '+ Add to pack'; btn.disabled = false; }, 2000);
 }
@@ -19203,7 +19203,7 @@ function tiSaveArtefact(idx) {{
   const root = document.querySelector('.ti-artefact[data-artefact-index="' + idx + '"]');
   if (!root) return;
   const status = root.querySelector('.ti-status');
-  status.textContent = 'Saving&hellip;';
+  status.textContent = 'Saving\u2026';
   const tas = root.querySelectorAll('textarea.ti-cap');
   const tasks = [];
   tas.forEach(function(ta) {{
@@ -19653,7 +19653,7 @@ function generateReelGrouped(btn, reelUrl) {{
   panel.style.display = '';
   var origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Rendering reel&hellip;';
+  btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
   fetch(reelUrl, {{method:'POST'}})
     .then(function(r) {{
@@ -20551,7 +20551,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f"{_h(caption_text)}</textarea>"
                 f'<button class="btn" style="margin-top:8px;font-size:12px;padding:6px 14px" '
                 f'onclick="navigator.clipboard.writeText(this.previousElementSibling.value);'
-                f"this.textContent='Copied&hairsp;✓'\">Copy caption</button>"
+                f"this.textContent='Copied ✓'\">Copy caption</button>"
             )
         elif caption_unavailable:
             caption_block = (
