@@ -10533,7 +10533,9 @@ function copyWhyCard(btn, taId) {{
         achievement: dict = {}
         for ra in ranked:
             a = ra.get("achievement") or {}
-            if a.get("swim_id") == swim_id_dec or (swim_id_dec and swim_id_dec in (a.get("swim_id") or "")):
+            if a.get("swim_id") == swim_id_dec or (
+                swim_id_dec and swim_id_dec in (a.get("swim_id") or "")
+            ):
                 achievement = a
                 break
         ach_dict = {
@@ -10593,21 +10595,37 @@ function copyWhyCard(btn, taId) {{
             )
         except _ClaudeUE:
             return jsonify(
-                {"caption": "", "tone": tone, "live": False, "generated_at": now_iso,
-                 "error": "no_key",
-                 "message": "AI captions are unavailable on this deployment."}
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": False,
+                    "generated_at": now_iso,
+                    "error": "no_key",
+                    "message": "AI captions are unavailable on this deployment.",
+                }
             ), 200
         except Exception:
             return jsonify(
-                {"caption": "", "tone": tone, "live": True, "generated_at": now_iso,
-                 "error": "transient",
-                 "message": "The AI is briefly busy — wait a few seconds and try again."}
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI is briefly busy — wait a few seconds and try again.",
+                }
             ), 200
         revised = (revised or "").strip()
         if not revised:
             return jsonify(
-                {"caption": "", "tone": tone, "live": True, "generated_at": now_iso,
-                 "error": "transient", "message": "The AI returned nothing — try again."}
+                {
+                    "caption": "",
+                    "tone": tone,
+                    "live": True,
+                    "generated_at": now_iso,
+                    "error": "transient",
+                    "message": "The AI returned nothing — try again.",
+                }
             ), 200
         return jsonify(
             {
