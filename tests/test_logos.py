@@ -10,9 +10,10 @@ appended to ClubProfile.brand_logos. The metadata feeds:
     when picking imagery for generated posts)
 
 These tests cover the storage primitives — the web routes and AI
-vision integration are covered separately. Vision is gated behind a
-``describe_image`` helper on the llm module; if not present the AI
-fields stay empty.
+vision integration are covered separately. Vision runs through
+``llm.generate_vision`` (local image paths); if no provider is
+configured the AI fields stay empty. See also
+tests/test_logo_vision_colours.py for the vision wiring.
 """
 from __future__ import annotations
 
@@ -178,15 +179,12 @@ def test_delete_missing_inputs():
 
 
 # ---------------------------------------------------------------------------
-# AI description — no vision helper → empty dict
+# AI description — gated on llm.is_available / generate_vision
 # ---------------------------------------------------------------------------
 
-def test_describe_returns_empty_when_no_vision_helper(monkeypatch):
+def test_describe_returns_empty_when_unavailable(monkeypatch):
     import mediahub.media_ai.llm as _llm
-    monkeypatch.setattr(_llm, "is_available", lambda: True, raising=False)
-    # Ensure no describe_image attribute exists on the llm module
-    if hasattr(_llm, "describe_image"):
-        monkeypatch.delattr(_llm, "describe_image", raising=True)
+    monkeypatch.setattr(_llm, "is_available", lambda: False, raising=False)
     out = logos.describe_logo_with_ai(b"\x89PNG...", "image/png")
     assert out == {}
 
@@ -197,7 +195,7 @@ def test_describe_handles_vision_failure(monkeypatch):
 
     def boom(*a, **kw):
         raise RuntimeError("vision API exploded")
-    monkeypatch.setattr(_llm, "describe_image", boom, raising=False)
+    monkeypatch.setattr(_llm, "generate_vision", boom, raising=False)
     out = logos.describe_logo_with_ai(b"\x89PNG...", "image/png")
     assert out == {}
 
@@ -206,11 +204,11 @@ def test_describe_normalises_response(monkeypatch):
     import mediahub.media_ai.llm as _llm
     monkeypatch.setattr(_llm, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(
-        _llm, "describe_image",
-        lambda *a, **kw: {
-            "description": "Wordmark in navy on transparent. Suits dark backgrounds.",
-            "dominant_colours": ["#0A2540", "0f0", "garbage"],
-        },
+        _llm, "generate_vision",
+        lambda *a, **kw: (
+            '{"description": "Wordmark in navy on transparent. Suits dark '
+            'backgrounds.", "dominant_colours": ["#0A2540", "0f0", "garbage"]}'
+        ),
         raising=False,
     )
     out = logos.describe_logo_with_ai(b"\x89PNG...", "image/png")

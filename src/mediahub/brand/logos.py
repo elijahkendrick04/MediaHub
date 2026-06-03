@@ -28,12 +28,15 @@ No automatic logo *generation* happens here — the user uploads the
 files they already have. Generation belongs to the motion / graphic
 renderers downstream.
 """
+
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,19 +49,47 @@ log = logging.getLogger(__name__)
 # raster, vector, design-tool, and print format. The server validates
 # by extension because some browsers (Safari especially) send empty
 # MIME types for SVG / PDF / EPS / design-tool uploads.
-ALLOWED_EXTENSIONS: frozenset[str] = frozenset({
-    # Raster
-    "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "tif",
-    "heic", "heif", "avif", "ico", "jxl", "jp2", "ppm",
-    # Vector
-    "svg", "eps", "ai", "cdr", "wmf", "emf",
-    # Document / multi-page
-    "pdf",
-    # Native design-tool files
-    "psd", "indd", "sketch", "fig", "xd", "afdesign", "afphoto",
-    # High-end / specialist
-    "exr", "tga", "dng",
-})
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        # Raster
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "gif",
+        "bmp",
+        "tiff",
+        "tif",
+        "heic",
+        "heif",
+        "avif",
+        "ico",
+        "jxl",
+        "jp2",
+        "ppm",
+        # Vector
+        "svg",
+        "eps",
+        "ai",
+        "cdr",
+        "wmf",
+        "emf",
+        # Document / multi-page
+        "pdf",
+        # Native design-tool files
+        "psd",
+        "indd",
+        "sketch",
+        "fig",
+        "xd",
+        "afdesign",
+        "afphoto",
+        # High-end / specialist
+        "exr",
+        "tga",
+        "dng",
+    }
+)
 
 # Per-file size cap. Logos are typically small; cap stops zip-bomb /
 # disk-fill attacks while leaving headroom for high-res print files
@@ -113,6 +144,7 @@ def _now_iso() -> str:
 # AI vision pass — optional, gracefully no-ops without a vision model
 # ---------------------------------------------------------------------------
 
+
 def describe_logo_with_ai(file_bytes: bytes, mime: str) -> dict:
     """Ask the vision LLM to describe a logo. Returns ``{"description":
     str, "dominant_colours": list[str]}`` or empty dict on failure.
@@ -133,28 +165,61 @@ def describe_logo_with_ai(file_bytes: bytes, mime: str) -> dict:
         return {}
     if not getattr(_llm, "is_available", lambda: False)():
         return {}
-    # We don't unconditionally invoke vision — many deployments don't
-    # have a vision-capable model. Look for a vision helper first; the
-    # llm wrapper exposes one if available.
-    describe = getattr(_llm, "describe_image", None)
-    if not callable(describe):
-        return {}
+    # ``generate_vision`` is the real multimodal entry point (Gemini /
+    # Anthropic). It takes local image PATHS, not raw bytes, so we stage
+    # the upload to a NamedTemporaryFile with a suffix the providers
+    # recognise, run vision, then always clean the temp file up.
+    prompt = (
+        "Describe this logo in one short sentence (<=140 chars), "
+        "focusing on what makes it visually distinctive (icon "
+        "vs wordmark, mono vs full-colour, light vs dark, what's "
+        "suited to dark backgrounds vs light). Then list the 2-4 "
+        "dominant hex colours. Return JSON with keys "
+        "'description' and 'dominant_colours' (array of #rrggbb)."
+    )
+    suffix = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }.get((mime or "").strip().lower(), ".png")
+    raw: str
+    tmp_path: Optional[str] = None
     try:
-        result = describe(
-            file_bytes,
-            mime=mime,
-            instruction=(
-                "Describe this logo in one short sentence (<=140 chars), "
-                "focusing on what makes it visually distinctive (icon "
-                "vs wordmark, mono vs full-colour, light vs dark, what's "
-                "suited to dark backgrounds vs light). Then list the 2-4 "
-                "dominant hex colours. Return JSON with keys "
-                "'description' and 'dominant_colours' (array of #rrggbb)."
-            ),
-        )
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp_path = tmp.name
+            tmp.write(file_bytes)
+            tmp.flush()
+            tmp.close()
+            raw = _llm.generate_vision([tmp_path], prompt, max_tokens=300)
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
     except Exception as e:
-        log.debug("logo describe_image failed: %s", e)
+        log.debug("logo generate_vision failed: %s", e)
         return {}
+
+    # ``generate_vision`` returns free text — pull the JSON object out.
+    result = None
+    try:
+        from mediahub.media_ai.llm import _extract_json
+
+        result = _extract_json(raw)
+    except Exception:
+        result = None
+    if result is None:
+        text = (raw or "").strip()
+        fence = re.match(r"^```(?:json)?\s*(.+?)\s*```$", text, re.DOTALL)
+        if fence:
+            text = fence.group(1).strip()
+        try:
+            result = json.loads(text)
+        except Exception:
+            return {}
     if not isinstance(result, dict):
         return {}
     out: dict = {}
@@ -183,6 +248,7 @@ def describe_logo_with_ai(file_bytes: bytes, mime: str) -> dict:
 # Storage operations
 # ---------------------------------------------------------------------------
 
+
 def store_logo(
     *,
     profile_id: str,
@@ -208,8 +274,7 @@ def store_logo(
     ext = _ext(filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise ValueError(
-            f"unsupported format '.{ext}' — accepted: "
-            + ", ".join(sorted(ALLOWED_EXTENSIONS))
+            f"unsupported format '.{ext}' — accepted: " + ", ".join(sorted(ALLOWED_EXTENSIONS))
         )
     if existing_logos and len(existing_logos) >= MAX_LOGOS_PER_PROFILE:
         raise ValueError(
