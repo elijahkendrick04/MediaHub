@@ -7127,6 +7127,11 @@ def create_app() -> Flask:
             "healthz",
             "healthz_deps",
             "healthz_memory",
+            # /healthz/search and /healthz/breaker are monitoring probes
+            # that must return health JSON without an active org, like
+            # their /healthz/* siblings above.
+            "healthz_search",
+            "healthz_breaker",
             # /health is the deep dep-checking probe; it must also be
             # reachable without an active org (and outside the API prefix
             # allowlist below — it returns HTML/JSON, not JSON-only).
