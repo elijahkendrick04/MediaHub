@@ -24,6 +24,7 @@ This is intentionally string-based, not a structured prompt object —
 LLMs absorb natural-language guidance well, and a single function makes
 it trivial to add to any new tool.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,12 +39,12 @@ def _get(profile, name: str, default: Any = None) -> Any:
 
 
 _ORG_TYPE_PROSE = {
-    "swimming_club":      "a swimming club",
-    "athletics":          "an athletics club",
-    "football":           "a football / rugby / team-sport organisation",
+    "swimming_club": "a swimming club",
+    "athletics": "an athletics club",
+    "football": "a football / rugby / team-sport organisation",
     "university_society": "a university society or student sports club",
-    "corporate_team":     "a corporate team",
-    "other":              "",  # leave silent for the generic bucket
+    "corporate_team": "a corporate team",
+    "other": "",  # leave silent for the generic bucket
 }
 
 
@@ -79,17 +80,19 @@ def _dna_prose(profile) -> str:
     tone_notes = (_get(profile, "tone_notes") or "").strip()
     bits: list[str] = []
     if summary:
-        bits.append("About the organisation (from their website / social presence): "
-                    + summary)
+        bits.append("About the organisation (from their website / social presence): " + summary)
     if keywords:
-        bits.append("Words and themes the organisation uses about itself: "
-                    + ", ".join(keywords) + ".")
+        bits.append(
+            "Words and themes the organisation uses about itself: " + ", ".join(keywords) + "."
+        )
     if use:
-        bits.append("Phrases that sound like them: "
-                    + "; ".join(f'"{p}"' for p in use) + ".")
+        bits.append("Phrases that sound like them: " + "; ".join(f'"{p}"' for p in use) + ".")
     if avoid:
-        bits.append("Phrases that would feel off-brand — never use: "
-                    + "; ".join(f'"{p}"' for p in avoid) + ".")
+        bits.append(
+            "Phrases that would feel off-brand — never use: "
+            + "; ".join(f'"{p}"' for p in avoid)
+            + "."
+        )
     if tone_notes:
         bits.append("Voice notes the organisation typed for us: " + tone_notes)
     return " ".join(bits)
@@ -130,10 +133,10 @@ def _voice_profile_prose(profile) -> str:
             pass
     addr = vp.get("preferred_swimmer_address")
     addr_map = {
-        "first_name":   "Address swimmers by first name only.",
-        "last_name":    "Use the swimmer's full name with surname.",
+        "first_name": "Address swimmers by first name only.",
+        "last_name": "Use the swimmer's full name with surname.",
         "surname_only": "Use the swimmer's surname only (broadcast style).",
-        "nickname":     "Address swimmers familiarly, nickname-style.",
+        "nickname": "Address swimmers familiarly, nickname-style.",
     }
     if isinstance(addr, str) and addr in addr_map:
         bits.append(addr_map[addr])
@@ -145,8 +148,9 @@ def _voice_profile_prose(profile) -> str:
         bits.append("Typical closers: " + ", ".join(f'"{c}"' for c in closers[:4]) + ".")
     forbidden = vp.get("forbidden_phrases") or []
     if forbidden:
-        bits.append("Phrases to avoid (learned): "
-                    + ", ".join(f'"{p}"' for p in forbidden[:5]) + ".")
+        bits.append(
+            "Phrases to avoid (learned): " + ", ".join(f'"{p}"' for p in forbidden[:5]) + "."
+        )
     common_hash = vp.get("common_hashtags") or []
     if common_hash:
         bits.append("Hashtags they commonly use: " + ", ".join(common_hash[:6]) + ".")
@@ -205,8 +209,9 @@ def _guidelines_prose(profile) -> str:
     bits: list[str] = []
     summary = (g.get("summary") or "").strip()
     if summary:
-        bits.append("Brand guidelines (from the organisation's uploaded style document): "
-                    + summary)
+        bits.append(
+            "Brand guidelines (from the organisation's uploaded style document): " + summary
+        )
     attrs = g.get("voice_attributes") or []
     if attrs:
         bits.append("Voice should feel: " + ", ".join(attrs) + ".")
@@ -218,8 +223,11 @@ def _guidelines_prose(profile) -> str:
         bits.append("DO NOT: " + " · ".join(donts) + ".")
     prohibited = g.get("prohibited_words") or []
     if prohibited:
-        bits.append("Prohibited words/phrases — never use these even in paraphrase: "
-                    + ", ".join(f'"{w}"' for w in prohibited[:15]) + ".")
+        bits.append(
+            "Prohibited words/phrases — never use these even in paraphrase: "
+            + ", ".join(f'"{w}"' for w in prohibited[:15])
+            + "."
+        )
     pref = g.get("preferred_terminology") or {}
     if isinstance(pref, dict) and pref:
         pairs = ", ".join(f'"{k}" → "{v}"' for k, v in list(pref.items())[:10])
@@ -235,8 +243,11 @@ def _guidelines_prose(profile) -> str:
         bits.append("Sponsor mention rules: " + sponsor_rules)
     key_msgs = g.get("key_messages") or []
     if key_msgs:
-        bits.append("Recurring key messages to weave in where appropriate: "
-                    + " · ".join(key_msgs[:5]) + ".")
+        bits.append(
+            "Recurring key messages to weave in where appropriate: "
+            + " · ".join(key_msgs[:5])
+            + "."
+        )
     return " ".join(bits)
 
 
@@ -250,10 +261,26 @@ def _logos_prose(profile) -> str:
     for logo in logos[:8]:
         if not isinstance(logo, dict):
             continue
-        label = (logo.get("label") or logo.get("original_filename") or "logo").strip()
+        raw_label = (logo.get("label") or "").strip()
+        if not raw_label:
+            # Fall back to the filename, but HUMANISE it: with the raw
+            # "stockport_logo_crest.png" in the prompt, caption LLMs were
+            # observed echoing the literal filename into published copy.
+            fn = (logo.get("original_filename") or "logo").strip()
+            stem = fn.rsplit(".", 1)[0] if "." in fn else fn
+            raw_label = stem.replace("_", " ").replace("-", " ").strip() or "logo"
+        label = raw_label
         desc = (logo.get("ai_description") or "").strip()
         mime = (logo.get("mime") or "").strip()
-        fmt = mime.split("/")[-1] if "/" in mime else (logo.get("original_filename", "").rsplit(".", 1)[-1] if "." in logo.get("original_filename", "") else "")
+        fmt = (
+            mime.split("/")[-1]
+            if "/" in mime
+            else (
+                logo.get("original_filename", "").rsplit(".", 1)[-1]
+                if "." in logo.get("original_filename", "")
+                else ""
+            )
+        )
         bits = [label]
         if fmt:
             bits.append(f"format: {fmt}")
@@ -267,12 +294,14 @@ def _logos_prose(profile) -> str:
         f"{'s' if len(pieces) != 1 else ''} on file. When suggesting "
         "imagery or motion compositions, pick the variant whose "
         "description best matches the context (e.g. dark backgrounds → "
-        "the white/mono variant, square crops → the icon variant):"
+        "the white/mono variant, square crops → the icon variant). "
+        "These are internal asset references — NEVER mention logo names, "
+        "file names, or this inventory in any written caption or copy:"
     )
     return intro + "\n" + "\n".join(f"  · {p}" for p in pieces)
 
 
-def brand_context_for_llm(profile) -> str:
+def brand_context_for_llm(profile, *, include_logos: bool = False) -> str:
     """Return a single coherent system-prompt block describing the
     organisation's brand identity, voice, captured DNA, and uploaded
     guidelines. Empty string when nothing is known.
@@ -292,7 +321,11 @@ def brand_context_for_llm(profile) -> str:
          words, terminology, hashtag/sponsor rules, key messages).
       4. Captured DNA from website + socials.
       5. Voice profile learned from past captions.
-      6. Logo inventory.
+      6. Logo inventory — OFF by default (``include_logos=False``).
+         Only asset-picking generators (imagery/motion) should opt in:
+         with it in the prompt, caption LLMs were observed echoing raw
+         logo file names ("stockport_logo_crest.png") into published
+         captions.
       7. Compliance recheck reminder at the very end.
 
     Guidelines deliberately precede website/social DNA so that the
@@ -308,7 +341,7 @@ def brand_context_for_llm(profile) -> str:
         _guidelines_prose(profile),
         _dna_prose(profile),
         _voice_profile_prose(profile),
-        _logos_prose(profile),
+        _logos_prose(profile) if include_logos else "",
         _compliance_recheck_prose(profile),
     ]
     sections = [s for s in sections if s]

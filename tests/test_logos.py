@@ -15,6 +15,7 @@ vision integration are covered separately. Vision runs through
 configured the AI fields stay empty. See also
 tests/test_logo_vision_colours.py for the vision wiring.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,6 +41,7 @@ def iso_root(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # logos_dir
 # ---------------------------------------------------------------------------
+
 
 def test_logos_dir_namespaces_per_profile(iso_root):
     a = logos.logos_dir("club-a")
@@ -70,6 +72,7 @@ def test_logos_dir_requires_profile_id():
 # store_logo
 # ---------------------------------------------------------------------------
 
+
 def test_store_logo_writes_file_and_returns_metadata(iso_root):
     meta = logos.store_logo(
         profile_id="acme",
@@ -89,31 +92,31 @@ def test_store_logo_writes_file_and_returns_metadata(iso_root):
 
 def test_store_logo_rejects_unsupported_extension(iso_root):
     with pytest.raises(ValueError) as ei:
-        logos.store_logo(profile_id="acme",
-                          filename="hack.exe", file_bytes=b"MZ")
+        logos.store_logo(profile_id="acme", filename="hack.exe", file_bytes=b"MZ")
     assert "unsupported format" in str(ei.value)
 
 
 def test_store_logo_rejects_oversize(iso_root):
     big = b"x" * (logos.MAX_LOGO_BYTES + 1)
     with pytest.raises(ValueError) as ei:
-        logos.store_logo(profile_id="acme",
-                          filename="big.png", file_bytes=big)
+        logos.store_logo(profile_id="acme", filename="big.png", file_bytes=big)
     assert "exceeds" in str(ei.value)
 
 
 def test_store_logo_rejects_empty(iso_root):
     with pytest.raises(ValueError):
-        logos.store_logo(profile_id="acme",
-                          filename="x.png", file_bytes=b"")
+        logos.store_logo(profile_id="acme", filename="x.png", file_bytes=b"")
 
 
 def test_store_logo_enforces_per_profile_cap(iso_root):
     existing = [{"logo_id": f"x{i}"} for i in range(logos.MAX_LOGOS_PER_PROFILE)]
     with pytest.raises(ValueError) as ei:
-        logos.store_logo(profile_id="acme",
-                          filename="extra.png", file_bytes=PNG_SIGNATURE,
-                          existing_logos=existing)
+        logos.store_logo(
+            profile_id="acme",
+            filename="extra.png",
+            file_bytes=PNG_SIGNATURE,
+            existing_logos=existing,
+        )
     assert "delete one before uploading" in str(ei.value)
 
 
@@ -132,16 +135,15 @@ def test_store_logo_supports_svg_pdf_eps_ai(iso_root):
 # resolve_logo_path — IDOR guard
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_returns_path_for_owned_logo(iso_root):
-    meta = logos.store_logo(profile_id="acme",
-                              filename="x.png", file_bytes=PNG_SIGNATURE)
+    meta = logos.store_logo(profile_id="acme", filename="x.png", file_bytes=PNG_SIGNATURE)
     p = logos.resolve_logo_path("acme", meta["logo_id"])
     assert p is not None and p.exists()
 
 
 def test_resolve_returns_none_for_other_profile(iso_root):
-    meta = logos.store_logo(profile_id="acme",
-                              filename="x.png", file_bytes=PNG_SIGNATURE)
+    meta = logos.store_logo(profile_id="acme", filename="x.png", file_bytes=PNG_SIGNATURE)
     p = logos.resolve_logo_path("evil-other", meta["logo_id"])
     assert p is None
 
@@ -160,9 +162,9 @@ def test_resolve_returns_none_for_unknown_id(iso_root):
 # delete_logo
 # ---------------------------------------------------------------------------
 
+
 def test_delete_removes_file(iso_root):
-    meta = logos.store_logo(profile_id="acme",
-                              filename="x.png", file_bytes=PNG_SIGNATURE)
+    meta = logos.store_logo(profile_id="acme", filename="x.png", file_bytes=PNG_SIGNATURE)
     path = iso_root / meta["stored_path"]
     assert path.exists()
     assert logos.delete_logo("acme", meta["logo_id"]) is True
@@ -182,8 +184,10 @@ def test_delete_missing_inputs():
 # AI description — gated on llm.is_available / generate_vision
 # ---------------------------------------------------------------------------
 
+
 def test_describe_returns_empty_when_unavailable(monkeypatch):
     import mediahub.media_ai.llm as _llm
+
     monkeypatch.setattr(_llm, "is_available", lambda: False, raising=False)
     out = logos.describe_logo_with_ai(b"\x89PNG...", "image/png")
     assert out == {}
@@ -191,10 +195,12 @@ def test_describe_returns_empty_when_unavailable(monkeypatch):
 
 def test_describe_handles_vision_failure(monkeypatch):
     import mediahub.media_ai.llm as _llm
+
     monkeypatch.setattr(_llm, "is_available", lambda: True, raising=False)
 
     def boom(*a, **kw):
         raise RuntimeError("vision API exploded")
+
     monkeypatch.setattr(_llm, "generate_vision", boom, raising=False)
     out = logos.describe_logo_with_ai(b"\x89PNG...", "image/png")
     assert out == {}
@@ -202,9 +208,11 @@ def test_describe_handles_vision_failure(monkeypatch):
 
 def test_describe_normalises_response(monkeypatch):
     import mediahub.media_ai.llm as _llm
+
     monkeypatch.setattr(_llm, "is_available", lambda: True, raising=False)
     monkeypatch.setattr(
-        _llm, "generate_vision",
+        _llm,
+        "generate_vision",
         lambda *a, **kw: (
             '{"description": "Wordmark in navy on transparent. Suits dark '
             'backgrounds.", "dominant_colours": ["#0A2540", "0f0", "garbage"]}'
@@ -223,24 +231,36 @@ def test_describe_normalises_response(monkeypatch):
 # brand_context_for_llm surfaces the logo inventory
 # ---------------------------------------------------------------------------
 
+
 def test_context_lists_logo_variants(iso_root):
     from mediahub.brand.context import brand_context_for_llm
     from mediahub.web.club_profile import ClubProfile
+
     prof = ClubProfile(
         profile_id="acme",
         display_name="ACME",
         brand_logos=[
-            {"logo_id": "a", "original_filename": "navy.svg",
-              "label": "Navy on white", "mime": "image/svg+xml",
-              "ai_description": "Wordmark, primary mark for light backgrounds.",
-              "ai_dominant_colours": ["#0a2540"]},
-            {"logo_id": "b", "original_filename": "white.png",
-              "label": "White mono", "mime": "image/png",
-              "ai_description": "Mono variant for dark backgrounds.",
-              "ai_dominant_colours": ["#ffffff"]},
+            {
+                "logo_id": "a",
+                "original_filename": "navy.svg",
+                "label": "Navy on white",
+                "mime": "image/svg+xml",
+                "ai_description": "Wordmark, primary mark for light backgrounds.",
+                "ai_dominant_colours": ["#0a2540"],
+            },
+            {
+                "logo_id": "b",
+                "original_filename": "white.png",
+                "label": "White mono",
+                "mime": "image/png",
+                "ai_description": "Mono variant for dark backgrounds.",
+                "ai_dominant_colours": ["#ffffff"],
+            },
         ],
     )
-    ctx = brand_context_for_llm(prof)
+    # Logo inventory is opt-in (asset-picking generators only) — with it
+    # in every prompt, caption LLMs echoed raw file names into captions.
+    ctx = brand_context_for_llm(prof, include_logos=True)
     assert "2 logo variants" in ctx
     assert "Navy on white" in ctx
     assert "Mono variant for dark backgrounds" in ctx
