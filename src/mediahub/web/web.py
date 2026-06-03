@@ -17720,6 +17720,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # the "no_sources" branch as an empty dict so resolution still
         # runs when only guidelines / logos were supplied.
         link_palette_signals: dict[str, list[str]] = {}
+        link_colour_usage: dict[str, list] = {}
         if status in ("ok", "ok_heuristic"):
             for k in (
                 "brand_voice_summary",
@@ -17754,6 +17755,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if isinstance(sigs, dict):
                 link_palette_signals = {
                     str(k): list(v) for k, v in sigs.items() if isinstance(v, list)
+                }
+            usage = result.get("brand_palette_usage") or {}
+            if isinstance(usage, dict):
+                link_colour_usage = {
+                    str(k): list(v) for k, v in usage.items() if isinstance(v, list)
                 }
         elif status == "no_sources":
             # User submitted no links at all — keep the identity fields
@@ -17900,6 +17906,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 link_palette_signals=link_palette_signals,
                 brand_guidelines=prof.brand_guidelines or {},
                 brand_logos=prof.brand_logos or [],
+                colour_usage=link_colour_usage,
             )
             if sources:
                 resolved = _palette.resolve_palette(
@@ -18007,14 +18014,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if all_slots_blank or wants_ai_fourth:
             try:
                 signals = {}
+                usage_map: dict[str, list] = {}
                 lcs = prof.link_capture_state or {}
                 for plat, entry in lcs.items():
-                    if isinstance(entry, dict) and entry.get("palette_mentions"):
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("palette_mentions"):
                         signals[plat] = list(entry["palette_mentions"])
+                    if entry.get("colour_usage"):
+                        usage_map[plat] = list(entry["colour_usage"])
                 sources = _palette.gather_colour_sources(
                     link_palette_signals=signals,
                     brand_guidelines=prof.brand_guidelines or {},
                     brand_logos=prof.brand_logos or [],
+                    colour_usage=usage_map,
                 )
                 if sources:
                     resolved = _palette.resolve_palette(
