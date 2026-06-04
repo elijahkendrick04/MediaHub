@@ -991,6 +991,36 @@ def _render_busy_response(kind: str):
     return resp
 
 
+# ---------------------------------------------------------------------------
+# V10: background job store for the 3-variant regenerate fan-out.
+#
+# The synchronous route held one HTTP request open across three sequential
+# Chromium renders (60-120s on the single-CPU box) — past proxy-timeout
+# territory and a dishonest "10-30 seconds" UX. The route now returns a
+# job id instantly; a daemon thread renders the variants one at a time
+# (the render gate is 1-slot anyway, so parallel threads only added
+# queue-timeout risk) and the UI polls /api/variant-jobs/<id>.
+# ---------------------------------------------------------------------------
+_VARIANT_JOBS: Dict[str, dict] = {}
+_VARIANT_JOBS_LOCK = threading.Lock()
+_VARIANT_JOB_TTL_S = 15 * 60.0
+_VARIANT_JOB_LIMIT = 40
+
+
+def _variant_jobs_gc_locked() -> None:
+    """Drop expired / overflow jobs. Call with ``_VARIANT_JOBS_LOCK`` held."""
+    now = time.time()
+    for k in [
+        k
+        for k, v in _VARIANT_JOBS.items()
+        if now - v.get("created_at", 0.0) > _VARIANT_JOB_TTL_S
+    ]:
+        _VARIANT_JOBS.pop(k, None)
+    while len(_VARIANT_JOBS) > _VARIANT_JOB_LIMIT:
+        oldest = min(_VARIANT_JOBS, key=lambda k: _VARIANT_JOBS[k].get("created_at", 0.0))
+        _VARIANT_JOBS.pop(oldest, None)
+
+
 def _maybe_evict_active_runs() -> None:
     """Best-effort FIFO eviction of finished entries in _active_runs.
 
@@ -2626,11 +2656,13 @@ function generateReel(btn, reelUrl) {
 }
 
 function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
-  // V8.1 issue 4: replace single-output regenerate with a 3-variant picker.
+  // V10: kick off a background variants job and poll for results. The old
+  // synchronous request held the connection for every render (60-120s)
+  // while promising "10-30 seconds" — long enough to look broken and to
+  // flirt with proxy timeouts.
   var panel = document.querySelector('.visual-panel[data-card="' + cardId + '"]');
   if (!panel) return;
   panel.style.display = '';
-  // Derive the variants endpoint from the create-graphic URL.
   var variantsUrl = createUrl.replace(/\\/create-graphic$/, '/regenerate-variants');
   // Carry the user's photo choice so the 3 variants keep that photo.
   var regenBody = {};
@@ -2639,23 +2671,59 @@ function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Generating 3 options\u2026';
-  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
-    '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 3 alternative designs in parallel&hellip; 10-30 seconds.</div>';
+  function _vSpin(msg) {
+    panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+      '<div style="width:24px;height:24px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+      msg + '</div>';
+  }
+  function _vFail(msg) {
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">' + msg + '</div>';
+  }
+  _vSpin('Designing 3 alternative options\u2026 renders run one at a time, usually 1-2 minutes.');
   fetch(variantsUrl, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(regenBody)})
     .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
     .then(function(res){
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok || res.body.error) {
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Error: ' + (res.body.error || 'variants failed') + '</div>';
+      if (!res.ok || !res.body || res.body.error || !res.body.job_id) {
+        _vFail('Error: ' + ((res.body && (res.body.user_message || res.body.error)) || 'variants failed'));
         return;
       }
-      _renderVariantPicker(panel, res.body.variants || [], cardId, createUrl);
+      var pollUrl = (window._API_BASE || '') + '/api/variant-jobs/' + encodeURIComponent(res.body.job_id);
+      var started = Date.now();
+      var timer = setInterval(function(){
+        if (Date.now() - started > 6 * 60 * 1000) {
+          clearInterval(timer);
+          _vFail('Timed out waiting for variants. The renderer may be busy - try again in a minute.');
+          return;
+        }
+        fetch(pollUrl, {cache:'no-store'})
+          .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+          .then(function(st){
+            if (!st.ok || !st.body || st.body.error) {
+              clearInterval(timer);
+              _vFail('Error: ' + ((st.body && st.body.error) || 'job lost'));
+              return;
+            }
+            if (st.body.status === 'running') {
+              var total = st.body.total || 3;
+              var current = Math.min((st.body.done || 0) + 1, total);
+              _vSpin('Designing option ' + current + ' of ' + total + '... (' +
+                     (st.body.done || 0) + ' finished)');
+              return;
+            }
+            clearInterval(timer);
+            btn.disabled = false; btn.textContent = origLabel;
+            var variants = (st.body.variants || []).filter(function(v){ return v.visual; });
+            if (!variants.length) {
+              _vFail('Error: ' + (st.body.error || 'no variants produced'));
+              return;
+            }
+            _renderVariantPicker(panel, variants, cardId, createUrl);
+          })
+          .catch(function(){ /* transient poll error - keep polling */ });
+      }, 2500);
     })
-    .catch(function(err){
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    });
+    .catch(function(err){ _vFail('Network error: ' + err); });
 }
 
 function _renderVariantPicker(panel, variants, cardId, createUrl) {
@@ -5885,6 +5953,39 @@ def _short_hook(text: str, max_words: int = 3, max_chars: int = 22) -> str:
     return " ".join(out)
 
 
+_EMOJI_DISPLAY_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0E\uFE0F\u200D]"
+)
+
+
+def _display_clean(text: str) -> str:
+    """Normalise social-caption copy for on-graphic display.
+
+    Captions are written for Instagram (emoji, double exclamations); the
+    rendered graphic is display typography, so strip emoji/variation
+    selectors and collapse whitespace.
+    """
+    text = _EMOJI_DISPLAY_RE.sub("", str(text or ""))
+    return " ".join(text.split()).strip()
+
+
+def _soft_trim(text: str, limit: int = 80) -> str:
+    """Word-boundary truncation with an ellipsis.
+
+    Replaces the bare ``[:80]`` chops that printed mid-word fragments
+    ("…in the 200 Free i") on rendered graphics.
+    """
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[: max(1, limit - 1)]
+    if " " in cut:
+        head = cut.rsplit(" ", 1)[0].rstrip(",;:!?.\u00b7-")
+        if len(head) >= max(4, int(limit * 0.4)):
+            cut = head
+    return cut + "\u2026"
+
+
 def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> dict:
     """Map a caption-only stub card into a text-led graphic ``content_item``.
 
@@ -5895,43 +5996,69 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     ``recap_mention`` so the renderer selects the text-led layout (which needs
     no athlete photo). This is presentation shaping of already-AI-written copy
     — not content generation — so it stays deterministic.
+
+    Per-type shaping (V10): each flow sets its own second headline line and
+    REAL stat tiles, so a sponsor thank-you no longer renders as
+    "<SPONSOR> RECAP" with a strip of invented filler stats.
     """
     import re as _re
 
-    caption = str(card.get("caption") or "").strip()
+    caption = _display_clean(card.get("caption") or "")
     fd = form_data or {}
-    meet = str(fd.get("meet_name") or "").strip()
-    sponsor = str(fd.get("sponsor_name") or "").strip()
+    meet = _display_clean(fd.get("meet_name") or "")
+    sponsor = _display_clean(fd.get("sponsor_name") or "")
     # Sentence-ish split (also break on newlines).
     parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+|\n+", caption) if p.strip()]
 
+    stats: dict[str, str] = {}
     if stub_type == "sponsor_post":
         hook = "SPONSOR"
         head_src = _short_hook(sponsor or meet or "Thank you")
+        line2_default = "THANK YOU"
         kicker = meet or sponsor or "Sponsor"
         bullets = parts[:4]
+        if sponsor:
+            stats["sponsor"] = sponsor
+        if meet:
+            stats["event"] = meet
     elif stub_type == "weekend_preview":
         hook = "PREVIEW"
         head_src = _short_hook(meet or "Event preview")
+        line2_default = "PREVIEW"
         kicker = meet or "Preview"
         bullets = parts[:4]
+        if meet:
+            stats["event"] = meet
+        stats["status"] = "COMING UP"
     elif stub_type == "session_update":
         hook = "LIVE"
         head_src = _short_hook(meet or "Session update")
+        line2_default = "UPDATE"
         kicker = meet or "Live update"
         bullets = parts[:4]
+        stats["status"] = "LIVE"
+        if meet:
+            stats["event"] = meet
     else:  # free_text / other
         hook = "HIGHLIGHT"
         head_src = _short_hook(parts[0]) if parts else "Highlight"
+        line2_default = ""
         kicker = meet or "Highlight"
         # First sentence became the hook, so bullets are the rest (or the
         # whole caption when there's only one sentence).
         bullets = (parts[1:] if len(parts) > 1 else parts)[:4]
+        if meet:
+            stats["event"] = meet
 
     hl1, hl2 = _wrap_two_lines(str(head_src).upper(), limit=14)
-    bullets = [b[:80] for b in bullets if b]
+    if not hl2:
+        # The renderer used to default a missing second line to "RECAP",
+        # which mislabelled every non-recap stub graphic. Each flow now
+        # supplies its own (possibly empty) second line instead.
+        hl2 = line2_default
+    bullets = [_soft_trim(b, 80) for b in bullets if b]
     if not bullets and caption:
-        bullets = [caption[:80]]
+        bullets = [_soft_trim(caption, 80)]
     return {
         "id": stub_type,
         "post_angle": "recap_mention",
@@ -5944,6 +6071,7 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
             "headline_line2": hl2,
             "bullets": bullets,
             "primary_hook": hook,
+            "stats": stats,
         },
     }
 
@@ -19776,6 +19904,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 pass
         return bk
 
+    def _resolve_run_brand_kit(profile_id: str, run_id: str, run_data=None):
+        """Brand kit for run-scoped graphics, in priority order:
+
+        1. The per-run kit (data/brand_kits/<run_id>.json) — written when
+           the user confirms a palette in the two-step upload flow, so it
+           must keep winning.
+        2. The owning organisation's saved brand kit — without this,
+           graphics for runs whose profile_id fell back to club_filter
+           rendered with a synthetic identity: default navy/gold palette
+           and the swimmer's club code title-cased into the footer
+           ("Aberdeen Asc") instead of the signed-in club's brand.
+        3. The synthetic kit derived from profile_id (legacy fallback —
+           keeps pre-multi-tenant runs rendering).
+        """
+        try:
+            kit_path = DATA_DIR / "data" / "brand_kits" / f"{run_id}.json"
+            if kit_path.exists() and (json.loads(kit_path.read_text()) or {}):
+                return _v8_brand_kit_for(profile_id, run_id=run_id)
+        except Exception:
+            pass
+        owner = ""
+        try:
+            owner = _run_owner_id(run_id, run_data)
+        except Exception:
+            owner = ""
+        if owner:
+            try:
+                prof = load_profile(owner)
+                if prof is not None:
+                    bk = prof.get_brand_kit()
+                    if bk is not None:
+                        return bk
+            except Exception:
+                log.warning(
+                    "run brand kit: owner profile %s unreadable, using fallback", owner
+                )
+        return _v8_brand_kit_for(profile_id, run_id=run_id)
+
     @app.route("/media-library")
     def media_library_page():
         """Browse and upload reusable media assets."""
@@ -20192,7 +20358,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # Run-scoped synthetic profiles are still allowed for everyone.
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
-        brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id)
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
 
         # Pull media library assets for this profile
         media_assets = []
@@ -20595,10 +20761,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate-variants", methods=["POST"])
     def api_regenerate_variants(run_id: str, card_id: str):
-        """V8.1 issue 4: produce 3 visibly-different design alternatives.
+        """Produce 3 visibly-different design alternatives (V10: async).
 
-        Fires three renders with seeds 1, 2, 3 in parallel threads and
-        returns ``{variants: [{visual, brief}, ...]}``.
+        Validates the card, then hands off to a background job that
+        renders three mutually-distinct variants sequentially. Returns
+        ``{job_id, poll_url}`` (202) immediately; pass ``?sync=1`` for
+        the legacy blocking response shape.
         """
         if not _v8_ok:
             return jsonify({"error": "v8_unavailable"}), 503
@@ -20652,7 +20820,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # Defense-in-depth: same per-org gate as create-graphic.
         if not _session_can_access_profile(profile_id):
             return jsonify({"error": "forbidden"}), 403
-        brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id)
+        brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
 
         media_assets = []
         try:
@@ -20686,69 +20854,237 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "medal_card",
             ]
 
-        from concurrent.futures import ThreadPoolExecutor
-        import dataclasses as _dc
+        # V10: distinct directions, background rendering, honest progress.
+        #
+        # Legacy behaviour (and why it failed):
+        #   * three parallel threads each called the AI director with an
+        #     IDENTICAL prompt — the model returned the same direction
+        #     three times, and because the AI direction WINS inside
+        #     generate(), the pre-built distinct random profiles were
+        #     silently discarded. Users got three near-identical cards.
+        #   * the request blocked for all three renders (60-120s on the
+        #     single-CPU box) while the UI promised "10-30 seconds".
+        #
+        # Now: ONE batch AI call returns three mutually-distinct
+        # directions (random profiles fill any gap), each variant renders
+        # sequentially in a daemon thread with use_ai_director=False so
+        # its direction can't be overridden, a final guard re-rolls any
+        # duplicate signature, and the route returns a job id the UI polls.
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "status": "running",
+            "variants": [],
+            "total": 3,
+            "done": 0,
+            "error": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        with _VARIANT_JOBS_LOCK:
+            _variant_jobs_gc_locked()
+            _VARIANT_JOBS[job_id] = job
 
-        # V9: build three distinct random variation profiles so the
-        # variant picker actually shows three different visual directions
-        # (not the legacy palette-only seeds 1/2/3).
-        from mediahub.creative_brief.generator import random_variation_profile
-
-        history = _v9_load_variation_history(run_id, card_id)
-        recent_sigs = history.get("signatures", [])[-6:]
-
-        profiles: list[Any] = []
-        sigs_so_far = list(recent_sigs)
-        for _ in range(3):
-            prof = random_variation_profile(
-                angle=item.get("post_angle") or "",
-                avoid_signatures=sigs_so_far,
+        def _worker() -> None:
+            import dataclasses as _dc
+            from mediahub.creative_brief.generator import (
+                _profile_from_ai_direction,
+                random_variation_profile,
             )
-            # Pin the random fallback to the chosen-photo constraint so a
-            # no-AI render still respects the user's photo decision.
-            if _choice_families and getattr(prof, "layout_family", None) not in _choice_families:
-                try:
-                    prof = _dc.replace(prof, layout_family=_choice_families[0])
-                except Exception:
-                    pass
-            profiles.append(prof)
-            sigs_so_far.append(prof.signature())
 
-        def _one(profile) -> dict:
             try:
-                with _render_slot("variant", card_id, timeout=_RENDER_QUEUE_TIMEOUT):
-                    res = _v8_create_visual_for_item(
-                        item,
-                        brand_kit,
-                        profile_id=profile_id,
-                        run_id=run_id,
-                        media_assets=media_assets,
-                        variation_profile=profile,
-                        use_ai_director=True,
-                        recent_signatures=sigs_so_far,
-                        allowed_families=_choice_families,
-                        forced_hero_asset_id=_forced_asset,
-                    )
-                visuals = res.get("visuals") or []
-                # Pick the feed_portrait by default if present, else first.
-                primary = next(
-                    (v for v in visuals if v.get("format_name") == "feed_portrait"),
-                    visuals[0] if visuals else None,
-                )
-                return {
-                    "seed": 0,
-                    "variation_signature": (res.get("brief") or {}).get("variation_signature", ""),
-                    "visual": primary,
-                    "visuals": visuals,
-                    "brief": res.get("brief"),
-                    "errors": res.get("errors") or [],
-                }
-            except Exception as e:
-                return {"seed": 0, "visual": None, "visuals": [], "brief": None, "errors": [str(e)]}
+                history = _v9_load_variation_history(run_id, card_id)
+                recent_sigs = history.get("signatures", [])[-6:]
+                recent_hooks = history.get("hooks", [])[-6:]
+                angle = item.get("post_angle") or ""
+                default_family = _choice_families[0] if _choice_families else "individual_hero"
 
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            variants = list(ex.map(_one, profiles))
-        return jsonify({"ok": True, "variants": variants})
+                directions: list = []
+                try:
+                    from mediahub.creative_brief.ai_director import ai_creative_directions
+
+                    directions = (
+                        ai_creative_directions(
+                            content_item=item,
+                            brand_kit=brand_kit,
+                            angle=angle,
+                            default_family=default_family,
+                            recent_signatures=recent_sigs,
+                            recent_hooks=recent_hooks,
+                            allowed_families=_choice_families,
+                            count=3,
+                        )
+                        or []
+                    )
+                except Exception as e:
+                    log.warning("variants %s: batch direction failed: %s", job_id[:8], e)
+                    directions = []
+
+                def _pin(prof):
+                    if _choice_families and getattr(prof, "layout_family", None) not in _choice_families:
+                        try:
+                            return _dc.replace(prof, layout_family=_choice_families[0])
+                        except Exception:
+                            return prof
+                    return prof
+
+                sigs_so_far = list(recent_sigs)
+                profiles: list[Any] = []
+                for i in range(3):
+                    prof = None
+                    if i < len(directions) and isinstance(directions[i], dict):
+                        try:
+                            prof = _profile_from_ai_direction(
+                                directions[i],
+                                default_family=default_family,
+                                allowed_families=_choice_families,
+                            )
+                        except Exception:
+                            prof = None
+                    if prof is None:
+                        prof = _pin(
+                            random_variation_profile(angle=angle, avoid_signatures=sigs_so_far)
+                        )
+                    prof = _pin(prof)
+                    # Final distinctness guard: never render two variants
+                    # from the same signature, whatever upstream produced.
+                    for _ in range(6):
+                        if prof.signature() not in sigs_so_far:
+                            break
+                        prof = _pin(
+                            random_variation_profile(angle=angle, avoid_signatures=sigs_so_far)
+                        )
+                    profiles.append(prof)
+                    sigs_so_far.append(prof.signature())
+
+                for idx, prof in enumerate(profiles, start=1):
+                    entry: dict = {
+                        "seed": idx,
+                        "option": idx,
+                        "variation_signature": "",
+                        "visual": None,
+                        "visuals": [],
+                        "brief": None,
+                        "errors": [],
+                    }
+                    try:
+                        with _render_slot(
+                            "variant", f"{card_id}#{idx}", timeout=_RENDER_QUEUE_TIMEOUT
+                        ):
+                            res = _v8_create_visual_for_item(
+                                item,
+                                brand_kit,
+                                profile_id=profile_id,
+                                run_id=run_id,
+                                media_assets=media_assets,
+                                # Picker preview only — the other formats
+                                # render on demand after "Pick this one".
+                                # 3 variants x 1 format, not 3 x 3.
+                                formats=["feed_portrait"],
+                                variation_profile=prof,
+                                # The direction is already fixed per-variant;
+                                # letting the director run again here is
+                                # exactly the convergence bug this replaces.
+                                use_ai_director=False,
+                                recent_signatures=sigs_so_far,
+                                allowed_families=_choice_families,
+                                forced_hero_asset_id=_forced_asset,
+                            )
+                        visuals = res.get("visuals") or []
+                        primary = next(
+                            (v for v in visuals if v.get("format_name") == "feed_portrait"),
+                            visuals[0] if visuals else None,
+                        )
+                        brief_d = res.get("brief") or {}
+                        entry.update(
+                            {
+                                "variation_signature": brief_d.get("variation_signature", ""),
+                                "visual": primary,
+                                "visuals": visuals,
+                                "brief": brief_d,
+                                "errors": res.get("errors") or [],
+                            }
+                        )
+                        # Persist immediately so the NEXT regenerate avoids
+                        # these directions even if the user never picks one.
+                        new_sig = brief_d.get("variation_signature") or ""
+                        if new_sig:
+                            _v9_save_variation_history(
+                                run_id, card_id, new_sig, brief_d.get("primary_hook") or ""
+                            )
+                    except _RenderBusy:
+                        entry["errors"] = [
+                            "renderer_busy: no render slot freed up in time"
+                        ]
+                    except Exception as e:
+                        entry["errors"] = [str(e)]
+                    job["variants"].append(entry)
+                    job["done"] = idx
+                if any(v.get("visual") for v in job["variants"]):
+                    job["status"] = "done"
+                else:
+                    job["status"] = "error"
+                    job["error"] = (
+                        "; ".join(
+                            e for v in job["variants"] for e in (v.get("errors") or [])
+                        )
+                        or "all variants failed"
+                    )
+            except Exception as e:
+                job["status"] = "error"
+                job["error"] = str(e)
+                log.exception("variants %s: job crashed", job_id[:8])
+
+        # ?sync=1 keeps the legacy blocking contract for tests/scripts.
+        if (request.args.get("sync") or "").lower() in ("1", "true", "yes"):
+            _worker()
+            return jsonify(
+                {
+                    "ok": job["status"] != "error",
+                    "job_id": job_id,
+                    "variants": job["variants"],
+                    "error": job["error"] or None,
+                }
+            )
+        threading.Thread(target=_worker, name=f"variants-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_variant_job_status", job_id=job_id),
+                    "total": 3,
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/variant-jobs/<job_id>", methods=["GET"])
+    def api_variant_job_status(job_id: str):
+        """Progress + results for a background variant job.
+
+        Variants stream into the payload as each render finishes, so the
+        UI can show real progress ("option 2 of 3") instead of a blind
+        spinner. Job ids are unguessable, but gate on the owning session
+        anyway (defense-in-depth, same posture as the run routes).
+        """
+        with _VARIANT_JOBS_LOCK:
+            job = _VARIANT_JOBS.get(job_id)
+        if job is None:
+            return jsonify({"error": "job_not_found"}), 404
+        if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
+            return jsonify({"error": "job_not_found"}), 404
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": job["status"],
+                "done": job["done"],
+                "total": job["total"],
+                "variants": list(job["variants"]),
+                "error": job["error"] or None,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Motion-graphic + short-form video output (Remotion)
@@ -20914,7 +21250,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "_run_" + run_id
         )
         try:
-            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+            brand_kit = _resolve_run_brand_kit(profile_id, run_id) if _v8_ok else None
         except Exception:
             brand_kit = None
 
@@ -21039,7 +21375,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "_run_" + run_id
         )
         try:
-            brand_kit = _v8_brand_kit_for(profile_id, run_id=run_id) if _v8_ok else None
+            brand_kit = _resolve_run_brand_kit(profile_id, run_id) if _v8_ok else None
         except Exception:
             brand_kit = None
 
