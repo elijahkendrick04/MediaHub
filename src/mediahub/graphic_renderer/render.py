@@ -1676,11 +1676,9 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
             # we actually know. The old defaults here invented claims
             # ("Multiple medals on day two") on cards with no data, which
             # broke the product's "we don't invent results" promise.
-            bullets = [
-                b
-                for b in (layers.get("meet_name"), layers.get("club_full"))
-                if b
-            ] or ["Full story in the caption"]
+            bullets = [b for b in (layers.get("meet_name"), layers.get("club_full")) if b] or [
+                "Full story in the caption"
+            ]
     bullets_html = ""
     for i, b in enumerate(bullets[:4], 1):
         bullets_html += (
