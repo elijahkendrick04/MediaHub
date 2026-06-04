@@ -1001,22 +1001,60 @@ def _render_busy_response(kind: str):
 # (the render gate is 1-slot anyway, so parallel threads only added
 # queue-timeout risk) and the UI polls /api/variant-jobs/<id>.
 # ---------------------------------------------------------------------------
-_VARIANT_JOBS: Dict[str, dict] = {}
-_VARIANT_JOBS_LOCK = threading.Lock()
+# DISK-BACKED, not in-memory: gunicorn runs ``--workers 2`` (Procfile), so
+# the POST that creates a job and the GETs that poll it routinely land on
+# different processes — an in-memory dict 404s ("job_not_found") for half
+# the polls. Jobs are tiny JSON files under RUNS_DIR/_variant_jobs/,
+# written atomically (tmp + os.replace). ``--max-requests 200`` also
+# recycles workers mid-job; a job whose file stops updating is reported
+# as lost instead of spinning forever.
 _VARIANT_JOB_TTL_S = 15 * 60.0
-_VARIANT_JOB_LIMIT = 40
+_VARIANT_JOB_STALL_S = 5 * 60.0  # running + no file update for this long = lost
 
 
-def _variant_jobs_gc_locked() -> None:
-    """Drop expired / overflow jobs. Call with ``_VARIANT_JOBS_LOCK`` held."""
+def _variant_jobs_dir() -> Path:
+    d = RUNS_DIR / "_variant_jobs"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _variant_job_save(job: dict) -> None:
+    """Atomically persist a job snapshot (single writer: the job thread)."""
+    job["updated_at"] = time.time()
+    path = _variant_jobs_dir() / f"{job['id']}.json"
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(job), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        log.exception("variant job %s: persist failed", str(job.get("id", ""))[:8])
+
+
+def _variant_job_load(job_id: str) -> Optional[dict]:
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id or ""):
+        return None
+    path = _variant_jobs_dir() / f"{job_id}.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _variant_jobs_gc() -> None:
+    """Best-effort removal of expired job files (any worker may run this)."""
     now = time.time()
-    for k in [
-        k for k, v in _VARIANT_JOBS.items() if now - v.get("created_at", 0.0) > _VARIANT_JOB_TTL_S
-    ]:
-        _VARIANT_JOBS.pop(k, None)
-    while len(_VARIANT_JOBS) > _VARIANT_JOB_LIMIT:
-        oldest = min(_VARIANT_JOBS, key=lambda k: _VARIANT_JOBS[k].get("created_at", 0.0))
-        _VARIANT_JOBS.pop(oldest, None)
+    try:
+        for f in _variant_jobs_dir().glob("*.json"):
+            try:
+                if now - f.stat().st_mtime > _VARIANT_JOB_TTL_S:
+                    f.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _maybe_evict_active_runs() -> None:
@@ -20877,9 +20915,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             "created_at": time.time(),
             "owner_pid": _active_profile_id() or "",
         }
-        with _VARIANT_JOBS_LOCK:
-            _variant_jobs_gc_locked()
-            _VARIANT_JOBS[job_id] = job
+        _variant_jobs_gc()
+        _variant_job_save(job)
 
         def _worker() -> None:
             import dataclasses as _dc
@@ -21017,6 +21054,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         entry["errors"] = [str(e)]
                     job["variants"].append(entry)
                     job["done"] = idx
+                    _variant_job_save(job)
                 if any(v.get("visual") for v in job["variants"]):
                     job["status"] = "done"
                 else:
@@ -21025,9 +21063,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         "; ".join(e for v in job["variants"] for e in (v.get("errors") or []))
                         or "all variants failed"
                     )
+                _variant_job_save(job)
             except Exception as e:
                 job["status"] = "error"
                 job["error"] = str(e)
+                _variant_job_save(job)
                 log.exception("variants %s: job crashed", job_id[:8])
 
         # ?sync=1 keeps the legacy blocking contract for tests/scripts.
@@ -21063,21 +21103,30 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         spinner. Job ids are unguessable, but gate on the owning session
         anyway (defense-in-depth, same posture as the run routes).
         """
-        with _VARIANT_JOBS_LOCK:
-            job = _VARIANT_JOBS.get(job_id)
+        job = _variant_job_load(job_id)
         if job is None:
             return jsonify({"error": "job_not_found"}), 404
         if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
             return jsonify({"error": "job_not_found"}), 404
+        status = job.get("status", "running")
+        error = job.get("error") or None
+        # A running job whose file hasn't been touched for a long time means
+        # the worker process holding its thread was recycled (gunicorn
+        # --max-requests). Report it as lost so the UI stops spinning.
+        if status == "running" and (
+            time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S
+        ):
+            status = "error"
+            error = "job_lost: the render worker restarted mid-job — try again"
         return jsonify(
             {
                 "ok": True,
                 "job_id": job_id,
-                "status": job["status"],
-                "done": job["done"],
-                "total": job["total"],
-                "variants": list(job["variants"]),
-                "error": job["error"] or None,
+                "status": status,
+                "done": job.get("done", 0),
+                "total": job.get("total", 3),
+                "variants": list(job.get("variants") or []),
+                "error": error,
             }
         )
 

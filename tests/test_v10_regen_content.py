@@ -227,3 +227,40 @@ def test_medal_card_drops_redundant_gold_pill():
     repl = _fill_medal_card(brief, 1080, 1350, {"MEDAL_BADGE_BLOCK": "<div>★ GOLD</div>"})
     assert repl["MEDAL_BADGE_BLOCK"] == ""
     assert repl["MEDAL_TEXT"] == "GOLD"
+
+
+# ---------------------------------------------------------------------------
+# 6. variant job store survives multi-worker gunicorn (disk-backed)
+# ---------------------------------------------------------------------------
+
+
+def test_variant_job_store_roundtrips_via_disk(tmp_path, monkeypatch):
+    """Jobs persist as files so a poll landing on ANOTHER gunicorn worker
+    (Procfile runs --workers 2) still finds the job. The in-memory dict
+    this replaces 404'd half the polls with job_not_found."""
+    from mediahub.web import web as web_mod
+
+    monkeypatch.setattr(web_mod, "RUNS_DIR", tmp_path)
+    job_id = "a" * 32
+    job = {
+        "id": job_id,
+        "status": "running",
+        "variants": [],
+        "total": 3,
+        "done": 0,
+        "error": "",
+        "created_at": 0.0,
+        "owner_pid": "",
+    }
+    web_mod._variant_job_save(job)
+    loaded = web_mod._variant_job_load(job_id)
+    assert loaded is not None
+    assert loaded["status"] == "running"
+    assert loaded["updated_at"] > 0
+    # Malformed / unknown ids stay not-found (and never touch the fs).
+    assert web_mod._variant_job_load("nope") is None
+    assert web_mod._variant_job_load("b" * 32) is None
+    # GC removes expired files.
+    monkeypatch.setattr(web_mod, "_VARIANT_JOB_TTL_S", -1.0)
+    web_mod._variant_jobs_gc()
+    assert web_mod._variant_job_load(job_id) is None
