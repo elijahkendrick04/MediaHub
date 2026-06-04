@@ -3316,6 +3316,88 @@ def _run_source_url(run_id: str) -> Optional[str]:
     return None
 
 
+def _run_provenance(run_id: str) -> Optional[dict]:
+    """The mirror's ``_provenance.json`` for a results-from-a-link run, or None.
+
+    Read from the run's persisted ``input.bin`` ZIP (the staged mirror, which
+    the file-upload path never produces). Bounded via ``_zip_safety`` and fully
+    defensive — never raises into the review page.
+    """
+    try:
+        path = RUNS_DIR / run_id / "input.bin"
+        if not path.is_file():
+            return None
+        import io as _io  # noqa: PLC0415
+        import zipfile  # noqa: PLC0415
+
+        from mediahub.interpreter._zip_safety import safe_infolist, safe_read_member  # noqa: PLC0415
+
+        with zipfile.ZipFile(_io.BytesIO(path.read_bytes())) as zf:
+            info = {i.filename: i for i in safe_infolist(zf)}.get("_provenance.json")
+            if info is None:
+                return None
+            raw = safe_read_member(zf, info)
+        return json.loads(raw.decode("utf-8", "ignore"))
+    except Exception:
+        return None
+
+
+def _run_ai_read_sources(run_id: str) -> list[dict]:
+    """AI-read tables recorded for a run: ``[{source_url, model, tables,
+    confidence}, …]``, or ``[]``. Lets the review page mark which results were
+    read from the page by AI (Tier C) rather than parsed deterministically."""
+    prov = _run_provenance(run_id)
+    if not prov:
+        return []
+    return [e for e in (prov.get("ai_extractions") or []) if isinstance(e, dict)]
+
+
+def _best_club_match(clubs: list[str], target: str) -> str:
+    """The club whose name best matches ``target`` (the active org), or "".
+
+    Combines substring containment, a significant-token subset/overlap test
+    (so an abbreviation like "Otter SC" still matches "Otter Swimming Club"),
+    and a difflib ratio — sport/vendor-agnostic, no abbreviation dictionaries.
+    This is only a pre-selection default; the user still confirms. Returns ""
+    when nothing clears a confidence floor, so a wrong club is never silently
+    auto-picked.
+    """
+    import difflib  # noqa: PLC0415
+    import re as _re  # noqa: PLC0415
+
+    def _norm(s: str) -> str:
+        return _re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+    def _sig(norm: str) -> set[str]:
+        toks = norm.split()
+        big = [t for t in toks if len(t) >= 3]  # drop noise like "sc", "of"
+        return set(big or toks)
+
+    nt = _norm(target)
+    if not nt or not clubs:
+        return ""
+    nt_sig = _sig(nt)
+    best, best_score = "", 0.0
+    for club in clubs:
+        nc = _norm(club)
+        if not nc:
+            continue
+        if nt == nc:
+            return club
+        score = difflib.SequenceMatcher(None, nt, nc).ratio()
+        if nt in nc or nc in nt:
+            score = max(score, 0.9)
+        nc_sig = _sig(nc)
+        if nt_sig and nc_sig:
+            if nt_sig <= nc_sig or nc_sig <= nt_sig:
+                score = max(score, 0.88)
+            else:
+                score = max(score, len(nt_sig & nc_sig) / len(nt_sig | nc_sig))
+        if score > best_score:
+            best, best_score = club, score
+    return best if best_score >= 0.6 else ""
+
+
 def _stage_results_zip(zip_bytes: bytes, source_url: str, profile_id: Optional[str]) -> str:
     """Write the mirror ZIP as a staged upload (mirrors ``upload()``) and return
     the temp run id for ``/upload/configure``. Adds ``source_url`` to the meta."""
@@ -9171,6 +9253,37 @@ def create_app() -> Flask:
             payload["error"] = entry.get("error", "The fetch failed.")
         return jsonify(payload)
 
+    @app.route("/runs/<run_id>/refetch", methods=["POST"])
+    def run_refetch(run_id):
+        """Re-fetch a results-from-a-link run's source as a brand-new run.
+
+        Reuses the Step-7 background job and the SAME status endpoint the upload
+        page polls, so a fresh run is staged for /upload/configure. Never mutates
+        the existing run — re-fetch is always additive."""
+        if not _results_url_enabled():
+            return jsonify({"error": "Results-from-a-link is disabled on this deployment."}), 404
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id or ""):
+            return jsonify({"error": "Bad run id"}), 400
+        # Tenant gate — don't let a run id from another org be re-fetched.
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "Run not found"}), 404
+        source_url = _run_source_url(run_id)
+        if not source_url:
+            return jsonify({"error": "This run wasn't fetched from a link."}), 400
+        sid = session.get("mh_sid")
+        if not sid:
+            sid = uuid.uuid4().hex
+            session["mh_sid"] = sid
+        if not _url_fetch_rate_ok(sid):
+            return (
+                jsonify({"error": "Too many fetches just now — wait a minute and try again."}),
+                429,
+            )
+        prof = _active_profile()
+        profile_id = prof.profile_id if prof is not None else None
+        job_id = _start_url_fetch_job(source_url, profile_id)
+        return jsonify({"job_id": job_id})
+
     @app.route("/upload/configure", methods=["GET", "POST"])
     def upload_configure():
         run_id = request.values.get("run_id", "").strip()
@@ -9407,7 +9520,12 @@ def create_app() -> Flask:
                     pass
             return redirect(url_for("run_status", run_id=new_run_id))
 
-        return _render_configure(run_id, meta)
+        # Pre-select the club whose name best fuzzy-matches the active org, so
+        # the common case is a single click. The user still confirms (and can
+        # change it); an unconfident match pre-selects nothing.
+        _ap = _active_profile()
+        _preselect = _best_club_match(meta.get("clubs") or [], _ap.display_name if _ap else "")
+        return _render_configure(run_id, meta, selected_club=_preselect)
 
     # ---- PROGRESS ------------------------------------------------------
     @app.route("/runs/<run_id>")
@@ -9749,6 +9867,85 @@ def create_app() -> Flask:
         _pack_url = url_for("content_pack", run_id=run_id)
         # Reel + Turn-Into generation now live on the Content builder (they are
         # content creation, which happens after approval). Review = triage only.
+
+        # --- Results-from-a-link provenance (Step 8): a Source chip, an AI-read
+        # marker for results read from the page by Tier C, and a one-click
+        # re-fetch that stages a fresh run. Only appears for URL-sourced runs;
+        # file uploads have no source_url sidecar so this stays empty.
+        _provenance_card = ""
+        _src_url = _run_source_url(run_id)
+        if _src_url:
+            from urllib.parse import urlparse as _urlparse  # noqa: PLC0415
+
+            _src_host = _urlparse(_src_url).hostname or _src_url
+            _ai_note = ""
+            _ai_sources = _run_ai_read_sources(run_id)
+            if _ai_sources:
+                _n_tables = sum(int(s.get("tables") or 0) for s in _ai_sources)
+                _confs = [float(s.get("confidence") or 0.0) for s in _ai_sources]
+                _avg = (sum(_confs) / len(_confs)) if _confs else 0.0
+                _ai_note = (
+                    '<div class="kv" style="margin-top:10px">'
+                    '<span class="k">AI-read</span><span>'
+                    '<span class="tag warn">AI-read from page</span> '
+                    f'{_n_tables} table{"" if _n_tables == 1 else "s"} on this run '
+                    f'{"was" if _n_tables == 1 else "were"} read from the page by AI vision '
+                    f'(avg confidence {_avg:.0%}) and re-checked by the deterministic '
+                    'interpreter like any other input.</span></div>'
+                )
+            _refetch_block = ""
+            if _results_url_enabled():
+                _refetch_js = (
+                    """
+<script>
+(function(){
+  var b=document.getElementById('mh-refetch-btn');
+  var s=document.getElementById('mh-refetch-status');
+  if(!b) return;
+  function show(m){ s.hidden=false; s.textContent=m; }
+  function poll(jobId){
+    var u='__STATUS_BASE__'.replace('JOBID',jobId);
+    (function tick(){
+      fetch(u).then(function(r){return r.json();}).then(function(j){
+        if(j.status==='done'&&j.redirect){ show('Done - opening configure...'); window.location.href=j.redirect; return; }
+        if(j.status==='error'){ b.disabled=false; show(j.error||'The re-fetch failed.'); return; }
+        show(j.progress||'Reading the site...'); setTimeout(tick,1500);
+      }).catch(function(){ setTimeout(tick,2500); });
+    })();
+  }
+  b.addEventListener('click',function(){
+    b.disabled=true; show('Starting...');
+    fetch('__REFETCH_URL__',{method:'POST'})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){ if(!res.ok||res.j.error){throw new Error(res.j.error||'Could not start the re-fetch.');} poll(res.j.job_id); })
+      .catch(function(e){ b.disabled=false; show(e.message); });
+  });
+})();
+</script>
+"""
+                    .replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id))
+                    .replace("__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID"))
+                )
+                _refetch_block = (
+                    '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+                    '<button id="mh-refetch-btn" type="button" class="btn secondary">Re-fetch latest results &rarr;</button>'
+                    '<span id="mh-refetch-status" role="status" aria-live="polite" hidden '
+                    'class="muted" style="font-family:var(--font-mono);font-size:12px"></span>'
+                    '</div>'
+                    '<p class="muted" style="font-size:12px;margin-top:8px">'
+                    'Re-fetching reads the site again and stages a <b>new</b> run &mdash; '
+                    'this one is left untouched.</p>'
+                    + _refetch_js
+                )
+            _provenance_card = (
+                '<div class="card">'
+                '<div class="kv"><span class="k">Source</span><span>'
+                f'<a href="{_h(_src_url)}" target="_blank" rel="noopener">{_h(str(_src_host))}</a>'
+                '</span></div>'
+                + _ai_note
+                + _refetch_block
+                + '</div>'
+            )
 
         # --- V7: Workflow state
         _wf_summary = {}
@@ -10471,6 +10668,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}</span>
   </div>
 </section>
+
+{_provenance_card}
 
 <div class="card">
   <h2>Recognition summary</h2>

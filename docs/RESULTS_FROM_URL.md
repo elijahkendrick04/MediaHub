@@ -69,6 +69,26 @@ an honest error — never a made-up result.
 
 ---
 
+## In the review — provenance you can trust
+
+A run created from a link carries its origin into the review page:
+
+- **Source chip.** The review header shows `Source: <host>`, linked to the exact
+  URL the results came from, so every generated card is traceable to where it was
+  read.
+- **"AI-read from page" marker.** If any results were read by Tier C (the AI
+  vision path) rather than parsed deterministically, the header says so and shows
+  the average confidence. AI-read rows are *marked*, never hidden — and they were
+  still re-checked by the deterministic interpreter like any other input.
+- **Re-fetch latest results.** One click re-reads the site and stages a **new**
+  run; the run you're looking at is never mutated. Useful when a meet publishes
+  updated or additional results.
+- **Club pre-select.** On the configure step, the club whose name best matches
+  your organisation is pre-selected — abbreviations like "Otter SC" ↔ "Otter
+  Swimming Club" included — and you still confirm before running.
+
+---
+
 ## Security model
 
 Reading arbitrary websites is a security-sensitive surface. Every fetch is
@@ -154,7 +174,9 @@ rest of MediaHub.
   `rendered.py` (Tier B), `crawl.py` (the walker), `triage.py` (AI link triage),
   `ai_read.py` (Tier C), `package.py` (mirror → ZIP).
 - `src/mediahub/interpreter/ingest.py` — deterministic JSON/CSV/XLSX ingestion.
-- `src/mediahub/web/web.py` — the `/upload/from-url` route, background job, and
-  the "Paste a results link" input on the upload page.
+- `src/mediahub/web/web.py` — the `/upload/from-url` route, background job, the
+  "Paste a results link" input on the upload page, the review-page provenance
+  (Source chip + AI-read marker), the club fuzzy pre-select on configure, and the
+  `/runs/<id>/refetch` route.
 
 Plain-English words: see [`../GLOSSARY.md`](../GLOSSARY.md).
