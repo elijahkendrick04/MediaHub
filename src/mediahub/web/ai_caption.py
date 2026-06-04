@@ -24,6 +24,7 @@ The tone is now described to the model in plain English (e.g. "warm,
 community-focused, first-name use") instead of being a hardcoded
 system-prompt branch. The model decides exactly what that looks like.
 """
+
 from __future__ import annotations
 
 import random
@@ -47,8 +48,11 @@ def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str
     """Thin wrapper kept for tests + back-compat. Delegates to ai_core
     so the active provider (Claude / Gemini) actually runs."""
     from mediahub.ai_core import (
-        ask, ProviderNotConfigured, ProviderError,
+        ask,
+        ProviderNotConfigured,
+        ProviderError,
     )
+
     try:
         return ask(system, user, max_tokens=max_tokens) or ""
     except ProviderNotConfigured as e:
@@ -67,16 +71,23 @@ def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str
 # downstream consumer that wants to use it needs to know it exists; we
 # don't let the LLM invent tones.
 _TONE_DESCRIPTORS: dict[str, str] = {
-    "ai":         "a balanced sports social-media voice — natural, "
-                  "specific, mildly warm, no jargon.",
-    "warm-club":  "warm and community-focused: first-name the swimmer, "
-                  "celebrate the team, sound like the club family talking.",
-    "hype":       "energetic and race-day: high-energy language, "
-                  "exclamation marks where genuinely earned, make the "
-                  "reader feel the adrenaline.",
-    "data-led":   "precise and data-led: lead with numbers and hard "
-                  "facts, sponsor-friendly, no fluff — every word earns "
-                  "its place.",
+    "ai": "a balanced editorial sports voice — natural and "
+    "specific. Vary your opening from caption to caption; "
+    "include at least one concrete fact (time, place, "
+    "event or venue).",
+    "warm-club": "club-family warmth, written first-person plural "
+    "(we/our). Speak to the community directly and "
+    "mention supporters or coaches naturally. Gentle, "
+    "unhurried pace. At most 1 emoji.",
+    "hype": "high energy. Short, punchy sentences — no sentence "
+    "over 10 words. Present tense. Urgency and "
+    "exclamation. Lead with the moment, not the name. "
+    "1-2 emoji allowed. NO reflective sentiment.",
+    "data-led": "numbers first — open with the time or placing "
+    'figure. No subjective adjectives (never "fantastic", '
+    '"incredible", "well-deserved", "amazing"). '
+    "Sponsor-safe neutral register. No emoji. No "
+    "exclamation marks.",
 }
 
 KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
@@ -86,16 +97,18 @@ KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
 # AI-tell ban list
 # ---------------------------------------------------------------------------
 
-AI_TELL_BAN_LIST: frozenset[str] = frozenset({
-    "delve",
-    "delves",
-    "delving",
-    "elevate",
-    "elevates",
-    "elevated",
-    "elevating",
-    "in the world of",
-})
+AI_TELL_BAN_LIST: frozenset[str] = frozenset(
+    {
+        "delve",
+        "delves",
+        "delving",
+        "elevate",
+        "elevates",
+        "elevated",
+        "elevating",
+        "in the world of",
+    }
+)
 
 _AI_TELL_SYSTEM_INSTRUCTION: str = (
     "Never use these overworked AI phrases: "
@@ -103,6 +116,80 @@ _AI_TELL_SYSTEM_INSTRUCTION: str = (
     "Avoid reflexive exclamation marks — use '!' only when the moment "
     "genuinely warrants it, not as empty emphasis."
 )
+
+
+_COURSE_SUFFIX_RE = re.compile(r"\s*\(\s*(SC|LC)\s*\)\s*$", re.IGNORECASE)
+
+_COURSE_SPELLED = {"SC": "short course", "LC": "long course"}
+
+_NO_COURSE_ABBREV_INSTRUCTION: str = (
+    'Never write the abbreviations "(SC)" or "(LC)" — say "short course"/'
+    '"long course" only if the distinction genuinely matters, otherwise '
+    "omit it."
+)
+
+_SHARED_TONE_BANS: str = (
+    'Do not open with "Another …" or "What a …"; never use the phrase ' '"testament to".'
+)
+
+
+def _strip_course_suffix(event: str) -> str:
+    """Remove a trailing "(SC)" / "(LC)" course marker from an event name.
+
+    MR-5: course jargon like "100m Breaststroke (SC)" leaked into every
+    published caption. The abbreviation means nothing to a parent
+    scrolling a feed, so it never belongs in prompt-visible event names.
+    Case-insensitive; tolerates surrounding whitespace.
+    """
+    if not event:
+        return event
+    return _COURSE_SUFFIX_RE.sub("", event).strip()
+
+
+def _sanitise_achievement_for_prompt(a: dict) -> dict:
+    """Return a shallow copy of the achievement with course jargon
+    removed from the event name and the ``course`` field spelled out
+    ("SC" → "short course") so the raw distinction stays available for
+    data-led time context without the abbreviation ever reaching the
+    LLM's source prose."""
+    if not isinstance(a, dict):
+        return a
+    out = dict(a)
+    event = (out.get("event") or "").strip()
+    if event:
+        out["event"] = _strip_course_suffix(event)
+    course = (out.get("course") or "").strip()
+    if course:
+        out["course"] = _COURSE_SPELLED.get(course.upper(), course)
+    return out
+
+
+def _locale_instruction(club_profile) -> str:
+    """MR-7: derive a spelling-locale instruction from the club's country.
+
+    UK organisations were getting US spellings ("program") in published
+    captions. Returns "" when no country is set.
+    """
+    if club_profile is None:
+        return ""
+    if isinstance(club_profile, dict):
+        country = (club_profile.get("country") or "").strip()
+    else:
+        country = (getattr(club_profile, "country", "") or "").strip()
+    if not country:
+        return ""
+    uk_names = {
+        "united kingdom",
+        "uk",
+        "great britain",
+        "england",
+        "scotland",
+        "wales",
+        "northern ireland",
+    }
+    if country.lower() in uk_names:
+        return "Write in British English (programme, recognise, centre, " "organise; metres)."
+    return f"Write in the natural English variant for {country}."
 
 
 def _contains_ai_tell(text: str) -> bool:
@@ -115,6 +202,7 @@ def _contains_ai_tell(text: str) -> bool:
 # N-gram similarity helpers (no external deps)
 # ---------------------------------------------------------------------------
 
+
 def _word_ngrams(text: str, n: int) -> set[str]:
     """Return the set of word n-grams for text after stripping punctuation."""
     tokens = re.sub(r"[^\w\s]", "", text.lower()).split()
@@ -122,7 +210,7 @@ def _word_ngrams(text: str, n: int) -> set[str]:
         return set()
     if len(tokens) < n:
         return set(tokens)
-    return {" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)}
+    return {" ".join(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
 
 
 def _ngram_similarity(a: str, b: str, n: int = 3) -> float:
@@ -134,9 +222,7 @@ def _ngram_similarity(a: str, b: str, n: int = 3) -> float:
     return len(na & nb) / len(union) if union else 0.0
 
 
-def _is_near_duplicate(
-    candidate: str, reference_list: list[str], threshold: float = 0.55
-) -> bool:
+def _is_near_duplicate(candidate: str, reference_list: list[str], threshold: float = 0.55) -> bool:
     """Return True if candidate is too similar to any string in reference_list."""
     return any(_ngram_similarity(candidate, ref) >= threshold for ref in reference_list)
 
@@ -150,16 +236,14 @@ _PLATFORM_SPECS: dict[str, dict] = {
         "label": "Instagram/Facebook feed",
         "max_chars": 280,
         "guidance": (
-            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally "
-            "in a feed scroll"
+            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally " "in a feed scroll"
         ),
     },
     "story": {
         "label": "Instagram/TikTok story",
         "max_chars": 100,
         "guidance": (
-            "punchy single sentence, no hashtags, fits on a visual card, "
-            "immediate impact"
+            "punchy single sentence, no hashtags, fits on a visual card, " "immediate impact"
         ),
     },
     "x": {
@@ -249,10 +333,10 @@ def _voice_profile_prose(vp: Optional[dict]) -> str:
             pass
     addr = vp.get("preferred_swimmer_address")
     addr_map = {
-        "first_name":   "Address the swimmer by first name only.",
-        "last_name":    "Address the swimmer by their full name with surname.",
+        "first_name": "Address the swimmer by first name only.",
+        "last_name": "Address the swimmer by their full name with surname.",
         "surname_only": "Address the swimmer by surname only (broadcast style).",
-        "nickname":     "Address the swimmer in a familiar, nickname-style way.",
+        "nickname": "Address the swimmer in a familiar, nickname-style way.",
     }
     if isinstance(addr, str) and addr in addr_map:
         bits.append(addr_map[addr])
@@ -309,8 +393,9 @@ def generate_caption_for_tone(
     from mediahub.ai_core import narrate_achievement, narrate_brand
 
     tone_desc = _resolve_tone_descriptor(club_profile, tone)
-    resolved_vp = (_resolve_voice_profile(club_profile)
-                   or (voice_profile if isinstance(voice_profile, dict) else None))
+    resolved_vp = _resolve_voice_profile(club_profile) or (
+        voice_profile if isinstance(voice_profile, dict) else None
+    )
     vp_prose = _voice_profile_prose(resolved_vp)
 
     system_parts = [
@@ -321,6 +406,8 @@ def generate_caption_for_tone(
         "Never invent facts. Output ONLY the caption text — no preamble, "
         "no quotes, no markdown.",
         _AI_TELL_SYSTEM_INSTRUCTION,
+        _NO_COURSE_ABBREV_INSTRUCTION,
+        _SHARED_TONE_BANS,
         # Force genuine variety. The model has a strong attractor toward
         # the same opener / same closer wording on identical inputs;
         # this instruction nudges it off the attractor.
@@ -331,10 +418,11 @@ def generate_caption_for_tone(
         "different rhythm, different lens (e.g. swimmer's effort vs. "
         "the team's reaction vs. the numbers vs. the milestone).",
     ]
+    locale_line = _locale_instruction(club_profile)
+    if locale_line:
+        system_parts.append(locale_line)
     if recent_captions:
-        recent_block = "\n".join(
-            f"- {c.strip()}" for c in recent_captions[-5:] if c and c.strip()
-        )
+        recent_block = "\n".join(f"- {c.strip()}" for c in recent_captions[-5:] if c and c.strip())
         if recent_block:
             system_parts.append(
                 "Recent captions you wrote for this same card (DO NOT "
@@ -381,6 +469,7 @@ def generate_caption_for_tone(
     if artefact_key:
         try:
             from mediahub.brand.derived import platform_format_for
+
             fmt = platform_format_for(artefact_key)
             if fmt:
                 system_parts.append(fmt)
@@ -405,8 +494,7 @@ def generate_caption_for_tone(
         if dbits:
             system_parts.append(
                 "Creative direction for THIS card (honour the platform + "
-                "angle, but write the caption in your own fresh words): "
-                + "; ".join(dbits) + "."
+                "angle, but write the caption in your own fresh words): " + "; ".join(dbits) + "."
             )
     # Any caller-supplied extra instructions get appended last so they
     # take precedence over generic guidance. Used by the sponsor-variant
@@ -422,7 +510,13 @@ def generate_caption_for_tone(
     if brief_prose and brief_prose.strip():
         user_prose = brief_prose.strip()
     else:
-        user_prose = narrate_achievement(achievement_dict, profile=club_profile)
+        # MR-5: strip "(SC)"/"(LC)" jargon from the event name (and spell
+        # out the course field) before the facts are narrated into the
+        # prompt. The caller's dict is never mutated.
+        user_prose = narrate_achievement(
+            _sanitise_achievement_for_prompt(achievement_dict),
+            profile=club_profile,
+        )
     if not user_prose.strip():
         raise ClaudeUnavailableError("not enough detail to generate a caption")
     # Tiny random suffix breaks identical-output caching at the provider's
@@ -452,12 +546,20 @@ def generate_ai_caption(
     dict on failure (no template fallback)."""
     try:
         caption = generate_caption_for_tone(achievement_dict, club_brand, tone="ai")
-        return {"caption": caption, "tone": "ai",
-                "fallback": False, "fallback_voice": None}
+        return {
+            "caption": caption,
+            "tone": "ai",
+            "fallback": False,
+            "fallback_voice": None,
+        }
     except ClaudeUnavailableError as e:
-        return {"caption": "", "tone": "ai",
-                "fallback": True, "fallback_voice": None,
-                "error": str(e)}
+        return {
+            "caption": "",
+            "tone": "ai",
+            "fallback": True,
+            "fallback_voice": None,
+            "error": str(e),
+        }
 
 
 # Back-compat exports — the names are imported elsewhere in web.py.
@@ -472,6 +574,7 @@ def _build_user_message(*_args, **_kwargs) -> str:
     """Kept for back-compat with tests that import it. The new pipeline
     builds prose via narrate_achievement instead."""
     from mediahub.ai_core import narrate_achievement
+
     a = _args[0] if _args else _kwargs.get("achievement", {}) or {}
     return narrate_achievement(a if isinstance(a, dict) else {})
 
@@ -489,6 +592,7 @@ _voice_profile_instructions = _voice_profile_addendum
 # ---------------------------------------------------------------------------
 # Multi-candidate generation with deduplication
 # ---------------------------------------------------------------------------
+
 
 def generate_caption_candidates(
     achievement_dict: dict,
@@ -549,6 +653,7 @@ def generate_caption_candidates(
 # Per-platform variant generation
 # ---------------------------------------------------------------------------
 
+
 def generate_platform_variants(
     base_caption: str,
     club_brand: Optional[dict] = None,
@@ -568,8 +673,7 @@ def generate_platform_variants(
         raise ClaudeUnavailableError("base_caption is empty")
 
     target_platforms = [
-        p for p in (platforms or list(_PLATFORM_SPECS.keys()))
-        if p in _PLATFORM_SPECS
+        p for p in (platforms or list(_PLATFORM_SPECS.keys())) if p in _PLATFORM_SPECS
     ]
     if not target_platforms:
         return {}
@@ -587,14 +691,16 @@ def generate_platform_variants(
             "Output ONLY the adapted caption — no preamble, no quotes, "
             "no markdown.",
             _AI_TELL_SYSTEM_INSTRUCTION,
+            _NO_COURSE_ABBREV_INSTRUCTION,
         ]
+        locale_line = _locale_instruction(club_profile)
+        if locale_line:
+            system_parts.append(locale_line)
         if few_shot_examples:
             capped = [e.strip() for e in few_shot_examples[-5:] if e and e.strip()]
             if capped:
                 block = "\n".join(f"- {e}" for e in capped)
-                system_parts.append(
-                    "Voice examples from this club (match their style):\n" + block
-                )
+                system_parts.append("Voice examples from this club (match their style):\n" + block)
         brand_prose = narrate_brand(club_brand)
         if brand_prose:
             system_parts.append("Brand voice: " + brand_prose)
@@ -617,6 +723,7 @@ def generate_platform_variants(
 # Approval-loop hook
 # ---------------------------------------------------------------------------
 
+
 def record_approved_caption(profile_id: str, caption: str) -> None:
     """Append an edited-and-approved caption to the club's few-shot store.
 
@@ -624,12 +731,14 @@ def record_approved_caption(profile_id: str, caption: str) -> None:
     this club benefits from its real published voice.
     """
     from mediahub.web.caption_examples import append_example
+
     append_example(profile_id, caption)
 
 
 __all__ = [
     "ClaudeUnavailableError",
     "KNOWN_AI_TONES",
+    "_strip_course_suffix",
     "AI_TELL_BAN_LIST",
     "generate_ai_caption",
     "generate_caption_for_tone",
