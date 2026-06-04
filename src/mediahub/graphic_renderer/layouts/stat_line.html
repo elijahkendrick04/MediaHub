@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{MEET_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+/* Restrained editorial recap: a lot of negative space, one hero stat, a tidy
+   support row. The Canva-cleanliness lesson applied to MediaHub's poster type. */
+.sl-kicker {
+  position: absolute; top: 92px; left: 64px; right: 64px; z-index: 5;
+  font-family: 'Inter', sans-serif;
+  font-size: 20px; letter-spacing: 0.22em; text-transform: uppercase;
+  opacity: 0.70;
+}
+.sl-headline {
+  position: absolute; top: 138px; left: 64px; right: 64px; z-index: 5;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: {{HEADLINE_FONT_SIZE}}px;
+  line-height: 0.9; letter-spacing: -0.02em; text-transform: uppercase;
+}
+.sl-headline .accent { color: var(--accent); }
+
+.sl-hero {
+  position: absolute; left: 64px; right: 64px; top: 49%;
+  transform: translateY(-50%); z-index: 5;
+}
+.sl-hero .ev {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 26px; letter-spacing: 0.10em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+}
+.sl-hero .val {
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900; font-size: {{HERO_FONT_SIZE}}px;
+  line-height: 0.84; letter-spacing: -0.03em; color: #fff;
+  font-feature-settings: "tnum";
+}
+.sl-hero .sl-rule {
+  margin-top: 22px; height: 3px; width: 58%;
+  background: linear-gradient(90deg, var(--accent), transparent 82%);
+}
+
+.sl-support {
+  position: absolute; left: 64px; right: 64px; bottom: 150px; z-index: 5;
+  display: flex; gap: 52px;
+}
+.sl-support .cell .lab {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px; letter-spacing: 0.20em; text-transform: uppercase;
+  opacity: 0.60; margin-bottom: 6px;
+}
+.sl-support .cell .v {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 22px; color: #fff; line-height: 1.1;
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="bg-water-pattern"></div>
+  <div class="bg-noise"></div>
+
+  <div class="sl-kicker">{{KICKER}}</div>
+  <div class="sl-headline">{{HEADLINE_LINE1}}<br/><span class="accent">{{HEADLINE_LINE2}}</span></div>
+
+  <div class="sl-hero">
+    <div class="ev">{{HERO_EVENT}}</div>
+    <div class="val">{{HERO_VALUE}}</div>
+    <div class="sl-rule"></div>
+  </div>
+
+  <div class="sl-support">{{SUPPORT_CELLS}}</div>
+
+  <div class="brand-corner">
+    <div class="logo-mark{{LOGO_MARK_MOD}}">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{SPONSOR_BLOCK}}
+</div>
+</body>
+</html>

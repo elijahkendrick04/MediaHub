@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+:root {
+  --primary: {{PRIMARY}};
+  --primary-deep: {{PRIMARY_DEEP}};
+  --secondary: {{SECONDARY}};
+  --accent: {{ACCENT}};
+  --water-pattern: {{WATER_PATTERN}};
+  --ai-bg: url('{{AI_BG_URI}}');
+  --noise-pattern: {{NOISE_PATTERN}};
+}
+
+.canvas { width: {{WIDTH}}px; height: {{HEIGHT}}px; }
+
+/* Full-bleed REAL athlete/action photo as the hero. When no photo is supplied
+   the url() is empty and the brand gradient below shows through, so the card
+   still reads as an intentional branded lockup (never a fabricated person). */
+.hero-photo {
+  position: absolute; inset: 0; z-index: 1;
+  background-image: url('{{HERO_PHOTO_URI}}');
+  background-size: cover;
+  background-position: 50% 26%;
+}
+/* Brand scrim: keep the photo bright at the top, ramp to a deep brand-tinted
+   base so the lower lockup stays legible at thumbnail size. */
+.hero-scrim {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(8,10,14,0.12) 0%, rgba(8,10,14,0.00) 28%,
+      rgba(8,10,14,0.34) 60%, rgba(8,10,14,0.90) 100%),
+    linear-gradient(180deg, transparent 52%, var(--primary-deep) 128%);
+}
+
+.label-ribbon { font-size: {{RIBBON_FONT_SIZE}}px; }
+
+.aph-lockup {
+  position: absolute; left: 56px; right: 56px; bottom: 150px; z-index: 7;
+}
+.aph-firstname {
+  font-family: 'Bebas Neue', 'Anton', sans-serif;
+  font-weight: 700;
+  font-size: {{NAME_FONT_SIZE}}px;
+  line-height: 0.9;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 6px 30px rgba(0,0,0,0.6);
+}
+.aph-surname {
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-weight: 900;
+  font-size: {{NAME_FONT_SIZE}}px;
+  line-height: 0.84;
+  letter-spacing: -0.012em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-shadow: 0 6px 30px rgba(0,0,0,0.55);
+}
+.aph-meta {
+  display: flex; align-items: baseline; gap: 20px; margin-top: 20px;
+}
+.aph-result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 800;
+  font-size: {{RESULT_FONT_SIZE}}px;
+  color: var(--accent);
+  line-height: 1; letter-spacing: -0.01em;
+}
+.aph-event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: {{EVENT_FONT_SIZE}}px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0.92;
+}
+.aph-rule { margin-top: 18px; height: 4px; width: 132px; background: var(--accent); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="hero-photo"></div>
+  <div class="hero-scrim"></div>
+  <div class="bg-noise"></div>
+
+  <div class="label-ribbon">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="aph-lockup">
+    <div class="aph-firstname">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="aph-surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="aph-meta">
+      <span class="aph-result">{{RESULT_VALUE_RAW}}</span>
+      <span class="aph-event">{{EVENT_NAME}}</span>
+    </div>
+    <div class="aph-rule"></div>
+  </div>
+
+  <div class="brand-corner">
+    <div class="logo-mark{{LOGO_MARK_MOD}}">{{LOGO_BLOCK}}</div>
+    <div class="text-block">
+      <div class="club-line">{{CLUB_FULL}}</div>
+      <div class="meet-line">{{MEET_NAME}}</div>
+    </div>
+  </div>
+
+  {{MEDAL_BADGE_BLOCK}}
+  {{SPONSOR_BLOCK}}
+</div>
+</body>
+</html>

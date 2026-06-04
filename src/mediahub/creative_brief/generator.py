@@ -308,7 +308,7 @@ def generate(
         ):
             import dataclasses as _dc
 
-            _is_text = pattern["family"] in {"text_led_recap", "weekend_numbers"}
+            _is_text = pattern["family"] in _TEXT_LED_FAMILIES
             try:
                 variation_profile = _dc.replace(
                     variation_profile,
@@ -1000,6 +1000,12 @@ def auto_variation_seed_for(card_id: str | None) -> int:
 # templates that exist in graphic_renderer/layouts/ and that work without
 # a sponsor or athlete photo dependency. The ai_director can recommend
 # any of these without needing extra data.
+# Text-led families need no athlete photo — the renderer fills the canvas with
+# type. Kept as one constant so every photo/no-photo gate agrees on the set.
+_TEXT_LED_FAMILIES: frozenset[str] = frozenset(
+    {"text_led_recap", "weekend_numbers", "stat_line"}
+)
+
 _GENERIC_FAMILIES: tuple[str, ...] = (
     "individual_hero",
     "big_number_hero",
@@ -1007,6 +1013,7 @@ _GENERIC_FAMILIES: tuple[str, ...] = (
     "weekend_numbers",
     "athlete_spotlight",
     "story_card",
+    "stat_line",
 )
 
 # Medal-aware families. Used when the achievement is a medal so the
@@ -1048,7 +1055,7 @@ def random_variation_profile(
 
     def _pick() -> VariationProfile:
         family = rng.choice(families)
-        is_text_led = family in {"text_led_recap", "weekend_numbers"}
+        is_text_led = family in _TEXT_LED_FAMILIES
         # When the family is text-led, no athlete photo can be in play.
         photo = "no-photo" if is_text_led else rng.choice(PHOTO_TREATMENTS)
         # Text-led layouts rely on the BRAND PRIMARY being dark for the
@@ -1159,7 +1166,7 @@ def _profile_from_ai_direction(
         family = default_family
     if allowed_families and family not in allowed_families:
         family = allowed_families[0]
-    photo_override = "no-photo" if family in {"text_led_recap", "weekend_numbers"} else None
+    photo_override = "no-photo" if family in _TEXT_LED_FAMILIES else None
 
     try:
         deco = float(direction.get("decoration_strength", 0.5))

@@ -149,6 +149,7 @@ _LAYOUT_FAMILIES = (
     "athlete_spotlight",
     "story_card",
     "medal_card",
+    "stat_line",
 )
 
 

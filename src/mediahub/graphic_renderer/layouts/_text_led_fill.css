@@ -128,8 +128,10 @@
   pointer-events: none;
   text-transform: uppercase;
   white-space: nowrap;
-  overflow: hidden;
-  max-width: 92%;
+  /* No own clip box: the inline font-size is autofit to ~96% of the canvas
+     width (render._surname_font_px) so the WHOLE surname reads, and the
+     canvas's own overflow:hidden trims any deliberate edge bleed. A fixed
+     max-width here used to chop "CARTER" down to "CART". */
 }
 
 /* Soft background spotlight where the photo would be — keeps the empty

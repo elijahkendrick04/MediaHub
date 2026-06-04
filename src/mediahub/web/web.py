@@ -20839,7 +20839,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         choice_allowed_families = None
         if force_no_photo:
             chosen_asset_id = None
-            choice_allowed_families = ["text_led_recap", "weekend_numbers"]
+            choice_allowed_families = ["text_led_recap", "weekend_numbers", "stat_line"]
         elif chosen_asset_id:
             forced_hero_asset_id = chosen_asset_id
             # Constrain to photo-capable families so the chosen photo actually
@@ -20850,6 +20850,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "story_card",
                 "athlete_spotlight",
                 "medal_card",
+                "action_photo_hero",
             ]
 
         # The photos the user can pick from for this card (their org's library
@@ -21282,7 +21283,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         _forced_asset = None
         _choice_families = None
         if _nop:
-            _choice_families = ["text_led_recap", "weekend_numbers"]
+            _choice_families = ["text_led_recap", "weekend_numbers", "stat_line"]
         elif _chosen:
             _forced_asset = _chosen
             _choice_families = [
@@ -21291,6 +21292,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "story_card",
                 "athlete_spotlight",
                 "medal_card",
+                "action_photo_hero",
             ]
 
         # V10: distinct directions, background rendering, honest progress.

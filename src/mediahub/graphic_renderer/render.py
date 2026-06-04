@@ -885,7 +885,7 @@ def _build_text_led_fill_block(
     if course and len(cells) < 3:
         cells.append(("COURSE", course))
     if meet and len(cells) < 3:
-        cells.append(("MEET", meet[:32]))
+        cells.append(("MEET", _ellipsize(meet, 28)))
     cells = cells[:3]
     if not cells:
         cells = [("NEW PB", layers.get("achievement_label") or "PB")]
@@ -896,17 +896,20 @@ def _build_text_led_fill_block(
     if compact:
         mega_size = int(min(width, height) * 0.62)
         mega_top = int(height * 0.22)
-        mega_right = int(-width * 0.02)
         glow_size = int(min(width, height) * 0.55)
         glow_top = int(height * 0.20)
         glow_right = int(-width * 0.12)
     else:
         mega_size = int(min(width, height) * 0.78)
         mega_top = int(height * 0.18)
-        mega_right = int(-width * 0.04)
         glow_size = int(min(width, height) * 0.70)
         glow_top = int(height * 0.20)
         glow_right = int(-width * 0.16)
+
+    # Fit the giant surname watermark so the WHOLE name reads ("CARTER", not a
+    # clipped "CA"/"ARTER"); short names keep their drama (autofit caps at
+    # mega_size). Centred below so any residual width is shared, not edge-cut.
+    mega_px = _mega_watermark_px(mega_letter, width, mega_size)
 
     strip_class = "txl-stat-strip compact-tr" if compact else "txl-stat-strip"
     # In compact mode, only show 2 cells (event/time) so the column is short.
@@ -924,8 +927,9 @@ def _build_text_led_fill_block(
         f'<div class="txl-accent-bar diagonal"></div>'
         f'<div class="txl-accent-bar dot-grid"></div>'
         f'<div class="txl-mega-initial" '
-        f'style="top:{mega_top}px;right:{mega_right}px;font-size:{mega_size}px;">'
-        f"{html_escape(mega_letter[:8])}"
+        f'style="top:{mega_top}px;left:50%;transform:translateX(-50%);'
+        f'right:auto;font-size:{mega_px}px;">'
+        f"{html_escape(mega_letter[:14])}"
         f"</div>"
         f"{strip_html}"
     )
@@ -1014,6 +1018,35 @@ def _surname_font_px(surname: str, width: int, height: int, base_px: int) -> int
     )
 
 
+def _mega_watermark_px(text: str, width: int, cap_px: int) -> int:
+    """Font size for the giant no-photo surname watermark (text-led fill).
+
+    Fits the whole word into ~84% of the canvas width — a deliberately bigger
+    safety margin than the ~96% used for the in-layout surname, because the
+    watermark is *centred* and must never bleed a letter off either edge (the
+    char-width table runs a touch narrow for real Anton, so ~96% sometimes
+    pushed a "CARTER" out to "ARTER"). Capped at the layout's design size so
+    short names keep their drama; floored so very long names stay legible.
+    """
+    text = (text or "").upper().strip()
+    if not text:
+        return cap_px
+    from mediahub.graphic_renderer.autofit import fit_font_px
+
+    floor = max(40, int(width * 0.12))
+    cap = max(floor, int(cap_px))
+    return fit_font_px(
+        text,
+        box_w=width * 0.84,
+        box_h=cap,
+        font_family=_SURNAME_FONT_FAMILY,
+        weight=900,
+        min_px=floor,
+        max_px=cap,
+        line_height=1.0,
+    )
+
+
 def _scale_for_format(width: int, height: int) -> dict[str, float]:
     """Return per-format multipliers used to pick font sizes."""
     if width == height:  # square
@@ -1033,12 +1066,16 @@ def _scale_for_format(width: int, height: int) -> dict[str, float]:
 
 
 def _detect_medal_tier(brief) -> Optional[str]:
-    """Return 'gold' | 'silver' | 'bronze' | 'pb' | None based on the brief.
+    """Return 'gold' | 'silver' | 'bronze' | None based on the brief.
 
     Looks at achievement_label, post_angle, inspiration_pattern_id, and place
     so any layout (not just medal_card) can colour itself appropriately.
     A swimmer that medalled should always read as "medalled" at a glance,
     regardless of which layout the brief picked.
+
+    A PB is deliberately NOT a tier here: it keeps the club's real brand
+    accent (see ``_MEDAL_ACCENTS``) rather than being repainted, so the most
+    common card type still looks like the club.
     """
     layers = brief.text_layers or {}
     label = (layers.get("achievement_label") or "").lower()
@@ -1053,18 +1090,20 @@ def _detect_medal_tier(brief) -> Optional[str]:
         return "silver"
     if "bronze" in combined or place in ("3", "3rd") or place.startswith("3"):
         return "bronze"
-    if "new pb" in combined or "personal best" in combined or "pb swim" in combined:
-        return "pb"
     return None
 
 
-# Medal palette overrides — applied on top of the club's brand colours so
-# tier is unmistakable at a glance while the brand still dominates.
+# Medal palette overrides — applied on top of the club's brand colours so the
+# medal tier is unmistakable at a glance while the brand still dominates. Only
+# the three medal tiers tint the accent, because for a medal the colour *is* the
+# information (a gold card should feel gold). A PB is intentionally absent: it
+# keeps the club's confirmed brand accent and reads "NEW PB" through the ribbon
+# text, so a navy+gold club's PB card stays navy+gold instead of turning a
+# generic, off-brand cyan — and the most common card type looks on-brand.
 _MEDAL_ACCENTS = {
     "gold": {"accent": "#FFD24A", "accent_deep": "#A77A07", "badge": "GOLD"},
     "silver": {"accent": "#E8EAED", "accent_deep": "#6F757B", "badge": "SILVER"},
     "bronze": {"accent": "#E2A26A", "accent_deep": "#7E481B", "badge": "BRONZE"},
-    "pb": {"accent": "#22D3EE", "accent_deep": "#0E7C8F", "badge": "NEW PB"},
 }
 
 
@@ -1135,11 +1174,11 @@ def _common_replacements(
         # Override accent so result-chip border, label-ribbon, and event
         # subtitle all pick up the tier colour automatically.
         accent = ovr["accent"]
-        # Tier badge — placed below the result chip, top-right, so it
-        # sits next to the time (which is the hero element) and never
-        # collides with the .label-ribbon top-left achievement label.
-        # PB uses a lighter, less-shouty treatment than medal tiers.
-        badge_top = int(height * 0.20)
+        # Tier badge — only medals (gold/silver/bronze) reach here, so the
+        # badge always carries real, non-duplicate information. It sits below
+        # the result chip, top-right, next to the time (the hero element), and
+        # never collides with the .label-ribbon top-left achievement label.
+        badge_top = int(height * 0.215)
         font_size = max(36, int(height * 0.038))
         medal_badge_html = (
             f'<div class="tier-badge" style="position:absolute;'
@@ -1373,6 +1412,9 @@ def _fill_individual_hero(brief, width: int, height: int, repl: dict[str, str]) 
     # Rebuild the text-led fill block in compact mode so it does not collide
     # with the bottom fg-text + result-chip area.
     if not has_photo:
+        # Skip the compact stat strip here: the event is already the subtitle
+        # and the time is already the hero result chip, so the strip only
+        # repeated them. Dropping it gives a clean single-chip top-right.
         repl["TEXT_LED_FILL_BLOCK"] = _build_text_led_fill_block(
             full_name=layers.get("athlete_full_name") or "",
             surname=layers.get("athlete_surname") or "",
@@ -1382,6 +1424,7 @@ def _fill_individual_hero(brief, width: int, height: int, repl: dict[str, str]) 
             palette=brief.palette or {},
             has_photo=False,
             compact=True,
+            skip_stat_strip=True,
         )
     repl.update(
         {
@@ -1502,11 +1545,19 @@ def _fill_weekend_numbers(brief, width: int, height: int, repl: dict[str, str]) 
         while len(stat_pairs) < 4 and i < len(defaults):
             stat_pairs.append(defaults[i])
             i += 1
+    num_base = int(min(width, height) * 0.13)
+    # Two-column grid: fit each tile's value font so a long value (e.g. an
+    # event name) doesn't overflow the tile. Numeric values like "58.34" stay
+    # at the full display size; "100m Freestyle" shrinks to fit rather than
+    # being clipped mid-word. Anton caps advance ~0.52em.
+    tile_inner = max(120, int((width - 112 - 18) / 2) - 48)
     tiles_html = ""
     for value, label in stat_pairs[:6]:
+        value = _ellipsize(str(value), 16)
+        fit_px = max(30, min(num_base, int(tile_inner / (max(1, len(value)) * 0.52))))
         tiles_html += (
             '<div class="stat-tile">'
-            f'<div class="num">{html_escape(value)}</div>'
+            f'<div class="num" style="font-size:{fit_px}px">{html_escape(value)}</div>'
             f'<div class="label">{html_escape(label)}</div>'
             "</div>\n"
         )
@@ -1546,8 +1597,10 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         # right-aligned, since spot-side now spans the full width.
         surname = (layers.get("athlete_surname") or "").upper()
         full_name = layers.get("athlete_full_name") or ""
-        mega_letter = (surname or full_name or "").upper()[:8]
+        mega_letter = (surname or full_name or "").upper()[:14]
         mega_size = int(min(width, height) * 0.62)
+        # Fit to the canvas width so the full surname reads when centred (no clip).
+        mega_px = _mega_watermark_px(mega_letter, width, mega_size)
         # Position centered horizontally, in the middle vertical band
         custom_block = (
             f'<div class="txl-photo-glow" style="top:{int(height*0.40)}px;'
@@ -1555,7 +1608,7 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
             f'height:{int(min(width,height)*0.55)}px;"></div>'
             f'<div class="txl-accent-bar diagonal"></div>'
             f'<div class="txl-mega-initial" style="top:{int(height*0.36)}px;'
-            f"left:50%;transform:translateX(-50%);right:auto;font-size:{mega_size}px;"
+            f"left:50%;transform:translateX(-50%);right:auto;font-size:{mega_px}px;"
             f'-webkit-text-stroke:4px rgba(255,255,255,0.16);">'
             f"{html_escape(mega_letter)}</div>"
         )
@@ -1572,7 +1625,12 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         primary_event = _clean_event_name(_raw_event)
         primary_result = layers.get("result_value") or ""
         primary_label = layers.get("achievement_label") or ""
-        if primary_event or primary_result:
+        # The career-best card (below) already headlines the primary event +
+        # result, so don't repeat it as the first stat row — start the rows
+        # from the supporting facts instead. Only show the primary row when
+        # there's no career-best card to carry it (i.e. no result value).
+        has_career_best = bool(primary_result)
+        if (primary_event or primary_result) and not has_career_best:
             rows.append((primary_event, primary_result, primary_label))
         # Synthesise supporting rows so the panel doesn't look bare
         place = layers.get("place") or ""
@@ -1625,9 +1683,9 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
     # full-width 4-column row at the bottom so long meet names fit.
     support_cells: list[tuple[str, str]] = []
     if layers.get("meet_name"):
-        support_cells.append(("Meet", layers["meet_name"][:24]))
+        support_cells.append(("Meet", _ellipsize(layers["meet_name"], 22)))
     if layers.get("venue_name"):
-        support_cells.append(("Venue", layers["venue_name"][:24]))
+        support_cells.append(("Venue", _ellipsize(layers["venue_name"], 22)))
     if layers.get("event_name"):
         ev_text = layers["event_name"]
         course = (
@@ -1637,7 +1695,7 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         )
         support_cells.append(("Course", course))
     if layers.get("club_full"):
-        support_cells.append(("Club", layers["club_full"][:24]))
+        support_cells.append(("Club", _ellipsize(layers["club_full"], 22)))
     support_cells = support_cells[:4]
     support_grid_html = ""
     if support_cells and not has_photo:
@@ -1902,6 +1960,107 @@ def _fill_big_number_hero(brief, width: int, height: int, repl: dict[str, str]) 
     return repl
 
 
+def _fill_action_photo_hero(brief, width: int, height: int, repl: dict[str, str]) -> dict[str, str]:
+    """Full-bleed real-photo hero — clean lower-third lockup over a brand scrim.
+
+    The photo (HERO_PHOTO_URI) is the original, un-cutout image, supplied by
+    ``render_brief`` only when a real athlete/action photo exists. When it is
+    empty the template falls back to the brand gradient — this layout never
+    fabricates a person (MediaHub's standing "no fake people" rule).
+    """
+    layers = brief.text_layers or {}
+    repl = dict(repl)
+    repl.update(
+        {
+            "NAME_FONT_SIZE": str(int(height * 0.086)),
+            "EVENT_FONT_SIZE": str(int(min(width, height) * 0.026)),
+            "RESULT_FONT_SIZE": str(int(height * 0.058)),
+            "RESULT_VALUE_RAW": html_escape(layers.get("result_value") or ""),
+        }
+    )
+    _rl, _rpx = _fit_ribbon_label(
+        layers.get("achievement_label") or "", int(height * 0.030), width
+    )
+    repl["ACHIEVEMENT_LABEL"] = html_escape(_rl)
+    repl["RIBBON_FONT_SIZE"] = str(_rpx)
+    return repl
+
+
+def _fill_stat_line(brief, width: int, height: int, repl: dict[str, str]) -> dict[str, str]:
+    """Restrained editorial recap — one hero stat, generous negative space.
+
+    The Canva-cleanliness lesson rendered in MediaHub's poster type: a kicker, a
+    stacked headline (the AI hook), one big autofit hero numeral on an accent
+    rule, and a tidy support row. Text-led, so it never needs a photo.
+    """
+    layers = brief.text_layers or {}
+    repl = dict(repl)
+
+    # Headline: prefer the AI hook, else the achievement label. A multi-word hook
+    # splits across two lines (the second line picks up the accent colour).
+    hook = (
+        (getattr(brief, "primary_hook", "") or "").strip()
+        or (layers.get("achievement_label") or "").strip()
+        or "RESULT"
+    ).upper()
+    words = hook.split()
+    if len(words) >= 2:
+        mid = (len(words) + 1) // 2
+        line1, line2 = " ".join(words[:mid]), " ".join(words[mid:])
+    else:
+        line1, line2 = hook, ""
+
+    hero_value = (layers.get("result_value") or layers.get("place") or "—").strip()
+    hero_event = _clean_event_name(layers.get("event_name") or "") or (
+        layers.get("meet_name") or ""
+    )
+
+    # Fit the hero numeral to the column width so long values never overflow.
+    from mediahub.graphic_renderer.autofit import fit_font_px as _fit
+
+    hero_px = _fit(
+        hero_value or "—",
+        box_w=(width - 128) * 0.98,
+        box_h=int(height * 0.22),
+        font_family="Anton",
+        weight=900,
+        min_px=int(height * 0.07),
+        max_px=int(height * 0.17),
+        line_height=1.0,
+    )
+
+    cells: list[tuple[str, str]] = []
+    name = (layers.get("athlete_full_name") or "").strip()
+    if name:
+        cells.append(("Swimmer", _ellipsize(name, 18)))
+    place = (layers.get("place") or "").strip()
+    if place:
+        cells.append(("Finish", place))
+    club = (layers.get("club_short") or layers.get("club_full") or "").strip()
+    if club and len(cells) < 3:
+        cells.append(("Club", _ellipsize(club, 18)))
+    cells = cells[:3]
+    support_html = "".join(
+        f'<div class="cell"><div class="lab">{html_escape(lab)}</div>'
+        f'<div class="v">{html_escape(val)}</div></div>'
+        for lab, val in cells
+    )
+
+    repl.update(
+        {
+            "KICKER": html_escape(layers.get("meet_name") or layers.get("club_full") or ""),
+            "HEADLINE_LINE1": html_escape(line1),
+            "HEADLINE_LINE2": html_escape(line2),
+            "HEADLINE_FONT_SIZE": str(int(height * 0.084)),
+            "HERO_EVENT": html_escape(hero_event),
+            "HERO_VALUE": html_escape(hero_value),
+            "HERO_FONT_SIZE": str(hero_px),
+            "SUPPORT_CELLS": support_html,
+        }
+    )
+    return repl
+
+
 # Map family → filler
 _FILLERS = {
     "individual_hero": _fill_individual_hero,
@@ -1912,6 +2071,8 @@ _FILLERS = {
     "story_card": _fill_story_card,
     "reel_cover": _fill_reel_cover,
     "big_number_hero": _fill_big_number_hero,
+    "action_photo_hero": _fill_action_photo_hero,
+    "stat_line": _fill_stat_line,
 }
 
 
@@ -2052,6 +2213,17 @@ def render_brief(
         except Exception:
             athlete_uri = None
 
+    # Full-bleed photo families (action_photo_hero) render the ORIGINAL,
+    # un-cutout image as a cover background with a brand scrim. Only ever a real
+    # provided photo — never a fabricated person — and left empty when none is
+    # supplied (the layout then falls back to the brand gradient).
+    hero_photo_uri = ""
+    if family == "action_photo_hero" and athlete_path:
+        try:
+            hero_photo_uri = _img_to_data_uri(athlete_path)
+        except Exception:
+            hero_photo_uri = ""
+
     venue_uri = None
     if venue_path:
         try:
@@ -2092,6 +2264,7 @@ def render_brief(
         ),
         sponsor_block=_build_sponsor_block(sponsor_name) if sponsor_name else "",
     )
+    base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 
     # Layout-specific
     if family == "meet_preview":

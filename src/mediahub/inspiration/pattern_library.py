@@ -309,6 +309,75 @@ PATTERNS.append({
 })
 
 
+PATTERNS.append({
+    "id": "action_photo_hero",
+    "label": "Action photo hero — full-bleed real photo + brand scrim",
+    "family": "action_photo_hero",
+    "post_angles": ["confirmed_official_pb", "pb_improvement", "first_sub_barrier",
+                    "likely_pb", "finalist", "top_of_field", "qualifying_time",
+                    "biggest_drop", "fastest_since", "medal_gold", "medal_silver",
+                    "medal_bronze", "athlete_spotlight"],
+    "format_priority": ["feed_portrait", "story", "feed_square"],
+    "composition": (
+        "A real athlete/action photo fills the whole frame. A brand-tinted scrim "
+        "ramps from clear at the top to a deep base, so a clean lower-third "
+        "lockup (first name, surname in the accent, result + event on an accent "
+        "rule) stays legible at thumbnail size. Achievement ribbon top-left, "
+        "brand corner bottom-left. Falls back to the brand gradient when no real "
+        "photo is supplied — it never fabricates a person."
+    ),
+    "typography": {
+        "headline_font": "Anton / Bebas Neue",
+        "body_font": "Space Grotesk; JetBrains Mono for the result",
+        "headline_weight": "900",
+        "body_weight": "600-800",
+    },
+    "colour_treatment": (
+        "Photo at full strength up top; brand-primary scrim at the base. "
+        "Surname + result in the club accent colour."
+    ),
+    "image_treatment": "real full-bleed photo (the original image, not a cutout); no synthetic people",
+    "text_layers": ["achievement_label", "athlete_first_name", "athlete_surname",
+                    "result_value", "event_name", "meet_name", "club_full"],
+    "why_use_this": (
+        "The clean, photographic social look (the lesson from studying Canva's "
+        "generator) while staying honest — it only ever uses a real photo the "
+        "club supplied."
+    ),
+})
+
+
+PATTERNS.append({
+    "id": "stat_line",
+    "label": "Stat line — restrained editorial recap",
+    "family": "stat_line",
+    "post_angles": ["confirmed_official_pb", "pb_improvement", "first_sub_barrier",
+                    "likely_pb", "finalist", "top_of_field", "qualifying_time",
+                    "recap_mention", "weekend_recap"],
+    "format_priority": ["feed_portrait", "feed_square", "story"],
+    "composition": (
+        "Deliberate negative space: a small meet kicker, a stacked headline (the "
+        "hook, second line in the accent), ONE big autofit hero numeral on an "
+        "accent rule, then a tidy support row (swimmer / finish / club). Brand "
+        "corner bottom-left."
+    ),
+    "typography": {
+        "headline_font": "Anton",
+        "body_font": "Space Grotesk / Inter",
+        "headline_weight": "900",
+        "body_weight": "600-700",
+    },
+    "colour_treatment": "club primary gradient, white type, accent on the hook line + the rule",
+    "image_treatment": "no photo required (text-led)",
+    "text_layers": ["primary_hook", "result_value", "event_name", "athlete_full_name",
+                    "place", "meet_name", "club_full"],
+    "why_use_this": (
+        "A calm, premium recap for when a busy poster is too much — restraint as a "
+        "deliberate option alongside the bold layouts."
+    ),
+})
+
+
 def list_patterns() -> list[dict]:
     return [{"id": p["id"], "label": p["label"], "family": p["family"]} for p in PATTERNS]
 
