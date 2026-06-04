@@ -1,0 +1,228 @@
+"""Step 7 — results-from-a-link product surface (web.py wiring).
+
+The URL path converges with the file-upload path at /upload/configure. These
+tests drive a monkeypatched crawler (no network/browser) and assert: URL
+validation, the background job lifecycle, staged input.bin + upload_meta.json
+(incl. source_url), the redirect to the EXISTING configure step, honest
+job-level errors (never a 500), and the kill-switch. The file-upload path is
+left byte-for-byte unchanged.
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+
+import pytest
+
+
+@pytest.fixture
+def app_mod(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads_v4"))
+    monkeypatch.setenv("SWIM_CONTENT_PROFILES_DIR", str(tmp_path / "club_profiles"))
+    monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "1")
+    for sub in ("runs_v4", "uploads_v4", "club_profiles"):
+        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+    import mediahub.web.club_profile as cp
+    import mediahub.web.web as wm
+
+    importlib.reload(cp)
+    importlib.reload(wm)
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    return app, wm
+
+
+_EVENT_HTML = (
+    "<html><body><h3>100m Free</h3><table>"
+    "<tr><th>Place</th><th>Name</th><th>Club</th><th>Time</th></tr>"
+    "<tr><td>1</td><td>Ada Lovelace</td><td>Brighton Swimming</td><td>1:02.34</td></tr>"
+    "<tr><td>2</td><td>Bea Carr</td><td>Wigan Otters</td><td>1:03.11</td></tr>"
+    "</table></body></html>"
+)
+
+
+def _fake_crawl_factory(wm, *, empty=False, raises=False):
+    from mediahub.results_fetch.crawl import CrawlResult, FileProvenance
+
+    def _fake(url, **kwargs):
+        if raises:
+            raise RuntimeError("boom in crawl")
+        if empty:
+            return CrawlResult(entry_url=url, pages_visited=2, kept=0, total_bytes=0)
+        return CrawlResult(
+            files={"agb/event1.html": _EVENT_HTML.encode()},
+            provenance={
+                "agb/event1.html": FileProvenance(
+                    source_url=url + "event1.html",
+                    tier="static",
+                    trigger=None,
+                    content_type="text/html",
+                    fetched_at=0.0,
+                )
+            },
+            entry_url=url,
+            pages_visited=3,
+            kept=1,
+            total_bytes=len(_EVENT_HTML),
+        )
+
+    return _fake
+
+
+# ---------------------------------------------------------------------------
+# URL validation
+# ---------------------------------------------------------------------------
+
+
+def test_rejects_non_http_url(app_mod):
+    app, wm = app_mod
+    c = app.test_client()
+    r = c.post("/upload/from-url", data={"url": "not-a-url"})
+    assert r.status_code == 400
+    assert "error" in r.get_json()
+
+
+def test_rejects_loopback_host(app_mod):
+    app, wm = app_mod
+    c = app.test_client()
+    r = c.post("/upload/from-url", data={"url": "http://127.0.0.1/secret"})
+    assert r.status_code == 400  # SSRF guard refuses internal hosts up front
+
+
+# ---------------------------------------------------------------------------
+# Job lifecycle + staging (run the worker synchronously for determinism)
+# ---------------------------------------------------------------------------
+
+
+def test_job_stages_zip_with_source_url(app_mod, monkeypatch):
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site", _fake_crawl_factory(wm)
+    )
+    job_id = "abc123def456"
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://results.swim.test/agb/", None)
+
+    entry = wm._url_job_get(job_id)
+    assert entry["status"] == "done"
+    run_id = entry["run_id"]
+
+    import os
+
+    runs_dir = wm.RUNS_DIR
+    assert (runs_dir / run_id / "input.bin").exists()
+    meta = json.loads((runs_dir / run_id / "upload_meta.json").read_text())
+    assert meta["source_url"] == "https://results.swim.test/agb/"
+    assert meta["filename"].endswith(".zip")
+    assert "results.swim.test" in meta["filename"]
+    assert os.path.getsize(runs_dir / run_id / "input.bin") > 0
+
+
+def test_status_endpoint_redirects_to_configure(app_mod, monkeypatch):
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site", _fake_crawl_factory(wm)
+    )
+    job_id = "0123456789ab"
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://results.swim.test/agb/", None)
+
+    c = app.test_client()
+    r = c.get(f"/api/upload/from-url/{job_id}/status")
+    assert r.status_code == 200
+    payload = r.get_json()
+    assert payload["status"] == "done"
+    assert "/upload/configure" in payload["redirect"]
+    assert wm._url_job_get(job_id)["run_id"] in payload["redirect"]
+
+
+def test_route_starts_background_job(app_mod, monkeypatch):
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site", _fake_crawl_factory(wm)
+    )
+    # The fake test domain doesn't resolve; the route's SSRF check does real DNS,
+    # so stub it true (the crawl itself is mocked and re-validates every fetch).
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: True)
+    c = app.test_client()
+    r = c.post("/upload/from-url", data={"url": "https://results.swim.test/agb/"})
+    assert r.status_code == 200
+    job_id = r.get_json()["job_id"]
+    import re
+
+    assert re.fullmatch(r"[0-9a-f]{12}", job_id)
+
+
+# ---------------------------------------------------------------------------
+# Honest failures — job error, never a 500
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_exception_becomes_job_error(app_mod, monkeypatch):
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site",
+        _fake_crawl_factory(wm, raises=True),
+    )
+    job_id = "ffffffffffff"
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://x.test/r/", None)  # must not raise
+    entry = wm._url_job_get(job_id)
+    assert entry["status"] == "error"
+    assert entry["error"]
+
+
+def test_empty_crawl_errors_clearly(app_mod, monkeypatch):
+    app, wm = app_mod
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site",
+        _fake_crawl_factory(wm, empty=True),
+    )
+    job_id = "aaaaaaaaaaaa"
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://x.test/r/", None)
+    entry = wm._url_job_get(job_id)
+    assert entry["status"] == "error"
+    assert "No competition results" in entry["error"]
+
+
+def test_unknown_job_status_is_404(app_mod):
+    app, wm = app_mod
+    c = app.test_client()
+    assert c.get("/api/upload/from-url/0123456789ab/status").status_code == 404
+    assert c.get("/api/upload/from-url/bad/status").status_code == 400  # bad id shape
+
+
+# ---------------------------------------------------------------------------
+# Kill-switch + file-upload path unchanged
+# ---------------------------------------------------------------------------
+
+
+def test_kill_switch_hides_input_and_404s_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs_v4"))
+    monkeypatch.setenv("MEDIAHUB_RESULTS_FETCH_ENABLED", "0")
+    import mediahub.web.web as wm
+
+    importlib.reload(wm)
+    app = wm.create_app()
+    app.config["TESTING"] = True
+    c = app.test_client()
+    assert "mh-url-input" not in c.get("/upload").get_data(as_text=True)
+    assert c.post("/upload/from-url", data={"url": "https://x.test/"}).status_code == 404
+
+
+def test_file_upload_path_still_works(app_mod):
+    app, wm = app_mod
+    c = app.test_client()
+    # GET still renders; POST with a file still stages + redirects to configure
+    assert c.get("/upload").status_code == 200
+    import io
+
+    data = {"file": (io.BytesIO(_EVENT_HTML.encode()), "meet.html")}
+    r = c.post("/upload", data=data, content_type="multipart/form-data")
+    assert r.status_code in (302, 303)
+    assert "/upload/configure" in r.headers["Location"]
