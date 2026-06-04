@@ -87,10 +87,11 @@ def test_configure_post_kicks_off_pipeline_for_picked_club(app, monkeypatch):
     started: dict = {}
 
     def _fake_start_run(file_bytes, file_name, profile_id, use_cache, fetch_pbs,
-                        club_filter=None):
+                        club_filter=None, source_url=None):
         started["club_filter"] = club_filter
         started["filename"] = file_name
         started["profile_id"] = profile_id
+        started["source_url"] = source_url
         return "fakerun123"
 
     monkeypatch.setattr(web_module, "_start_run", _fake_start_run)
@@ -119,6 +120,9 @@ def test_configure_post_kicks_off_pipeline_for_picked_club(app, monkeypatch):
     assert rv2.status_code in (302, 303), rv2.data[:300]
     assert "/runs/fakerun123" in rv2.headers["Location"]
     assert started["club_filter"] == pick
+    # The file-upload path carries no source URL — the results-from-a-link
+    # plumbing must not disturb the file contract.
+    assert started["source_url"] is None
 
 
 def test_upload_form_has_no_club_or_brand_fields(app):
