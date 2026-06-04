@@ -32,6 +32,35 @@
   color: rgba(255,255,255,0.20);
 }
 
+/* MR-9: weave the club PRIMARY into the card. The gold medal elements stay
+   gold; the brand shows up as a left edge ribbon, a primary-tinted glow
+   behind the canvas top, and the meet chip painted in PRIMARY. */
+.brand-ribbon {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 18px;
+  z-index: 6;
+  background: linear-gradient(180deg, var(--primary) 0%, var(--primary-deep) 100%);
+  box-shadow: 6px 0 24px rgba(0,0,0,0.30);
+}
+.brand-glow {
+  position: absolute;
+  top: -12%; left: -10%;
+  width: 70%; height: 55%;
+  z-index: 1;
+  background: radial-gradient(ellipse at 30% 20%, var(--primary) 0%, transparent 65%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.brand-corner .meet-line {
+  display: inline-block;
+  background: var(--primary);
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 6px;
+  opacity: 1;
+}
+
 .fg-text { bottom: {{FG_TEXT_BOTTOM}}px; left: 56px; right: 460px; }
 .fg-firstname { font-size: {{FIRSTNAME_FONT_SIZE}}px; }
 .fg-event { font-size: {{EVENT_FONT_SIZE}}px; }
@@ -43,10 +72,13 @@
 <body>
 <div class="canvas">
   <div class="bg-gradient" style="position:absolute;inset:0;z-index:0;"></div>
+  <div class="brand-glow"></div>
   <div class="bg-ai"></div>
   <div class="bg-water-pattern"></div>
   <div class="bg-noise"></div>
   <div class="bg-vignette"></div>
+
+  <div class="brand-ribbon"></div>
 
   <div class="surname-bg">{{ATHLETE_SURNAME_DISPLAY}}</div>
 

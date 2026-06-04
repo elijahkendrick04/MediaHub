@@ -581,7 +581,16 @@ def generate(
                     layers[f"stat_{_key}"] = str(_sv).strip()
         if gt.get("primary_hook"):
             primary_hook = str(gt["primary_hook"])
-            layers["achievement_label"] = primary_hook
+            # Do NOT mirror the hook into ``achievement_label``: the stub
+            # hooks ("SPONSOR"/"PREVIEW"/"LIVE"/"HIGHLIGHT") are routing
+            # words, and the text-led renderer turns ``achievement_label``
+            # into a stat-tile VALUE labelled "RESULT" — which rendered as
+            # the live "SPONSOR / RESULT" tile. Only set the label when the
+            # caller hands a dedicated display value for it.
+            if gt.get("achievement_label"):
+                layers["achievement_label"] = str(gt["achievement_label"])
+            else:
+                layers.pop("achievement_label", None)
 
     brief = CreativeBrief(
         id="cb_" + uuid.uuid4().hex[:12],

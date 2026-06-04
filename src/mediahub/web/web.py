@@ -6022,6 +6022,17 @@ def _soft_trim(text: str, limit: int = 80) -> str:
     return cut + "\u2026"
 
 
+def _has_real_text(text: str) -> bool:
+    """True when ``text`` contains at least one letter or digit.
+
+    ``_display_clean`` strips emoji but leaves the sentence punctuation, so
+    an emoji-only caption sentence ("\U0001f3c6\U0001f3c6\U0001f3c6.") survives as a bare
+    "." — which then renders as a meaningless decorated bullet row. Require
+    real alphanumeric content before a sentence may become a bullet.
+    """
+    return any(ch.isalnum() for ch in text or "")
+
+
 def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> dict:
     """Map a caption-only stub card into a text-led graphic ``content_item``.
 
@@ -6092,8 +6103,10 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
         # which mislabelled every non-recap stub graphic. Each flow now
         # supplies its own (possibly empty) second line instead.
         hl2 = line2_default
-    bullets = [_soft_trim(b, 80) for b in bullets if b]
-    if not bullets and caption:
+    # Drop bullets with no real text (emoji-only sentences reduce to bare
+    # punctuation after ``_display_clean``).
+    bullets = [_soft_trim(b, 80) for b in bullets if b and _has_real_text(b)]
+    if not bullets and caption and _has_real_text(caption):
         bullets = [_soft_trim(caption, 80)]
     return {
         "id": stub_type,
@@ -8547,6 +8560,67 @@ def create_app() -> Flask:
 """
             return _layout("Couldn't read file", body, active="create")
 
+        # MR-8: pre-select the club that best matches the signed-in
+        # organisation instead of defaulting to the alphabetical first club.
+        # Fuzzy match (difflib + containment) on lowercased names so
+        # "Chelmsford SC" still finds "City of Chelmsford" in the meet file.
+        active_prof = _active_profile()
+        org_name = (getattr(active_prof, "display_name", "") or "").strip()
+        club_match_warning_html = ""
+        if not selected_club and clubs:
+            best_club, best_ratio = "", 0.0
+            if org_name:
+                from difflib import SequenceMatcher
+
+                # Generic swim-club filler words carry no identity — strip
+                # them so "Chelmsford Swimming Club" vs "City of Chelmsford
+                # SC" compares on the distinctive part ("chelmsford").
+                _generic = {
+                    "swimming",
+                    "swim",
+                    "club",
+                    "sc",
+                    "asc",
+                    "asa",
+                    "city",
+                    "of",
+                    "the",
+                    "amateur",
+                    "aquatics",
+                    "squad",
+                    "team",
+                }
+
+                def _core(name: str) -> str:
+                    toks = [t for t in name.lower().split() if t not in _generic]
+                    return " ".join(toks) or name.lower()
+
+                org_l = org_name.lower()
+                org_core = _core(org_name)
+                for c in clubs:
+                    c_l = str(c).lower()
+                    c_core = _core(str(c))
+                    ratio = max(
+                        SequenceMatcher(None, org_l, c_l).ratio(),
+                        SequenceMatcher(None, org_core, c_core).ratio(),
+                    )
+                    # Containment counts as a strong match either way round
+                    # ("chelmsford" in "city of chelmsford sc").
+                    for a, b in ((org_l, c_l), (org_core, c_core)):
+                        if a and b and (a in b or b in a):
+                            ratio = max(ratio, 0.9)
+                    if ratio > best_ratio:
+                        best_ratio, best_club = ratio, c
+            if best_ratio >= 0.6:
+                selected_club = best_club
+            elif org_name:
+                club_match_warning_html = (
+                    '<p class="dim" style="margin-top:4px;font-size:var(--fs-sm);'
+                    'color:var(--warn)">Heads up &mdash; none of the clubs in this '
+                    f"meet match {_h(org_name)}. Captions will speak as "
+                    f"{_h(org_name)} about the selected club's swimmers.</p>"
+                )
+
         # V8.2 issue 4: ONLY clubs from this file are listed.
         opts = "".join(
             f'<option value="{_h(c)}"{" selected" if c == selected_club else ""}>{_h(c)}</option>'
@@ -8560,7 +8634,7 @@ def create_app() -> Flask:
         # profile, not on individual runs. Colour pickers stay because
         # they're cheap per-run overrides for the rare case someone wants
         # a different palette for a sponsor-themed post.
-        active_prof = _active_profile()
+        # (active_prof already resolved above for the MR-8 club pre-select.)
         prof_primary = "#0A2540"
         prof_secondary = "#101820"
         prof_accent = "#FFD86E"
@@ -8660,6 +8734,7 @@ def create_app() -> Flask:
     <label for="run-config-club">Club to feature</label>
     <select name="club_filter" id="run-config-club" required>{opts}</select>
     <p class="dim" style="margin-top:4px;font-size:var(--fs-sm)">Only clubs that actually appear in this meet are listed.</p>
+    {club_match_warning_html}
 
     <fieldset class="mh-fieldset">
       <legend>Brand &mdash; loaded from your organisation</legend>
