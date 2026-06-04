@@ -553,13 +553,32 @@ def generate(
     if isinstance(gt, dict):
         if gt.get("headline_line1"):
             layers["headline_line1"] = str(gt["headline_line1"])
-        if gt.get("headline_line2"):
+            # Honour an explicitly-empty second line. The stub flows set
+            # their own line 2 ("THANK YOU" / "PREVIEW" / "UPDATE") or ""
+            # for none — an empty string must reach the renderer as "no
+            # second line", NOT fall through to its "RECAP" default
+            # (which branded sponsor thank-yous as recaps).
+            if "headline_line2" in gt:
+                layers["headline_line2"] = str(gt.get("headline_line2") or "")
+        elif gt.get("headline_line2"):
             layers["headline_line2"] = str(gt["headline_line2"])
         _gt_bullets = gt.get("bullets")
         if isinstance(_gt_bullets, list):
             _clean = [str(b).strip() for b in _gt_bullets if str(b).strip()]
             if _clean:
                 layers["bullets"] = _clean[:4]
+        # Caller-supplied stat tiles (label -> value) for the text-led
+        # centre strip. Stub cards have no swim results, so without this
+        # the renderer back-filled the strip with nonsense ("SPONSOR"
+        # labelled RESULT, sentence counts labelled HIGHLIGHTS).
+        _gt_stats = gt.get("stats")
+        if isinstance(_gt_stats, dict):
+            for _sk, _sv in list(_gt_stats.items())[:3]:
+                _key = "".join(
+                    ch if (ch.isalnum() or ch == "_") else "_" for ch in str(_sk).strip().lower()
+                ).strip("_")
+                if _key and str(_sv).strip():
+                    layers[f"stat_{_key}"] = str(_sv).strip()
         if gt.get("primary_hook"):
             primary_hook = str(gt["primary_hook"])
             # Do NOT mirror the hook into ``achievement_label``: the stub
