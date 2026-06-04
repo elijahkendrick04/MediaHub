@@ -67,16 +67,23 @@ def call_claude(system: str, user: str, max_tokens: int = 400, **_kwargs) -> str
 # downstream consumer that wants to use it needs to know it exists; we
 # don't let the LLM invent tones.
 _TONE_DESCRIPTORS: dict[str, str] = {
-    "ai":         "a balanced sports social-media voice — natural, "
-                  "specific, mildly warm, no jargon.",
-    "warm-club":  "warm and community-focused: first-name the swimmer, "
-                  "celebrate the team, sound like the club family talking.",
-    "hype":       "energetic and race-day: high-energy language, "
-                  "exclamation marks where genuinely earned, make the "
-                  "reader feel the adrenaline.",
-    "data-led":   "precise and data-led: lead with numbers and hard "
-                  "facts, sponsor-friendly, no fluff — every word earns "
-                  "its place.",
+    "ai":         "a balanced editorial sports voice — natural and "
+                  "specific. Vary your opening from caption to caption; "
+                  "include at least one concrete fact (time, place, "
+                  "event or venue).",
+    "warm-club":  "club-family warmth, written first-person plural "
+                  "(we/our). Speak to the community directly and "
+                  "mention supporters or coaches naturally. Gentle, "
+                  "unhurried pace. At most 1 emoji.",
+    "hype":       "high energy. Short, punchy sentences — no sentence "
+                  "over 10 words. Present tense. Urgency and "
+                  "exclamation. Lead with the moment, not the name. "
+                  "1-2 emoji allowed. NO reflective sentiment.",
+    "data-led":   "numbers first — open with the time or placing "
+                  "figure. No subjective adjectives (never \"fantastic\", "
+                  "\"incredible\", \"well-deserved\", \"amazing\"). "
+                  "Sponsor-safe neutral register. No emoji. No "
+                  "exclamation marks.",
 }
 
 KNOWN_AI_TONES: frozenset[str] = frozenset(_TONE_DESCRIPTORS.keys())
@@ -103,6 +110,77 @@ _AI_TELL_SYSTEM_INSTRUCTION: str = (
     "Avoid reflexive exclamation marks — use '!' only when the moment "
     "genuinely warrants it, not as empty emphasis."
 )
+
+
+_COURSE_SUFFIX_RE = re.compile(r"\s*\(\s*(SC|LC)\s*\)\s*$", re.IGNORECASE)
+
+_COURSE_SPELLED = {"SC": "short course", "LC": "long course"}
+
+_NO_COURSE_ABBREV_INSTRUCTION: str = (
+    'Never write the abbreviations "(SC)" or "(LC)" — say "short course"/'
+    '"long course" only if the distinction genuinely matters, otherwise '
+    "omit it."
+)
+
+_SHARED_TONE_BANS: str = (
+    'Do not open with "Another …" or "What a …"; never use the phrase '
+    '"testament to".'
+)
+
+
+def _strip_course_suffix(event: str) -> str:
+    """Remove a trailing "(SC)" / "(LC)" course marker from an event name.
+
+    MR-5: course jargon like "100m Breaststroke (SC)" leaked into every
+    published caption. The abbreviation means nothing to a parent
+    scrolling a feed, so it never belongs in prompt-visible event names.
+    Case-insensitive; tolerates surrounding whitespace.
+    """
+    if not event:
+        return event
+    return _COURSE_SUFFIX_RE.sub("", event).strip()
+
+
+def _sanitise_achievement_for_prompt(a: dict) -> dict:
+    """Return a shallow copy of the achievement with course jargon
+    removed from the event name and the ``course`` field spelled out
+    ("SC" → "short course") so the raw distinction stays available for
+    data-led time context without the abbreviation ever reaching the
+    LLM's source prose."""
+    if not isinstance(a, dict):
+        return a
+    out = dict(a)
+    event = (out.get("event") or "").strip()
+    if event:
+        out["event"] = _strip_course_suffix(event)
+    course = (out.get("course") or "").strip()
+    if course:
+        out["course"] = _COURSE_SPELLED.get(course.upper(), course)
+    return out
+
+
+def _locale_instruction(club_profile) -> str:
+    """MR-7: derive a spelling-locale instruction from the club's country.
+
+    UK organisations were getting US spellings ("program") in published
+    captions. Returns "" when no country is set.
+    """
+    if club_profile is None:
+        return ""
+    if isinstance(club_profile, dict):
+        country = (club_profile.get("country") or "").strip()
+    else:
+        country = (getattr(club_profile, "country", "") or "").strip()
+    if not country:
+        return ""
+    uk_names = {
+        "united kingdom", "uk", "great britain", "england",
+        "scotland", "wales", "northern ireland",
+    }
+    if country.lower() in uk_names:
+        return ("Write in British English (programme, recognise, centre, "
+                "organise; metres).")
+    return f"Write in the natural English variant for {country}."
 
 
 def _contains_ai_tell(text: str) -> bool:
@@ -321,6 +399,8 @@ def generate_caption_for_tone(
         "Never invent facts. Output ONLY the caption text — no preamble, "
         "no quotes, no markdown.",
         _AI_TELL_SYSTEM_INSTRUCTION,
+        _NO_COURSE_ABBREV_INSTRUCTION,
+        _SHARED_TONE_BANS,
         # Force genuine variety. The model has a strong attractor toward
         # the same opener / same closer wording on identical inputs;
         # this instruction nudges it off the attractor.
@@ -331,6 +411,9 @@ def generate_caption_for_tone(
         "different rhythm, different lens (e.g. swimmer's effort vs. "
         "the team's reaction vs. the numbers vs. the milestone).",
     ]
+    locale_line = _locale_instruction(club_profile)
+    if locale_line:
+        system_parts.append(locale_line)
     if recent_captions:
         recent_block = "\n".join(
             f"- {c.strip()}" for c in recent_captions[-5:] if c and c.strip()
@@ -422,7 +505,13 @@ def generate_caption_for_tone(
     if brief_prose and brief_prose.strip():
         user_prose = brief_prose.strip()
     else:
-        user_prose = narrate_achievement(achievement_dict, profile=club_profile)
+        # MR-5: strip "(SC)"/"(LC)" jargon from the event name (and spell
+        # out the course field) before the facts are narrated into the
+        # prompt. The caller's dict is never mutated.
+        user_prose = narrate_achievement(
+            _sanitise_achievement_for_prompt(achievement_dict),
+            profile=club_profile,
+        )
     if not user_prose.strip():
         raise ClaudeUnavailableError("not enough detail to generate a caption")
     # Tiny random suffix breaks identical-output caching at the provider's
@@ -587,7 +676,11 @@ def generate_platform_variants(
             "Output ONLY the adapted caption — no preamble, no quotes, "
             "no markdown.",
             _AI_TELL_SYSTEM_INSTRUCTION,
+            _NO_COURSE_ABBREV_INSTRUCTION,
         ]
+        locale_line = _locale_instruction(club_profile)
+        if locale_line:
+            system_parts.append(locale_line)
         if few_shot_examples:
             capped = [e.strip() for e in few_shot_examples[-5:] if e and e.strip()]
             if capped:
@@ -630,6 +723,7 @@ def record_approved_caption(profile_id: str, caption: str) -> None:
 __all__ = [
     "ClaudeUnavailableError",
     "KNOWN_AI_TONES",
+    "_strip_course_suffix",
     "AI_TELL_BAN_LIST",
     "generate_ai_caption",
     "generate_caption_for_tone",
