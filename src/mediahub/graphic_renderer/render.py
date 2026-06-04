@@ -968,23 +968,6 @@ def _surname_for_display(surname: str, max_chars: int = 8) -> str:
     return s[:max_chars] if len(s) > max_chars else s
 
 
-def _tile_text(s: str, max_chars: int) -> str:
-    """Shorten stat-tile text to ``max_chars`` at a word boundary.
-
-    Tiles used to hard-cut mid-word ("North District Ope"), which reads as a
-    rendering bug. Dropping trailing whole words keeps the tile legible with
-    no ellipsis needed; only a single word longer than the budget is
-    hard-cut (with an ellipsis, since no boundary exists).
-    """
-    s = " ".join((s or "").split())
-    if len(s) <= max_chars:
-        return s
-    cut = s[:max_chars]
-    if " " in cut:
-        return cut.rsplit(" ", 1)[0].rstrip(" ,;:.-")
-    return s[: max_chars - 1].rstrip() + "\u2026"
-
-
 _COURSE_SUFFIX_RE = re.compile(r"\s*\((?:SC|LC)\)\s*$", re.IGNORECASE)
 
 
@@ -1327,6 +1310,61 @@ def _common_replacements(
     }
 
 
+def _ellipsize(text: str, limit: int) -> str:
+    """Trim ``text`` to ``limit`` chars at a word boundary with an ellipsis.
+
+    Replaces the bare ``[:N]`` chops that left mid-word fragments like
+    "County Championshi" on rendered graphics.
+    """
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[: max(1, limit - 1)]
+    if " " in cut:
+        head = cut.rsplit(" ", 1)[0].rstrip(",;:·-")
+        if len(head) >= max(4, int(limit * 0.4)):
+            cut = head
+    return cut + "…"
+
+
+def _fit_ribbon_label(label: str, base_px: int, canvas_w: int) -> tuple[str, int]:
+    """Make the achievement ribbon's label always fit the canvas.
+
+    The ``.label-ribbon`` sits at left:64px and shares the top band with
+    the result chip on the right, so long AI hooks ("BREASTSTROKE
+    DOMINANCE") used to overflow and render clipped at both ends. Budget
+    ~55% of the canvas width, shrink the font to no less than 60% of its
+    base size, then word-boundary truncate whatever still doesn't fit.
+    Bebas/Anton condensed caps average ~0.52em advance width.
+    """
+    label = " ".join((label or "").split())
+    if not label:
+        return label, int(base_px)
+    budget = canvas_w * 0.55 - 56  # minus ribbon padding
+
+    def _w(text: str, px: float) -> float:
+        return len(text) * 0.52 * px
+
+    px = float(base_px)
+    floor = max(18.0, base_px * 0.60)
+    while px > floor and _w(label, px) > budget:
+        px -= 2.0
+    if _w(label, px) > budget:
+        words = label.split(" ")
+        kept = ""
+        for word in words:
+            cand = (kept + " " + word).strip()
+            if kept and _w(cand + "…", px) > budget:
+                break
+            kept = cand
+        if kept and kept != label:
+            label = kept + "…"
+        elif _w(label, px) > budget:
+            max_chars = max(4, int(budget / (0.52 * px)) - 1)
+            label = label[:max_chars] + "…"
+    return label, int(px)
+
+
 def _fill_individual_hero(brief, width: int, height: int, repl: dict[str, str]) -> dict[str, str]:
     s = _scale_for_format(width, height)
     repl = dict(repl)
@@ -1364,6 +1402,11 @@ def _fill_individual_hero(brief, width: int, height: int, repl: dict[str, str]) 
             "RESULT_FONT_SIZE": str(int(height * s["result"])),
         }
     )
+    _rl, _rpx = _fit_ribbon_label(
+        layers.get("achievement_label") or "", int(height * s["ribbon"]), width
+    )
+    repl["ACHIEVEMENT_LABEL"] = html_escape(_rl)
+    repl["RIBBON_FONT_SIZE"] = str(_rpx)
     return repl
 
 
@@ -1411,6 +1454,18 @@ def _fill_medal_card(brief, width: int, height: int, repl: dict[str, str]) -> di
             "MEDAL_FONT_SIZE": str(int(min(width, height) * 0.10)),
         }
     )
+    # The giant medal element already names the tier; the floating
+    # "★ GOLD" pill on top of it made the same word appear three times
+    # on one card (pill + medal + a "GOLDEN …" hook). Drop the pill on
+    # this layout only — photo-led layouts keep it.
+    repl["MEDAL_BADGE_BLOCK"] = ""
+    _rl, _rpx = _fit_ribbon_label(
+        (brief.text_layers or {}).get("achievement_label") or "",
+        int(height * s["ribbon"]),
+        width,
+    )
+    repl["ACHIEVEMENT_LABEL"] = html_escape(_rl)
+    repl["RIBBON_FONT_SIZE"] = str(_rpx)
     return repl
 
 
@@ -1440,7 +1495,7 @@ def _fill_weekend_numbers(brief, width: int, height: int, repl: dict[str, str]) 
         if place:
             stat_pairs.append((place, "BEST FINISH"))
         if event:
-            stat_pairs.append((_tile_text(_clean_event_name(event), 14), "FEATURE EVENT"))
+            stat_pairs.append((_ellipsize(_clean_event_name(event), 14), "FEATURE EVENT"))
         # Pad to 4 with placeholder counts that read as professional copy
         defaults = [("1", "MEET"), ("✓", "COMPLETE"), ("24", "HOURS"), ("★", "HIGHLIGHT")]
         i = 0
@@ -1675,57 +1730,67 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
                 layers.get("achievement_label") or "Strong swim",
             ]
         else:
-            bullets = [
-                "Personal bests across the squad",
-                "Multiple medals on day two",
-                "Big finals representation",
+            # No real content — fall back to NEUTRAL lines built from what
+            # we actually know. The old defaults here invented claims
+            # ("Multiple medals on day two") on cards with no data, which
+            # broke the product's "we don't invent results" promise.
+            bullets = [b for b in (layers.get("meet_name"), layers.get("club_full")) if b] or [
+                "Full story in the caption"
             ]
     bullets_html = ""
     for i, b in enumerate(bullets[:4], 1):
         bullets_html += (
             f'<div class="row"><span class="num">0{i}</span>' f"<span>{html_escape(b)}</span></div>"
         )
-    headline_line1 = (layers.get("headline_line1") or "WEEKEND").upper()
-    headline_line2 = (layers.get("headline_line2") or "RECAP").upper()
+    headline_line1 = (layers.get("headline_line1") or "").upper()
+    if headline_line1:
+        # An explicitly-set empty line 2 means "single-line headline".
+        # Only fall back to "RECAP" when the caller never set the key at
+        # all (the legacy weekend-recap path) — sponsor thank-yous were
+        # rendering as "ACME SPORTS RECAP" because of this default.
+        if "headline_line2" in layers:
+            headline_line2 = (layers.get("headline_line2") or "").upper()
+        else:
+            headline_line2 = "RECAP"
+    else:
+        headline_line1, headline_line2 = "WEEKEND", "RECAP"
 
     # Centre stat strip — keeps the middle of the canvas alive when bullets
-    # alone don't fill the page. Use any stat_* layers, else infer from
-    # bullets.
+    # alone don't fill the page. Caller-supplied stat_* layers win; else
+    # infer from REAL fields only. No fabricated filler: a card with no
+    # stats shows no strip rather than "3 VOICES / WEEK WINDOW" nonsense.
     stat_cells: list[tuple[str, str]] = []
     for k, v in layers.items():
         if k.startswith("stat_") and v not in (None, "", "—"):
             label = k[5:].replace("_", " ").upper()
-            stat_cells.append((str(v), label))
+            stat_cells.append((_ellipsize(str(v), 20), label))
     if not stat_cells:
         if layers.get("result_value"):
             stat_cells.append((layers["result_value"], "TIME"))
         if layers.get("event_name"):
-            ev = _clean_event_name(layers["event_name"])
-            stat_cells.append((_tile_text(ev, 14), "EVENT"))
-        if layers.get("achievement_label"):
-            stat_cells.append((layers["achievement_label"], "RESULT"))
-        meet = _tile_text(layers.get("meet_name") or "", 18)
-        # A long meet name would either clip or wrap badly inside a tile —
-        # and it's already on the canvas as the kicker, so skip it then.
-        if meet and len(layers.get("meet_name") or "") <= 18 and len(stat_cells) < 3:
-            stat_cells.append((meet, "MEET"))
-        if not stat_cells:
-            # Bullet count is the only honest fallback — the old "3 VOICES"
-            # / "WEEK WINDOW" fillers were meaningless on a public graphic.
-            stat_cells.append((str(len(bullets[:6])), "HIGHLIGHTS"))
+            stat_cells.append((_ellipsize(_clean_event_name(layers["event_name"]), 14), "EVENT"))
+        if layers.get("meet_name") and len(stat_cells) < 3:
+            stat_cells.append((_ellipsize(layers["meet_name"], 18), "MEET"))
+        if (layers.get("club_short") or layers.get("club_full")) and 0 < len(stat_cells) < 3:
+            stat_cells.append(
+                (_ellipsize(layers.get("club_short") or layers.get("club_full"), 14), "CLUB")
+            )
     stat_cells = stat_cells[:3]
-    stats_inner = "".join(
-        f'<div class="cell"><div class="num">{html_escape(v)}</div>'
-        f'<div class="lab">{html_escape(l)}</div></div>'
-        for v, l in stat_cells
-    )
-    # Size the grid to the actual cell count so 1-2 cells fill the row
-    # instead of huddling in the left third of a fixed 3-column grid.
-    n_cols = max(1, len(stat_cells))
-    recap_stats_block = (
-        f'<div class="recap-stats" style="grid-template-columns:repeat({n_cols},1fr)">'
-        f"{stats_inner}</div>"
-    )
+    if stat_cells:
+        stats_inner = "".join(
+            f'<div class="cell"><div class="num">{html_escape(v)}</div>'
+            f'<div class="lab">{html_escape(l)}</div></div>'
+            for v, l in stat_cells
+        )
+        # Size the grid to the actual cell count so 1-2 cells fill the row
+        # instead of huddling in the left third of a fixed 3-column grid.
+        n_cols = max(1, len(stat_cells))
+        recap_stats_block = (
+            f'<div class="recap-stats" style="grid-template-columns:repeat({n_cols},1fr)">'
+            f"{stats_inner}</div>"
+        )
+    else:
+        recap_stats_block = ""
 
     repl = dict(repl)
     repl.update(
