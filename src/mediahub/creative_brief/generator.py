@@ -575,8 +575,7 @@ def generate(
         if isinstance(_gt_stats, dict):
             for _sk, _sv in list(_gt_stats.items())[:3]:
                 _key = "".join(
-                    ch if (ch.isalnum() or ch == "_") else "_"
-                    for ch in str(_sk).strip().lower()
+                    ch if (ch.isalnum() or ch == "_") else "_" for ch in str(_sk).strip().lower()
                 ).strip("_")
                 if _key and str(_sv).strip():
                     layers[f"stat_{_key}"] = str(_sv).strip()
