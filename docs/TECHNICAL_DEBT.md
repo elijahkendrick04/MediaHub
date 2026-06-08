@@ -60,3 +60,53 @@ not enforced with mypy in CI.
 `test_v8_graphic_renderer.py` patches Playwright. We don't have a slow CI
 job that runs the actual rasterisation — production regressions in the
 renderer aren't caught until manual review.
+
+## `web/web.py` is a 22,500-line monolith (114 routes)
+
+Every route, every f-string Jinja template, and most request glue live in one
+file. It still works and the CLAUDE.md conventions keep it coherent, but it is
+the single biggest maintainability and merge-conflict risk in the repo, and the
+hardest file to review. **Plan (incremental, gated):** peel cohesive surfaces
+into Flask **Blueprints** one at a time — `privacy`, `media-library`,
+`organisation/brand`, the motion/reel API, the research console — each behind
+the CLAUDE.md 15-step route-removal/replacement checklist so persisted state,
+`url_for()` targets, and templates don't break. Do **not** attempt a big-bang
+split; one Blueprint per PR, suite green between each. No behaviour change —
+pure relocation. (Tracked here rather than done in one pass precisely because a
+rushed carve-up of this file is higher-risk than the debt it pays down.)
+
+## Mixed persistence: JSONL ledgers + a shared SQLite `data.db`
+
+Some modules persist to a shared SQLite `data.db` (`workflow/schedule.py`,
+`memory/store.py`, `observability/`, `publishing/posting_log.py`,
+`media_library/store.py`, the run-metadata table), while others still use JSONL
+ledgers (`context_engine/trust.py`, `brand/playbooks.py`, `workflow/autonomy.py`,
+`interpreter/patterns.py`) and run *snapshots* are per-run JSON files under
+`DATA_DIR/runs_v4/`. The split is historical, not principled. **Plan:** treat
+`data.db` as the system-of-record for cross-worker/queryable state and keep JSON
+only for large immutable run snapshots; migrate the JSONL ledgers that need
+cross-worker consistency (trust, audit) into `data.db` tables. Decide
+per-ledger; don't migrate the append-only audit logs casually.
+
+## Two `AutonomyLevel` enums with different semantics
+
+`sport_profiles/autonomy.py` defines a *publishing-policy* enum
+(`draft_only`/`approval_required`/`fully_autonomous`, inert) while
+`autonomy/tools.py` defines a *runner-reach* `IntEnum`
+(`OFF`/`SUGGEST`/`DRAFT`/`PREPARE`, live). They describe different axes and must
+not be collapsed blindly, but having two types named `AutonomyLevel` invites
+confusion. **Plan:** when Phase 2's per-type toggle is built, rename one (e.g.
+the runner's to `RunnerReach`) and make the sport-profile policy the single
+public "how autonomous is this post type" type.
+
+## Auto-generated inventories had rotted (partially resolved)
+
+`scripts/build_inventories.py` hard-coded `ROOT` to the one-off V9 export path,
+so none of the `docs/*_INVENTORY.md` files could be regenerated in the repo and
+they drifted stale (ENV_INVENTORY listed 16 of 64 vars). **Resolved** for the
+generator (ROOT now derives from `__file__`; the env regex catches indirect
+`get_secret()` keys) and for `ENV_INVENTORY.md`. **Remaining:** the other
+inventories (`ROUTE_`, `API_`, `DEPENDENCY_`, `DETECTOR_`, `INVENTORY.md`) are
+now regenerable but were not refreshed in that pass to keep the diff focused —
+run `python scripts/build_inventories.py` to bring them current (note
+`INVENTORY.md` includes byte sizes and will churn).
