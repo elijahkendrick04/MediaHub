@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   minimal_type_poster  (v2 archetype, PAR-7)
+
+   A purely typographic poster — no photo, ever. The surname is set
+   enormous and stacked under the first name, a single accent rule splits
+   the canvas, and the event/result sit as a quiet baseline ledger. This
+   is the deliberately restrained, high-contrast option in the rotation:
+   it adds variety and is the natural pick when a card has no image.
+
+   Structural signature: huge stacked type on a flat ground, one rule,
+   generous negative space — minimalism against the busier archetypes.
+   =================================================================== */
+
+.mt {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 104px 84px;
+}
+.mt *, .mt *::before, .mt *::after { box-sizing: border-box; }
+
+.mt__top { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.mt__kicker {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 27px; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.mt__meet { font-family: 'Inter',sans-serif; font-weight: 600; font-size: 22px; letter-spacing: 0.04em; color: var(--mh-on-primary); opacity: 0.72; text-transform: uppercase; }
+
+/* the type block */
+.mt__type { margin: auto 0; }
+.mt__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 56px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 6px;
+}
+.mt__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: var(--mh-fit-mega-name-px, 200px); line-height: 0.82;
+  letter-spacing: -0.02em; text-transform: uppercase; color: var(--mh-on-primary);
+}
+.mt__rule { height: 8px; width: 200px; background: var(--mh-accent); margin: 40px 0; border-radius: 4px; }
+.mt__ledger { display: flex; align-items: flex-end; gap: 64px; }
+.mt__field { display: flex; flex-direction: column; }
+.mt__lab { font-family: 'Inter',sans-serif; font-weight: 700; font-size: 17px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent); margin-bottom: 10px; }
+.mt__event-val { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 38px; text-transform: uppercase; color: var(--mh-on-primary); }
+.mt__result-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 88px); line-height: 0.9; color: var(--mh-on-primary);
+}
+
+.mt__foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 30px; border-top: 2px solid var(--mh-outline); }
+.mt__brand { display: flex; align-items: center; gap: 16px; }
+.mt__logo { height: 60px; width: auto; }
+.mt__logo img, .mt__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.mt__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px; text-transform: uppercase; color: var(--mh-on-primary); }
+.mt__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="mt">
+
+  <div class="mt__top">
+    <div class="mt__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="mt__meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="mt__type">
+    <div class="mt__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="mt__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="mt__rule"></div>
+    <div class="mt__ledger">
+      <div class="mt__field">
+        <div class="mt__lab">Event</div>
+        <div class="mt__event-val">{{EVENT_NAME}}</div>
+      </div>
+      <div class="mt__field">
+        <div class="mt__lab">Result</div>
+        <div class="mt__result-val">{{RESULT_VALUE}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt__foot">
+    <div class="mt__brand">
+      <div class="mt__logo">{{LOGO_BLOCK}}</div>
+      <div class="mt__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="mt__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

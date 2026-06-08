@@ -22,16 +22,24 @@ The system should not become a manual agency or a Canva template shop. The defen
 ## Project Structure
 
 ```
-src/mediahub/          — Main Python package
-  web/web.py           — Flask monolith (~5000 lines), all routes
+src/mediahub/          — Main Python package (~43 sub-packages)
+  web/web.py           — Flask monolith (~22,500 lines, 114 routes)
   web/club_profile.py  — ClubProfile dataclass + persistence
   media_ai/llm.py      — Cloud LLM wrapper (Gemini/Claude with provider failover)
+  ai_core/             — Provider-agnostic LLM client + bounded ask_with_tools loop (Cap 1)
   club_platform/       — Content types, stubs, athlete spotlight
   brand/               — BrandKit, tone system
-  workflow/            — CardStatus, WorkflowStore, content pack
+  workflow/            — CardStatus, WorkflowStore, content pack, schedule, audit log
   media_library/       — Media asset store
-tests/                 — pytest suite
-data/                  — Runtime data (DB, runs, cache)
+  results_fetch/       — "Results from a link": 3-tier crawl → mirror ZIP → pipeline
+  memory/              — Semantic caption recall (embeddings + sqlite-vec, Cap 2)
+  web_research/        — SearXNG/DuckDuckGo search + bounded deep-research loop (Cap 3)
+  scheduler/           — In-process, exactly-once SQLite job runner (Section 6)
+  autonomy/            — Bounded narrow-tool runner; queues for review, never publishes
+  notify/              — ntfy / webhook notification channels
+  observability/       — LLM-usage + uptime tracking
+tests/                 — pytest suite (~206 files)
+data/                  — Runtime data: data.db (SQLite) + runs/cache under DATA_DIR
 ```
 
 ## Key Architecture Conventions

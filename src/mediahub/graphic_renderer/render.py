@@ -454,7 +454,7 @@ def _accent_decoration_html(
             f'<div style="position:absolute;left:{offset}px;top:{offset}px;width:{long_side}px;'
             f"height:{long_side}px;border-top:{weight}px solid {color};border-left:{weight}px solid {color};"
             f'z-index:11;pointer-events:none;"></div>'
-            f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height*0.07)}px;'
+            f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height * 0.07)}px;'
             f"width:{long_side}px;height:{long_side}px;border-bottom:{weight}px solid {color};"
             f'border-right:{weight}px solid {color};z-index:11;pointer-events:none;"></div>'
         )
@@ -476,8 +476,8 @@ def _accent_decoration_html(
     if style == "ribbon":
         size = int(min(width, height) * 0.20 * (0.6 + s))
         return (
-            f'<div style="position:absolute;left:-{size//2}px;top:{int(height*0.20)}px;'
-            f"width:{size*2}px;height:{max(20, int(size*0.18))}px;background:{color};"
+            f'<div style="position:absolute;left:-{size // 2}px;top:{int(height * 0.20)}px;'
+            f"width:{size * 2}px;height:{max(20, int(size * 0.18))}px;background:{color};"
             f"transform:rotate(-32deg);transform-origin:left center;opacity:0.85;"
             f'z-index:11;pointer-events:none;"></div>'
         )
@@ -485,7 +485,7 @@ def _accent_decoration_html(
         size = int(min(width, height) * 0.05 * (0.6 + s))
         top = int(height * 0.52)
         return (
-            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{top}px;'
+            f'<div style="position:absolute;right:{int(width * 0.06)}px;top:{top}px;'
             f"width:0;height:0;border-left:{size}px solid {color};"
             f"border-top:{size}px solid transparent;border-bottom:{size}px solid transparent;"
             f'z-index:11;pointer-events:none;opacity:0.95;"></div>'
@@ -493,14 +493,14 @@ def _accent_decoration_html(
     if style == "underline":
         bar_h = max(4, int(height * 0.006 * (0.6 + s)))
         return (
-            f'<div style="position:absolute;left:{int(width*0.06)}px;right:{int(width*0.40)}px;'
-            f"top:{int(height*0.20)}px;height:{bar_h}px;background:{color};"
+            f'<div style="position:absolute;left:{int(width * 0.06)}px;right:{int(width * 0.40)}px;'
+            f"top:{int(height * 0.20)}px;height:{bar_h}px;background:{color};"
             f'z-index:11;pointer-events:none;"></div>'
         )
     if style == "badge":
         size = int(min(width, height) * 0.085 * (0.6 + s))
         return (
-            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{int(height*0.32)}px;'
+            f'<div style="position:absolute;right:{int(width * 0.06)}px;top:{int(height * 0.32)}px;'
             f"width:{size}px;height:{size}px;border-radius:50%;background:{color};"
             f"opacity:0.85;z-index:11;pointer-events:none;"
             f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
@@ -942,7 +942,7 @@ def _build_result_chip(label: str, value: str) -> str:
         f'<div class="result-chip">'
         f'<div class="label">{html_escape(label or "Time")}</div>'
         f'<div class="value">{html_escape(value)}</div>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -1182,15 +1182,15 @@ def _common_replacements(
         font_size = max(36, int(height * 0.038))
         medal_badge_html = (
             f'<div class="tier-badge" style="position:absolute;'
-            f'top:{badge_top}px;right:56px;z-index:10;'
-            f'background:linear-gradient(135deg,{ovr["accent"]} 0%,{ovr["accent_deep"]} 100%);'
-            f'color:#1a1a1a;padding:14px 28px;border-radius:999px;'
-            f'font-family:\'Bebas Neue\',\'Anton\',sans-serif;'
-            f'font-size:{font_size}px;letter-spacing:0.14em;'
-            f'font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,0.50),'
-            f'inset 0 2px 0 rgba(255,255,255,0.5);'
+            f"top:{badge_top}px;right:56px;z-index:10;"
+            f"background:linear-gradient(135deg,{ovr['accent']} 0%,{ovr['accent_deep']} 100%);"
+            f"color:#1a1a1a;padding:14px 28px;border-radius:999px;"
+            f"font-family:'Bebas Neue','Anton',sans-serif;"
+            f"font-size:{font_size}px;letter-spacing:0.14em;"
+            f"font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,0.50),"
+            f"inset 0 2px 0 rgba(255,255,255,0.5);"
             f'border:2px solid rgba(255,255,255,0.25)">'
-            f'&#9733; {ovr["badge"]}</div>'
+            f"&#9733; {ovr['badge']}</div>"
         )
 
     base_css = _read_text(_BASE_CSS_PATH)
@@ -1603,11 +1603,11 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         mega_px = _mega_watermark_px(mega_letter, width, mega_size)
         # Position centered horizontally, in the middle vertical band
         custom_block = (
-            f'<div class="txl-photo-glow" style="top:{int(height*0.40)}px;'
-            f"left:50%;transform:translateX(-50%);width:{int(min(width,height)*0.55)}px;"
-            f'height:{int(min(width,height)*0.55)}px;"></div>'
+            f'<div class="txl-photo-glow" style="top:{int(height * 0.40)}px;'
+            f"left:50%;transform:translateX(-50%);width:{int(min(width, height) * 0.55)}px;"
+            f'height:{int(min(width, height) * 0.55)}px;"></div>'
             f'<div class="txl-accent-bar diagonal"></div>'
-            f'<div class="txl-mega-initial" style="top:{int(height*0.36)}px;'
+            f'<div class="txl-mega-initial" style="top:{int(height * 0.36)}px;'
             f"left:50%;transform:translateX(-50%);right:auto;font-size:{mega_px}px;"
             f'-webkit-text-stroke:4px rgba(255,255,255,0.16);">'
             f"{html_escape(mega_letter)}</div>"
@@ -1798,7 +1798,7 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
     bullets_html = ""
     for i, b in enumerate(bullets[:4], 1):
         bullets_html += (
-            f'<div class="row"><span class="num">0{i}</span>' f"<span>{html_escape(b)}</span></div>"
+            f'<div class="row"><span class="num">0{i}</span><span>{html_escape(b)}</span></div>'
         )
     headline_line1 = (layers.get("headline_line1") or "").upper()
     if headline_line1:
@@ -2167,6 +2167,239 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 
 
 # ---------------------------------------------------------------------------
+# Generation Engine v2 — Tier A render helpers (gated by MEDIAHUB_GEN_V2)
+# ---------------------------------------------------------------------------
+
+
+# NB: hex parsing reuses the module-level ``_hex_to_rgb`` (defined above with the
+# other colour helpers). A second definition here would shadow it and silently
+# change ``darken``/``lighten``'s malformed-input fallback on the flag-OFF path.
+
+
+def _rel_luminance(hex_colour: str) -> float:
+    """WCAG relative luminance (0=black … 1=white). Deterministic colour maths."""
+
+    def _chan(c: int) -> float:
+        x = c / 255.0
+        return x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _hex_to_rgb(hex_colour)
+    return 0.2126 * _chan(r) + 0.7152 * _chan(g) + 0.0722 * _chan(b)
+
+
+def _on_color(hex_colour: str) -> str:
+    """Black or white — whichever reads better as a foreground on ``hex_colour``."""
+    return "#0B0B0C" if _rel_luminance(hex_colour) > 0.42 else "#FFFFFF"
+
+
+def _contrast_ratio(c1: str, c2: str) -> float:
+    """WCAG contrast ratio (1..21) between two hex colours."""
+    hi = max(_rel_luminance(c1), _rel_luminance(c2))
+    lo = min(_rel_luminance(c1), _rel_luminance(c2))
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _legible_accent(primary: str) -> str:
+    """A same-hue brand tint guaranteed to read against the ``primary`` ground.
+
+    Lightens a dark primary / darkens a light one, so it works both as kicker
+    text on the primary ground and as a result-chip background behind primary
+    text. Used only when the club provides no usable accent — never overrides a
+    real, contrasting brand accent.
+    """
+    return lighten(primary, 0.62) if _rel_luminance(primary) < 0.45 else darken(primary, 0.45)
+
+
+def _fit_one_line_px(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    font_family: str,
+    weight,
+    min_px: int,
+    max_px: int,
+) -> int:
+    """Largest int px at which ``text`` fits on **one line** in ``box_w`` (≤ ``box_h``).
+
+    The v2 hero slots render with ``white-space: nowrap``, so they must be sized
+    single-line. ``autofit.fit_font_px`` word-*wraps* to measure, which over-sizes
+    a multi-word surname ("Van Dyk") that then overflows on the one forced line.
+    """
+    from mediahub.graphic_renderer.autofit import em_width
+
+    if not text or not text.strip():
+        return max_px
+    ew = em_width(text, font_family=font_family, weight=weight)
+    if ew <= 0:
+        return max_px
+    px = min(int(box_w / ew), int(box_h))
+    return max(min_px, min(max_px, px))
+
+
+def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
+    """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
+
+    v2 keeps brand identity *stable* — unlike the v1 seed-rotated palette, which
+    can swap which brand colour plays "primary" and turn a navy+gold club's
+    ground muddy. So primary/accent come from the ``BrandKit`` when present and
+    only fall back to the brief palette otherwise. Deterministic colour maths
+    (``darken`` + WCAG luminance) fill surface/on-*/outline; no brand colour is
+    invented. ``surface`` is a deep brand-tinted ground, ``on-*`` are
+    contrast-picked, and the hairline ``outline`` is a translucent on-colour.
+    """
+
+    primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
+    secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
+    accent = getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None
+
+    # _is_brand_hex is strict (3/6-digit only), so a junk value can't slip a
+    # ``;``/``}`` into the injected ``:root{}`` block, and darken/_on_color always
+    # receive a parseable colour.
+    if not _is_brand_hex(primary):
+        primary = palette.get("primary")
+    if not _is_brand_hex(primary):
+        primary = "#0A2540"
+    if not _is_brand_hex(secondary):
+        secondary = palette.get("secondary")
+    if not _is_brand_hex(secondary):
+        secondary = darken(primary, 0.40)
+
+    # The accent paints kickers/labels and the result chip, so it MUST contrast
+    # with the primary ground. Prefer an explicit accent; else the secondary only
+    # when it actually contrasts (navy+gold → gold); else a legible brand tint.
+    # Without this, a single-colour kit (accent=None, secondary=#000000 by the
+    # BrandKit default) collapses the accent to black and hides the result time.
+    if not _is_brand_hex(accent):
+        accent = palette.get("accent")
+    if not _is_brand_hex(accent):
+        accent = (
+            secondary if _contrast_ratio(secondary, primary) >= 3.0 else _legible_accent(primary)
+        )
+
+    surface = darken(primary, 0.50)
+    on_primary = _on_color(primary)
+    on_surface = _on_color(surface)
+    outline = "rgba(255,255,255,0.20)" if on_primary == "#FFFFFF" else "rgba(0,0,0,0.20)"
+    return {
+        "--mh-primary": primary,
+        "--mh-secondary": secondary,
+        "--mh-accent": accent,
+        "--mh-surface": surface,
+        "--mh-on-primary": on_primary,
+        "--mh-on-surface": on_surface,
+        "--mh-outline": outline,
+    }
+
+
+def _v2_photo_position(athlete_path) -> str:
+    """CSS ``object-position`` that keeps the saliency focus in frame.
+
+    Uses the deterministic ``saliency.best_crop`` centroid for a portrait ratio,
+    converted to a percentage. Safe default on any failure so a render never
+    breaks on a missing or odd image.
+    """
+    if not athlete_path:
+        return "center 28%"
+    try:
+        from mediahub.graphic_renderer.saliency import best_crop
+
+        x, y, w, h = best_crop(athlete_path, "4:5")
+        with Image.open(athlete_path) as im:
+            iw, ih = im.size
+        if iw <= 0 or ih <= 0:
+            return "center 28%"
+        cx = max(0.0, min(1.0, (x + w / 2.0) / iw)) * 100.0
+        cy = max(0.0, min(1.0, (y + h / 2.0) / ih)) * 100.0
+        return f"{cx:.0f}% {cy:.0f}%"
+    except Exception:
+        return "center 28%"
+
+
+def _v2_hero_stat(brief) -> str:
+    """The optional emphasis line for an archetype's stat slot.
+
+    Honest by construction: only real brief text is used (an explicit
+    ``hero_stat``/``context`` layer if the pipeline set one), never a fabricated
+    number. Empty is fine — every v2 archetype collapses the slot gracefully.
+    """
+    layers = brief.text_layers or {}
+    return (layers.get("hero_stat") or layers.get("context") or "").strip()
+
+
+def _fill_v2_archetype(
+    brief, width, height, base_repl, *, athlete_path=None, brand_kit=None
+) -> dict:
+    """Replacements for a ``layouts/v2`` archetype: roles + autofit + saliency.
+
+    Starts from the shared replacements (names/event/logo/photo already filled),
+    adds the result + hero-stat slots the v2 layouts use, and appends one
+    ``:root{…}`` block to BASE_CSS carrying the brand role tokens, the
+    autofit-computed hero sizes, and the saliency photo position.
+    """
+    repl = dict(base_repl)
+    layers = brief.text_layers or {}
+
+    result = layers.get("result_value") or ""
+    surname = (layers.get("athlete_surname") or "").upper()
+    repl["RESULT_VALUE"] = html_escape(result)
+    repl["HERO_STAT"] = html_escape(_v2_hero_stat(brief))
+    # v2 archetypes carry their OWN accent design (ticks / rules / rings / chips),
+    # so the v1 accent-decoration overlay — which targets the v1 `.canvas` and
+    # would otherwise be re-injected before </body> — must NOT also fire, or it
+    # paints a stray band across the composition. Suppress it for v2.
+    repl["ACCENT_DECORATION"] = ""
+
+    root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
+    # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
+    # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
+    # shrink rather than overflow. The per-layout defaults handle the short case.
+    root_vars["--mh-fit-surname-px"] = "%dpx" % _fit_one_line_px(
+        surname or "X",
+        width * 0.86,
+        height * 0.18,
+        font_family="Anton",
+        weight=400,
+        min_px=44,
+        max_px=132,
+    )
+    root_vars["--mh-fit-result-px"] = "%dpx" % _fit_one_line_px(
+        result or "X",
+        width * 0.52,
+        height * 0.12,
+        font_family="JetBrains Mono",
+        weight=700,
+        min_px=40,
+        max_px=104,
+    )
+    # "Mega" sizes for archetypes where the numeral or the name is THE hero
+    # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
+    root_vars["--mh-fit-mega-result-px"] = "%dpx" % _fit_one_line_px(
+        result or "X",
+        width * 0.92,
+        height * 0.34,
+        font_family="JetBrains Mono",
+        weight=700,
+        min_px=72,
+        max_px=300,
+    )
+    root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
+        surname or "X",
+        width * 0.92,
+        height * 0.22,
+        font_family="Anton",
+        weight=400,
+        min_px=64,
+        max_px=220,
+    )
+    root_vars["--mh-photo-pos"] = _v2_photo_position(athlete_path)
+
+    root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block
+    return repl
+
+
+# ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
 
@@ -2192,11 +2425,24 @@ def render_brief(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     family = brief.layout_template or "individual_hero"
-    template_path = LAYOUTS_DIR / f"{family}.html"
-    if not template_path.exists():
-        # Fallback to text-led recap if family is unknown
-        family = "text_led_recap"
+    # Gen Engine v2 (Tier A): when the flag is on and the brief names a v2
+    # archetype, load it from layouts/v2/ — BEFORE the legacy existence-check
+    # below, which would otherwise treat the v2 name as "unknown" and fall back.
+    _v2_archetype = None
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        if _archetypes.is_enabled() and family in _archetypes.list_archetypes():
+            _v2_archetype = family
+            template_path = _archetypes.V2_DIR / f"{family}.html"
+    except Exception:
+        _v2_archetype = None
+    if _v2_archetype is None:
         template_path = LAYOUTS_DIR / f"{family}.html"
+        if not template_path.exists():
+            # Fallback to text-led recap if family is unknown
+            family = "text_led_recap"
+            template_path = LAYOUTS_DIR / f"{family}.html"
 
     # Athlete cutout
     athlete_uri = None
@@ -2265,7 +2511,16 @@ def render_brief(
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 
     # Layout-specific
-    if family == "meet_preview":
+    if _v2_archetype:
+        repl = _fill_v2_archetype(
+            brief,
+            width,
+            height,
+            base_repl,
+            athlete_path=athlete_path,
+            brand_kit=brand_kit,
+        )
+    elif family == "meet_preview":
         repl = _fill_meet_preview(
             brief,
             width,
@@ -2328,8 +2583,10 @@ def render_brief(
     # Inject the grain SVG <filter> right after <body> so layouts that
     # opt in via class="texture-grain" get the filter resolved. Strip
     # the class entirely when the grain feature flag is off so renders
-    # are byte-different (verifiable). V8.1 Issue 7 §3.
-    if _grain_enabled():
+    # are byte-different (verifiable). V8.1 Issue 7 §3. The grain injector
+    # targets the v1 `.canvas` wrapper, which v2 archetypes do not have —
+    # so skip it for v2 (they manage their own surface texture).
+    if _grain_enabled() and not _v2_archetype:
         html = _re.sub(r"(<body[^>]*>)", r"\1" + _GRAIN_SVG_BLOCK, html, count=1)
         html = html.replace(
             '<div class="canvas"',

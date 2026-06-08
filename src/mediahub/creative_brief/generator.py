@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+import logging
 import random as _random
 import time
 import uuid
@@ -40,6 +41,8 @@ from typing import Optional
 
 from mediahub.inspiration.pattern_library import best_pattern_for, patterns_for_post_angle, PATTERNS
 from mediahub.media_ai import is_available as _llm_available
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -626,9 +629,23 @@ def generate(
         mood=mood,
         ai_directed=ai_directed,
     )
+    # Gen Engine v2 (Tier A): when MEDIAHUB_GEN_V2 is on, swap the layout for a
+    # deterministic v2 archetype keyed by this card's variation_seed (stable per
+    # card, spread across the pack). Off by default — flag-off keeps the legacy
+    # family byte-for-byte. The signature below then captures the v2 choice.
+    try:
+        from mediahub.graphic_renderer import archetypes as _v2_archetypes
+
+        if _v2_archetypes.is_enabled():
+            _arch = _v2_archetypes.pick_archetype(variation_seed)
+            if _arch:
+                brief.layout_template = _arch
+    except Exception:  # never break brief generation for an optional feature
+        log.debug("gen-v2 archetype swap skipped", exc_info=True)
+
     # Stamp a signature so callers can dedupe / audit recent renders.
     sig = (
-        f"{brief.layout_template}|{brief.palette.get('primary','')}|"
+        f"{brief.layout_template}|{brief.palette.get('primary', '')}|"
         f"{brief.background_style}|{brief.accent_style}|"
         f"{brief.typography_pair}|{brief.composition}|"
         f"{brief.photo_treatment}|{brief.primary_hook[:40]}"

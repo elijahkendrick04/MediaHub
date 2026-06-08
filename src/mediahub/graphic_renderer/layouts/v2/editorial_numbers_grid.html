@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{EVENT_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   editorial_numbers_grid  (v2 archetype, PAR-7)
+
+   A magazine results page: a ruled masthead (club · meet), the athlete
+   name set large, then a hairline-ruled GRID of labelled stat cells
+   (Event / Result / Achievement / Meet). Information-dense and entirely
+   typographic — the picker's choice for a data-led recap, and a strong
+   no-photo option.
+
+   Structural signature: a rectilinear ruled grid of label+value cells —
+   the opposite of the photo-led wedge/lower-third archetypes.
+   =================================================================== */
+
+.eg {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  padding: 80px 76px;
+}
+.eg *, .eg *::before, .eg *::after { box-sizing: border-box; }
+
+.eg__masthead {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding-bottom: 26px; border-bottom: 3px solid var(--mh-on-surface);
+}
+.eg__brand { display: flex; align-items: center; gap: 16px; }
+.eg__logo { height: 56px; width: auto; }
+.eg__logo img, .eg__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.eg__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mh-on-surface); }
+.eg__meet { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600; font-size: 21px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mh-accent); }
+
+.eg__head { margin-top: 40px; }
+.eg__kicker {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.eg__name {
+  margin-top: 14px;
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 120px); line-height: 0.88;
+  letter-spacing: -0.005em; text-transform: uppercase; color: var(--mh-on-surface);
+}
+
+/* the grid: 2 columns, hairline-ruled cells, grows to fill */
+.eg__grid {
+  margin-top: 48px; flex: 1 1 auto;
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--mh-outline);
+  border-left: 1px solid var(--mh-outline);
+}
+.eg__cell {
+  border-right: 1px solid var(--mh-outline);
+  border-bottom: 1px solid var(--mh-outline);
+  padding: 34px 32px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.eg__cell--wide { grid-column: 1 / -1; }
+.eg__lab {
+  font-family: 'Inter', sans-serif; font-weight: 700; font-size: 18px;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent);
+  margin-bottom: 12px;
+}
+.eg__val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 46px; line-height: 1.0; color: var(--mh-on-surface);
+}
+.eg__val--mono {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-size: var(--mh-fit-result-px, 84px); color: var(--mh-accent);
+}
+
+.eg__foot {
+  margin-top: 30px; display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+.eg__tag { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 20px; color: var(--mh-on-surface); opacity: 0.7; }
+.eg__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="eg">
+
+  <div class="eg__masthead">
+    <div class="eg__brand">
+      <div class="eg__logo">{{LOGO_BLOCK}}</div>
+      <div class="eg__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="eg__meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="eg__head">
+    <div class="eg__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="eg__name">{{ATHLETE_FULL_NAME}}</div>
+  </div>
+
+  <div class="eg__grid">
+    <div class="eg__cell eg__cell--wide">
+      <div class="eg__lab">Event</div>
+      <div class="eg__val">{{EVENT_NAME}}</div>
+    </div>
+    <div class="eg__cell">
+      <div class="eg__lab">Result</div>
+      <div class="eg__val eg__val--mono">{{RESULT_VALUE}}</div>
+    </div>
+    <div class="eg__cell">
+      <div class="eg__lab">Recognition</div>
+      <div class="eg__val">{{ACHIEVEMENT_LABEL}}</div>
+    </div>
+  </div>
+
+  <div class="eg__foot">
+    <div class="eg__tag">{{HERO_STAT}}</div>
+    <div class="eg__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>
