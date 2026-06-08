@@ -61,14 +61,22 @@ Results ingestion is one spoke among many.
 
 ## Roadmap status (auto-updated)
 
-This roadmap stays current automatically. A GitHub Action
+The stamp and activity feed below are meant to refresh on **every push to
+`main`** via a GitHub Action
 ([`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml),
-backed by [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py))
-refreshes the stamp and activity feed below on **every push to `main`**, and
-flips an item's status badge when a commit message contains a directive line.
-These directives are **human-authored** — the autonomous roadmap builder that
-used to emit them was removed in #214; the script still applies any you write by
-hand in a commit message:
+backed by [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py)),
+which also flips an item's status badge when a commit message contains a
+directive line. The directives are **human-authored** — the autonomous roadmap
+builder that used to emit them was removed in #214; the script still applies any
+you write by hand in a commit message:
+
+> ⚠️ **Automation note (2026-06):** the auto-refresh stalled — the stamp sat on
+> `2026-06-02` while ~38 merges landed. The script itself is fine (it ran clean
+> here); the failure is the Action's *commit-back step* not landing on a
+> branch-protected `main`. Until the `github-actions[bot]` is allowed to push to
+> `main` (Settings → Actions → write permission + a branch-protection bypass for
+> the bot), refresh by hand: `python scripts/roadmap_autoupdate.py` then commit
+> `docs/ROADMAP.md`. The stamp/activity above were last refreshed that way.
 
 > `roadmap: <ID> <status>` — where `<ID>` is a new phase (`P0`, `P3`) or item
 > (`P0.1`, `P1.2`), a legacy phase (`1.6`, `2.1`), or an Appendix item (`PAR-1`,
@@ -76,7 +84,7 @@ hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-02 · `3bce3c120` · Merge pull request #220 from elijahkendrick04/claude/autotest-autonomy-followups
+**Last updated:** 2026-06-04 · `95dbd9435` · Merge pull request #258 from elijahkendrick04/claude/clever-fermat-7wAQV
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -84,18 +92,18 @@ hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-02 | `d4e8f7c4c` | autotest: backpressure + same-problem suppression for human-merged fix PRs |
-| 2026-06-02 | `0d2097a37` | fix: 'Approve all in queue' button and 100% reviewed indicator ar |
-| 2026-06-02 | `2384c9835` | autotest: governed auto-merge — 3-way classification + self-governance boundary (ADR 0005) |
-| 2026-06-02 | `131f8abf7` | autotest: persist fixer memory [skip ci] |
-| 2026-06-02 | `17f2efde2` | autotest: refresh bug report [skip ci] |
-| 2026-06-02 | `25d1137f5` | autotest: persist fixer memory [skip ci] |
-| 2026-06-02 | `75791ea97` | fix: 'Re-run to see the full audit' warning with no Re-run button |
-| 2026-06-02 | `85707faf2` | autotest: refresh bug report [skip ci] |
-| 2026-06-02 | `8d6271810` | autotest(contract): pin schemathesis to its 3.x API + harden against version drift |
-| 2026-06-02 | `260e10dcb` | docs(autotest): benchmark report, implementation prompt, change log + index links |
-| 2026-06-02 | `ed74e5429` | autotest: trust lifecycle (Tier A) + deterministic coverage (Tier B-D) |
-| 2026-06-02 | `b72348d07` | docs(readme): align with multi-sport, autonomy-first direction; fix stale facts |
+| 2026-06-04 | `006c53210` | style: ruff-format touched files (pinned hook v0.8.4) |
+| 2026-06-04 | `f82b47f4f` | Upgrade card graphics: brand-accent fidelity, de-clutter, two new layouts |
+| 2026-06-04 | `bc4ef4fdc` | feat(web): finish results-from-a-link review surfaces (Steps 7-8) |
+| 2026-06-04 | `ca8d1a16d` | style: ruff-format ai_caption.py at repo line length |
+| 2026-06-04 | `cbd0c97bd` | style: ruff-format ai_caption.py |
+| 2026-06-04 | `3c4d32a09` | docs(skills): newline-terminated SKILL.md |
+| 2026-06-04 | `3d4a39e7f` | Update SKILL.md with testing instructions |
+| 2026-06-04 | `22a983901` | test(gfx): retarget to reconciled main |
+| 2026-06-04 | `c0baa8568` | fix(gfx): rebase render.py onto V10 main |
+| 2026-06-04 | `aabc2affc` | fix(gfx): rebase generator.py onto V10 main |
+| 2026-06-04 | `8399c16c6` | fix(gfx): rebase web.py onto V10 main |
+| 2026-06-04 | `913e2257b` | test(caption): pin tone/jargon/locale rules |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
@@ -147,15 +155,61 @@ Three facts shape the work ahead.
 - The content-strategy brain **as the hub** (today's planner is swim-result-centric).
 - Multi-sport beyond swimming (the `register_sport` seam exists; only swimming is
   registered; `football.yaml` is config-only).
-- Per-content-type **autonomy toggles** (`AutonomyLevel` is inert scaffolding).
+- Per-content-type **autonomy toggles in the UI** (the *runner* now exists — see
+  below — but the per-post-type toggle and workspace control do not, and the
+  `sport_profiles.AutonomyLevel` enum that was meant to drive them is still inert).
 - **Direct-to-platform** publishing (only Buffer today).
 - The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
   rembg present).
 
 **In progress (🔵):** the Generative Content Engine v2 (decided in
 [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
-prompts in Appendix A; not yet built) and the sport-profile scaffolding (added this
-rebuild, inert).
+prompts in Appendix A). Status as of this reconcile: **~10% wired** — the PAR
+helpers exist and are tested (`graphic_renderer/autofit.py` is wired for font
+measurement; `web/caption_examples.py` is live), but the `MEDIAHUB_GEN_V2` flag is
+**not read anywhere**, only **1 of ~12** `layouts/v2/` archetypes exists, `render.py`
+never loads `layouts/v2/`, and `ai_director.py` still emits the old enum tuple. The
+**Tier A wiring is being done now** (see *Immediate next moves*). The sport-profile
+scaffolding remains inert.
+
+#### Also shipped since this plan was written — *not* in the Phase 0–5 spine
+
+A whole stream of work landed after this roadmap was last rewritten and has **no
+item here**. It was driven by a separate "**Capabilities 1–5 / Section 6**" report
+(referenced in the council transcripts and in `.env.example`, but never checked in
+as a doc) and by day-to-day product-quality passes. Folding it in so the roadmap is
+honest:
+
+- **Capability 1 — `ai_core` LLM client + bounded tool-loop.** A provider-agnostic
+  OpenAI-compatible client and `ask_with_tools(tools, on_tool_call, max_rounds)`
+  (the substrate the autonomy + research loops ride on). *Wired.*
+- **Capability 2 — semantic caption memory** (`memory/`). Embeddings + a `sqlite-vec`
+  store; recalls a club's prior accepted captions into the caption/voice flow.
+  Off until an embed endpoint is configured. *Wired.*
+- **Capability 3 — web research** (`web_research/`). DuckDuckGo by default, optional
+  self-hosted SearXNG, plus a bounded deep-research ReAct loop; converged with
+  PB-baseline discovery behind a type-safe gate (the model proposes URLs, the
+  deterministic parser still asserts the time). *Wired, £0 default.*
+- **Section 6 — the autonomy substrate.** `scheduler/` (an exactly-once, atomic-claim
+  SQLite job runner — *not* Temporal; the council chose in-process Flask+threading
+  over new infra), `notify/` (ntfy + webhook pings), and `autonomy/` — a **bounded,
+  narrow-tool autonomy runner** that prepares + *queues for human review* and can
+  never publish. All **off by default**. This is a real, if partial, down-payment on
+  **Phase 2** via a different architecture than P2.1 proposed.
+- **Results from a link** (`results_fetch/`). Paste a results URL → 3-tier crawl
+  (static → headless Chromium → AI vision) → mirror ZIP → the existing pipeline.
+  Sport-agnostic *ingestion*; production-ready. See [`RESULTS_FROM_URL.md`](RESULTS_FROM_URL.md).
+  (Detector *quality* for non-swim sports still needs a registered sport — so this
+  advances **P3** ingestion without yet satisfying its per-sport exit criterion.)
+- **Observability** (`observability/`) — LLM-usage + uptime tracking. **Graphics /
+  caption / brand-fidelity polish** — new card layouts, AI-palette-from-usage, logo
+  vision colours, caption tone/jargon/locale fixes (the bulk of recent commits).
+
+> **Two `AutonomyLevel` enums now exist** and must be reconciled when Phase 2 is
+> built properly: `sport_profiles/autonomy.py` (`draft_only`/`approval_required`/
+> `fully_autonomous` — the *publishing*-autonomy policy, inert) vs `autonomy/tools.py`
+> (`OFF`/`SUGGEST`/`DRAFT`/`PREPARE` — the *runner*'s pre-approval reach, live). They
+> describe different axes; don't collapse them blindly.
 
 > **Test baseline (point-in-time):** the full suite is green — **2836 passed, 1
 > skipped** in a fully-provisioned environment after merging `main` (the lone skip
@@ -249,7 +303,7 @@ plan to act on) and **P3** (new sports need profiles).
 
 ---
 
-## Phase 2 — Autonomy toggles + orchestration backbone · P2 · ❌ **NOT STARTED**
+## Phase 2 — Autonomy toggles + orchestration backbone · P2 · 🔵 **IN PROGRESS — substrate shipped; UI + per-type policy pending**
 
 **Goal.** Put every content type on a durable workflow with an **optional
 human-approval signal**; implement the guardrails + kill switch + audit trail;
@@ -260,17 +314,32 @@ expose the per-type `autonomy_level` in the workspace.
 the kill switch halts publishing instantly; every autonomous decision is recorded in
 an immutable audit trail. Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
 
-### P2.1 — Temporal orchestration adapter · ❌ **NOT STARTED**
-One durable workflow per content type. `workflow.store` is the lightweight precursor.
+> **Reality check (2026-06 reconcile).** A meaningful slice of this phase already
+> shipped under the "Section 6" stream — but via a **different architecture than P2.1
+> proposed**. The council rejected Temporal in favour of an **in-process** design
+> (Flask + `threading` + SQLite, no Celery/Redis/new infra): `scheduler/` fires due
+> tasks exactly-once via an atomic SQLite claim, `autonomy/` is a bounded narrow-tool
+> runner that only ever *queues for human review*, and `workflow/autonomy.py` keeps an
+> audit log. All **off by default**. What's left is the **product surface**, not the
+> backbone: the per-type policy (P2.2/P2.4) and the remaining guardrails (P2.3).
+
+### P2.1 — ~~Temporal orchestration adapter~~ → in-process scheduler + bounded runner · ✅ **DONE (in-process, not Temporal)**
+Superseded by a council decision: instead of a Temporal adapter, durability is the
+`scheduler/` atomic-claim SQLite runner + the `autonomy/` bounded loop, both riding
+`ai_core.ask_with_tools`. `workflow.store` remains the card-state precursor. Temporal
+is **not** being adopted; this item is closed by the in-process substrate.
 
 ### P2.2 — Human-approval signal = the autonomy toggle · ❌ **NOT STARTED**
 Gated types pause on the signal; autonomous types skip it. Maps onto the existing
 `workflow.CardStatus` QUEUE → APPROVED → POSTED transition.
 
-### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · ❌ **NOT STARTED**
-Built on `context_engine.trust`, `recognition.schema.SafeToPost`, caption
-brand-safety, and `publishing.posting_log`. The safeguarding posture from ADR-0003
-applies to minors' data.
+### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · 🔵 **PARTIAL**
+Foundations exist: `workflow/autonomy.py` keeps an immutable audit log; the runner's
+tools are a fixed allow-list (no shell/file/web) and structurally cannot publish;
+`publishing.posting_log` records posting events; `context_engine.trust` scores
+provenance. **Remaining:** wire these into a single per-type *publish gate* with a
+brand-safety check and a global kill switch, on `recognition.schema.SafeToPost`. The
+safeguarding posture from ADR-0003 applies to minors' data.
 
 ### P2.4 — Per-type autonomy controls in the workspace · ❌ **NOT STARTED**
 Surface the toggle; default everything gated; warn before enabling `fully_autonomous`.
@@ -399,16 +468,27 @@ the no-hidden-fees promise** the whole roadmap is built around.
 A recommended ordered backlog — roughly one focused session per phase, each with its
 own exit criterion. (Full backlog in the rebuild's `CHANGES`/PR.)
 
-1. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
+**Re-sequenced (2026-06 reconcile):** the revealed priority of recent work is
+**product quality on the swim wedge**, not the grand expansions — so the asset-quality
+item (P1.4 Tier A) jumps to the front, and the expansions (multi-sport, direct
+publishing, local-AI) stay deferred until the wedge is genuinely good.
+
+1. **P1.4 — Generative Content Engine v2, Tier A.** *(active — being wired now.)* The
+   "samey graphics" fix is the highest-leverage quality win and the scaffolding mostly
+   exists, just unwired: load `layouts/v2/*`, author the missing archetypes, wire
+   `autofit` + `saliency`, behind `MEDIAHUB_GEN_V2`. Deterministic, ~$0. *Exit:* a pack
+   renders ≥6 structurally-distinct archetypes; long names never overflow.
+2. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
    *Exit:* a zero-license deployment renders reels. (Biggest hidden-cost win.)
-2. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
+3. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
    strategy brain over sport profiles. *Exit:* a ranked plan for ≥2 profiles.
-3. **P1.4 — Generative Content Engine v2.** Run Appendix A (PAR-2/PAR-3/PAR-7 →
-   SEQ-0 → SEQ-1). *Exit:* ≥6 structural archetypes; a ranked pool, not one card.
-4. **P2 — Autonomy on Temporal.** Per-type toggle + guardrails + kill switch +
-   audit. *Exit:* `fully_autonomous` publishes only when guardrails pass.
+4. **P2 — finish autonomy (UI + gate).** The substrate shipped in-process; what's left
+   is the per-type toggle (P2.2/P2.4) + the publish gate/kill-switch (P2.3) + resolving
+   the two `AutonomyLevel` enums. *Exit:* `fully_autonomous` publishes only when
+   guardrails pass.
 5. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real
-   data spoke. *Exit:* one non-swimming sport produces content end-to-end.
+   data spoke. (`results_fetch/` already does sport-agnostic *ingestion*; this adds the
+   per-sport *detector*.) *Exit:* one non-swimming sport produces content end-to-end.
 6. **P4 — Free direct publishing.** Bluesky + Mastodon adapters; demote Buffer.
    *Exit:* publish to ≥2 platforms incl. one free.
 7. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with
