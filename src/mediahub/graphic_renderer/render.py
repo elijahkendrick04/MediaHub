@@ -2200,14 +2200,22 @@ def _contrast_ratio(c1: str, c2: str) -> float:
 
 
 def _legible_accent(primary: str) -> str:
-    """A same-hue brand tint guaranteed to read against the ``primary`` ground.
+    """A same-hue brand tint that CLEARS the compliance gate against ``primary``.
 
-    Lightens a dark primary / darkens a light one, so it works both as kicker
-    text on the primary ground and as a result-chip background behind primary
-    text. Used only when the club provides no usable accent — never overrides a
-    real, contrasting brand accent.
+    Lightens a dark primary / darkens a light one, stepping the amount up until
+    the tint reads both as kicker text on the primary ground AND as a result-chip
+    background behind primary-coloured text (both APCA directions ≥ the gate
+    threshold). Used only when the club provides no usable accent — never
+    overrides a real, contrasting brand accent.
     """
-    return lighten(primary, 0.62) if _rel_luminance(primary) < 0.45 else darken(primary, 0.45)
+    from mediahub.quality.compliance import is_legible
+
+    dark = _rel_luminance(primary) < 0.45
+    for amt in (0.62, 0.74, 0.85, 0.92, 0.97):
+        cand = lighten(primary, amt) if dark else darken(primary, amt)
+        if is_legible(cand, primary) and is_legible(primary, cand):
+            return cand
+    return "#FFFFFF" if dark else "#0B0B0C"  # last resort: maximum contrast
 
 
 def _fit_one_line_px(
@@ -2267,15 +2275,23 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
 
     # The accent paints kickers/labels and the result chip, so it MUST contrast
     # with the primary ground. Prefer an explicit accent; else the secondary only
-    # when it actually contrasts (navy+gold → gold); else a legible brand tint.
+    # when it actually reads (navy+gold → gold); else a legible brand tint. The
+    # "does it read" test is the deterministic APCA compliance gate (Tier B §5.5),
+    # the same gate that ranks the LLM director's pool — so the Tier A accent
+    # repair and the Tier B pool ranking judge legibility by one shared measure.
     # Without this, a single-colour kit (accent=None, secondary=#000000 by the
     # BrandKit default) collapses the accent to black and hides the result time.
     if not _is_brand_hex(accent):
         accent = palette.get("accent")
     if not _is_brand_hex(accent):
-        accent = (
-            secondary if _contrast_ratio(secondary, primary) >= 3.0 else _legible_accent(primary)
-        )
+        from mediahub.quality.compliance import is_legible
+
+        # Use the secondary only when it reads BOTH as kicker text on the ground
+        # and as a chip behind primary text; else derive a gate-passing tint.
+        if is_legible(secondary, primary) and is_legible(primary, secondary):
+            accent = secondary
+        else:
+            accent = _legible_accent(primary)
 
     surface = darken(primary, 0.50)
     on_primary = _on_color(primary)
