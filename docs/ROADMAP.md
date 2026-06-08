@@ -84,7 +84,7 @@ you write by hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-04 · `95dbd9435` · Merge pull request #258 from elijahkendrick04/claude/clever-fermat-7wAQV
+**Last updated:** 2026-06-08 · `75dde80c1` · Roadmap reconcile + env-doc fix + Gen-v2 Tier A graphics (#259)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -92,18 +92,18 @@ you write by hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-08 | `e4a71e623` | fix(gfx): address code-review findings on Gen-v2 Tier A |
+| 2026-06-08 | `b842dc34c` | style: ruff-format touched files (pinned hook v0.8.4) |
+| 2026-06-08 | `e2ba101c9` | docs(debt): record structural tech debt — monolith, persistence, autonomy enums |
+| 2026-06-08 | `535aa7c0e` | feat(gfx): wire Gen Engine v2 Tier A — archetype library behind MEDIAHUB_GEN_V2 |
+| 2026-06-08 | `aa8303b9a` | docs+fix: make env-var documentation complete and regenerable |
+| 2026-06-08 | `034acfccc` | docs: reconcile roadmap with shipped reality |
 | 2026-06-04 | `006c53210` | style: ruff-format touched files (pinned hook v0.8.4) |
 | 2026-06-04 | `f82b47f4f` | Upgrade card graphics: brand-accent fidelity, de-clutter, two new layouts |
 | 2026-06-04 | `bc4ef4fdc` | feat(web): finish results-from-a-link review surfaces (Steps 7-8) |
 | 2026-06-04 | `ca8d1a16d` | style: ruff-format ai_caption.py at repo line length |
 | 2026-06-04 | `cbd0c97bd` | style: ruff-format ai_caption.py |
 | 2026-06-04 | `3c4d32a09` | docs(skills): newline-terminated SKILL.md |
-| 2026-06-04 | `3d4a39e7f` | Update SKILL.md with testing instructions |
-| 2026-06-04 | `22a983901` | test(gfx): retarget to reconciled main |
-| 2026-06-04 | `c0baa8568` | fix(gfx): rebase render.py onto V10 main |
-| 2026-06-04 | `aabc2affc` | fix(gfx): rebase generator.py onto V10 main |
-| 2026-06-04 | `8399c16c6` | fix(gfx): rebase web.py onto V10 main |
-| 2026-06-04 | `913e2257b` | test(caption): pin tone/jargon/locale rules |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
@@ -164,12 +164,14 @@ Three facts shape the work ahead.
 
 **In progress (🔵):** the Generative Content Engine v2 (decided in
 [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
-prompts in Appendix A). Status as of this reconcile: **~10% wired** — the PAR
-helpers exist and are tested (`graphic_renderer/autofit.py` is wired for font
-measurement; `web/caption_examples.py` is live), but the `MEDIAHUB_GEN_V2` flag is
-**not read anywhere**, only **1 of ~12** `layouts/v2/` archetypes exists, `render.py`
-never loads `layouts/v2/`, and `ai_director.py` still emits the old enum tuple. The
-**Tier A wiring is being done now** (see *Immediate next moves*). The sport-profile
+prompts in Appendix A). **Tier A shipped (PR #259, 2026-06):** `render.py` now
+loads **6 structurally-distinct `layouts/v2/` archetypes** behind `MEDIAHUB_GEN_V2`
+(default off) with a deterministic seeded picker, autofit, saliency crops, and
+contrast-checked brand role tokens; the deterministic engine is untouched and the
+flag-off path is byte-identical. **Next: Tier B (SEQ-2)** — the LLM design-spec
+director + generate-pool / rank / brand-compliance, whose building blocks
+(`creative_brief/design_spec.py`, `quality/variant_metrics.py`) already exist;
+`ai_director.py` still emits the old enum tuple until then. The sport-profile
 scaffolding remains inert.
 
 #### Also shipped since this plan was written — *not* in the Phase 0–5 spine
@@ -282,11 +284,14 @@ Extend `content_engine` (planner) + `context_engine` to fuse own/external/direct
 signals into a ranked plan keyed by sport profile. The swim newsworthiness ranker
 generalises into the cross-source prioritiser.
 
-### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · 🔵 **IN PROGRESS**
+### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · 🔵 **IN PROGRESS — Tier A done, Tier B next**
 The asset-quality stream: replace the enum-permutation variation mechanism with an
 archetype library + design-spec director, keeping the deterministic engine. Decided
 in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
-build prompts in **Appendix A** (PAR-\* / SEQ-\*). Not yet built.
+build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Tier A (SEQ-1) shipped** (PR
+#259): the 6-archetype library + deterministic picker + autofit/saliency/role
+tokens, behind `MEDIAHUB_GEN_V2`. **Tier B (SEQ-2)** is the active next step — the
+LLM design-spec director, generate-pool, rank, and brand-compliance check.
 
 ### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
 Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
@@ -473,11 +478,15 @@ own exit criterion. (Full backlog in the rebuild's `CHANGES`/PR.)
 item (P1.4 Tier A) jumps to the front, and the expansions (multi-sport, direct
 publishing, local-AI) stay deferred until the wedge is genuinely good.
 
-1. **P1.4 — Generative Content Engine v2, Tier A.** *(active — being wired now.)* The
-   "samey graphics" fix is the highest-leverage quality win and the scaffolding mostly
-   exists, just unwired: load `layouts/v2/*`, author the missing archetypes, wire
-   `autofit` + `saliency`, behind `MEDIAHUB_GEN_V2`. Deterministic, ~$0. *Exit:* a pack
-   renders ≥6 structurally-distinct archetypes; long names never overflow.
+1. **P1.4 Tier A — ✅ shipped (PR #259).** The 6-archetype library + deterministic
+   picker + autofit/saliency/role tokens render behind `MEDIAHUB_GEN_V2`; a pack now
+   spans ≥6 distinct archetypes and long names never overflow.
+1b. **P1.4 Tier B — *active next*.** The LLM design-spec director (SEQ-2): the model
+   chooses archetype / colour-roles / hero-stat / hook per moment, emits N candidates,
+   and a deterministic APCA/ΔE2000 **brand-compliance check** ranks them (generalising
+   Tier A's accent-legibility guard). Building blocks (`design_spec.py`,
+   `variant_metrics.py`) exist; keep the Tier A picker as the honest fallback floor.
+   *Exit:* a ranked, compliance-scored shortlist of ≥4 distinct candidates per card.
 2. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
    *Exit:* a zero-license deployment renders reels. (Biggest hidden-cost win.)
 3. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
