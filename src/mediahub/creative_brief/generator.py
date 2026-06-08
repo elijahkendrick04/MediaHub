@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+import logging
 import random as _random
 import time
 import uuid
@@ -40,6 +41,8 @@ from typing import Optional
 
 from mediahub.inspiration.pattern_library import best_pattern_for, patterns_for_post_angle, PATTERNS
 from mediahub.media_ai import is_available as _llm_available
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -637,8 +640,8 @@ def generate(
             _arch = _v2_archetypes.pick_archetype(variation_seed)
             if _arch:
                 brief.layout_template = _arch
-    except Exception:
-        pass
+    except Exception:  # never break brief generation for an optional feature
+        log.debug("gen-v2 archetype swap skipped", exc_info=True)
 
     # Stamp a signature so callers can dedupe / audit recent renders.
     sig = (

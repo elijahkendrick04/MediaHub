@@ -29,6 +29,7 @@ Authoring convention for a ``layouts/v2/<name>.html`` archetype:
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 
 V2_DIR = Path(__file__).parent / "layouts" / "v2"
@@ -41,14 +42,23 @@ def is_enabled() -> bool:
     return os.environ.get("MEDIAHUB_GEN_V2", "").strip().lower() in _TRUE
 
 
+@lru_cache(maxsize=1)
+def _scan() -> tuple[str, ...]:
+    """Scan ``layouts/v2`` once. Archetype files are static at runtime, so the
+    directory listing is cached rather than re-globbed on every per-card render.
+    """
+    if not V2_DIR.is_dir():
+        return ()
+    return tuple(sorted(p.stem for p in V2_DIR.glob("*.html")))
+
+
 def list_archetypes() -> list[str]:
     """Sorted archetype names (``<name>`` of every ``layouts/v2/<name>.html``).
 
-    Sorted so the seeded picker is stable across processes/filesystems.
+    Sorted so the seeded picker is stable across processes/filesystems. Returns a
+    fresh list each call (callers may keep/sort it) over the cached scan.
     """
-    if not V2_DIR.is_dir():
-        return []
-    return sorted(p.stem for p in V2_DIR.glob("*.html"))
+    return list(_scan())
 
 
 def pick_archetype(seed: int) -> str | None:

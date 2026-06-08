@@ -230,6 +230,66 @@ def test_flag_off_renders_a_legacy_layout(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Regression guards (from code review)
+# --------------------------------------------------------------------------- #
+
+
+def test_darken_fallback_is_byte_identical_flag_off():
+    """The v2 helpers must not shadow the module-level `_hex_to_rgb` and change
+    `darken`/`lighten`'s malformed-input fallback — that would alter the legacy
+    (flag-OFF) render path. Pre-PR `darken("")` is "#000000"."""
+    from mediahub.graphic_renderer.render import darken, lighten
+
+    assert darken("") == "#000000"
+    assert lighten("") != "#0A2540"  # not the navy the duplicate helper returned
+
+
+def test_single_colour_kit_accent_stays_legible():
+    """A kit with only a primary (accent=None, secondary=#000000 by BrandKit
+    default) must NOT collapse --mh-accent to black against a dark ground."""
+    from mediahub.graphic_renderer.render import _mh_role_vars, _contrast_ratio
+
+    kit = BrandKit(
+        profile_id="x",
+        display_name="X",
+        primary_colour="#A30D2D",
+        secondary_colour="#000000",
+        short_name="X",
+    )  # accent_colour defaults to None
+    roles = _mh_role_vars({}, kit)
+    assert _contrast_ratio(roles["--mh-accent"], roles["--mh-primary"]) >= 3.0
+
+
+def test_contrasting_secondary_is_used_as_accent():
+    """A navy+gold kit (no explicit accent) should still get the gold secondary
+    as its accent — the legibility guard must not discard a good contrast."""
+    from mediahub.graphic_renderer.render import _mh_role_vars
+
+    kit = BrandKit(
+        profile_id="x",
+        display_name="X",
+        primary_colour="#0A2540",
+        secondary_colour="#F2C14E",
+        short_name="X",
+    )
+    assert _mh_role_vars({}, kit)["--mh-accent"].upper() == "#F2C14E"
+
+
+def test_fit_one_line_keeps_multiword_surname_on_one_line():
+    """`white-space: nowrap` slots must be sized single-line: a multi-word
+    surname has to FIT on one line at the returned px (no overflow/clip)."""
+    from mediahub.graphic_renderer.render import _fit_one_line_px
+    from mediahub.graphic_renderer.autofit import em_width
+
+    box_w = 1080 * 0.86
+    surname = "VAN DER BERG"
+    px = _fit_one_line_px(
+        surname, box_w, 1350 * 0.18, font_family="Anton", weight=400, min_px=44, max_px=132
+    )
+    assert em_width(surname, font_family="Anton", weight=400) * px <= box_w + 1
+
+
+# --------------------------------------------------------------------------- #
 # One real Playwright render (skipped without Chromium)
 # --------------------------------------------------------------------------- #
 

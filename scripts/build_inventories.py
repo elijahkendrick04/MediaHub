@@ -160,8 +160,10 @@ def write_api():
 def write_env():
     # Match os.environ.get(...), os.getenv(...), environ[...] subscripts, and
     # aliased access (e.g. `import os as _os; _os.environ.get`) by anchoring on
-    # `environ`/`getenv` rather than a literal `os.` prefix. The narrow old
-    # pattern silently dropped GEMINI_API_KEY and ~48 others.
+    # `environ`/`getenv` rather than a literal `os.` prefix — the narrow old
+    # pattern missed subscript and aliased reads. (Provider keys resolved
+    # indirectly, like GEMINI_API_KEY/ANTHROPIC_API_KEY, are recovered by the
+    # secrets_store merge below, not by this regex.)
     pat = re.compile(r"(?:environ\.get\(|getenv\(|environ\[)\s*['\"]([A-Z_][A-Z0-9_]*)['\"]")
     found: dict[str, list[str]] = {}
     for p in (ROOT / "src").rglob("*.py"):

@@ -2171,17 +2171,9 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 # ---------------------------------------------------------------------------
 
 
-def _hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
-    """Parse ``#rgb`` / ``#rrggbb`` to (r, g, b); tolerant of junk input."""
-    s = (hex_colour or "").strip().lstrip("#")
-    if len(s) == 3:
-        s = "".join(c * 2 for c in s)
-    if len(s) != 6:
-        return (10, 37, 64)  # brand-navy default, matching the rest of this file
-    try:
-        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
-    except ValueError:
-        return (10, 37, 64)
+# NB: hex parsing reuses the module-level ``_hex_to_rgb`` (defined above with the
+# other colour helpers). A second definition here would shadow it and silently
+# change ``darken``/``lighten``'s malformed-input fallback on the flag-OFF path.
 
 
 def _rel_luminance(hex_colour: str) -> float:
@@ -2200,6 +2192,51 @@ def _on_color(hex_colour: str) -> str:
     return "#0B0B0C" if _rel_luminance(hex_colour) > 0.42 else "#FFFFFF"
 
 
+def _contrast_ratio(c1: str, c2: str) -> float:
+    """WCAG contrast ratio (1..21) between two hex colours."""
+    hi = max(_rel_luminance(c1), _rel_luminance(c2))
+    lo = min(_rel_luminance(c1), _rel_luminance(c2))
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _legible_accent(primary: str) -> str:
+    """A same-hue brand tint guaranteed to read against the ``primary`` ground.
+
+    Lightens a dark primary / darkens a light one, so it works both as kicker
+    text on the primary ground and as a result-chip background behind primary
+    text. Used only when the club provides no usable accent — never overrides a
+    real, contrasting brand accent.
+    """
+    return lighten(primary, 0.62) if _rel_luminance(primary) < 0.45 else darken(primary, 0.45)
+
+
+def _fit_one_line_px(
+    text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    font_family: str,
+    weight,
+    min_px: int,
+    max_px: int,
+) -> int:
+    """Largest int px at which ``text`` fits on **one line** in ``box_w`` (≤ ``box_h``).
+
+    The v2 hero slots render with ``white-space: nowrap``, so they must be sized
+    single-line. ``autofit.fit_font_px`` word-*wraps* to measure, which over-sizes
+    a multi-word surname ("Van Dyk") that then overflows on the one forced line.
+    """
+    from mediahub.graphic_renderer.autofit import em_width
+
+    if not text or not text.strip():
+        return max_px
+    ew = em_width(text, font_family=font_family, weight=weight)
+    if ew <= 0:
+        return max_px
+    px = min(int(box_w / ew), int(box_h))
+    return max(min_px, min(max_px, px))
+
+
 def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
 
@@ -2212,23 +2249,33 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
     contrast-picked, and the hairline ``outline`` is a translucent on-colour.
     """
 
-    def _hexish(v) -> bool:
-        return isinstance(v, str) and v.strip().startswith("#")
-
     primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
     secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
     accent = getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None
 
-    if not _hexish(primary):
+    # _is_brand_hex is strict (3/6-digit only), so a junk value can't slip a
+    # ``;``/``}`` into the injected ``:root{}`` block, and darken/_on_color always
+    # receive a parseable colour.
+    if not _is_brand_hex(primary):
         primary = palette.get("primary")
-    if not _hexish(primary):
+    if not _is_brand_hex(primary):
         primary = "#0A2540"
-    if not _hexish(secondary):
-        secondary = palette.get("secondary") or darken(primary, 0.40)
-    if not _hexish(accent):
+    if not _is_brand_hex(secondary):
+        secondary = palette.get("secondary")
+    if not _is_brand_hex(secondary):
+        secondary = darken(primary, 0.40)
+
+    # The accent paints kickers/labels and the result chip, so it MUST contrast
+    # with the primary ground. Prefer an explicit accent; else the secondary only
+    # when it actually contrasts (navy+gold → gold); else a legible brand tint.
+    # Without this, a single-colour kit (accent=None, secondary=#000000 by the
+    # BrandKit default) collapses the accent to black and hides the result time.
+    if not _is_brand_hex(accent):
         accent = palette.get("accent")
-    if not _hexish(accent):
-        accent = secondary if _hexish(secondary) else "#FFD24A"
+    if not _is_brand_hex(accent):
+        accent = (
+            secondary if _contrast_ratio(secondary, primary) >= 3.0 else _legible_accent(primary)
+        )
 
     surface = darken(primary, 0.50)
     on_primary = _on_color(primary)
@@ -2281,7 +2328,7 @@ def _v2_hero_stat(brief) -> str:
 
 
 def _fill_v2_archetype(
-    brief, width, height, base_repl, *, archetype, athlete_path=None, brand_kit=None
+    brief, width, height, base_repl, *, athlete_path=None, brand_kit=None
 ) -> dict:
     """Replacements for a ``layouts/v2`` archetype: roles + autofit + saliency.
 
@@ -2290,8 +2337,6 @@ def _fill_v2_archetype(
     ``:root{…}`` block to BASE_CSS carrying the brand role tokens, the
     autofit-computed hero sizes, and the saliency photo position.
     """
-    from mediahub.graphic_renderer.autofit import fit_font_px
-
     repl = dict(base_repl)
     layers = brief.text_layers or {}
 
@@ -2306,11 +2351,10 @@ def _fill_v2_archetype(
     repl["ACCENT_DECORATION"] = ""
 
     root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
-    # Autofit the two overflow-prone hero slots against a safe content width so
-    # long names ("REEKIE-AYALA") shrink instead of overflowing — for ANY
-    # archetype geometry. The per-layout defaults handle the common short case;
-    # autofit only bites on long strings.
-    root_vars["--mh-fit-surname-px"] = "%dpx" % fit_font_px(
+    # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
+    # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
+    # shrink rather than overflow. The per-layout defaults handle the short case.
+    root_vars["--mh-fit-surname-px"] = "%dpx" % _fit_one_line_px(
         surname or "X",
         width * 0.86,
         height * 0.18,
@@ -2319,7 +2363,7 @@ def _fill_v2_archetype(
         min_px=44,
         max_px=132,
     )
-    root_vars["--mh-fit-result-px"] = "%dpx" % fit_font_px(
+    root_vars["--mh-fit-result-px"] = "%dpx" % _fit_one_line_px(
         result or "X",
         width * 0.52,
         height * 0.12,
@@ -2330,7 +2374,7 @@ def _fill_v2_archetype(
     )
     # "Mega" sizes for archetypes where the numeral or the name is THE hero
     # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
-    root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_font_px(
+    root_vars["--mh-fit-mega-result-px"] = "%dpx" % _fit_one_line_px(
         result or "X",
         width * 0.92,
         height * 0.34,
@@ -2339,7 +2383,7 @@ def _fill_v2_archetype(
         min_px=72,
         max_px=300,
     )
-    root_vars["--mh-fit-mega-name-px"] = "%dpx" % fit_font_px(
+    root_vars["--mh-fit-mega-name-px"] = "%dpx" % _fit_one_line_px(
         surname or "X",
         width * 0.92,
         height * 0.22,
@@ -2473,7 +2517,6 @@ def render_brief(
             width,
             height,
             base_repl,
-            archetype=_v2_archetype,
             athlete_path=athlete_path,
             brand_kit=brand_kit,
         )
