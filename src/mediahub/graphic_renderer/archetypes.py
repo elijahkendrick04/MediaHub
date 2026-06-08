@@ -25,6 +25,7 @@ Authoring convention for a ``layouts/v2/<name>.html`` archetype:
     ``{{HERO_STAT}}``, ``{{LOGO_BLOCK}}``, ``{{ATHLETE_IMG_BLOCK}}`` …).
   * must read well at both 1080×1350 and 1080×1920.
 """
+
 from __future__ import annotations
 
 import os

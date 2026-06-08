@@ -454,7 +454,7 @@ def _accent_decoration_html(
             f'<div style="position:absolute;left:{offset}px;top:{offset}px;width:{long_side}px;'
             f"height:{long_side}px;border-top:{weight}px solid {color};border-left:{weight}px solid {color};"
             f'z-index:11;pointer-events:none;"></div>'
-            f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height*0.07)}px;'
+            f'<div style="position:absolute;right:{offset}px;bottom:{offset + int(height * 0.07)}px;'
             f"width:{long_side}px;height:{long_side}px;border-bottom:{weight}px solid {color};"
             f'border-right:{weight}px solid {color};z-index:11;pointer-events:none;"></div>'
         )
@@ -476,8 +476,8 @@ def _accent_decoration_html(
     if style == "ribbon":
         size = int(min(width, height) * 0.20 * (0.6 + s))
         return (
-            f'<div style="position:absolute;left:-{size//2}px;top:{int(height*0.20)}px;'
-            f"width:{size*2}px;height:{max(20, int(size*0.18))}px;background:{color};"
+            f'<div style="position:absolute;left:-{size // 2}px;top:{int(height * 0.20)}px;'
+            f"width:{size * 2}px;height:{max(20, int(size * 0.18))}px;background:{color};"
             f"transform:rotate(-32deg);transform-origin:left center;opacity:0.85;"
             f'z-index:11;pointer-events:none;"></div>'
         )
@@ -485,7 +485,7 @@ def _accent_decoration_html(
         size = int(min(width, height) * 0.05 * (0.6 + s))
         top = int(height * 0.52)
         return (
-            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{top}px;'
+            f'<div style="position:absolute;right:{int(width * 0.06)}px;top:{top}px;'
             f"width:0;height:0;border-left:{size}px solid {color};"
             f"border-top:{size}px solid transparent;border-bottom:{size}px solid transparent;"
             f'z-index:11;pointer-events:none;opacity:0.95;"></div>'
@@ -493,14 +493,14 @@ def _accent_decoration_html(
     if style == "underline":
         bar_h = max(4, int(height * 0.006 * (0.6 + s)))
         return (
-            f'<div style="position:absolute;left:{int(width*0.06)}px;right:{int(width*0.40)}px;'
-            f"top:{int(height*0.20)}px;height:{bar_h}px;background:{color};"
+            f'<div style="position:absolute;left:{int(width * 0.06)}px;right:{int(width * 0.40)}px;'
+            f"top:{int(height * 0.20)}px;height:{bar_h}px;background:{color};"
             f'z-index:11;pointer-events:none;"></div>'
         )
     if style == "badge":
         size = int(min(width, height) * 0.085 * (0.6 + s))
         return (
-            f'<div style="position:absolute;right:{int(width*0.06)}px;top:{int(height*0.32)}px;'
+            f'<div style="position:absolute;right:{int(width * 0.06)}px;top:{int(height * 0.32)}px;'
             f"width:{size}px;height:{size}px;border-radius:50%;background:{color};"
             f"opacity:0.85;z-index:11;pointer-events:none;"
             f'box-shadow:0 6px 18px rgba(0,0,0,0.35);"></div>'
@@ -942,7 +942,7 @@ def _build_result_chip(label: str, value: str) -> str:
         f'<div class="result-chip">'
         f'<div class="label">{html_escape(label or "Time")}</div>'
         f'<div class="value">{html_escape(value)}</div>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -1182,15 +1182,15 @@ def _common_replacements(
         font_size = max(36, int(height * 0.038))
         medal_badge_html = (
             f'<div class="tier-badge" style="position:absolute;'
-            f'top:{badge_top}px;right:56px;z-index:10;'
-            f'background:linear-gradient(135deg,{ovr["accent"]} 0%,{ovr["accent_deep"]} 100%);'
-            f'color:#1a1a1a;padding:14px 28px;border-radius:999px;'
-            f'font-family:\'Bebas Neue\',\'Anton\',sans-serif;'
-            f'font-size:{font_size}px;letter-spacing:0.14em;'
-            f'font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,0.50),'
-            f'inset 0 2px 0 rgba(255,255,255,0.5);'
+            f"top:{badge_top}px;right:56px;z-index:10;"
+            f"background:linear-gradient(135deg,{ovr['accent']} 0%,{ovr['accent_deep']} 100%);"
+            f"color:#1a1a1a;padding:14px 28px;border-radius:999px;"
+            f"font-family:'Bebas Neue','Anton',sans-serif;"
+            f"font-size:{font_size}px;letter-spacing:0.14em;"
+            f"font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,0.50),"
+            f"inset 0 2px 0 rgba(255,255,255,0.5);"
             f'border:2px solid rgba(255,255,255,0.25)">'
-            f'&#9733; {ovr["badge"]}</div>'
+            f"&#9733; {ovr['badge']}</div>"
         )
 
     base_css = _read_text(_BASE_CSS_PATH)
@@ -1603,11 +1603,11 @@ def _fill_athlete_spotlight(brief, width: int, height: int, repl: dict[str, str]
         mega_px = _mega_watermark_px(mega_letter, width, mega_size)
         # Position centered horizontally, in the middle vertical band
         custom_block = (
-            f'<div class="txl-photo-glow" style="top:{int(height*0.40)}px;'
-            f"left:50%;transform:translateX(-50%);width:{int(min(width,height)*0.55)}px;"
-            f'height:{int(min(width,height)*0.55)}px;"></div>'
+            f'<div class="txl-photo-glow" style="top:{int(height * 0.40)}px;'
+            f"left:50%;transform:translateX(-50%);width:{int(min(width, height) * 0.55)}px;"
+            f'height:{int(min(width, height) * 0.55)}px;"></div>'
             f'<div class="txl-accent-bar diagonal"></div>'
-            f'<div class="txl-mega-initial" style="top:{int(height*0.36)}px;'
+            f'<div class="txl-mega-initial" style="top:{int(height * 0.36)}px;'
             f"left:50%;transform:translateX(-50%);right:auto;font-size:{mega_px}px;"
             f'-webkit-text-stroke:4px rgba(255,255,255,0.16);">'
             f"{html_escape(mega_letter)}</div>"
@@ -1798,7 +1798,7 @@ def _fill_text_led_recap(brief, width: int, height: int, repl: dict[str, str]) -
     bullets_html = ""
     for i, b in enumerate(bullets[:4], 1):
         bullets_html += (
-            f'<div class="row"><span class="num">0{i}</span>' f"<span>{html_escape(b)}</span></div>"
+            f'<div class="row"><span class="num">0{i}</span><span>{html_escape(b)}</span></div>'
         )
     headline_line1 = (layers.get("headline_line1") or "").upper()
     if headline_line1:
@@ -2311,22 +2311,42 @@ def _fill_v2_archetype(
     # archetype geometry. The per-layout defaults handle the common short case;
     # autofit only bites on long strings.
     root_vars["--mh-fit-surname-px"] = "%dpx" % fit_font_px(
-        surname or "X", width * 0.86, height * 0.18,
-        font_family="Anton", weight=400, min_px=44, max_px=132,
+        surname or "X",
+        width * 0.86,
+        height * 0.18,
+        font_family="Anton",
+        weight=400,
+        min_px=44,
+        max_px=132,
     )
     root_vars["--mh-fit-result-px"] = "%dpx" % fit_font_px(
-        result or "X", width * 0.52, height * 0.12,
-        font_family="JetBrains Mono", weight=700, min_px=40, max_px=104,
+        result or "X",
+        width * 0.52,
+        height * 0.12,
+        font_family="JetBrains Mono",
+        weight=700,
+        min_px=40,
+        max_px=104,
     )
     # "Mega" sizes for archetypes where the numeral or the name is THE hero
     # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
     root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_font_px(
-        result or "X", width * 0.92, height * 0.34,
-        font_family="JetBrains Mono", weight=700, min_px=72, max_px=300,
+        result or "X",
+        width * 0.92,
+        height * 0.34,
+        font_family="JetBrains Mono",
+        weight=700,
+        min_px=72,
+        max_px=300,
     )
     root_vars["--mh-fit-mega-name-px"] = "%dpx" % fit_font_px(
-        surname or "X", width * 0.92, height * 0.22,
-        font_family="Anton", weight=400, min_px=64, max_px=220,
+        surname or "X",
+        width * 0.92,
+        height * 0.22,
+        font_family="Anton",
+        weight=400,
+        min_px=64,
+        max_px=220,
     )
     root_vars["--mh-photo-pos"] = _v2_photo_position(athlete_path)
 

@@ -6,6 +6,7 @@ injection, and the flag-off-is-unchanged invariant. The heavy Playwright render
 is exercised once and skipped when Chromium is unavailable; everything else runs
 without a browser by stubbing the single ``render_html_to_png`` call.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,10 +20,22 @@ from mediahub.media_requirements.evaluator import EvaluationResult
 
 # The PAR-7 placeholder allow-list every v2 archetype must stay within.
 _ALLOWED_PLACEHOLDERS = {
-    "ATHLETE_FULL_NAME", "ATHLETE_FIRST_NAME", "ATHLETE_SURNAME_DISPLAY",
-    "EVENT_NAME", "RESULT_VALUE", "ACHIEVEMENT_LABEL", "MEET_NAME", "CLUB_FULL",
-    "HERO_STAT", "LOGO_BLOCK", "ATHLETE_IMG_BLOCK", "ACCENT_DECORATION",
-    "SPONSOR_BLOCK", "WIDTH", "HEIGHT", "BASE_CSS",
+    "ATHLETE_FULL_NAME",
+    "ATHLETE_FIRST_NAME",
+    "ATHLETE_SURNAME_DISPLAY",
+    "EVENT_NAME",
+    "RESULT_VALUE",
+    "ACHIEVEMENT_LABEL",
+    "MEET_NAME",
+    "CLUB_FULL",
+    "HERO_STAT",
+    "LOGO_BLOCK",
+    "ATHLETE_IMG_BLOCK",
+    "ACCENT_DECORATION",
+    "SPONSOR_BLOCK",
+    "WIDTH",
+    "HEIGHT",
+    "BASE_CSS",
 }
 
 
@@ -63,15 +76,20 @@ def _brief(*, seed=0, swimmer="Eira Hughes", result="2:08.41"):
         },
     }
     return gen_brief(
-        item, _eval(), _brand(),
-        profile_id="test", meet_name="Manchester Open",
-        venue_name="Manchester Aquatics Centre", variation_seed=seed,
+        item,
+        _eval(),
+        _brand(),
+        profile_id="test",
+        meet_name="Manchester Open",
+        venue_name="Manchester Aquatics Centre",
+        variation_seed=seed,
     )
 
 
 # --------------------------------------------------------------------------- #
 # Registry + picker (no rendering)
 # --------------------------------------------------------------------------- #
+
 
 def test_registry_lists_six_distinct_archetypes():
     names = archetypes.list_archetypes()
@@ -103,6 +121,7 @@ def test_picker_is_deterministic_and_spreads():
 # Archetype authoring convention (PAR-7 hygiene)
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.parametrize("name", archetypes.list_archetypes())
 def test_archetype_follows_convention(name):
     raw = (archetypes.V2_DIR / f"{name}.html").read_text(encoding="utf-8")
@@ -119,6 +138,7 @@ def test_archetype_follows_convention(name):
 # --------------------------------------------------------------------------- #
 # Generator integration: flag flips the layout to a v2 archetype
 # --------------------------------------------------------------------------- #
+
 
 def test_generator_keeps_legacy_family_when_flag_off(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_GEN_V2", raising=False)
@@ -138,6 +158,7 @@ def test_generator_swaps_to_v2_when_flag_on(monkeypatch):
 # Full HTML assembly without a browser (stub the Playwright call)
 # --------------------------------------------------------------------------- #
 
+
 def _render_html(monkeypatch, tmp_path, brief):
     """Run render_brief but capture the assembled HTML instead of rasterising."""
     import mediahub.graphic_renderer.render as R
@@ -147,6 +168,7 @@ def _render_html(monkeypatch, tmp_path, brief):
     def _fake_png(html, output_path, size):
         captured["html"] = html
         from pathlib import Path
+
         Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
         return 8
 
@@ -164,8 +186,14 @@ def test_v2_assembly_is_clean_for_every_archetype(monkeypatch, tmp_path, seed):
     assert "{{" not in html and "}}" not in html
     # the brand role tokens + autofit vars were injected
     assert ":root{" in html
-    for token in ("--mh-primary:", "--mh-accent:", "--mh-on-primary:",
-                  "--mh-fit-surname-px:", "--mh-fit-result-px:", "--mh-photo-pos:"):
+    for token in (
+        "--mh-primary:",
+        "--mh-accent:",
+        "--mh-on-primary:",
+        "--mh-fit-surname-px:",
+        "--mh-fit-result-px:",
+        "--mh-photo-pos:",
+    ):
         assert token in html, f"{brief.layout_template} missing {token}"
     # real content made it in
     assert "Manchester Open" in html
@@ -183,7 +211,8 @@ def test_autofit_shrinks_a_long_surname(monkeypatch, tmp_path):
     # a genuinely long, wide surname can't fit at the 132px default in the box,
     # so autofit must shrink it rather than let it overflow
     long = _render_html(
-        monkeypatch, tmp_path,
+        monkeypatch,
+        tmp_path,
         _brief(seed=0, swimmer="Aleksandra Vandersloot-Chamberlain"),
     )
     short_px, long_px = _surname_px(short), _surname_px(long)
@@ -203,6 +232,7 @@ def test_flag_off_renders_a_legacy_layout(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 # One real Playwright render (skipped without Chromium)
 # --------------------------------------------------------------------------- #
+
 
 def _have_playwright() -> bool:
     try:

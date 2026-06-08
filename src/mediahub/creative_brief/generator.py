@@ -642,7 +642,7 @@ def generate(
 
     # Stamp a signature so callers can dedupe / audit recent renders.
     sig = (
-        f"{brief.layout_template}|{brief.palette.get('primary','')}|"
+        f"{brief.layout_template}|{brief.palette.get('primary', '')}|"
         f"{brief.background_style}|{brief.accent_style}|"
         f"{brief.typography_pair}|{brief.composition}|"
         f"{brief.photo_treatment}|{brief.primary_hook[:40]}"
