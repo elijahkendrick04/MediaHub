@@ -542,4 +542,133 @@ def ai_creative_directions(
     return cleaned or None
 
 
-__all__ = ["ai_creative_direction", "ai_creative_directions", "ai_fresh_hook"]
+# ---------------------------------------------------------------------------
+# Gen Engine v2 — Tier B §5.4: the design-spec director
+# ---------------------------------------------------------------------------
+
+# One-line "when to use" guidance per v2 archetype, injected into the prompt so
+# the model picks the composition that fits THIS moment rather than an arbitrary
+# seed. Keyed by the archetype name (file stem under layouts/v2/).
+_ARCHETYPE_GUIDE: dict[str, str] = {
+    "split_diagonal_hero": "photo-led, dynamic; a strong action or portrait moment.",
+    "big_number_dominant": "the time/score IS the story; works with no photo.",
+    "full_bleed_photo_lower_third": "a great full-frame photo; broadcast lower-third.",
+    "editorial_numbers_grid": "data-rich recap; several stats; no photo needed.",
+    "minimal_type_poster": "bold, restrained, type-only; a clean PB with no photo.",
+    "centered_medal_spotlight": "a medal/podium/celebratory moment; symmetric.",
+}
+
+
+def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) -> str:
+    catalog = "\n".join(
+        f"  - {a}: {_ARCHETYPE_GUIDE.get(a, 'a distinct layout.')}" for a in archetypes
+    )
+    return (
+        "You are the art director for a sports club's social graphic. Choose the "
+        "single best composition for ONE achievement and return STRICT JSON only "
+        "(no prose, no markdown).\n\n"
+        "Pick from these archetypes:\n" + catalog + "\n\n"
+        "Return this exact shape:\n"
+        "{\n"
+        '  "archetype": <one archetype name from the list>,\n'
+        '  "colour_roles": {"ground": <role>, "surface": <role>, "headline": <role>, "accent": <role>},\n'
+        '  "focal_element": "athlete_cutout|athlete_photo|big_number|medal|logo|none",\n'
+        '  "crop_intent": "tight_portrait|rule_of_thirds_action|centered|full_bleed|original",\n'
+        '  "hero_stat": "final_time|pb_delta|placing|relay_split|event|points",\n'
+        '  "secondary_stats": [<stat>, ...],\n'
+        '  "headline_hook": <<=80 chars, punchy, no emoji, no cliché ("delve","elevate")>,\n'
+        '  "accent_treatment": "brackets|stripe|badge|frame|minimal|ribbon|underline",\n'
+        '  "logo_lockup": "full_horizontal|full_stacked|mono_light|mono_dark|icon",\n'
+        '  "mood": "explosive|electric|calm|fierce|celebratory|stoic|precise|bold|triumphant|minimal",\n'
+        '  "motion_intent": "fade_in|snap_in_then_settle|slide_up|scale_in|kinetic_type|static",\n'
+        '  "rationale": <one sentence: why this composition fits THIS result>\n'
+        "}\n\n"
+        "colour_roles values must be one of: " + ", ".join(token_roles) + ".\n"
+        "Choose the archetype that fits the moment (a medal → spotlight; a standout "
+        "time with no photo → big_number or minimal poster; a great photo → "
+        "full-bleed or diagonal). Lead with the most newsworthy hero_stat."
+    )
+
+
+def _design_spec_user_prompt(
+    summary: str, brand_ctx: str, angle: str, recent_archetypes: list[str]
+) -> str:
+    parts = [f"ACHIEVEMENT:\n{summary}", f"BRAND:\n{brand_ctx}"]
+    if angle:
+        parts.append(f"ANGLE: {angle}")
+    if recent_archetypes:
+        parts.append(
+            "RECENTLY USED archetypes (prefer a different composition for variety): "
+            + ", ".join(recent_archetypes[:6])
+        )
+    return "\n\n".join(parts)
+
+
+def ai_design_spec(
+    *,
+    content_item: dict,
+    brand_kit,
+    archetypes: list[str],
+    token_roles: list[str],
+    angle: str = "",
+    recent_archetypes: Optional[list[str]] = None,
+):
+    """Ask the AI for a v2 ``DesignSpec`` — which archetype + emphasis + hook best
+    fit THIS achievement (Tier B §5.4).
+
+    Returns a validated :class:`creative_brief.design_spec.DesignSpec`, or ``None``
+    when no provider is configured / the call fails / the response can't be parsed.
+    The caller then uses the deterministic archetype picker (Tier A) as the honest
+    floor — never a fabricated card. The (possibly hallucinated) model JSON is run
+    through ``design_spec.normalise``, so the returned spec is always renderable and
+    brand-legal even if the model ignores the schema.
+    """
+    if not archetypes or not token_roles:
+        return None
+    try:
+        from mediahub.ai_core import ask, ProviderNotConfigured, ProviderError
+        from mediahub.creative_brief.design_spec import normalise
+    except Exception as e:
+        log.debug("ai_design_spec: import failed: %s", e)
+        return None
+
+    sys = _design_spec_system_prompt(list(archetypes), list(token_roles))
+    user = _design_spec_user_prompt(
+        _achievement_summary(content_item),
+        _brand_context(brand_kit),
+        angle,
+        recent_archetypes or [],
+    )
+    try:
+        out = ask(sys, user, max_tokens=500)
+    except ProviderNotConfigured:
+        log.info("ai_design_spec: no provider — caller falls back to the Tier A picker")
+        return None
+    except ProviderError as e:
+        log.warning("ai_design_spec: provider error: %s", str(e)[:300])
+        return None
+    except Exception as e:
+        log.warning("ai_design_spec: unexpected error: %s", str(e)[:300])
+        return None
+    if not out:
+        log.warning("ai_design_spec: provider returned empty output")
+        return None
+    raw = _parse_strict_json(out)
+    if raw is None:
+        log.warning("ai_design_spec: could not parse JSON (len=%d)", len(out or ""))
+        return None
+    try:
+        spec = normalise(raw, archetypes=list(archetypes), token_roles=list(token_roles))
+    except Exception as e:
+        log.warning("ai_design_spec: normalise failed: %s", e)
+        return None
+    log.debug(
+        "ai_design_spec: archetype=%s hero_stat=%s mood=%s",
+        spec.archetype,
+        spec.hero_stat,
+        spec.mood,
+    )
+    return spec
+
+
+__all__ = ["ai_creative_direction", "ai_creative_directions", "ai_fresh_hook", "ai_design_spec"]
