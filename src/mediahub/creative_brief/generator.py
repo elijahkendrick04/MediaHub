@@ -626,6 +626,20 @@ def generate(
         mood=mood,
         ai_directed=ai_directed,
     )
+    # Gen Engine v2 (Tier A): when MEDIAHUB_GEN_V2 is on, swap the layout for a
+    # deterministic v2 archetype keyed by this card's variation_seed (stable per
+    # card, spread across the pack). Off by default — flag-off keeps the legacy
+    # family byte-for-byte. The signature below then captures the v2 choice.
+    try:
+        from mediahub.graphic_renderer import archetypes as _v2_archetypes
+
+        if _v2_archetypes.is_enabled():
+            _arch = _v2_archetypes.pick_archetype(variation_seed)
+            if _arch:
+                brief.layout_template = _arch
+    except Exception:
+        pass
+
     # Stamp a signature so callers can dedupe / audit recent renders.
     sig = (
         f"{brief.layout_template}|{brief.palette.get('primary','')}|"

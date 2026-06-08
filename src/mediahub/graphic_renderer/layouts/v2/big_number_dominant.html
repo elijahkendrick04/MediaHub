@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{RESULT_VALUE}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   big_number_dominant  (v2 archetype, PAR-7)
+
+   The RESULT is the hero: one enormous monospace numeral spans almost the
+   full width, vertically centred, with the athlete + event reduced to a
+   compact kicker above and a brand ledger below. No photo is required —
+   this is the archetype the picker leans on for a pure-stat moment (a
+   sharp time, a points total) and for cards with no usable image.
+
+   Structural signature: a single dominant numeral on a flat brand ground,
+   framed by thin accent rules. Deliberately unlike the diagonal photo
+   wedge or any centred-cutout layout.
+   =================================================================== */
+
+.bn {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 96px 84px;
+}
+.bn *, .bn *::before, .bn *::after { box-sizing: border-box; }
+
+/* faint oversized ghost of the achievement word, behind the numeral */
+.bn__ghost {
+  position: absolute;
+  right: -4%;
+  bottom: 8%;
+  font-family: 'Anton', Impact, sans-serif;
+  font-size: 360px;
+  line-height: 0.8;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+  opacity: 0.06;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bn__top { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 18px; }
+.bn__kicker {
+  display: inline-flex; align-items: center; gap: 16px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 26px; letter-spacing: 0.24em;
+  text-transform: uppercase; color: var(--mh-accent);
+}
+.bn__tick { width: 46px; height: 6px; border-radius: 3px; background: var(--mh-accent); }
+.bn__name {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: 70px; line-height: 0.92;
+  letter-spacing: 0.005em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+}
+
+/* the hero numeral */
+.bn__mid { position: relative; z-index: 2; }
+.bn__result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: var(--mh-fit-mega-result-px, 240px);
+  line-height: 0.86;
+  letter-spacing: -0.03em;
+  color: var(--mh-accent);
+}
+.bn__event {
+  margin-top: 18px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 36px; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--mh-on-primary);
+}
+.bn__stat {
+  margin-top: 8px;
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 26px;
+  color: var(--mh-on-primary); opacity: 0.82;
+}
+
+/* foot brand row, separated by an accent hairline */
+.bn__foot {
+  position: relative; z-index: 2;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+  padding-top: 30px; border-top: 2px solid var(--mh-outline);
+}
+.bn__brand { display: flex; align-items: center; gap: 18px; }
+.bn__logo { height: 64px; width: auto; }
+.bn__logo img, .bn__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.bn__brand-text { display: flex; flex-direction: column; line-height: 1.16; }
+.bn__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 25px; text-transform: uppercase; color: var(--mh-on-primary); }
+.bn__meet { font-family: 'Inter', sans-serif; font-weight: 500; font-size: 17px; color: var(--mh-on-primary); opacity: 0.74; margin-top: 4px; }
+.bn__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="bn">
+
+  <div class="bn__ghost">{{ACHIEVEMENT_LABEL}}</div>
+
+  <div class="bn__top">
+    <div class="bn__kicker"><span class="bn__tick"></span>{{ACHIEVEMENT_LABEL}}</div>
+    <div class="bn__name">{{ATHLETE_FULL_NAME}}</div>
+  </div>
+
+  <div class="bn__mid">
+    <div class="bn__result">{{RESULT_VALUE}}</div>
+    <div class="bn__event">{{EVENT_NAME}}</div>
+    <div class="bn__stat">{{HERO_STAT}}</div>
+  </div>
+
+  <div class="bn__foot">
+    <div class="bn__brand">
+      <div class="bn__logo">{{LOGO_BLOCK}}</div>
+      <div class="bn__brand-text">
+        <div class="bn__club">{{CLUB_FULL}}</div>
+        <div class="bn__meet">{{MEET_NAME}}</div>
+      </div>
+    </div>
+    <div class="bn__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

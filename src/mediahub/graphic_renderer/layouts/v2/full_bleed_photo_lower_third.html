@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   full_bleed_photo_lower_third  (v2 archetype, PAR-7)
+
+   Broadcast "lower third": the athlete fills a full-bleed photo stage over
+   a brand-gradient ground; a solid brand band pinned to the bottom carries
+   the name full-width, then a meta row with the result isolated in an
+   accent chip on the right. When no photo is supplied the stage stays a
+   clean brand gradient (no floating cutout), so the card still reads.
+
+   Structural signature: a horizontal lower band with a full-width name and
+   a right-hand result chip — not a diagonal wedge or a centred lockup.
+   =================================================================== */
+
+.fb {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(120% 80% at 50% 8%, var(--mh-surface) 0%, var(--mh-primary) 78%);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.fb *, .fb *::before, .fb *::after { box-sizing: border-box; }
+
+.fb__stage { position: absolute; inset: 0; z-index: 0; }
+.fb__stage img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: var(--mh-photo-pos, center 26%);
+  display: block;
+}
+.fb__grad {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 44%, rgba(0,0,0,0.12) 62%, rgba(0,0,0,0.40) 100%);
+}
+
+/* kicker top-left, brand chip top-right — both over the photo */
+.fb__kicker {
+  position: absolute; top: 60px; left: 60px; z-index: 3;
+  display: inline-flex; align-items: center;
+  padding: 14px 22px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 800; font-size: 25px; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.fb__brand { position: absolute; top: 60px; right: 60px; z-index: 3; display: flex; align-items: center; gap: 14px; }
+.fb__logo { height: 56px; width: auto; }
+.fb__logo img, .fb__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.fb__club { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 23px; text-transform: uppercase; color: var(--mh-on-primary); text-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+
+/* the lower third — a vertical stack so the name always gets full width */
+.fb__band {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+  background: var(--mh-primary);
+  border-top: 5px solid var(--mh-accent);
+  padding: 44px 60px 50px;
+  display: flex; flex-direction: column;
+}
+.fb__first {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700; font-size: 30px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+.fb__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400; font-size: var(--mh-fit-surname-px, 116px);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary); white-space: nowrap;
+}
+.fb__row {
+  margin-top: 22px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
+}
+.fb__meta { min-width: 0; }
+.fb__event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600; font-size: 28px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+}
+.fb__where { margin-top: 8px; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 21px; color: var(--mh-on-primary); opacity: 0.74; }
+.fb__stat { margin-top: 8px; font-family: 'Inter', sans-serif; font-weight: 600; font-size: 22px; color: var(--mh-accent); }
+.fb__right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+.fb__result {
+  display: inline-block; padding: 16px 26px;
+  background: var(--mh-accent); color: var(--mh-primary);
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: var(--mh-fit-result-px, 80px); line-height: 0.9;
+}
+.fb__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="fb">
+
+  <div class="fb__stage">{{ATHLETE_IMG_BLOCK}}</div>
+  <div class="fb__grad"></div>
+
+  <div class="fb__kicker">{{ACHIEVEMENT_LABEL}}</div>
+  <div class="fb__brand">
+    <div class="fb__logo">{{LOGO_BLOCK}}</div>
+    <div class="fb__club">{{CLUB_FULL}}</div>
+  </div>
+
+  <div class="fb__band">
+    <div class="fb__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="fb__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="fb__row">
+      <div class="fb__meta">
+        <div class="fb__event">{{EVENT_NAME}}</div>
+        <div class="fb__where">{{MEET_NAME}}</div>
+        <div class="fb__stat">{{HERO_STAT}}</div>
+      </div>
+      <div class="fb__right">
+        <span class="fb__result">{{RESULT_VALUE}}</span>
+        <div class="fb__sponsor">{{SPONSOR_BLOCK}}</div>
+      </div>
+    </div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

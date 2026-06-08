@@ -2167,6 +2167,175 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 
 
 # ---------------------------------------------------------------------------
+# Generation Engine v2 — Tier A render helpers (gated by MEDIAHUB_GEN_V2)
+# ---------------------------------------------------------------------------
+
+
+def _hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
+    """Parse ``#rgb`` / ``#rrggbb`` to (r, g, b); tolerant of junk input."""
+    s = (hex_colour or "").strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        return (10, 37, 64)  # brand-navy default, matching the rest of this file
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return (10, 37, 64)
+
+
+def _rel_luminance(hex_colour: str) -> float:
+    """WCAG relative luminance (0=black … 1=white). Deterministic colour maths."""
+
+    def _chan(c: int) -> float:
+        x = c / 255.0
+        return x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _hex_to_rgb(hex_colour)
+    return 0.2126 * _chan(r) + 0.7152 * _chan(g) + 0.0722 * _chan(b)
+
+
+def _on_color(hex_colour: str) -> str:
+    """Black or white — whichever reads better as a foreground on ``hex_colour``."""
+    return "#0B0B0C" if _rel_luminance(hex_colour) > 0.42 else "#FFFFFF"
+
+
+def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
+    """Map the club's CANONICAL brand colours to the v2 ``--mh-*`` role tokens.
+
+    v2 keeps brand identity *stable* — unlike the v1 seed-rotated palette, which
+    can swap which brand colour plays "primary" and turn a navy+gold club's
+    ground muddy. So primary/accent come from the ``BrandKit`` when present and
+    only fall back to the brief palette otherwise. Deterministic colour maths
+    (``darken`` + WCAG luminance) fill surface/on-*/outline; no brand colour is
+    invented. ``surface`` is a deep brand-tinted ground, ``on-*`` are
+    contrast-picked, and the hairline ``outline`` is a translucent on-colour.
+    """
+
+    def _hexish(v) -> bool:
+        return isinstance(v, str) and v.strip().startswith("#")
+
+    primary = getattr(brand_kit, "primary_colour", None) if brand_kit is not None else None
+    secondary = getattr(brand_kit, "secondary_colour", None) if brand_kit is not None else None
+    accent = getattr(brand_kit, "accent_colour", None) if brand_kit is not None else None
+
+    if not _hexish(primary):
+        primary = palette.get("primary")
+    if not _hexish(primary):
+        primary = "#0A2540"
+    if not _hexish(secondary):
+        secondary = palette.get("secondary") or darken(primary, 0.40)
+    if not _hexish(accent):
+        accent = palette.get("accent")
+    if not _hexish(accent):
+        accent = secondary if _hexish(secondary) else "#FFD24A"
+
+    surface = darken(primary, 0.50)
+    on_primary = _on_color(primary)
+    on_surface = _on_color(surface)
+    outline = "rgba(255,255,255,0.20)" if on_primary == "#FFFFFF" else "rgba(0,0,0,0.20)"
+    return {
+        "--mh-primary": primary,
+        "--mh-secondary": secondary,
+        "--mh-accent": accent,
+        "--mh-surface": surface,
+        "--mh-on-primary": on_primary,
+        "--mh-on-surface": on_surface,
+        "--mh-outline": outline,
+    }
+
+
+def _v2_photo_position(athlete_path) -> str:
+    """CSS ``object-position`` that keeps the saliency focus in frame.
+
+    Uses the deterministic ``saliency.best_crop`` centroid for a portrait ratio,
+    converted to a percentage. Safe default on any failure so a render never
+    breaks on a missing or odd image.
+    """
+    if not athlete_path:
+        return "center 28%"
+    try:
+        from mediahub.graphic_renderer.saliency import best_crop
+
+        x, y, w, h = best_crop(athlete_path, "4:5")
+        with Image.open(athlete_path) as im:
+            iw, ih = im.size
+        if iw <= 0 or ih <= 0:
+            return "center 28%"
+        cx = max(0.0, min(1.0, (x + w / 2.0) / iw)) * 100.0
+        cy = max(0.0, min(1.0, (y + h / 2.0) / ih)) * 100.0
+        return f"{cx:.0f}% {cy:.0f}%"
+    except Exception:
+        return "center 28%"
+
+
+def _v2_hero_stat(brief) -> str:
+    """The optional emphasis line for an archetype's stat slot.
+
+    Honest by construction: only real brief text is used (an explicit
+    ``hero_stat``/``context`` layer if the pipeline set one), never a fabricated
+    number. Empty is fine — every v2 archetype collapses the slot gracefully.
+    """
+    layers = brief.text_layers or {}
+    return (layers.get("hero_stat") or layers.get("context") or "").strip()
+
+
+def _fill_v2_archetype(
+    brief, width, height, base_repl, *, archetype, athlete_path=None, brand_kit=None
+) -> dict:
+    """Replacements for a ``layouts/v2`` archetype: roles + autofit + saliency.
+
+    Starts from the shared replacements (names/event/logo/photo already filled),
+    adds the result + hero-stat slots the v2 layouts use, and appends one
+    ``:root{…}`` block to BASE_CSS carrying the brand role tokens, the
+    autofit-computed hero sizes, and the saliency photo position.
+    """
+    from mediahub.graphic_renderer.autofit import fit_font_px
+
+    repl = dict(base_repl)
+    layers = brief.text_layers or {}
+
+    result = layers.get("result_value") or ""
+    surname = (layers.get("athlete_surname") or "").upper()
+    repl["RESULT_VALUE"] = html_escape(result)
+    repl["HERO_STAT"] = html_escape(_v2_hero_stat(brief))
+    # v2 archetypes carry their OWN accent design (ticks / rules / rings / chips),
+    # so the v1 accent-decoration overlay — which targets the v1 `.canvas` and
+    # would otherwise be re-injected before </body> — must NOT also fire, or it
+    # paints a stray band across the composition. Suppress it for v2.
+    repl["ACCENT_DECORATION"] = ""
+
+    root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
+    # Autofit the two overflow-prone hero slots against a safe content width so
+    # long names ("REEKIE-AYALA") shrink instead of overflowing — for ANY
+    # archetype geometry. The per-layout defaults handle the common short case;
+    # autofit only bites on long strings.
+    root_vars["--mh-fit-surname-px"] = "%dpx" % fit_font_px(
+        surname or "X", width * 0.86, height * 0.18,
+        font_family="Anton", weight=400, min_px=44, max_px=132,
+    )
+    root_vars["--mh-fit-result-px"] = "%dpx" % fit_font_px(
+        result or "X", width * 0.52, height * 0.12,
+        font_family="JetBrains Mono", weight=700, min_px=40, max_px=104,
+    )
+    # "Mega" sizes for archetypes where the numeral or the name is THE hero
+    # (big_number_dominant, minimal_type_poster) — fit to almost the full width.
+    root_vars["--mh-fit-mega-result-px"] = "%dpx" % fit_font_px(
+        result or "X", width * 0.92, height * 0.34,
+        font_family="JetBrains Mono", weight=700, min_px=72, max_px=300,
+    )
+    root_vars["--mh-fit-mega-name-px"] = "%dpx" % fit_font_px(
+        surname or "X", width * 0.92, height * 0.22,
+        font_family="Anton", weight=400, min_px=64, max_px=220,
+    )
+    root_vars["--mh-photo-pos"] = _v2_photo_position(athlete_path)
+
+    root_block = "\n:root{" + "".join(f"{k}:{v};" for k, v in root_vars.items()) + "}\n"
+    repl["BASE_CSS"] = base_repl.get("BASE_CSS", "") + root_block
+    return repl
+
+
+# ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
 
@@ -2192,11 +2361,24 @@ def render_brief(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     family = brief.layout_template or "individual_hero"
-    template_path = LAYOUTS_DIR / f"{family}.html"
-    if not template_path.exists():
-        # Fallback to text-led recap if family is unknown
-        family = "text_led_recap"
+    # Gen Engine v2 (Tier A): when the flag is on and the brief names a v2
+    # archetype, load it from layouts/v2/ — BEFORE the legacy existence-check
+    # below, which would otherwise treat the v2 name as "unknown" and fall back.
+    _v2_archetype = None
+    try:
+        from mediahub.graphic_renderer import archetypes as _archetypes
+
+        if _archetypes.is_enabled() and family in _archetypes.list_archetypes():
+            _v2_archetype = family
+            template_path = _archetypes.V2_DIR / f"{family}.html"
+    except Exception:
+        _v2_archetype = None
+    if _v2_archetype is None:
         template_path = LAYOUTS_DIR / f"{family}.html"
+        if not template_path.exists():
+            # Fallback to text-led recap if family is unknown
+            family = "text_led_recap"
+            template_path = LAYOUTS_DIR / f"{family}.html"
 
     # Athlete cutout
     athlete_uri = None
@@ -2265,7 +2447,17 @@ def render_brief(
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 
     # Layout-specific
-    if family == "meet_preview":
+    if _v2_archetype:
+        repl = _fill_v2_archetype(
+            brief,
+            width,
+            height,
+            base_repl,
+            archetype=_v2_archetype,
+            athlete_path=athlete_path,
+            brand_kit=brand_kit,
+        )
+    elif family == "meet_preview":
         repl = _fill_meet_preview(
             brief,
             width,
@@ -2328,8 +2520,10 @@ def render_brief(
     # Inject the grain SVG <filter> right after <body> so layouts that
     # opt in via class="texture-grain" get the filter resolved. Strip
     # the class entirely when the grain feature flag is off so renders
-    # are byte-different (verifiable). V8.1 Issue 7 §3.
-    if _grain_enabled():
+    # are byte-different (verifiable). V8.1 Issue 7 §3. The grain injector
+    # targets the v1 `.canvas` wrapper, which v2 archetypes do not have —
+    # so skip it for v2 (they manage their own surface texture).
+    if _grain_enabled() and not _v2_archetype:
         html = _re.sub(r"(<body[^>]*>)", r"\1" + _GRAIN_SVG_BLOCK, html, count=1)
         html = html.replace(
             '<div class="canvas"',
