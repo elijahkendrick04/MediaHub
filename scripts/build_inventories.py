@@ -157,7 +157,13 @@ def write_api():
 
 
 # ---------- ENV_INVENTORY.md ----------
-def write_env():
+def env_inventory_md() -> str:
+    """Build the ENV_INVENTORY.md content (pure — no file write).
+
+    Separated from ``write_env`` so a CI test can assert the committed file is
+    current (``tests/test_inventories_fresh.py``) — otherwise the inventory
+    silently rots whenever an env var is added without regenerating.
+    """
     # Match os.environ.get(...), os.getenv(...), environ[...] subscripts, and
     # aliased access (e.g. `import os as _os; _os.environ.get`) by anchoring on
     # `environ`/`getenv` rather than a literal `os.` prefix — the narrow old
@@ -166,7 +172,7 @@ def write_env():
     # secrets_store merge below, not by this regex.)
     pat = re.compile(r"(?:environ\.get\(|getenv\(|environ\[)\s*['\"]([A-Z_][A-Z0-9_]*)['\"]")
     found: dict[str, list[str]] = {}
-    for p in (ROOT / "src").rglob("*.py"):
+    for p in sorted((ROOT / "src").rglob("*.py")):
         try:
             text = p.read_text()
         except Exception:
@@ -203,8 +209,13 @@ def write_env():
             f"{' …' if len(files) > 6 else ''} |\n"
         )
     out.append("\nSee `.env.example` for descriptions and defaults.\n")
-    (DOCS / "ENV_INVENTORY.md").write_text("".join(out))
-    print(f"ENV_INVENTORY.md: {len(found)} vars")
+    return "".join(out)
+
+
+def write_env():
+    content = env_inventory_md()
+    (DOCS / "ENV_INVENTORY.md").write_text(content)
+    print(f"ENV_INVENTORY.md: {content.count(chr(10) + '| `')} vars")
 
 
 # ---------- DETECTOR_INVENTORY.md ----------
