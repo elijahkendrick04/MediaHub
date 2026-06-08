@@ -441,7 +441,16 @@ def crawl_results_site(
 
             # Discover follow-ups from the (rendered when available) DOM.
             if _is_html(page.content_type) and depth < limits.max_depth:
-                for link in _discover_links(page.content, page.final_url):
+                # Resolve relative links against the directory we actually
+                # requested. A rendered backend can report final_url without the
+                # requested directory's trailing slash; urljoin would then drop
+                # that segment and the relative links escape scope. Restore the
+                # slash only in that exact case — entry URLs that legitimately
+                # have no trailing slash are left untouched.
+                discovery_base = page.final_url
+                if norm_url.endswith("/") and page.final_url == norm_url[:-1]:
+                    discovery_base = norm_url
+                for link in _discover_links(page.content, discovery_base):
                     if link.split("#", 1)[0] not in visited and in_scope(link, scope):
                         frontier.append((link, depth + 1))
     finally:

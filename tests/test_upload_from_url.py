@@ -197,6 +197,31 @@ def test_unknown_job_status_is_404(app_mod):
 
 
 # ---------------------------------------------------------------------------
+# Cross-worker job state — gunicorn runs --workers 2 (Bug A pinning test)
+# ---------------------------------------------------------------------------
+
+
+def test_job_state_survives_a_second_worker(app_mod):
+    """A status poll that lands on a worker without the job in memory must still
+    resolve it from shared disk — the crawl thread runs in one worker but the
+    load-balanced /status route can hit either. Clearing the in-memory dict
+    simulates that sibling worker."""
+    app, wm = app_mod
+    job_id = "0123456789ab"
+    wm._url_job_set(job_id, status="reading", progress="Reading the site", run_id="run-xyz")
+
+    # Simulate a second gunicorn worker: it never saw this job in its own memory.
+    wm._url_jobs.clear()
+    assert job_id not in wm._url_jobs
+
+    entry = wm._url_job_get(job_id)
+    assert entry is not None  # before the fix this was None → 404 / "status unknown"
+    assert entry["status"] == "reading"
+    assert entry["progress"] == "Reading the site"
+    assert entry["run_id"] == "run-xyz"
+
+
+# ---------------------------------------------------------------------------
 # Kill-switch + file-upload path unchanged
 # ---------------------------------------------------------------------------
 
