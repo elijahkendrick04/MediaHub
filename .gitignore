@@ -43,6 +43,12 @@ uploads_v4/
 smoke_v8_output/
 *.db
 data.db
+# SQLite WAL/shared-memory sidecars — transient runtime files written next to a
+# data.db whenever it is opened in WAL mode. `*.db` does not match these (they
+# don't end in .db), so list them explicitly to keep the tree clean.
+*.db-wal
+*.db-shm
+*.db-journal
 src/mediahub/data/
 src/mediahub/club_profiles/
 data/brand_kits/
