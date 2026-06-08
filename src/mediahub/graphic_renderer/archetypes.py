@@ -34,12 +34,32 @@ from pathlib import Path
 
 V2_DIR = Path(__file__).parent / "layouts" / "v2"
 
-_TRUE = {"1", "true", "on", "yes"}
+# Explicit kill-switch values. v2 is the DEFAULT engine (the deterministic
+# compliance gate guarantees every resolved palette is legible), so enablement is
+# opt-OUT: anything that isn't one of these leaves v2 on.
+_FALSE = {"0", "false", "off", "no"}
+
+# Conceptual brand colour-role names the design-spec director (Tier B §5.4) may
+# assign to the four compositional slots (ground/surface/headline/accent). They
+# map onto the renderer's resolved ``--mh-*`` tokens.
+TOKEN_ROLES: tuple[str, ...] = (
+    "primary",
+    "secondary",
+    "surface",
+    "accent",
+    "on_primary",
+    "on_surface",
+)
 
 
 def is_enabled() -> bool:
-    """True when the Gen Engine v2 flag is set. Off (legacy engine) by default."""
-    return os.environ.get("MEDIAHUB_GEN_V2", "").strip().lower() in _TRUE
+    """True unless v2 is explicitly disabled.
+
+    Gen Engine v2 is the **default** layout engine. Set ``MEDIAHUB_GEN_V2=0``
+    (also ``false``/``off``/``no``) to fall back to the legacy engine — the
+    deployment-wide kill-switch.
+    """
+    return os.environ.get("MEDIAHUB_GEN_V2", "").strip().lower() not in _FALSE
 
 
 @lru_cache(maxsize=1)

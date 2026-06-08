@@ -256,8 +256,19 @@ def generate(
     # nothing — a configured Gemini key would never have been honoured
     # otherwise, which silently downgraded production to random-only
     # variation.
+    # Gen v2: when v2 is the active engine the v1 menu-picker director is
+    # superseded by the design-spec director (run later, in the v2 hook), so skip
+    # this call when v2 is on to avoid a redundant per-card LLM round-trip.
+    try:
+        from mediahub.graphic_renderer import archetypes as _v2_archetypes
+
+        _v2_on = _v2_archetypes.is_enabled()
+    except Exception:
+        _v2_archetypes = None
+        _v2_on = False
+
     ai_direction: Optional[dict] = None
-    if use_ai_director:
+    if use_ai_director and not _v2_on:
         try:
             from mediahub.creative_brief.ai_director import ai_creative_direction
 
@@ -629,19 +640,46 @@ def generate(
         mood=mood,
         ai_directed=ai_directed,
     )
-    # Gen Engine v2 (Tier A): when MEDIAHUB_GEN_V2 is on, swap the layout for a
-    # deterministic v2 archetype keyed by this card's variation_seed (stable per
-    # card, spread across the pack). Off by default — flag-off keeps the legacy
-    # family byte-for-byte. The signature below then captures the v2 choice.
+    # Gen Engine v2: choose the v2 archetype for this card. Tier B (§5.4): when AI
+    # direction is requested and a provider is configured, the design-spec director
+    # picks the archetype + emphasis + hook FOR THIS MOMENT; otherwise (no provider
+    # / failure) the deterministic seed-picker (Tier A) is the honest floor. v2 is
+    # the default engine; MEDIAHUB_GEN_V2=0 keeps the legacy family byte-for-byte.
     try:
-        from mediahub.graphic_renderer import archetypes as _v2_archetypes
+        if _v2_on and _v2_archetypes is not None:
+            _names = _v2_archetypes.list_archetypes()
+            _spec = None
+            if _names and use_ai_director:
+                try:
+                    from mediahub.creative_brief.ai_director import ai_design_spec
 
-        if _v2_archetypes.is_enabled():
-            _arch = _v2_archetypes.pick_archetype(variation_seed)
-            if _arch:
-                brief.layout_template = _arch
+                    _spec = ai_design_spec(
+                        content_item=content_item,
+                        brand_kit=brand_kit,
+                        archetypes=_names,
+                        token_roles=list(_v2_archetypes.TOKEN_ROLES),
+                        angle=angle,
+                        recent_archetypes=[
+                            s.split("|", 1)[0] for s in (recent_signatures or []) if s
+                        ],
+                    )
+                except Exception:
+                    _spec = None
+            if _spec is not None:
+                brief.layout_template = _spec.archetype
+                if _spec.headline_hook:
+                    brief.primary_hook = _spec.headline_hook
+                if _spec.mood:
+                    brief.mood = _spec.mood
+                if _spec.rationale:
+                    brief.why_this_design = _spec.rationale
+                brief.ai_directed = True
+            elif _names:
+                _arch = _v2_archetypes.pick_archetype(variation_seed)
+                if _arch:
+                    brief.layout_template = _arch
     except Exception:  # never break brief generation for an optional feature
-        log.debug("gen-v2 archetype swap skipped", exc_info=True)
+        log.debug("gen-v2 archetype selection skipped", exc_info=True)
 
     # Stamp a signature so callers can dedupe / audit recent renders.
     sig = (

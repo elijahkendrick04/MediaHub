@@ -98,14 +98,17 @@ def test_registry_lists_six_distinct_archetypes():
     assert len(set(names)) == len(names)
 
 
-def test_flag_is_off_by_default(monkeypatch):
+def test_v2_is_default_on_with_killswitch(monkeypatch):
+    # v2 is the production default: unset (or anything but a kill value) is ON.
     monkeypatch.delenv("MEDIAHUB_GEN_V2", raising=False)
-    assert archetypes.is_enabled() is False
-    for val in ("1", "true", "on", "yes", "TRUE"):
+    assert archetypes.is_enabled() is True
+    for val in ("1", "true", "on", "yes", "TRUE", "anything"):
         monkeypatch.setenv("MEDIAHUB_GEN_V2", val)
         assert archetypes.is_enabled() is True
-    monkeypatch.setenv("MEDIAHUB_GEN_V2", "0")
-    assert archetypes.is_enabled() is False
+    # the kill-switch values fall back to the legacy engine
+    for val in ("0", "false", "off", "no", "OFF"):
+        monkeypatch.setenv("MEDIAHUB_GEN_V2", val)
+        assert archetypes.is_enabled() is False
 
 
 def test_picker_is_deterministic_and_spreads():
@@ -140,8 +143,8 @@ def test_archetype_follows_convention(name):
 # --------------------------------------------------------------------------- #
 
 
-def test_generator_keeps_legacy_family_when_flag_off(monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_GEN_V2", raising=False)
+def test_generator_uses_legacy_family_with_killswitch(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "0")  # kill-switch → legacy engine
     brief = _brief()
     assert brief.layout_template not in archetypes.list_archetypes()
 
@@ -220,8 +223,8 @@ def test_autofit_shrinks_a_long_surname(monkeypatch, tmp_path):
     assert long_px < short_px  # long name autofits down — no overflow
 
 
-def test_flag_off_renders_a_legacy_layout(monkeypatch, tmp_path):
-    monkeypatch.delenv("MEDIAHUB_GEN_V2", raising=False)
+def test_killswitch_renders_a_legacy_layout(monkeypatch, tmp_path):
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "0")  # kill-switch → legacy engine
     brief = _brief()
     html = _render_html(monkeypatch, tmp_path, brief)
     # legacy engine: no v2 role-token block is injected
