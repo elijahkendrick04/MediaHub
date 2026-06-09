@@ -7,6 +7,13 @@ every file that looks like competition results — sport-agnostic, by *shape*, w
 no vendor or sport hardcoding (mirrors the philosophy at the top of
 ``interpreter/ingest.py``).
 
+The path-prefix is the primary bound, with one shallow widening for meet *hubs*:
+same-host links discovered on the ENTRY page that fall outside the prefix are
+followed too (e.g. a ``/meets/<id>/results`` hub whose event pages live at a
+sibling ``/events/<id>/results``). Those off-prefix pages are kept only if they
+are themselves result-shaped, and they spawn no further off-prefix following —
+so a large multi-meet host is never crawled wholesale.
+
 The walker reads each page through :func:`results_fetch.read_page`, so it gets
 static-then-rendered escalation for free and shares ONE browser across the whole
 crawl. What it produces is a **mirror**: a flat ``{relative_path: bytes}`` map of
@@ -413,6 +420,11 @@ def crawl_results_site(
 
     used_paths: set[str] = set()
     visited: set[str] = set()
+    # Same-host links discovered on the ENTRY page that fall outside the path-
+    # prefix scope but are followed anyway (see the discovery block below). This
+    # is the only way an off-prefix URL becomes fetchable; a child page never
+    # adds to it, so the crawl can never widen past the entry's siblings.
+    offprefix_allowed: set[str] = set()
     frontier: list[tuple[str, int]] = [(entry_url, 0)]
     started = time.monotonic()
 
@@ -431,7 +443,7 @@ def crawl_results_site(
                 continue
             visited.add(norm_url)
 
-            if not in_scope(norm_url, scope):
+            if not in_scope(norm_url, scope) and norm_url not in offprefix_allowed:
                 result.blocked += 1
                 continue
             if not _allowed_by_robots(norm_url):
@@ -488,12 +500,39 @@ def crawl_results_site(
                             discovered.append(link)
 
                 in_scope_links = [link for link in discovered if in_scope(link, scope)]
+                follow = list(in_scope_links)
                 if is_entry:
                     result.entry_tier = page.tier
                     result.entry_final_url = page.final_url
                     result.entry_links_found = len(discovered)
                     result.entry_links_in_scope = len(in_scope_links)
-                for link in in_scope_links:
+                    # Some meet hubs route each event's results to a SIBLING
+                    # path on the same host, outside the entry's path-prefix
+                    # (e.g. a /meets/<id>/results hub whose event pages live at
+                    # /events/<id>/results — same host, different top-level
+                    # path). Follow those same-host, off-prefix links found on
+                    # the ENTRY page so the hub can reach its event pages.
+                    #
+                    # This stays bounded and sport/vendor-agnostic: only entry-
+                    # page links qualify (a child page never widens the crawl),
+                    # each reached page is kept solely if it is itself result-
+                    # shaped (the shape gate decides — no domain/word matching),
+                    # the pages they reach enqueue in-scope links only, and every
+                    # existing budget (max_pages, max_total_bytes, timeout,
+                    # robots, SSRF) still applies. A large multi-meet host is
+                    # therefore never crawled wholesale — its off-prefix nav
+                    # pages are fetched at most once, fail the shape gate, and
+                    # spawn no further off-prefix following.
+                    for link in discovered:
+                        if (
+                            in_scope(link, scope)
+                            or not _same_host(link, entry_url)
+                            or link in offprefix_allowed
+                        ):
+                            continue
+                        offprefix_allowed.add(link)
+                        follow.append(link)
+                for link in follow:
                     if link not in visited:
                         frontier.append((link, depth + 1))
     finally:
