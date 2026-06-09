@@ -12658,6 +12658,13 @@ Relay team broke club record"></textarea>
             "available": node_modules.exists(),
             "dir": str(remotion_dir),
         }
+        # Reel-engine selection seam (P0.1).  Purely informational —
+        # does not affect the ok flag since remotion is the default.
+        try:
+            from mediahub.visual.reel_engine import reel_engine_status
+            deps["reel_engine"] = reel_engine_status()
+        except Exception as _re_err:
+            deps["reel_engine"] = {"error": str(_re_err)[:200]}
         ok = (
             deps["playwright"].get("chromium")
             and deps["node"].get("available")
