@@ -17397,8 +17397,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"[ ERROR ] {_h(error)}</div>"
             )
         pw_hint = (
-            '<div class="dim" style="font-size:12px;margin-top:6px">'
-            "At least 8 characters.</div>"
+            '<div class="dim" style="font-size:12px;margin-top:6px">' "At least 8 characters.</div>"
             if min_password
             else ""
         )
@@ -17419,7 +17418,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '<label style="display:block;font-size:12px;text-transform:uppercase;'
             'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Password</label>'
             '<input type="password" name="password" required '
-            + ('autocomplete="new-password" minlength="8" ' if min_password else 'autocomplete="current-password" ')
+            + (
+                'autocomplete="new-password" minlength="8" '
+                if min_password
+                else 'autocomplete="current-password" '
+            )
             + 'style="width:100%" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             f"{pw_hint}"
             f'<button type="submit" class="btn" style="margin-top:20px;width:100%">{_h(submit_label)}</button>'
@@ -17630,8 +17633,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
             note = (
-                "Paid plans are billed through Stripe. The exact price is shown "
-                "during checkout."
+                "Paid plans are billed through Stripe. The exact price is shown " "during checkout."
             )
         else:
             note = (
@@ -17639,8 +17641,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
         note_html = (
-            '<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">'
-            f"{note}</p>"
+            '<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">' f"{note}</p>"
         )
 
         body = (
@@ -17791,8 +17792,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def _billing_unconfigured_response():
         """The honest 503 for billing actions when Stripe is unset."""
         return (
-            jsonify({"ok": False, "error": "billing_not_configured",
-                     "message": _billing.NOT_CONFIGURED_MESSAGE}),
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "billing_not_configured",
+                    "message": _billing.NOT_CONFIGURED_MESSAGE,
+                }
+            ),
             503,
         )
 
@@ -17825,8 +17831,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             update = _billing.verify_and_parse_webhook(payload, sig)
         except _billing.BillingError as exc:
             # Bad/forged signature or malformed payload → 400, do not act.
-            return jsonify({"ok": False, "error": "invalid_webhook",
-                            "message": str(exc)}), 400
+            return jsonify({"ok": False, "error": "invalid_webhook", "message": str(exc)}), 400
         if update is None:
             # A verified event we simply don't act on.
             return jsonify({"ok": True, "handled": False}), 200
@@ -17840,15 +17845,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if target is None:
             # Verified but we can't match it to a known account. Acknowledge
             # so Stripe stops retrying; nothing to update.
-            return jsonify({"ok": True, "handled": False,
-                            "reason": "no_matching_user"}), 200
+            return jsonify({"ok": True, "handled": False, "reason": "no_matching_user"}), 200
         store.set_plan(
             target.email,
             update.plan,
             stripe_customer_id=update.customer_id or target.stripe_customer_id,
         )
-        return jsonify({"ok": True, "handled": True,
-                        "plan": update.plan}), 200
+        return jsonify({"ok": True, "handled": True, "plan": update.plan}), 200
 
     # ---- /sign-in -----------------------------------------------------
     #

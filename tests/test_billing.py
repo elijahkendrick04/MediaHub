@@ -247,7 +247,11 @@ def test_webhook_subscription_deleted_reverts_to_free(monkeypatch, tmp_path):
 
     payload = _event(
         "customer.subscription.deleted",
-        {"object": "subscription", "customer": "cus_w2", "metadata": {"mediahub_email": "w2@club.org"}},
+        {
+            "object": "subscription",
+            "customer": "cus_w2",
+            "metadata": {"mediahub_email": "w2@club.org"},
+        },
     )
     r = c.post("/webhooks/stripe", data=payload, headers=_signed_webhook_headers(payload))
     assert r.status_code == 200
@@ -297,8 +301,11 @@ def test_webhook_unknown_user_is_acknowledged_not_errored(monkeypatch, tmp_path)
     # No matching account at all.
     payload = _event(
         "checkout.session.completed",
-        {"object": "checkout.session", "customer": "cus_ghost",
-         "metadata": {"plan": "club", "mediahub_email": "ghost@nowhere.org"}},
+        {
+            "object": "checkout.session",
+            "customer": "cus_ghost",
+            "metadata": {"plan": "club", "mediahub_email": "ghost@nowhere.org"},
+        },
     )
     r = c.post("/webhooks/stripe", data=payload, headers=_signed_webhook_headers(payload))
     # Acknowledge (200) so Stripe stops retrying; nothing updated.

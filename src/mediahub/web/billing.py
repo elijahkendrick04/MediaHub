@@ -290,7 +290,12 @@ def _interpret_event(event) -> Optional[SubscriptionUpdate]:
         return _get(obj, name, default)
 
     metadata = field("metadata", {}) or {}
-    email = (_meta_get(metadata, "mediahub_email") or field("client_reference_id") or field("customer_email") or "")
+    email = (
+        _meta_get(metadata, "mediahub_email")
+        or field("client_reference_id")
+        or field("customer_email")
+        or ""
+    )
     customer_id = field("customer", "") or ""
 
     if etype == "checkout.session.completed":
