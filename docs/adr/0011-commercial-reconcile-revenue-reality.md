@@ -4,6 +4,9 @@
   core sequencing conclusion of the 2026 scaling diligence: **commercialise before
   generalising.** The expansion phases (P3 multi-sport, P4 direct publishing, P5
   local-AI) are **deferred, not deleted** — gated behind a commercial track.
+  **Updated 2026-06-09:** the open questions Q1 (pricing *model*) and Q2 (self-host)
+  are now resolved by maintainer decision — see *Resolutions (folded back — 2026-06-09)*
+  below. Q3 (US schools) and Q4 (second person) remain open.
 - **Date:** 2026-06-09
 - **Deciders:** MediaHub maintainer (explicit user directive: *"strategy
   reconciliation of MediaHub's roadmap against a new diligence report… adopt its core
@@ -156,9 +159,12 @@ caveats. No pre-launch solo venture can have >95% confidence of any specific ARR
   hand-maintained for Phase C, exactly as the stalled auto-refresh is already done by
   hand (see the roadmap's 2026-06 automation note). No marker block was edited.
 - The roadmap now carries pricing it explicitly labels *unvalidated*; this is
-  deliberate (honest-error ethos) but means the price page is still an open decision.
-- A standing product principle ("no hidden fees / truly-free self-host") is now in
-  tension with the revenue goal and awaits a Council call.
+  deliberate (honest-error ethos). **Resolved 2026-06-09:** the pricing *model* is
+  now decided (monthly subscription, annual prepay; per-season declined — see
+  *Resolutions* below); only the exact *number* within £49–99/mo is still open.
+- A standing product principle ("no hidden fees / truly-free self-host") was in
+  tension with the revenue goal. **Resolved 2026-06-09** — retired in favour of
+  hosted-only, no self-host tier (see *Resolutions* below).
 
 **Deviations from the brief (recorded, not silent)**
 - **ADR number.** The brief requested `docs/adr/0005-commercial-reconcile-revenue-reality.md`,
@@ -170,6 +176,37 @@ caveats. No pre-launch solo venture can have >95% confidence of any specific ARR
   reconciled roadmap (Phase 2 substrate, Gen-v2 Tier A/B) rather than the older `main`
   snapshot, which would otherwise conflict.
 
+## Resolutions (folded back — 2026-06-09)
+
+Per the closing note below ("fold the verdict back into this ADR"), the following
+open questions are now **closed by maintainer decision**. The maintainer outranks the
+Council (see *On governance* above), so these are recorded as decisions, not as a
+Council transcript; no `/llm-council` re-run was required to close them.
+
+- **Q2 — Keep or cap free self-host → RESOLVED: hosted-SaaS only, no self-host tier
+  (free *or* capped).** This goes one step beyond the ADR's original default ("capped
+  lead-gen tier") to **no customer-facing self-host at all**. Rationale: it is the
+  simplest principle, captures the most revenue, and removes the zero-revenue escape
+  hatch entirely rather than half-closing it. [`CLAUDE.md`](../../CLAUDE.md) is the
+  authoritative statement of the principle (updated the same day under *Key
+  Architecture Conventions* and *Deployment*). The standing "no-hidden-fees /
+  truly-free self-host" product principle is **retired** in favour of hosted-only.
+
+- **Q1 — Exact pricing → RESOLVED on the *model* (not the exact number): keep the
+  MONTHLY subscription, decline per-season.** Billing stays subscription-only — Club
+  **£49–99/mo** and Federation **£250+/mo**, with **annual prepay** the default —
+  mapped through `STRIPE_PRICE_CLUB` / `STRIPE_PRICE_FEDERATION` (no amount is
+  hardcoded; see `web/billing.py`). A per-season / one-time anchor of **~£150/season**
+  was **validated and declined**: a year-long season at £150 is ≈ £12.50/mo (≈ £25/mo
+  even at two seasons/year), far below the diligence's validated willingness-to-pay
+  ladder and the £49–99/mo hypothesis (≈ £588–1188/yr), and would re-introduce exactly
+  the "£30/£250 is too low" problem the diligence flagged. **No one-time / seasonal
+  Stripe Payment Link is added.** The exact monthly figure within £49–99 remains to
+  validate with real buyers; only the *model* (monthly sub, annual prepay) is decided
+  here.
+
+- **Q3 (US schools) and Q4 (second person) remain OPEN** — untouched by this pass.
+
 ## Open Council questions (pressure-test before committing)
 
 These are the expensive-to-reverse, commercial-surface forks deliberately left open for
@@ -177,10 +214,13 @@ a `/llm-council` pass before they are baked into a price page, a tier, or a hire
 
 1. **Exact pricing.** Is Club £49–£99/mo (annual) / Federation £250+/mo right, or should
    the wedge launch higher/lower? What is the annual-prepay discount, and is there a
-   founder/early-bird tier?
+   founder/early-bird tier? → **RESOLVED on the model** (monthly subscription kept;
+   per-season / ~£150 anchor declined — see *Resolutions* above). Exact number within
+   £49–99/mo still to validate.
 2. **Keep or cap free self-host.** Convert to a capped lead-gen tier (default
    recommendation) or consciously keep true-free self-host and accept the lower ceiling?
-   This directly touches the standing "no-hidden-fees" principle.
+   This directly touches the standing "no-hidden-fees" principle. → **RESOLVED:
+   hosted-only, no self-host tier** (free or capped) — see *Resolutions* above.
 3. **Pursue US schools (Route B)?** Highest WTP and the strongest math, but needs US
    sales presence and competes with funded incumbents (Gipper/FanWord/Hudl). Worth
    sequencing after UK swimming, or a distraction for a solo founder?
