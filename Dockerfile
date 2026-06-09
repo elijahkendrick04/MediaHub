@@ -15,9 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
 #  - libnss3 / libxss1 / libgbm1: Chromium/Playwright runtime
 #  - poppler-utils: PDF parsing in interpreter
 #  - libgl1: image/video preprocessing
+#  - git: required to pip-install SearXNG from its git repo (below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     ca-certificates gnupg \
     poppler-utils \
     libgl1 \
