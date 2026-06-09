@@ -29,6 +29,7 @@ A missing or blank token raises `BufferAuthError` rather than silently
 calling the API and getting back an opaque 4xx. Network/HTTP failures
 raise `BufferAPIError` with a message safe to surface in the UI.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from typing import Optional
 
 import requests
 
+from mediahub.publishing.kill_switch import assert_publishing_allowed
 
 BUFFER_API_BASE = "https://api.bufferapp.com"
 _DEFAULT_TIMEOUT = 15  # seconds
@@ -155,15 +157,17 @@ def list_channels(token: str) -> list[dict]:
     for raw in data:
         if not isinstance(raw, dict):
             continue
-        channels.append({
-            "id": raw.get("id", ""),
-            "service": raw.get("service", ""),
-            "service_username": raw.get("service_username", ""),
-            "formatted_username": raw.get("formatted_username")
-                                  or raw.get("service_username", ""),
-            "avatar": raw.get("avatar"),
-            "default": bool(raw.get("default", False)),
-        })
+        channels.append(
+            {
+                "id": raw.get("id", ""),
+                "service": raw.get("service", ""),
+                "service_username": raw.get("service_username", ""),
+                "formatted_username": raw.get("formatted_username")
+                or raw.get("service_username", ""),
+                "avatar": raw.get("avatar"),
+                "default": bool(raw.get("default", False)),
+            }
+        )
     return channels
 
 
@@ -211,6 +215,7 @@ def schedule_post(
     BufferAPIError
         Any non-2xx response or transport failure.
     """
+    assert_publishing_allowed()
     prepared = _PreparedToken.require(token)
     if not channel_id or not str(channel_id).strip():
         raise BufferAPIError("A Buffer channel id is required.")
@@ -277,9 +282,7 @@ def schedule_post(
             update_id = str(single.get("id", ""))
 
     if not update_id:
-        raise BufferAPIError(
-            "Buffer accepted the request but did not return an update id."
-        )
+        raise BufferAPIError("Buffer accepted the request but did not return an update id.")
 
     return {
         "ok": True,
