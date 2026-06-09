@@ -9963,8 +9963,7 @@ def create_app() -> Flask:
                 )
             _refetch_block = ""
             if _results_url_enabled():
-                _refetch_js = (
-                    """
+                _refetch_js = """
 <script>
 (function(){
   var b=document.getElementById('mh-refetch-btn');
@@ -9990,29 +9989,24 @@ def create_app() -> Flask:
   });
 })();
 </script>
-"""
-                    .replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id))
-                    .replace("__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID"))
+""".replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id)).replace(
+                    "__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID")
                 )
                 _refetch_block = (
                     '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
                     '<button id="mh-refetch-btn" type="button" class="btn secondary">Re-fetch latest results &rarr;</button>'
                     '<span id="mh-refetch-status" role="status" aria-live="polite" hidden '
                     'class="muted" style="font-family:var(--font-mono);font-size:12px"></span>'
-                    '</div>'
+                    "</div>"
                     '<p class="muted" style="font-size:12px;margin-top:8px">'
-                    'Re-fetching reads the site again and stages a <b>new</b> run &mdash; '
-                    'this one is left untouched.</p>'
-                    + _refetch_js
+                    "Re-fetching reads the site again and stages a <b>new</b> run &mdash; "
+                    "this one is left untouched.</p>" + _refetch_js
                 )
             _provenance_card = (
                 '<div class="card">'
                 '<div class="kv"><span class="k">Source</span><span>'
                 f'<a href="{_h(_src_url)}" target="_blank" rel="noopener">{_h(str(_src_host))}</a>'
-                '</span></div>'
-                + _ai_note
-                + _refetch_block
-                + '</div>'
+                "</span></div>" + _ai_note + _refetch_block + "</div>"
             )
 
         # --- V7: Workflow state
