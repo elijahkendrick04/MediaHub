@@ -539,10 +539,9 @@ authoritative statement. Recorded in
 
 ### PC.6 — Go-to-market / distribution · ❌ **NOT STARTED**
 Distribution kills solo ventures, not product gaps. The sub-track:
-- **Governing-body endorsement** — pursue a Swim Wales / regional Swim England pilot or
-  reseller arrangement (one deal can reach hundreds of clubs — the highest-leverage
-  channel). *Threshold: if no NGB/region will pilot after ~6 months, treat it as
-  speculative and lean on direct + word-of-mouth.*
+- **Governing-body channel — split into two mechanisms with very different evidence (reality-checked 2026-06-09):**
+  - **(a) Official data-API access — REAL, dated, the concrete first NGB action.** Swim England launched a secure **approved-systems API** (announced 1 Oct 2025) letting approved platforms read official swim times/PBs directly from its databases; initial partners are the club-admin platforms Swim Club Manager and Swim Manager, and it explicitly invites *“commercial organisations interested in benefiting from the Swim England API”* to apply, with *“more to follow in 2026”* toward a “connected digital eco-system.” Applying for approved access is high-confidence-available and strengthens the deterministic data moat + credibility — but it grants **data, not promotion.** *(>95% this step is correct/available; sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).)*
+  - **(b) Promotional NGB endorsement to hundreds of clubs — DOWN-WEIGHTED to speculative.** No evidence any NGB promotes a third-party *content* tool to its member clubs. Swim England’s partner slots are **category-exclusive and already held** (SportsEngine = “preferred technology supplier” for swim schools; GoCardless = “Official Payments Partner”); the corporate-partner tier (Speedo, Sport England, SportsHotels) is sponsorship-based and slow. So “one deal reaches hundreds of clubs” is a *possibility, not the assumed highest-leverage channel.* **Threshold: if no NGB/region will pilot or promote after ~6 months, treat it as speculative and lean on direct + word-of-mouth.** This re-weighting reinforces **Route C** — the incumbents who already hold the endorsement *and* the official data integration are the realistic distribution partners. *([adr/0012](adr/0012-ngb-distribution-channel-reality-check.md).)*
 - **Hand-sell the first ~10 clubs** yourself (Swansea / Wales / England) — this *is* the
   traction gate, not a growth tactic.
 - **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
@@ -577,7 +576,7 @@ revenue in mind. Each carries the report's confidence band. **All figures are es
   them. *Trades upside for survival probability; possibly the most realistic high-value
   exit. Confidence it beats going direct: ~50/50.*
 
-**Highest-leverage combination:** governing-body endorsement (PC.6) for *distribution* +
+**Highest-leverage combination:** governing-body **data-API access + incumbent integration (Route C)** (PC.6) for *distribution* +
 US-schools repositioning (Route B) for *revenue*.
 
 ---
