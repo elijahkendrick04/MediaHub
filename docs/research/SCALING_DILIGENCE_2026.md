@@ -102,3 +102,37 @@ Implication: no change to the revenue-ceiling math or to Routes A/B/C. The arith
 that caps swimming-only at ≈ £150k–£400k ARR (and forces multi-sport breadth +
 institutional buyers + a second person for £1M+) stands on current figures. Logged so the
 anchors carry a 2026-06 verification date rather than drifting unverified.
+
+---
+
+## Evidence refresh — 2026-06-09 (strategy engine, cycle 2: PC.4 price comparators)
+
+Refreshed the competitor-pricing anchors underpinning the PC.4 repricing hypothesis with
+**current, directly-verified vendor pricing** (the prior figures were a mix of dated and
+estimated). These feed the sourced comparator table now in ROADMAP §PC.4.
+
+- **Gipper — $625 / $1,500 / $3,000 per year, annual payment only.** Verified directly on
+  gipper.com/pricing (2026-06-09): Basic $625/yr (≤2 users), Pro $1,500/yr (≤30 users),
+  Premier $3,000/yr (unlimited users); 14-day free trial; "we currently only offer annual
+  payment plans." This *replaces* the earlier "$625 entry up to ~$1,500–$3,000 custom
+  quote" with exact, current public tiers, and independently confirms two diligence
+  conclusions: (a) the proven analog sells to **schools with budgets, not volunteer
+  clubs**, and (b) **annual-only billing** is the norm for this buyer (validating PC.4's
+  annual-prepay requirement). *[Source: gipper.com/pricing, accessed 2026-06-09.]*
+- **Predis.ai — $19 / $40 / $212 per month** (Core / Rise / Enterprise+; annual-billed
+  equivalents $230 / $474 / $2,540). Verified directly on predis.ai/pricing (2026-06-09).
+  This narrows the earlier "$19–$249/mo" band to a current $19–$212/mo and keeps Predis as
+  the **horizontal-commodity price anchor** that caps the volunteer buyer's mental price
+  for "AI makes my posts" — it does *not* ingest results/PB data (still MediaHub's wedge),
+  but it sets the ~$20–60/mo expectation. *[Source: predis.ai/pricing, accessed 2026-06-09.]*
+
+Unchanged anchors carried forward from the body of this report (not re-verified this
+cycle, cited as-is): SwimTopia ~$150–$699/yr annual; Swim Wales NGB affiliation £150/yr;
+Canva Free £0.
+
+**Implication for the plan:** no change to the revenue-ceiling math or Routes A/B/C. The
+refresh hardens PC.4 from an *assumed reprice* into an *evidence-gated price-discovery
+step* — the candidate Club £49–£99/mo / Federation £250+/mo levels remain an explicitly
+unvalidated hypothesis, to be confirmed by revealed WTP (≥5 clubs paying annual prepay at
+a tested price) before any public list price is locked. The >95% standard attaches to that
+gating *decision*, never to the price levels or a revenue outcome.

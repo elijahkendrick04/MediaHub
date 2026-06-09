@@ -481,11 +481,50 @@ Step 14.*
 Escalation (2026-06-09, autobuild): the remaining work binds user-account identity to org membership and generalises cross-org isolation in one shared instance, which directly touches the locked cross-tenant isolation invariant (ADR-0003). Per CLAUDE.md governance this is a high-stakes, hard-to-reverse architecture fork that must be Council-pressure-tested and operator-signed-off before the org to workspace schema is committed; the autonomous build loop must NOT rearchitect it unattended. NEEDS OPERATOR/COUNCIL sign-off on the schema before implementation.
 
 ### PC.4 — Repricing & packaging (validate, don't assume) · ❌ **NOT STARTED**
-The £30/£250 tiers are **unvalidated and too low**. Candidate repricing **to test with
-real buyers** (a hypothesis, not a fixed price): **Club £49–£99/mo billed annually**,
-**Federation £250+/mo**. **Annual prepay is essential** — SMB/volunteer churn runs
-3–7%/mo and annual billing cuts it ~30–40%. Kill the £30 anchor. *Ref: Appendix B Step 7
-tiers (annotated ⚠️ unvalidated there); [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
+The £30/£250 tiers in the code are **unvalidated and too low**, and the £30 anchor must
+die. But the corrective is **not** to swap in a new fixed price — it is to **discover the
+price from revealed willingness-to-pay before locking any public list price.** WTP at the
+candidate tiers is the single most load-bearing *unproven* assumption on the whole revenue
+path, so PC.4 is structured as an evidence gate, not a one-off reprice:
+
+- **Candidate hypothesis (to test, not to publish):** Club **£49–£99/mo billed
+  annually**, Federation **£250+/mo**. Annual prepay is non-negotiable — SMB/volunteer
+  churn runs 3–7%/mo and annual billing cuts it ~30–40% ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)).
+- **Validation method:** treat the first ~10 hand-sold clubs (**PC.6**) as live price
+  discovery. Quote a *real* annual price, vary it across clubs, and record accept/decline
+  plus the price each club will actually pay — i.e. **revealed** WTP from real payments,
+  not survey-stated WTP.
+- **Gate (the >95%-confidence-correct step):** keep `/pricing` at the honest
+  *"Pricing TBC"* it already shows until **≥5 clubs have paid an annual prepay at a tested
+  price**; only then commit a public list price, set at the highest tested point that
+  still cleared. Below that signal, any fixed list price is a guess.
+- **Why this sequencing:** under-pricing is hard to reverse (re-pricing existing annual
+  contracts upward churns volunteer buyers), and over-pricing with no buyers teaches
+  nothing. Revealed WTP from real annual payments is the only evidence that de-risks the
+  tier — and it costs nothing extra because the first ~10 sales happen anyway under PC.6.
+
+**Sourced price comparators (anchor the hypothesis; every figure dated):**
+
+| Comparator | Segment | Current price | What it anchors |
+|---|---|---|---|
+| **Gipper** (closest analog) | US K-12/college athletic depts | **$625 / $1,500 / $3,000 per year, annual-only** *(gipper.com/pricing, verified 2026-06-09)* | The institutional ceiling a results-graphics tool can reach *with a sales motion*. |
+| **Predis.ai** (horizontal AI) | Any SMB / creator | **$19 / $40 / $212 per month** *(predis.ai/pricing, verified 2026-06-09)* | The buyer's mental price ceiling for "AI makes my posts." |
+| **SwimTopia** (swim incumbent that touches money) | Swim clubs | ~$150–$699/yr annual *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | What a club *will* pay when software is mission-critical (registration/billing) — MediaHub is not, yet. |
+| **Canva Free** | Volunteer creator | **£0** | The free substitute every volunteer already has. |
+| **Swim Wales affiliation** | Whole NGB relationship | £150/yr *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | The volunteer treasurer's anchor for "what anything costs." |
+
+Read together: the commodity floor (£0 Canva / ~$19/mo Predis) and the £150/yr NGB anchor
+pull the Club tier **down**, while Gipper proves the institutional ceiling is far higher
+($625–$3,000/yr) **but only for a schools/federation buyer with a budget, not a volunteer
+club.** That gap is exactly why Route B (US schools) and PC.6 governing-body endorsement
+carry the revenue weight, and why the Club tier must be set by revealed WTP rather than
+assumed.
+
+*Confidence: the **step** — gate the public price on ≥5 revealed annual payments before
+publishing a list price — is >95%-confidence-correct; it is what a hard-nosed operator
+would insist on. The **price levels themselves remain an unvalidated hypothesis** and are
+flagged as such, not stated as fact. Ref: Appendix B Step 7 tiers (⚠️ unvalidated there);
+[`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
 
 ### PC.5 — Free-self-host tension · ✅ **RESOLVED (2026-06-09): hosted-only**
 "Truly free, no hidden fees" self-host, as framed, hands power users a permanent
