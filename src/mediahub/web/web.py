@@ -13253,7 +13253,15 @@ Relay team broke club record"></textarea>
 })();
 </script>"""
 
-        body = toc_html + activity_html + status_html + autonomy_html + privacy_html + deployment_html + spy_js
+        body = (
+            toc_html
+            + activity_html
+            + status_html
+            + autonomy_html
+            + privacy_html
+            + deployment_html
+            + spy_js
+        )
         return _layout("Settings", body, active="settings")
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
@@ -13560,7 +13568,7 @@ Relay team broke club record"></textarea>
         """Autonomy section — per-type publishing policy controls (P2.4)."""
         section_header = (
             '<h2 id="autonomy" style="margin:40px 0 6px;font-size:22px;'
-            "scroll-margin-top:80px\">Autonomy controls</h2>"
+            'scroll-margin-top:80px">Autonomy controls</h2>'
         )
         if prof is None:
             return (
@@ -13585,8 +13593,16 @@ Relay team broke club record"></textarea>
 
         level_opts = [
             ("approval_required", "Approval required", "A human must approve before publishing."),
-            ("draft_only", "Draft only", "Generate drafts; never schedule or publish automatically."),
-            ("fully_autonomous", "Fully autonomous", "May publish without human approval when all guardrails pass."),
+            (
+                "draft_only",
+                "Draft only",
+                "Generate drafts; never schedule or publish automatically.",
+            ),
+            (
+                "fully_autonomous",
+                "Fully autonomous",
+                "May publish without human approval when all guardrails pass.",
+            ),
         ]
 
         rows_html = ""
@@ -13594,20 +13610,20 @@ Relay team broke club record"></textarea>
             current_val = current_policy.get(ct_str.value, "approval_required")
             select_opts = ""
             for val, label, _ in level_opts:
-                sel = ' selected' if current_val == val else ''
+                sel = " selected" if current_val == val else ""
                 select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
             rows_html += (
-                f'<tr>'
+                f"<tr>"
                 f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
                 f'<td style="font-size:12px;color:var(--ink-muted);max-width:220px">{_h(ct_meta.description)}</td>'
-                f'<td>'
+                f"<td>"
                 f'<select name="{_h(ct_str.value)}" '
                 f'style="background:var(--bg);color:var(--ink);'
                 f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
-                f'{select_opts}'
-                f'</select>'
-                f'</td>'
-                f'</tr>'
+                f"{select_opts}"
+                f"</select>"
+                f"</td>"
+                f"</tr>"
             )
 
         warning_html = (
@@ -13630,7 +13646,7 @@ Relay team broke club record"></textarea>
             f"</tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             f"</table></div>"
-            f'{warning_html}'
+            f"{warning_html}"
             f'<div style="margin-top:14px">'
             f'<button type="submit" class="btn primary">Save autonomy settings</button>'
             f'<span id="mh-autonomy-saved" style="margin-left:12px;font-size:13px;'
