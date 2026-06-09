@@ -440,10 +440,15 @@ class TestV2BrandContextSurfacesEverything:
             "grassroots", "spirit", "lap by lap", "elite only",
             "Be warm and direct", "be specific",
             "ALWAYS include the hashtag #V2Tag in every caption.",
-            "Primary wordmark", "V2 wordmark for light backgrounds",
         ]
         for m in markers:
             assert m in ctx, f"V2 field carrying {m!r} missing from system prompt"
+        # Logo inventory is opt-in (excluded from text/caption prompts to stop
+        # raw logo file names leaking into copy — see test_caption_no_logo_leak);
+        # asset-pickers request it explicitly, and then the logo surfaces.
+        ctx_logos = brand_context_for_llm(loaded, include_logos=True)
+        for m in ("Primary wordmark", "V2 wordmark for light backgrounds"):
+            assert m in ctx_logos, f"V2 logo field {m!r} missing under include_logos=True"
 
         # Non-negotiable rules lead, recheck trails
         assert ctx.startswith("=== NON-NEGOTIABLE RULES")
