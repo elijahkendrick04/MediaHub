@@ -171,13 +171,17 @@ def test_offscope_and_offhost_links_are_not_followed():
             base + "index.htm",
             '<html><body>'
             '<a href="heat1.htm">in scope</a>'
-            '<a href="/admin/secret.htm">off prefix</a>'
+            '<a href="/admin/secret.htm">off prefix, non-result</a>'
             '<a href="https://evil.test/x.htm">off host</a>'
             "</body></html>",
         ),
         base + "heat1.htm": _static(base + "heat1.htm", _EVENT_HTML.format(n=1)),
+        # A same-host, off-prefix link found on the entry page may now be
+        # fetched (siblings can hold a hub's results), but a non-result page
+        # fails the shape gate and never lands in the mirror.
         "https://site.test/admin/secret.htm": _static(
-            "https://site.test/admin/secret.htm", _EVENT_HTML.format(n=9)
+            "https://site.test/admin/secret.htm",
+            "<html><body><p>Admin login. Nothing to see here.</p></body></html>",
         ),
         "https://evil.test/x.htm": _static("https://evil.test/x.htm", _EVENT_HTML.format(n=8)),
     }
@@ -186,8 +190,64 @@ def test_offscope_and_offhost_links_are_not_followed():
     )
     fetched = {p.source_url for p in result.provenance.values()}
     assert base + "heat1.htm" in fetched
-    assert "https://site.test/admin/secret.htm" not in fetched  # off path-prefix
-    assert "https://evil.test/x.htm" not in fetched  # off host
+    # off path-prefix non-result page: shape-gated out, so not kept in the mirror
+    assert "https://site.test/admin/secret.htm" not in fetched
+    # off host: never fetched at all (hard invariant — host is the outer bound)
+    assert "https://evil.test/x.htm" not in fetched
+
+
+def test_entry_hub_follows_offprefix_sibling_result_pages_but_stays_bounded():
+    """A meet 'hub' page can link each event's results to a SIBLING path on the
+    same host, OUTSIDE the entry's path-prefix (e.g. /meets/1/results whose event
+    pages live at /events/<id>/results). The crawl must follow those same-host,
+    off-prefix links discovered on the ENTRY page so the hub reaches its results
+    — while staying strictly bounded: a non-result off-prefix link is shape-gated
+    out, and an off-prefix link discovered on a CHILD page (deep, far outside the
+    meet) is never crawled. Mirrors swimming.events /meets/<id>/results →
+    /events/<id>/results; the bound is what keeps results.swimming.org's huge
+    multi-meet host from being crawled wholesale.
+
+    Fails before the off-prefix-sibling fix (the event page is off-prefix, so the
+    old scope gate rejects it and nothing is kept).
+    """
+    entry = "https://swim.test/meets/1/results"
+    sibling = "https://swim.test/events/9/results"
+    signup = "https://swim.test/signup"
+    deep = "https://swim.test/events/9999/results"  # far outside the meet
+    pages = {
+        entry: _static(
+            entry,
+            "<html><body><h1>Meet 1</h1>"
+            f'<a href="{sibling}">Event 9</a>'
+            f'<a href="{signup}">Sign up</a>'
+            "</body></html>",
+        ),
+        # Off-prefix sibling: real result table → must be fetched AND kept.
+        # It also links to a DEEP off-prefix page; discovered on a child page,
+        # that link must not widen the crawl.
+        sibling: _static(
+            sibling,
+            _EVENT_HTML.format(n=9).replace(
+                "</table>", f'</table><a href="{deep}">More events</a>'
+            ),
+        ),
+        # Off-prefix, non-result page on the entry → fetched but shape-gated out.
+        signup: _static(signup, "<html><body><p>Create an account.</p></body></html>"),
+        # If the bound ever broke, this result-shaped page would be kept; it must
+        # not be — proving it's the crawl bound (not the shape gate) holding it.
+        deep: _static(deep, _EVENT_HTML.format(n=999)),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+
+    fetched = {p.source_url for p in result.provenance.values()}
+    # the off-prefix sibling event page was followed and its results kept
+    assert sibling in fetched, "off-prefix sibling result page was not followed/kept"
+    blob = b"\n".join(result.files.values())
+    assert b"Ada Lovelace" in blob and b"1:02.34" in blob
+    # the non-result off-prefix page was shape-gated out of the mirror
+    assert signup not in fetched
+    # the deep off-prefix link, discovered on a CHILD page, was NOT crawled
+    assert deep not in fetched, "a deep same-host link far outside the meet was crawled"
 
 
 def test_robots_disallow_blocks_pages():
