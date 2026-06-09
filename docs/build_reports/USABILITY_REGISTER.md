@@ -97,6 +97,7 @@ production.
 | ID | Date | Severity | Status | Summary | Guard test |
 |----|------|----------|--------|---------|------------|
 | — | 2026-06-09 | — | — | First usability run: full regression + discovery pass found NO functional defect; production healthy; all routes load; account flows + billing honest-errors + edge/404 states all graceful | — |
+| UX-001 | 2026-06-09 | P3 | Fixed | /activity Failed stat card rendered "01" instead of "1" (count-up animation) | `tests/test_activity_count_up.py` |
 
 ---
 
