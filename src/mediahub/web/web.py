@@ -12681,6 +12681,17 @@ Relay team broke club record"></textarea>
             deps["publish_kill_switch"] = kill_switch_status()
         except Exception as _ks_err:
             deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
+        # Per-type autonomy summary — additive, never affects the ok flag.
+        try:
+            from mediahub.publishing.per_type_policy import policy_summary as _pt_summary
+
+            _active_pid = _active_profile_id()
+            if _active_pid:
+                deps["per_type_autonomy"] = _pt_summary(_active_pid)
+            else:
+                deps["per_type_autonomy"] = {"note": "no active org"}
+        except Exception as _pt_err:
+            deps["per_type_autonomy"] = {"error": str(_pt_err)[:200]}
         ok = (
             deps["playwright"].get("chromium")
             and deps["node"].get("available")
@@ -13205,6 +13216,7 @@ Relay team broke club record"></textarea>
             '<nav class="mh-tabnav" id="mh-settings-tabs" aria-label="Settings sections">'
             '<a href="#activity" class="is-active">Activity</a>'
             '<a href="#status">Status</a>'
+            '<a href="#autonomy">Autonomy</a>'
             '<a href="#privacy">Privacy &amp; data</a>'
             '<a href="#deployment">Deployment</a>'
             "</nav>"
@@ -13212,6 +13224,7 @@ Relay team broke club record"></textarea>
 
         activity_html = _render_settings_activity_section(prof)
         status_html = _render_settings_status_section()
+        autonomy_html = _render_settings_autonomy_section(prof)
         privacy_html = _render_settings_privacy_section()
         deployment_html = _render_settings_deployment_section()
 
@@ -13240,7 +13253,7 @@ Relay team broke club record"></textarea>
 })();
 </script>"""
 
-        body = toc_html + activity_html + status_html + privacy_html + deployment_html + spy_js
+        body = toc_html + activity_html + status_html + autonomy_html + privacy_html + deployment_html + spy_js
         return _layout("Settings", body, active="settings")
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
@@ -13543,6 +13556,131 @@ Relay team broke club record"></textarea>
             f'{last_incident_html}</div>'
         )
 
+    def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
+        """Autonomy section — per-type publishing policy controls (P2.4)."""
+        section_header = (
+            '<h2 id="autonomy" style="margin:40px 0 6px;font-size:22px;'
+            "scroll-margin-top:80px\">Autonomy controls</h2>"
+        )
+        if prof is None:
+            return (
+                f"{section_header}"
+                '<p class="dim" style="margin-bottom:14px">'
+                "Sign in to an organisation to manage its publishing autonomy controls.</p>"
+                '<div class="card empty">No organisation pinned.</div>'
+            )
+
+        try:
+            from mediahub.publishing.per_type_policy import load_policy as _load_policy
+            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
+
+            current_policy = _load_policy(prof.profile_id)
+        except Exception as _e:
+            return (
+                f"{section_header}"
+                f'<div class="card empty">Could not load autonomy policy: {_h(str(_e))}</div>'
+            )
+
+        save_url = url_for("api_autonomy_policy_save")
+
+        level_opts = [
+            ("approval_required", "Approval required", "A human must approve before publishing."),
+            ("draft_only", "Draft only", "Generate drafts; never schedule or publish automatically."),
+            ("fully_autonomous", "Fully autonomous", "May publish without human approval when all guardrails pass."),
+        ]
+
+        rows_html = ""
+        for ct_str, ct_meta in _CT_REGISTRY.items():
+            current_val = current_policy.get(ct_str.value, "approval_required")
+            select_opts = ""
+            for val, label, _ in level_opts:
+                sel = ' selected' if current_val == val else ''
+                select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
+            rows_html += (
+                f'<tr>'
+                f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
+                f'<td style="font-size:12px;color:var(--ink-muted);max-width:220px">{_h(ct_meta.description)}</td>'
+                f'<td>'
+                f'<select name="{_h(ct_str.value)}" '
+                f'style="background:var(--bg);color:var(--ink);'
+                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
+                f'{select_opts}'
+                f'</select>'
+                f'</td>'
+                f'</tr>'
+            )
+
+        warning_html = (
+            '<div id="mh-autonomy-warn" style="display:none;margin-top:12px;padding:12px 18px;'
+            "background:rgba(255,170,58,0.10);border-left:3px solid var(--mh-prim-warning-500);"
+            'border-radius:0 6px 6px 0">'
+            "<b>Warning:</b> Setting any type to <em>Fully autonomous</em> allows MediaHub to "
+            "publish that content without a human approval step, subject to guardrails. "
+            "All other types remain gated. You can revert to <em>Approval required</em> at any time."
+            "</div>"
+        )
+
+        form_html = (
+            f'<form id="mh-autonomy-form" method="post" action="{save_url}" '
+            f'data-no-loader="1">'
+            f'<div class="card" style="padding:0;overflow:hidden">'
+            f'<table class="mh-table-stack" style="width:100%">'
+            f"<thead><tr>"
+            f"<th>Content type</th><th>Description</th><th>Publishing level</th>"
+            f"</tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            f"</table></div>"
+            f'{warning_html}'
+            f'<div style="margin-top:14px">'
+            f'<button type="submit" class="btn primary">Save autonomy settings</button>'
+            f'<span id="mh-autonomy-saved" style="margin-left:12px;font-size:13px;'
+            f'color:var(--mh-prim-success-400);display:none">Saved.</span>'
+            f"</div>"
+            f"</form>"
+        )
+
+        # JS: warn on fully_autonomous; AJAX save so the page doesn't reload
+        js_html = """
+<script>
+(function(){
+  var form = document.getElementById('mh-autonomy-form');
+  var warn = document.getElementById('mh-autonomy-warn');
+  var saved = document.getElementById('mh-autonomy-saved');
+  if (!form) return;
+  function checkWarn() {
+    var selects = form.querySelectorAll('select');
+    var hasAuto = false;
+    for (var i = 0; i < selects.length; i++) {
+      if (selects[i].value === 'fully_autonomous') { hasAuto = true; break; }
+    }
+    warn.style.display = hasAuto ? '' : 'none';
+  }
+  form.addEventListener('change', checkWarn);
+  checkWarn();
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    saved.style.display = 'none';
+    var data = new FormData(form);
+    fetch(form.action, {method: 'POST', body: data, headers: {'X-Requested-With': 'XMLHttpRequest'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (j && j.ok) { saved.style.display = ''; setTimeout(function(){ saved.style.display='none'; }, 3000); }
+      })
+      .catch(function(){});
+  });
+})();
+</script>"""
+
+        return (
+            f"{section_header}"
+            f'<p class="dim" style="margin-bottom:14px">Control how much MediaHub may publish '
+            f"on behalf of <b>{_h(prof.display_name)}</b> for each content type. "
+            f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
+            f"without your explicit opt-in.</p>"
+            f"{form_html}"
+            f"{js_html}"
+        )
+
     def _render_settings_privacy_section() -> str:
         """Privacy section — inventory + cache-clear, mirrors /privacy."""
         section_header = (
@@ -13735,6 +13873,56 @@ Relay team broke club record"></textarea>
                 "provider_label": provider_label,
             }
         )
+
+    # ---- Per-type autonomy policy API (P2.4) -------------------------
+    #
+    # GET  /api/autonomy/policy  — load the active org's per-type policy
+    # POST /api/autonomy/policy  — save the active org's per-type policy
+    #
+    # Both routes require an active (signed-in) org.  Cross-tenant
+    # isolation is enforced by scoping reads/writes to _active_profile_id()
+    # — a session can only ever see or alter its own org's policy.
+
+    @app.route("/api/autonomy/policy", methods=["GET"])
+    def api_autonomy_policy_load():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        try:
+            from mediahub.publishing.per_type_policy import load_policy as _load_policy
+
+            policy = _load_policy(pid)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid, "policy": policy})
+
+    @app.route("/api/autonomy/policy", methods=["POST"])
+    def api_autonomy_policy_save():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        try:
+            from mediahub.publishing.per_type_policy import (
+                load_policy as _load_policy,
+                save_policy as _save_policy,
+            )
+
+            existing = _load_policy(pid)
+            # Accept both JSON body and form data.
+            if request.is_json:
+                incoming = request.get_json(silent=True) or {}
+            else:
+                incoming = dict(request.form)
+            # Merge: start from existing (all keys present), override with incoming.
+            merged = dict(existing)
+            for k, v in incoming.items():
+                if isinstance(v, list):
+                    v = v[0] if v else ""
+                merged[k] = str(v)
+            _save_policy(pid, merged)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid})
 
     # ---- Buffer publishing -------------------------------------------
     #
