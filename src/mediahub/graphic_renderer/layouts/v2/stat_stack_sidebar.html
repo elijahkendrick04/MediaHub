@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   stat_stack_sidebar  (v2 archetype, PAR-7)
+
+   A two-zone composition split vertically: a wide LEFT STAGE on the
+   brand ground carrying the headline (kicker, first name, an oversized
+   surname) above a stacked event + result ledger, and a narrow RIGHT
+   RAIL running the full height as a surface-coloured "scoreboard" strip,
+   separated by a bold accent seam. The rail stacks short meta
+   top-to-bottom: the meet, an optional emphasis chip, then the club
+   lockup anchored at the foot.
+
+   Structural signature: the persistent vertical surface rail down the
+   right edge with stacked label/value chips and an accent seam, which
+   reads at a glance as a different card from the centred numeral
+   (big_number_dominant), the angled wedge (split_diagonal_hero) and the
+   flat type poster (minimal_type_poster).
+
+   Overflow safety: the stage is ~54% of the canvas (the rail takes the
+   rest), so the headline cannot use the full-canvas autofit boxes the
+   renderer computes (surname fit ~= 86% of canvas, result fit ~= 52%).
+   The surname is therefore scaled to the stage via calc(... * 0.62) on
+   the autofit var, and the result sits on its OWN full-stage-width row
+   (52% of canvas < the ~57% stage width), so neither can ever spill into
+   the rail. Holds at both 1080x1350 and 1080x1920: the stage grows while
+   the bottom-anchored rail foot and the ledger stay put. No photo
+   required; a supplied portrait sits as a quiet desaturated band behind
+   the stage headline rather than as the focal element.
+   =================================================================== */
+
+.ss {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ss *, .ss *::before, .ss *::after { box-sizing: border-box; }
+
+/* ---- left stage (~760px wide; ~616px content after padding) ---- */
+.ss__stage {
+  flex: 1 1 auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 92px 56px 84px 88px;
+  overflow: hidden;
+}
+.ss__photo { position: absolute; inset: 0; z-index: 0; opacity: 0.16; }
+.ss__photo img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: var(--mh-photo-pos, center 28%);
+  filter: grayscale(1) contrast(1.05);
+}
+.ss__stage > .ss__kicker,
+.ss__stage > .ss__first,
+.ss__stage > .ss__surname,
+.ss__stage > .ss__seam-rule,
+.ss__stage > .ss__ledger { position: relative; z-index: 1; }
+
+.ss__kicker {
+  display: flex; align-items: center; gap: 18px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 27px; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--mh-accent);
+  margin-bottom: 28px;
+}
+.ss__kicker::before {
+  content: ""; width: 56px; height: 8px; border-radius: 4px;
+  background: var(--mh-accent); flex: 0 0 auto;
+}
+
+.ss__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 48px; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 2px;
+}
+.ss__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  /* full-canvas autofit var, scaled to the narrower stage so it can
+     never overflow into the rail (stage content ~= 0.57 * canvas; the
+     surname autofit box is 0.86 * canvas, so 0.57/0.86 ~= 0.66 -> 0.62
+     with margin). */
+  font-size: calc(var(--mh-fit-surname-px, 132px) * 0.60);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  /* WRAP rather than nowrap: the renderer's autofit var is sized for a
+     full-canvas single line, but this archetype's stage is only ~57% of
+     the canvas and em_width under-models Anton, so a very long surname is
+     allowed to break onto a second line (anywhere if it is one giant
+     token) instead of clipping into the rail. Short names stay one line. */
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+
+.ss__seam-rule { height: 6px; width: 156px; background: var(--mh-accent); border-radius: 3px; margin: 40px 0 34px; }
+
+.ss__ledger { display: flex; flex-direction: column; gap: 30px; }
+.ss__field { display: flex; flex-direction: column; }
+.ss__lab {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 17px;
+  letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 10px;
+}
+.ss__event {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 34px; text-transform: uppercase; color: var(--mh-on-primary);
+}
+.ss__result {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  font-size: var(--mh-fit-result-px, 92px); line-height: 0.9;
+  color: var(--mh-accent); white-space: nowrap;
+}
+
+/* ---- right rail ---- */
+.ss__rail {
+  flex: 0 0 320px;
+  position: relative;
+  display: flex; flex-direction: column;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  border-left: 10px solid var(--mh-accent);
+  padding: 92px 40px 84px;
+}
+.ss__rail-top { display: flex; flex-direction: column; gap: 38px; }
+.ss__chip { display: flex; flex-direction: column; }
+.ss__chip-lab {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 15px;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 10px;
+}
+.ss__chip-val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 27px; line-height: 1.14; color: var(--mh-on-surface);
+}
+/* the emphasis chip collapses entirely when no hero stat is supplied */
+.ss__hero:has(.ss__chip-val:empty) { display: none; }
+
+.ss__rail-foot { margin-top: auto; padding-top: 34px; border-top: 2px solid var(--mh-outline); }
+.ss__logo { height: 64px; width: auto; margin-bottom: 16px; }
+.ss__logo img, .ss__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.ss__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 21px;
+  line-height: 1.18; text-transform: uppercase; color: var(--mh-on-surface);
+}
+.ss__sponsor { margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="ss">
+
+  <div class="ss__stage">
+    <div class="ss__photo">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="ss__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="ss__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="ss__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+    <div class="ss__seam-rule"></div>
+    <div class="ss__ledger">
+      <div class="ss__field">
+        <div class="ss__lab">Event</div>
+        <div class="ss__event">{{EVENT_NAME}}</div>
+      </div>
+      <div class="ss__field">
+        <div class="ss__lab">Result</div>
+        <div class="ss__result">{{RESULT_VALUE}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ss__rail">
+    <div class="ss__rail-top">
+      <div class="ss__chip">
+        <div class="ss__chip-lab">Meet</div>
+        <div class="ss__chip-val">{{MEET_NAME}}</div>
+      </div>
+      <div class="ss__chip ss__hero">
+        <div class="ss__chip-lab">Highlight</div>
+        <div class="ss__chip-val">{{HERO_STAT}}</div>
+      </div>
+    </div>
+    <div class="ss__rail-foot">
+      <div class="ss__logo">{{LOGO_BLOCK}}</div>
+      <div class="ss__club">{{CLUB_FULL}}</div>
+      <div class="ss__sponsor">{{SPONSOR_BLOCK}}</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
