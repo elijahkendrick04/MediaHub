@@ -189,6 +189,54 @@ def test_empty_crawl_errors_clearly(app_mod, monkeypatch):
     assert "No competition results" in entry["error"]
 
 
+def test_zero_kept_landing_page_errors_with_diagnostics(app_mod, monkeypatch):
+    """A crawl that records only the entry landing page (kept == 0, but files is
+    non-empty so is_empty is False) must surface an honest 'no results' error —
+    not silently stage the landing page — and the error must carry the entry-page
+    diagnostics (tier, exact final_url, links found, links in scope) so a
+    scope/discovery miss is debuggable from the status endpoint."""
+    from mediahub.results_fetch.crawl import CrawlResult, FileProvenance
+
+    def _fake(url, **kwargs):
+        # One landing page recorded (is_empty False), nothing kept.
+        return CrawlResult(
+            files={"champs/index.html": b"<html></html>"},
+            provenance={
+                "champs/index.html": FileProvenance(
+                    source_url=url,
+                    tier="rendered",
+                    trigger="js_shell",
+                    content_type="text/html",
+                    fetched_at=0.0,
+                )
+            },
+            entry_url=url,
+            pages_visited=1,
+            kept=0,
+            total_bytes=12,
+            entry_tier="rendered",
+            entry_final_url=url.rstrip("/") + "#results",
+            entry_links_found=41,
+            entry_links_in_scope=0,
+        )
+
+    monkeypatch.setattr("mediahub.results_fetch.crawl.crawl_results_site", _fake)
+    job_id = "bbbbbbbbbbbb"
+    wm = app_mod[1]
+    wm._url_job_set(job_id, status="queued")
+    wm._run_url_fetch_job(job_id, "https://meet.test/2025/champs/", None)
+
+    entry = wm._url_job_get(job_id)
+    assert entry["status"] == "error"
+    err = entry["error"]
+    assert "No competition results" in err
+    assert "diagnostics" in err
+    assert "tier=rendered" in err
+    assert "https://meet.test/2025/champs#results" in err  # exact final_url
+    assert "links found=41" in err
+    assert "in scope=0" in err
+
+
 def test_unknown_job_status_is_404(app_mod):
     app, wm = app_mod
     c = app.test_client()

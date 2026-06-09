@@ -296,6 +296,144 @@ def test_genuine_no_slash_entry_still_resolves_links():
     assert child in fetched
 
 
+def _rendered_final(
+    request_url: str, final_url: str, dom: str, *, static_dom: str | None = None
+) -> ReadResult:
+    """A rendered read whose reported final_url differs from the requested URL
+    (fragment/query/dropped-slash), optionally carrying the pre-escalation
+    static page so the static∪rendered union path can be exercised."""
+    page = RenderedPage(
+        content=dom.encode(),
+        final_url=final_url,
+        content_type="text/html",
+        tier="rendered",
+        text=visible_text(dom),
+        screenshot=b"\xff\xd8\xffjpg",
+        screenshot_mime="image/jpeg",
+        captures=[],
+    )
+    static_page = None
+    if static_dom is not None:
+        static_page = FetchedPage(
+            content=static_dom.encode(),
+            final_url=final_url,
+            content_type="text/html",
+            tier="static",
+            text=visible_text(static_dom),
+        )
+    return ReadResult(
+        url=request_url,
+        page=page,
+        tier="rendered",
+        trigger="js_shell",
+        static_page=static_page,
+    )
+
+
+def test_rendered_final_url_with_fragment_keeps_relative_links_in_scope():
+    """final_url carrying a #fragment (slash also dropped) must not defeat
+    discovery: the slash-terminated request is the resolution base, so the
+    relative child stays in scope. This is the case the strict-equality fix
+    missed in prod (results.rar-timing.co.uk)."""
+    entry = "https://meet.test/2025/champs/"
+    child = "https://meet.test/2025/champs/results/e1.pdf"
+    pages = {
+        entry: _rendered_final(
+            entry,
+            "https://meet.test/2025/champs#results",  # slash dropped + #fragment
+            '<html><body><a href="results/e1.pdf">Event 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched, "relative child escaped scope when final_url had a #fragment"
+    assert any(k.endswith(".pdf") for k in result.files), "child PDF not kept"
+
+
+def test_rendered_final_url_with_query_keeps_relative_links_in_scope():
+    """A ?query appended to final_url (slash dropped) must likewise not break
+    relative-link resolution for a directory request."""
+    entry = "https://meet.test/2025/champs/"
+    child = "https://meet.test/2025/champs/heat1.pdf"
+    pages = {
+        entry: _rendered_final(
+            entry,
+            "https://meet.test/2025/champs?v=2",  # slash dropped + ?query
+            '<html><body><a href="heat1.pdf">Heat 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched
+    assert any(k.endswith(".pdf") for k in result.files)
+
+
+def test_no_slash_entry_with_fragment_keeps_child_in_scope():
+    """The no-trailing-slash regression guard, now with a #fragment on final_url:
+    a genuine 'page' entry still resolves its relative links against the parent
+    and the child stays in scope (parent-prefix scope), unchanged by the fix."""
+    entry = "https://meet.test/results/639/events"
+    child = "https://meet.test/results/639/heat1.pdf"
+    pages = {
+        entry: _rendered_final(
+            entry,
+            "https://meet.test/results/639/events#top",  # fragment, no slash to restore
+            '<html><body><a href="heat1.pdf">Heat 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched
+
+
+def test_static_links_survive_a_render_that_drops_anchors():
+    """If the entry is read statically (anchors present) then escalated to a
+    render whose DOM dropped/rewrote those anchors, discovery must still follow
+    the links the STATIC HTML carried — the union keeps a render from zeroing out
+    a links-present page."""
+    entry = "https://meet.test/2025/champs/"
+    child = "https://meet.test/2025/champs/results/e1.pdf"
+    pages = {
+        entry: _rendered_final(
+            entry,
+            "https://meet.test/2025/champs/",
+            # Rendered DOM has NO result anchors (an SPA shell swapped them out).
+            '<html><body><div id="app">Loading…</div></body></html>',
+            # Static HTML carried the real relative result link.
+            static_dom='<html><body><a href="results/e1.pdf">Event 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched, "static-only link was lost when the render dropped anchors"
+    assert any(k.endswith(".pdf") for k in result.files)
+
+
+def test_entry_diagnostics_recorded_for_no_results_outcome():
+    """On a 0-kept outcome the entry-page diagnostics (tier, final_url, links
+    found, links in scope) are populated so the 'why no results' surface can be
+    honest."""
+    entry = "https://meet.test/2025/champs/"
+    pages = {
+        entry: _rendered_final(
+            entry,
+            "https://meet.test/2025/champs#x",
+            # An off-host link only → discovered but not in scope.
+            '<html><body><a href="https://elsewhere.test/a.pdf">x</a></body></html>',
+        ),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    assert result.kept == 0
+    assert result.entry_tier == "rendered"
+    assert result.entry_final_url == "https://meet.test/2025/champs#x"
+    assert result.entry_links_found == 1
+    assert result.entry_links_in_scope == 0
+
+
 # ---------------------------------------------------------------------------
 # shape_gate unit checks (sport-agnostic, structure + tokens)
 # ---------------------------------------------------------------------------

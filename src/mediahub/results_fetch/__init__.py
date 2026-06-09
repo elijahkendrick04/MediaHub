@@ -74,7 +74,10 @@ class ReadResult:
     records which escalation trigger fired, if any. ``render_failed`` is True
     when escalation was warranted but the render did not produce a usable page
     (browser missing, budget hit, navigation error) and we fell back to the
-    static result — surfaced honestly rather than hidden.
+    static result — surfaced honestly rather than hidden. ``static_page`` is the
+    pre-escalation static page when the returned ``page`` is a render (so the
+    crawler can union links the render may have dropped); it is ``None`` when the
+    static page IS the returned page.
     """
 
     url: str
@@ -82,6 +85,7 @@ class ReadResult:
     tier: str
     trigger: Optional[str] = None
     render_failed: bool = False
+    static_page: Optional[FetchedPage] = None
 
     @property
     def ok(self) -> bool:
@@ -134,4 +138,10 @@ def read_page(
         # Escalation was warranted but the render didn't land — keep the static
         # page (better than nothing) and flag the failure honestly.
         return ReadResult(url=url, page=fetched, tier="static", trigger=trigger, render_failed=True)
-    return ReadResult(url=url, page=rendered_page, tier="rendered", trigger=trigger)
+    return ReadResult(
+        url=url,
+        page=rendered_page,
+        tier="rendered",
+        trigger=trigger,
+        static_page=fetched,
+    )
