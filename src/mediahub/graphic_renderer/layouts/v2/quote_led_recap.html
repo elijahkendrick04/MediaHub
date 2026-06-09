@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   quote_led_recap  (v2 archetype, PAR-7)
+
+   An editorial pull-quote recap. The card is built like a magazine
+   blockquote: a light SURFACE "paper" ground, a thick accent quote-bar
+   running down the left margin, an oversized hanging quotation glyph, and
+   the athlete set as the pulled subject in left-aligned ragged display
+   type. The result is the pulled centrepiece - a large accent-underlined
+   headline value sitting inline in the quote, not boxed in a rail - and a
+   journalistic em-dash attribution line under a hairline rule names the
+   club (the masthead) with the hero stat and sponsor.
+
+   Structural signature: light editorial ground + left quote-bar + a large
+   hanging quote glyph dominating the upper-left + a ragged left column with
+   an inline accent-ruled result + a bottom em-dash attribution rule. The
+   mass is upper-left and the ground is light, so it reads as a journalistic
+   recap quote at a glance - distinct from the centred numeral, the
+   lower-third band, the angled wedge, the right-hand vertical scoreboard
+   rail, the broadcast bands, the three vertical bays, the magazine cover,
+   and the dark-ground centred type poster.
+   =================================================================== */
+
+.ql {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  padding: 96px 96px 84px 112px;
+}
+.ql *, .ql *::before, .ql *::after { box-sizing: border-box; }
+
+/* the left quote-bar - the blockquote signature */
+.ql__bar {
+  position: absolute; top: 96px; bottom: 84px; left: 60px;
+  width: 14px; border-radius: 7px; background: var(--mh-accent);
+}
+
+/* masthead row */
+.ql__head { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; }
+.ql__kicker {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 27px; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--mh-accent);
+}
+/* the kicker collapses cleanly when no achievement label is supplied */
+.ql__kicker:empty { display: none; }
+.ql__meet {
+  font-family: 'Inter',sans-serif; font-weight: 600; font-size: 22px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mh-on-surface); opacity: 0.66;
+}
+
+/* the pulled quote body - single ragged column, mass to the upper-left */
+.ql__body { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+.ql__quote {
+  position: absolute; top: -64px; left: -12px;
+  font-family: Georgia, 'Times New Roman', serif; font-weight: 700;
+  font-size: 440px; line-height: 0.62; color: var(--mh-accent);
+  opacity: 0.18; pointer-events: none; user-select: none;
+}
+.ql__col { position: relative; z-index: 1; padding-top: 120px; padding-right: 120px; }
+.ql__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 50px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 4px;
+}
+.ql__surname {
+  font-family: 'Anton','Bebas Neue','Oswald',Impact,sans-serif; font-weight: 400;
+  font-size: calc(var(--mh-fit-mega-name-px, 200px) * 0.62);
+  line-height: 0.86; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-surface); overflow-wrap: anywhere; word-break: break-word;
+}
+.ql__event {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 34px; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-on-surface); opacity: 0.78; margin-top: 30px;
+  overflow-wrap: anywhere;
+}
+/* the result - the pulled centrepiece, inline, accent-underlined */
+.ql__result {
+  display: inline-block; margin-top: 14px; padding-bottom: 12px;
+  border-bottom: 8px solid var(--mh-accent);
+  font-family: 'JetBrains Mono','Space Grotesk',monospace; font-feature-settings: "tnum";
+  font-weight: 700; font-size: calc(var(--mh-fit-result-px, 96px) * 1.04);
+  line-height: 0.92; color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+
+/* em-dash attribution line under a hairline rule */
+.ql__attrib { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 30px; border-top: 2px solid var(--mh-outline); }
+.ql__by { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.ql__dash { font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700; font-size: 34px; color: var(--mh-accent); }
+.ql__logo { height: 56px; width: auto; flex: 0 0 auto; }
+.ql__logo img, .ql__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.ql__club { font-family: 'Inter',sans-serif; font-weight: 800; font-size: 26px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--mh-on-surface); overflow-wrap: anywhere; }
+.ql__hero { flex: 0 0 auto; font-family: 'Inter',sans-serif; font-weight: 600; font-size: 24px; letter-spacing: 0.02em; color: var(--mh-on-surface); opacity: 0.7; text-align: right; }
+/* the hero-stat note collapses when no hero stat is supplied */
+.ql__hero:empty { display: none; }
+.ql__sponsor { flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="ql">
+
+  <div class="ql__bar"></div>
+
+  <div class="ql__head">
+    <div class="ql__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="ql__meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="ql__body">
+    <div class="ql__quote">&ldquo;</div>
+    <div class="ql__col">
+      <div class="ql__first">{{ATHLETE_FIRST_NAME}}</div>
+      <div class="ql__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+      <div class="ql__event">{{EVENT_NAME}}</div>
+      <div class="ql__result">{{RESULT_VALUE}}</div>
+    </div>
+  </div>
+
+  <div class="ql__attrib">
+    <div class="ql__by">
+      <div class="ql__dash">&mdash;</div>
+      <div class="ql__logo">{{LOGO_BLOCK}}</div>
+      <div class="ql__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="ql__hero">{{HERO_STAT}}</div>
+    <div class="ql__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>
