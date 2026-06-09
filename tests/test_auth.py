@@ -209,3 +209,73 @@ def test_pages_render_for_anonymous_visitor(client):
     assert client.get("/signup").status_code == 200
     assert client.get("/login").status_code == 200
     assert client.get("/pricing").status_code == 200
+
+
+# ---- cross-account isolation on the commercial surface (PC.1/PC.2) ------
+#
+# With billing configured, /billing renders an account panel showing the
+# *current* signed-in account's email + plan. This regression locks the
+# invariant that one account never sees another account's email, plan, or
+# Stripe customer id — the commercial-surface analogue of the cross-tenant
+# run-isolation invariant (ADR-0003).
+
+
+@pytest.fixture
+def billing_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Obviously-fake Stripe placeholders (never real secrets) so
+    # billing_configured() is True and /billing renders the account panel
+    # instead of the "not configured" stub. These are test fixtures only.
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_placeholder_not_a_real_key")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_placeholder")
+    monkeypatch.setenv("STRIPE_PRICE_CLUB", "price_club_test")
+    monkeypatch.setenv("STRIPE_PRICE_FEDERATION", "price_federation_test")
+    from mediahub.web.web import create_app
+
+    application = create_app()
+    application.config["TESTING"] = True
+    if not application.secret_key:
+        application.secret_key = "test-secret"
+    application._data_dir = tmp_path  # for tests that read the ledger
+    return application
+
+
+@pytest.fixture
+def billing_client(billing_app):
+    return billing_app.test_client()
+
+
+def test_billing_does_not_leak_another_accounts_plan(billing_client):
+    from mediahub.web import auth
+
+    # --- Account B: a premium CLUB subscriber with a Stripe customer id. ---
+    b_email = "owner-b@premium-federation.example"
+    b_customer_id = "cus_ISOLATIONLEAKB999"
+    billing_client.post("/signup", data={"email": b_email, "password": "twelvechars1"})
+    # Stamp B onto the paid Club plan via the REAL auth API (no invented names).
+    store = auth.UserStore()
+    updated = store.set_plan(b_email, auth.PLAN_CLUB, stripe_customer_id=b_customer_id)
+    assert updated is not None and updated.plan == auth.PLAN_CLUB
+    # Log B out so the next request is a clean session for a different account.
+    billing_client.get("/logout")
+
+    # --- Account A: a brand-new Free user. ---
+    a_email = "viewer-a@grassroots.example"
+    billing_client.post("/signup", data={"email": a_email, "password": "twelvechars1"})
+
+    r = billing_client.get("/billing")
+    assert r.status_code == 200
+    html = r.data.decode()
+
+    # A sees their own identity and Free plan label...
+    assert a_email in html
+    # The plan-value markup is matched specifically (the bare word "Club"
+    # appears in an unrelated JS comment in the shared layout, so only the
+    # rendered plan cell is a real leak signal).
+    assert 'margin-top:4px">Free</div>' in html
+    # ...and never B's email, B's Club plan, or B's Stripe customer id.
+    assert b_email not in html
+    assert b_customer_id not in html
+    assert 'margin-top:4px">Club</div>' not in html
+    # B's plan label ("Club") must not surface in A's rendered plan cell.
+    assert auth.plan_label(auth.PLAN_CLUB) == "Club"

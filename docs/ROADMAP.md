@@ -414,7 +414,7 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 ---
 
-## Phase C — Commercialise & Distribute · PC · ❌ **NOT STARTED · 🥇 TOP PRIORITY**
+## Phase C — Commercialise & Distribute · PC · 🔵 **IN PROGRESS (PC.1/PC.2 shipped)** · 🥇 TOP PRIORITY
 
 > **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
 > *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
@@ -441,16 +441,18 @@ go-to-market motion. Today there is **zero billing and zero customers** against 
    stalls below ~50 clubs over time, that is a retention/PMF problem to fix — **not** a
    signal to add sports.
 
-### PC.1 — Self-serve signup + auth · ❌ **NOT STARTED**
+### PC.1 — Self-serve signup + auth · ✅ **DONE**
 The signup/login/session half of Appendix B **Step 7** (email+password, hashed; signed
 session cookie), promoted from "alongside Phase 1" to the front of the queue. Self-hosted
 deployments without billing env vars keep working (auth optional). *Ref: Appendix B Step 7.*
+Shipped in PR #267 (signup/login/logout, bcrypt, signed session cookie, users.jsonl ledger); live-verified 2026-06-09. Auth stays optional when no accounts/billing are configured.
 
-### PC.2 — Stripe billing + subscription lifecycle · ❌ **NOT STARTED**
+### PC.2 — Stripe billing + subscription lifecycle · ✅ **DONE (code-complete; awaits operator STRIPE_* keys)**
 The billing half of Appendix B **Step 7**: Stripe Checkout, the Customer Portal, and a
 signed webhook that drives plan state. Annual prepay is the default (see PC.4). Billing
 routes honest-error (`503 "billing not configured"`) when `STRIPE_*` is unset, so the
 free/self-host path is unaffected. *Ref: Appendix B Step 7.*
+Shipped in PR #267 (Checkout, Customer Portal, signed webhook driving plan state). Routes honest-503 when STRIPE_* is unset so there is zero added running cost until the operator sets keys; live-verified 2026-06-09.
 
 ### PC.3 — True multi-tenancy: org → workspace · ⚠️ **PARTIAL (foundation only) — BLOCKING**
 **The #1 architectural fix.** Single-instance-per-club rises linearly in ops/support
@@ -461,6 +463,8 @@ already shipped** (`_can_access_run`, [`adr/0003-pilot-safety-invariant-lock.md`
 hierarchy** of Appendix B **Step 14**, pulled forward from "enterprise leadership" to a
 **blocking prerequisite**. *Ref: cross-cutting "Multi-tenancy: org → workspace"; Appendix B
 Step 14.*
+
+Escalation (2026-06-09, autobuild): the remaining work binds user-account identity to org membership and generalises cross-org isolation in one shared instance, which directly touches the locked cross-tenant isolation invariant (ADR-0003). Per CLAUDE.md governance this is a high-stakes, hard-to-reverse architecture fork that must be Council-pressure-tested and operator-signed-off before the org to workspace schema is committed; the autonomous build loop must NOT rearchitect it unattended. NEEDS OPERATOR/COUNCIL sign-off on the schema before implementation.
 
 ### PC.4 — Repricing & packaging (validate, don't assume) · ❌ **NOT STARTED**
 The £30/£250 tiers are **unvalidated and too low**. Candidate repricing **to test with
@@ -653,7 +657,7 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    (PC.1), Stripe billing (PC.2), **true multi-tenancy** (PC.3), validated pricing with
    annual prepay (PC.4), the free-self-host call (PC.5, **resolved: hosted-only**), and GTM/distribution (PC.6).
    *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
-   **Nothing below ships ahead of this.**
+   **Nothing below ships ahead of this.** (Update 2026-06-09: PC.1 + PC.2 shipped and live; PC.3 is the remaining engineering item but its org->workspace schema needs operator/Council sign-off — see PC.3.)
 2. **P1.4 graphics — finish only to the "sellable wedge" bar.** Tier A shipped (PR
    #259); Tier B (the LLM design-spec director, SEQ-2) continues — but **scoped to what
    makes the swim wedge demonstrably good enough to sell, not gold-plated**, and **no
