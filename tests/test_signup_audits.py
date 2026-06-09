@@ -238,10 +238,17 @@ def test_every_voice_relevant_field_surfaces_in_brand_context():
         "AUDIT-SPONSOR", "AUDIT-VOICE-SUMMARY", "audit-keyword",
         "audit-phrase-use", "audit-phrase-avoid",
         "AUDIT-GUIDELINES-SUMMARY", "AUDIT-DO", "AUDIT-DONT",
-        "AUDIT-MUST-RULE", "AUDIT-LOGO-LABEL", "AUDIT-LOGO-DESC",
+        "AUDIT-MUST-RULE",
     ]
     for marker in must_appear:
         assert marker in ctx, f"field carrying {marker!r} missing from brand context"
+    # Logo inventory is opt-in only: text/caption prompts exclude it so the LLM
+    # can't echo raw logo file names into published copy (see
+    # test_caption_no_logo_leak). Asset-picking generators pass include_logos=True,
+    # and then the label + AI description must surface.
+    ctx_logos = brand_context_for_llm(prof, include_logos=True)
+    for marker in ("AUDIT-LOGO-LABEL", "AUDIT-LOGO-DESC"):
+        assert marker in ctx_logos, f"logo field {marker!r} missing under include_logos=True"
 
 
 def test_org_type_shows_up_as_organisational_phrase():
