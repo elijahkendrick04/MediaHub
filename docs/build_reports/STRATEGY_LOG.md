@@ -11,20 +11,85 @@ edits docs only — never code, tests, infra, billing, or deploys.
 ## HANDOFF (current)
 
 - **Integrity state:** no high-confidence-core item is known to be below standard. This
-  cycle hardened **PC.4** from an assumed reprice into an **evidence-gated price-discovery
-  step** (gate the public list price on ≥5 clubs paying annual prepay at a tested price;
-  candidate Club £49–£99/mo / Federation £250+/mo kept as an explicitly *unvalidated
-  hypothesis*) and added a **sourced 2026 comparator table**. PC.3 (true multi-tenancy)
-  remains correctly ⚠️ BLOCKING + escalated for operator/Council sign-off.
-- **Biggest open evidence gap:** revealed willingness-to-pay at the candidate Club tier is
-  still unproven — but it is now correctly *structured as a gate to be closed by the first
-  ~10 hand-sold clubs (PC.6)*, not papered over with an assumed price. It cannot be closed
-  from the desk; it needs real annual payments.
-- **Highest-impact next correction:** expand the **PC.6 GTM / distribution** track into a
-  concrete, evidence-banded sequence (the binding constraint), or sanity-check the PC.6
-  governing-body-endorsement assumption against a current Swim Wales / Swim England
-  partner-programme reality check.
+  cycle reality-checked the **binding-constraint (distribution) track**: PC.6's
+  "governing-body endorsement = the single highest-leverage channel (reaches hundreds of
+  clubs)" was asserted, never evidenced. Split it into **(a) evidenced, dated, open
+  approved-data-API access** (Swim England's Oct-2025 approved-systems API — concrete first
+  NGB action, grants *data + credibility*, **>95% step correct/available**) and **(b)
+  promotional NGB endorsement → DOWN-WEIGHTED to speculative** (no evidence any NGB
+  promotes a third-party content tool; partner slots category-exclusive and already held by
+  SportsEngine / GoCardless). Recorded in ROADMAP §PC.6, the diligence (Evidence refresh
+  cycle 3), and **ADR-0012**. PC.4 remains an evidence-gated price-discovery step; PC.3
+  (true multi-tenancy) remains correctly ⚠️ BLOCKING + escalated.
+- **Biggest open evidence gap:** revealed willingness-to-pay at the candidate Club tier
+  (closable only by the first ~10 hand-sold clubs / real annual payments — PC.6, can't be
+  closed from the desk). Secondary gap now logged: **Swim Wales** has no comparable public
+  approved-supplier/endorsement programme found — do not assert one exists until verified.
+- **Highest-impact next correction:** expand PC.6 into a concrete, evidence-banded
+  **direct + word-of-mouth** hand-sell sequence (now the de-facto primary channel after the
+  endorsement down-weight), or pressure-test **Route C** (sell/integrate with SportsEngine /
+  Swim Manager / Swim Club Manager — who now hold both the NGB endorsement and the official
+  data API) as the realistic distribution partner, with a current go/no-go read.
 ---
+
+## 2026-06-09 — Cycle 3 (PC.6: NGB distribution-channel reality check + re-weight)
+
+**Assessed:** full roadmap against the standard; confirmed the prior handoff's queued
+correction (reality-check the governing-body-endorsement assumption) was the highest-impact
+open item. Distribution is the binding constraint, and PC.6 leaned on a national-governing-
+body "endorsement or reseller arrangement" as *"the single highest-leverage channel (one
+deal reaches hundreds of clubs)"* — a load-bearing claim that was **asserted, never
+evidenced.**
+
+**Evidence gap researched + findings (captured in `research/SCALING_DILIGENCE_2026.md`,
+Evidence refresh cycle 3; all primary-source, dated, access 2026-06-09):**
+- Swim England launched a secure **approved-systems API** (announced 1 Oct 2025) — approved
+  platforms read official swim times/PBs directly from its databases; initial partners are
+  the club-admin platforms Swim Club Manager + Swim Manager; it **explicitly invites
+  "commercial organisations… to apply"** and is "a step towards a connected digital
+  eco-system, with more to follow in 2026." → a REAL, dated NGB channel, but it grants
+  **data + credibility, not promotion.** *(swimming.org)*
+- **No evidence any NGB promotes/endorses a third-party CONTENT tool to member clubs.** Swim
+  England partner slots are **category-exclusive and already held**: SportsEngine =
+  "preferred technology supplier" (swim schools); GoCardless = "Official Payments Partner";
+  corporate tier (Speedo, Sport England, SportsHotels) is sponsorship/brand, no content
+  category. *(sportsengine.com, gocardless.com, swimming.org)* Swim Wales: no comparable
+  public programme found — logged as unknown, not asserted.
+
+**Improvement made:** split PC.6's "governing-body endorsement" into two mechanisms with
+separate confidence — **(a)** apply for approved data-API access (concrete, evidenced,
+>95%-correct first NGB action; data moat + credibility), **(b)** promotional endorsement →
+**down-weighted to speculative** with the 6-month threshold kept. Reinforced **Route C**
+(incumbents hold both the endorsement and the data API → realistic distribution partners).
+Edited ROADMAP §PC.6 + the "highest-leverage combination" line, the diligence (inline
+caveats on the three "highest-leverage channel" assertions + Evidence refresh cycle 3 with
+a re-weighting table), and recorded **ADR-0012**.
+
+**How it moved toward the standard:** the single most load-bearing *unproven* assumption on
+the binding-constraint track is no longer asserted — it is split so the >95% standard
+attaches to the **API-access step** (correct/available) and to the **decision to
+down-weight** promotional endorsement, while the promotional upside is **quarantined as
+speculative**, not deleted. No revenue figure changed; product vision unchanged; PC.3/PC.4
+untouched; auto-update stamp/activity blocks not hand-edited.
+
+**Self-verify:** coherence ✓ (PC.6 references real, dated programmes + Route C; no un-built
+prereq; "highest-leverage combination" lines in ROADMAP and diligence now consistent with
+the re-weight); evidence ✓ (every claim cited to a dated primary source, accessed
+2026-06-09; Swim Wales gap flagged unknown, not asserted); standard ✓ (API step
+>95%-correct; promotional endorsement quarantined as speculative with its low probability);
+honesty ✓ (no inflated number; lowers *stated* distribution optimism, the honest
+direction; outcome odds untouched); vision ✓ (unchanged — still the multi-sport,
+multi-tenant, human-gated content brain).
+
+**Realistic revenue ceiling + probability bands (unchanged this cycle, restated honestly):**
+swimming-only sustainable ≈ **£150k–£400k ARR** (most likely good outcome); **£1M+ ARR**
+low-double-digit-% and only via multi-sport breadth + institutional buyers + a second
+person; **£1M/month (~£12M ARR)** not realistic for a solo→small team on any evidence
+reviewed — directional north star only.
+
+**Queued next:** expand PC.6 into a concrete evidence-banded direct + word-of-mouth
+hand-sell sequence (now the de-facto primary channel), or a current go/no-go pressure-test
+of Route C against SportsEngine / Swim Manager / Swim Club Manager.
 
 ## 2026-06-09 — Cycle 2 (PC.4: assumed reprice → evidence-gated price discovery)
 
