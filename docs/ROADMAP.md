@@ -24,6 +24,17 @@ The plan now has **six stages, Phase 0 to Phase 5**:
 > Distinction → Leadership*). That older plan's detailed build prompts are kept in
 > the appendices for reference.
 
+> **Ahead of all six in priority (added 2026-06)** sits a new
+> **Phase C — Commercialise & Distribute**: self-serve signup, billing, true
+> multi-tenancy, sane pricing, and a real way to reach clubs. The numbered phases
+> describe *capability*; **Phase C is about getting paid for it** — and a hard-nosed
+> scaling diligence
+> ([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md))
+> concludes that **comes first.** So the order is now *commercialise, then generalise*:
+> the expansions (Phases 3–5) wait until clubs can sign up and pay on their own. The
+> reasoning sits under **"A commercial reality check"** below and is recorded in
+> **[adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md)**.
+
 Each task carries a little badge so you can see how it's going:
 ✅ done · 🔵 in progress · ⚠️ stuck · ❌ not started yet.
 
@@ -56,6 +67,43 @@ parser.** The moat is the intelligence layer — ingest → detect → rank → 
 generate → approve → export — now **generalised across sports** and made **largely
 autonomous**, on a stack that is **truly free to self-host with no hidden fees.**
 Results ingestion is one spoke among many.
+
+**A commercial reality check (2026-06) — *commercialise before generalising*.** The
+thesis above is a **capability** thesis. A 2026 scaling diligence
+([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md)) weighed it
+against market data and concluded the **binding constraint is distribution and
+monetisation, not more capability** — and that this roadmap, being 100% an engineering
+plan with no commercial track, was missing its most important phase. The load-bearing
+conclusions, now encoded below:
+
+> ⚠️ **All revenue figures here are hypotheses/estimates, not facts** — see the
+> diligence report and its caveats. No pre-launch solo venture can have high confidence
+> of any specific revenue number; the confidence attaches to the *decisions*, not the
+> outcome.
+
+- **Swimming-only is mathematically capped at ≈ £150k–£400k ARR** (~1,300 UK&I
+  affiliated clubs; ~2,740 USA Swimming clubs). £1M ARR at £30/mo would need ~2,778
+  paying clubs — more than *every* UK affiliated club. **£1M+ requires multi-sport
+  breadth *and* institutional buyers (schools / governing bodies) *and* almost certainly
+  a second person.**
+- **"£1M/month" (~£12M ARR) is dropped as a stated goal** — not realistic for a
+  solo→small team on any evidence reviewed. The most likely *good* outcome is a
+  £150k–£400k sustainable swimming business, with a low-double-digit-% shot at £1M+ only
+  via sport/segment expansion plus a second person.
+- **Single-instance-per-club can't scale**, and **"truly free, no hidden fees"
+  self-host — as framed — cannibalises revenue.** Both are addressed by **Phase C** (true
+  multi-tenancy; and capping the free tier vs. consciously accepting a lower ceiling — an
+  open call recorded in the ADR). The **no-hidden-fees** product principle is now **in
+  tension** with the revenue goal; that tension is named, not hidden.
+- **The incumbent-bolts-on-content threat is currently LOW but is a *time advantage,
+  not a moat*;** the horizontal commodity (Canva / Predis / Gipper's auto-achievement
+  graphics) is the real pressure on price and narrative.
+
+**Consequence for the plan:** a new **Phase C — Commercialise & Distribute** becomes the
+**top priority**, ahead of the expansion phases. P3 (multi-sport), P4 (direct publishing)
+and P5 (local-AI) are **deferred — not deleted** — behind two gates: *a club can sign up,
+pay, and publish with zero founder involvement*, and *≥10 clubs paying annually*. Recorded
+in [adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md).
 
 ---
 
@@ -161,6 +209,9 @@ Three facts shape the work ahead.
 - **Direct-to-platform** publishing (only Buffer today).
 - The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
   rembg present).
+- **No commercial layer** — zero billing, signup, or true multi-tenancy against ~164k
+  LOC and 2,836 tests. This "build/sell imbalance" is the binding constraint per the
+  2026 scaling diligence; it is now **Phase C**, the top priority (see below).
 
 **In progress (🔵):** the Generative Content Engine v2 (decided in
 [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
@@ -358,6 +409,114 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 ---
 
+## Phase C — Commercialise & Distribute · PC · ❌ **NOT STARTED · 🥇 TOP PRIORITY**
+
+> **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
+> *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
+> numbered phases are *capability*; Phase C is *commercialisation*. Added in the 2026-06
+> diligence reconcile
+> ([`adr/0011-commercial-reconcile-revenue-reality.md`](adr/0011-commercial-reconcile-revenue-reality.md));
+> evidence base in
+> [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). It does not
+> invent new work — it **promotes and reconciles** Appendix B **Step 7** (commercial
+> layer), Appendix B **Step 14** (multi-club orchestration), and the cross-cutting
+> **"Multi-tenancy: org → workspace"** item into one front-of-queue track.
+
+**Goal.** Make MediaHub **sellable without the founder in the loop**: self-serve signup +
+auth, Stripe billing, **true multi-tenancy** (org → workspace in one shared instance),
+validated pricing with annual prepay, a resolved free-self-host position, and a
+go-to-market motion. Today there is **zero billing and zero customers** against ~164k LOC
+— the diligence's central "build/sell imbalance" finding.
+
+**Exit criteria (both are hard gates on later phases).**
+1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
+   involvement.* No scaling work (P3/P4/P5) starts until this holds.
+2. **Traction gate:** *≥10 clubs paying annually* before any new sport (P3). If the wedge
+   stalls below ~50 clubs over time, that is a retention/PMF problem to fix — **not** a
+   signal to add sports.
+
+### PC.1 — Self-serve signup + auth · ❌ **NOT STARTED**
+The signup/login/session half of Appendix B **Step 7** (email+password, hashed; signed
+session cookie), promoted from "alongside Phase 1" to the front of the queue. Self-hosted
+deployments without billing env vars keep working (auth optional). *Ref: Appendix B Step 7.*
+
+### PC.2 — Stripe billing + subscription lifecycle · ❌ **NOT STARTED**
+The billing half of Appendix B **Step 7**: Stripe Checkout, the Customer Portal, and a
+signed webhook that drives plan state. Annual prepay is the default (see PC.4). Billing
+routes honest-error (`503 "billing not configured"`) when `STRIPE_*` is unset, so the
+free/self-host path is unaffected. *Ref: Appendix B Step 7.*
+
+### PC.3 — True multi-tenancy: org → workspace · ⚠️ **PARTIAL (foundation only) — BLOCKING**
+**The #1 architectural fix.** Single-instance-per-club rises linearly in ops/support
+against fixed founder hours and collapses around 15–40 clubs. Generalise to **org →
+workspace isolation in one shared instance.** The cross-tenant **isolation invariant
+already shipped** (`_can_access_run`, [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md))
+— that is the foundation, not the finish line. This is the **Organisation → Club → Run
+hierarchy** of Appendix B **Step 14**, pulled forward from "enterprise leadership" to a
+**blocking prerequisite**. *Ref: cross-cutting "Multi-tenancy: org → workspace"; Appendix B
+Step 14.*
+
+### PC.4 — Repricing & packaging (validate, don't assume) · ❌ **NOT STARTED**
+The £30/£250 tiers are **unvalidated and too low**. Candidate repricing **to test with
+real buyers** (a hypothesis, not a fixed price): **Club £49–£99/mo billed annually**,
+**Federation £250+/mo**. **Annual prepay is essential** — SMB/volunteer churn runs
+3–7%/mo and annual billing cuts it ~30–40%. Kill the £30 anchor. *Ref: Appendix B Step 7
+tiers (annotated ⚠️ unvalidated there); [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
+
+### PC.5 — Resolve the free-self-host tension · ❌ **NOT STARTED — open call**
+"Truly free, no hidden fees" self-host, as framed, hands power users a permanent
+zero-revenue escape hatch. **Default recommendation:** convert it into a **capped lead-gen
+tier** that deliberately lacks managed hosting, auto-publish, support SLAs, and
+multi-tenant admin (the things institutions pay for). **Alternative:** keep true-free
+self-host and *consciously accept a materially lower revenue ceiling.* This collides with
+the standing **no-hidden-fees** product principle, so it is an **open Council question**,
+not a unilateral flip — recorded in the ADR.
+
+### PC.6 — Go-to-market / distribution · ❌ **NOT STARTED**
+Distribution kills solo ventures, not product gaps. The sub-track:
+- **Governing-body endorsement** — pursue a Swim Wales / regional Swim England pilot or
+  reseller arrangement (one deal can reach hundreds of clubs — the highest-leverage
+  channel). *Threshold: if no NGB/region will pilot after ~6 months, treat it as
+  speculative and lean on direct + word-of-mouth.*
+- **Hand-sell the first ~10 clubs** yourself (Swansea / Wales / England) — this *is* the
+  traction gate, not a growth tactic.
+- **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
+
+**Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
+`DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the
+shipped cross-tenant isolation invariant (ADR-0003) as the multi-tenancy seed; Postiz /
+Mixpost org→workspace schemas as *reference only* over a network boundary (never embed
+AGPL — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
+
+**Dependencies.** Upstream of **P3 / P4 / P5** — those are gated behind PC's exit
+criteria. Independent of P0–P2 capability work, which may continue *to the bar needed to
+make the swim wedge sellable* (see P1.4 and "Immediate next moves") but **not ahead of
+billing**.
+
+### Strategy notes — the three credible £1M+ routes (context, *not* build items)
+
+These are **not roadmap work** — they are the only routes the diligence considers
+arithmetically credible for £1M+, recorded so the expansion phases are sequenced with
+revenue in mind. Each carries the report's confidence band. **All figures are estimates.**
+
+- **Route A — Multi-sport UK grassroots** (broadest TAM, weakest moat). ~151,000 UK
+  sports clubs; even a fraction at £49–£99/mo annual reaches £1M. *Risk: per-sport data
+  integrations are non-transferable engineering, head-on vs Canva/Predis. Confidence of
+  £1M: ~15–20%.* → sequences **P3**.
+- **Route B — US schools/colleges** (highest WTP, proven by Gipper/FanWord). Reposition
+  as results-driven achievement graphics at $625–$3,000/yr. *Needs US sales presence;
+  strongest math plus a wedge incumbents lack. Confidence of £1M solo: <15%; higher with
+  a US partner/hire.*
+- **Route C — Content/integration layer for swim-data incumbents** (de-risks
+  distribution). License/sell the content engine to SwimTopia/TeamUnify rather than fight
+  them. *Trades upside for survival probability; possibly the most realistic high-value
+  exit. Confidence it beats going direct: ~50/50.*
+
+**Highest-leverage combination:** governing-body endorsement (PC.6) for *distribution* +
+US-schools repositioning (Route B) for *revenue*.
+
+---
+
 ## Phase 3 — Broaden ingestion spokes · P3 · ❌ **NOT STARTED**
 
 **Goal.** Ingest beyond swimming and normalise every spoke to the canonical schema,
@@ -459,7 +618,8 @@ the no-hidden-fees promise** the whole roadmap is built around.
 | Investment | Status | Notes |
 |---|---|---|
 | No-hidden-fees discipline | 🔵 | Enforced via [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md); every paid path stays optional with a free default. |
-| Multi-tenancy: org → workspace | ⚠️ partial | Cross-tenant isolation invariant shipped; generalise org to per-team workspace. Reference Postiz/Mixpost schemas over a network boundary (never embed AGPL). |
+| Multi-tenancy: org → workspace | ❌ **blocking** | **Prerequisite for commercial scale (PC.3), not a nice-to-have** — single-instance-per-club can't scale. Cross-tenant isolation invariant shipped (the foundation only); generalise org → per-team workspace in one shared instance. Reference Postiz/Mixpost schemas over a network boundary (never embed AGPL). |
+| Go-to-market / distribution | ❌ not started | The build/sell imbalance is the #1 risk (PC.6): governing-body endorsement (Swim Wales / Swim England), annual prepay, and a deliberate build/sell rebalance. See [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). |
 | Safeguarding / minors' data | ✅ locked | Isolation invariant per [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md); applies with extra force to autonomous post types. |
 | Explainability & audit trail | 🔵 partial | Every step explainable; extend the run audit trail to autonomous-publish decisions (P2.3). |
 | Product design / UI polish | ❌ | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
@@ -470,41 +630,51 @@ the no-hidden-fees promise** the whole roadmap is built around.
 
 ## Immediate next moves
 
-A recommended ordered backlog — roughly one focused session per phase, each with its
-own exit criterion. (Full backlog in the rebuild's `CHANGES`/PR.)
+A recommended ordered backlog — each with its own exit criterion. (Full backlog in the
+rebuild's `CHANGES`/PR.)
 
-**Re-sequenced (2026-06 reconcile):** the revealed priority of recent work is
-**product quality on the swim wedge**, not the grand expansions — so the asset-quality
-item (P1.4 Tier A) jumps to the front, and the expansions (multi-sport, direct
-publishing, local-AI) stay deferred until the wedge is genuinely good.
+**Re-sequenced (2026-06 commercial reconcile).** The prior reconcile rightly put
+**product quality on the swim wedge** ahead of the grand expansions. The scaling
+diligence ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))
+adds the missing half: **the binding constraint is monetisation/distribution, not
+capability.** So the **commercial gate (Phase C) is now #1** — ahead of *everything*,
+including more graphics polish — and P3/P4/P5 are explicitly deferred behind it **and** a
+*≥10 clubs paying annually* gate.
 
-1. **P1.4 Tier A — ✅ shipped (PR #259).** The 6-archetype library + deterministic
-   picker + autofit/saliency/role tokens render behind `MEDIAHUB_GEN_V2`; a pack now
-   spans ≥6 distinct archetypes and long names never overflow.
-1b. **P1.4 Tier B — *active next*.** The LLM design-spec director (SEQ-2): the model
-   chooses archetype / colour-roles / hero-stat / hook per moment, emits N candidates,
-   and a deterministic APCA/ΔE2000 **brand-compliance check** ranks them (generalising
-   Tier A's accent-legibility guard). Building blocks (`design_spec.py`,
-   `variant_metrics.py`) exist; keep the Tier A picker as the honest fallback floor.
-   *Exit:* a ranked, compliance-scored shortlist of ≥4 distinct candidates per card.
-2. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
+1. **Phase C — Commercialise & Distribute (🥇 top priority).** Self-serve signup + auth
+   (PC.1), Stripe billing (PC.2), **true multi-tenancy** (PC.3), validated pricing with
+   annual prepay (PC.4), the free-self-host call (PC.5), and GTM/distribution (PC.6).
+   *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
+   **Nothing below ships ahead of this.**
+2. **P1.4 graphics — finish only to the "sellable wedge" bar.** Tier A shipped (PR
+   #259); Tier B (the LLM design-spec director, SEQ-2) continues — but **scoped to what
+   makes the swim wedge demonstrably good enough to sell, not gold-plated**, and **no
+   longer ranked above billing.** *Exit:* swim packs are good enough that a club will pay;
+   then stop polishing and sell. (Building blocks `design_spec.py` / `variant_metrics.py`
+   exist; keep the Tier A picker as the honest fallback floor.)
+3. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
    *Exit:* a zero-license deployment renders reels. (Biggest hidden-cost win.)
-3. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
+4. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
    strategy brain over sport profiles. *Exit:* a ranked plan for ≥2 profiles.
-4. **P2 — finish autonomy (UI + gate).** The substrate shipped in-process; what's left
-   is the per-type toggle (P2.2/P2.4) + the publish gate/kill-switch (P2.3) + resolving
-   the two `AutonomyLevel` enums. *Exit:* `fully_autonomous` publishes only when
-   guardrails pass.
-5. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real
-   data spoke. (`results_fetch/` already does sport-agnostic *ingestion*; this adds the
-   per-sport *detector*.) *Exit:* one non-swimming sport produces content end-to-end.
-6. **P4 — Free direct publishing.** Bluesky + Mastodon adapters; demote Buffer.
-   *Exit:* publish to ≥2 platforms incl. one free.
-7. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with
-   no cloud keys.
+5. **P2 — finish autonomy (UI + gate).** The substrate shipped in-process; what's left is
+   the per-type toggle (P2.2/P2.4) + the publish gate/kill-switch (P2.3) + resolving the
+   two `AutonomyLevel` enums. *Exit:* `fully_autonomous` publishes only when guardrails
+   pass.
 
-Run a **pilot** in parallel (one real club, the themed product) to surface UX holes
-the audits can't — see [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md).
+**Deferred behind the commercial gate AND "≥10 clubs paying annually":**
+
+6. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real data
+   spoke. (`results_fetch/` already does sport-agnostic *ingestion*; this adds the
+   per-sport *detector*.) *Gated:* no new sport until ≥10 clubs pay annually. *Exit:* one
+   non-swimming sport produces content end-to-end.
+7. **P4 — Free direct publishing.** Bluesky + Mastodon adapters; demote Buffer. *Exit:*
+   publish to ≥2 platforms incl. one free.
+8. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with no
+   cloud keys.
+
+Run a **pilot** in parallel (one real club, the themed product) to surface UX holes the
+audits can't — see [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md). The pilot now doubles as the
+first hand-sell toward the Phase C traction gate.
 
 ---
 
@@ -520,9 +690,10 @@ this lineage note:
   Its local `§0–§5` / `PAR-*` / `SEQ-*` numbering is self-contained.
 - **Appendix B — Growth & Expansion (Steps 8–17).** ⚠️ **Legacy sequence,
   superseded.** Written against the older *Parity → Distinction → Leadership* spine.
-  Its still-relevant steps are absorbed by the new phases (sport expansion → **P3**;
-  publishing → **P4**; agentic/autonomy → **P2**; commercial/enterprise → cross-cutting).
-  Where it conflicts with the new strategy, **the Phase 0–5 spine wins.** Retained for
+  Its still-relevant steps are absorbed by the new phases (commercial/enterprise →
+  **Phase C** — Step 7 → PC.1/PC.2/PC.4, Step 14's org→club hierarchy → PC.3; sport
+  expansion → **P3**; publishing → **P4**; agentic/autonomy → **P2**).
+  Where it conflicts with the new strategy, **the Phase C + 0–5 spine wins.** Retained for
   step-level execution detail only.
 - **Appendix C — Adaptive Theming Engine verification.** Current. Verifies the
   **shipped** theming engine summarised under "Where we are today" (see
@@ -1099,6 +1270,18 @@ Sequential Spine (§3) in order.*
 
 ##### Context
 MediaHub has no commercial layer today. The plan is to ship public pricing, self-serve signup, and a free tier alongside Phase 1's product improvements so commercial pressure surfaces during iteration.
+
+> ⚠️ **Promoted & repriced (2026-06 reconcile).** This step is no longer "alongside
+> Phase 1" — it is the front-of-queue **Phase C** (signup → **PC.1**, Stripe → **PC.2**,
+> tiers/pricing → **PC.4**). The scaling diligence
+> ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)) makes
+> it the **top priority**, ahead of expansion. **The `Free / Club £30/mo / Federation
+> £250/mo` figures in the prompt below are ⚠️ unvalidated and too low** — candidate
+> repricing: **Club £49–£99/mo billed annually, Federation £250+/mo**, with **annual
+> prepay** (SMB/volunteer churn is 3–7%/mo; annual billing cuts it ~30–40%). Treat the
+> code-block prompt below as legacy execution detail; Phase C and
+> [`adr/0011-commercial-reconcile-revenue-reality.md`](adr/0011-commercial-reconcile-revenue-reality.md)
+> are the current source of truth.
 
 ##### Implementation Prompt
 
@@ -1782,6 +1965,15 @@ OUTPUT: single report.
 
 ##### Context
 The financial backbone of the strategy. Governing bodies, leagues, federations, and large university athletic departments need multi-club orchestration: branded league templates, federation-wide engagement analytics, sponsorship reporting across clubs.
+
+> ⚠️ **Partly promoted (2026-06 reconcile).** The **Organisation → Club → Run hierarchy /
+> multi-tenancy** half of this step is no longer a far-future "leadership" item — it is
+> pulled forward to **Phase C · PC.3** as a **blocking prerequisite**, because
+> single-instance-per-club can't scale (ops/support rise linearly vs. fixed founder
+> hours). The *federation analytics / template-push / sponsorship-report* surfaces remain
+> later-stage. See
+> [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) and
+> [`adr/0011-commercial-reconcile-revenue-reality.md`](adr/0011-commercial-reconcile-revenue-reality.md).
 
 ##### Implementation Prompt
 
