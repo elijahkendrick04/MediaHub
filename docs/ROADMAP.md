@@ -1082,7 +1082,7 @@ top. The archetype must read *structurally distinct* from `individual_hero` /
 `magazine_cover`, `ticker_strip`, `stat_stack_sidebar`, `triptych_progression`,
 `quote_led_recap`, `big_number_dominant`, `duo_athlete_split`, `minimal_type_poster`.
 
-**Progress (PAR-7 catalog, auto-run):** 10 of 12 archetypes live — `magazine_cover` added 2026-06-09 (a sports-magazine cover: masthead + headline-over-photo + marginal cover-line column + circular coverstar burst). Representative seeds-0..9 pack archetype-diversity 0.90 → **1.00**; library distinctiveness floor unchanged (new archetype nearest-neighbour dHash 0.38, in-band, not a reskin). Remaining: `quote_led_recap`, `duo_athlete_split`. See `docs/build_reports/GEN_QUALITY_BASELINE.md`.
+**Progress (PAR-7 catalog, auto-run):** 11 of 12 archetypes live — `quote_led_recap` added 2026-06-09 (an editorial pull-quote recap: light surface ground + left accent quote-bar + oversized hanging quote glyph + ragged left column + inline accent-underlined result + em-dash attribution rule; purely typographic, strong no-photo pick). Representative seeds-0..9 pack archetype-diversity stays saturated at **1.00**; library grows 10 → **11**; new archetype nearest-neighbour dHash 0.32 sits above the pre-existing library distinctiveness floor (0.309) so the floor is unchanged (genuine new structure, not a reskin). Remaining: `duo_athlete_split`. See `docs/build_reports/GEN_QUALITY_BASELINE.md`.
 
 **Implementation prompt (template — fill in `<NAME>`):**
 > [Preamble.] Author ONE new graphic archetype `graphic_renderer/layouts/v2/<NAME>.html`
