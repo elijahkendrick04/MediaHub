@@ -55,3 +55,12 @@ PyYAML>=6.0
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,
 # maintained under the Pallets-Eco (Flask) org; deps python-dateutil + pytz.
 croniter>=2.0
+
+# Phase C commercial layer (web/auth.py + web/billing.py). bcrypt (Apache-2.0)
+# hashes account passwords — used directly because passlib 1.7.x cannot load a
+# bcrypt 4.1+/5.x backend. stripe (MIT) is the official SDK for Checkout, the
+# Customer Portal, and webhook signature verification. Both are optional at
+# runtime: with no STRIPE_* env configured, billing honest-errors (503) and the
+# rest of the app is unaffected.
+bcrypt>=4.0
+stripe>=7.0
