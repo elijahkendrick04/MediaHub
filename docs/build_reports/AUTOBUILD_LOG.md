@@ -10,6 +10,19 @@ lives at the top.
 ## HANDOFF (latest)
 
 1. ✅ **Production health: healthy.** `https://mediahub-gzwc.onrender.com`
+   `/healthz` returns `{"ok":true,"version":"v4.0.0"}`. PR #272 is deployed live
+   on Render (commit `0d8a45e`, build green).
+2. 🟡 **Mid-flight: nothing half-merged.** No work is left in a partial state.
+   ⚠️ NOTE: a concurrent actor merged **PR #273** (graphics archetype **PAR-7**)
+   to `main` immediately after #272, so a second autobuilder — or the operator —
+   may be working in parallel. Watch for collisions (rebase before you push, and
+   re-check `main` head before merging).
+3. ⛔ **Single next task.** **PC.3** (true multi-tenancy, org → workspace) is
+   **BLOCKED** pending operator/Council sign-off on the schema, because it
+   touches the locked cross-tenant isolation invariant (**ADR-0003**). Until that
+   sign-off lands, the next unblocked autonomous item is **P1.4 graphics Tier B**
+   (sellable-wedge bar) **or P0.1 Remotion free-fallback**. Add **no new running
+   cost**.
    `/healthz/deps` returns `{"ok":true,…,"deps":{"reel_engine":{"active":"remotion",
    "remotion_available":true,…}}}`. PR #280 is deployed live on Render
    (commit `13f776d`, all CI checks green).
