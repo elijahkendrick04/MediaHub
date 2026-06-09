@@ -11,14 +11,40 @@ issue log, proposals) lives in [`USABILITY_REGISTER.md`](USABILITY_REGISTER.md).
 
 - **Production health: HEALTHY** (v4.0.0, `/health` ok). Brief cold-start 502s
   are normal on the single-CPU free box and recover in seconds.
-- **Open defects: 0** (P1 0 / P2 0 / P3 0). One non-defect proposal **P-1** is
-  logged. No next-up defect.
-- **In flight: none half-merged.** This run shipped a docs-only PR establishing
-  the register + log (no code change).
+- **Open defects: 0** (P1 0 / P2 0 / P3 0) after merge of this run's fix. One
+  non-defect proposal **P-1** is logged. No next-up defect.
+- **In flight: none half-merged.** This run fixed the /activity Failed count-up
+  "01" display bug (P3) guarded by `tests/test_activity_count_up.py`.
 
 ---
 
 ## Run entries (newest first)
+
+### 2026-06-09 — UX-001 fix: /activity Failed stat "01" → "1"
+
+**Defect fixed (P3 — UX-001).**
+The "Failed" summary stat card on `/activity` rendered `01` instead of `1` when
+the failed-run count was a single digit. Root cause: the server-side Python
+template used `:02d` formatting (which zero-pads single digits) for the initial
+`textContent` of all stat cards except Achievements; the count-up animation JS
+also lacked thousands-comma formatting. Both surfaces now use the same `:,`
+equivalent: no leading zeros, comma separators for thousands (matching the
+"3,198" Achievements card that was already correct).
+
+**Changes.**
+- `src/mediahub/web/web.py`: three Python f-string stat-card templates changed
+  from `:02d` to `:,`; JS `animateCount` gains a `_fmtN` helper that applies
+  thousands commas and replaces all three `toFixed(dp)` calls.
+- `tests/test_activity_count_up.py`: new server-side + Playwright regression
+  guard (skips when Playwright/Chromium absent, matching `test_browser_cascade`
+  pattern).
+
+**Defects.**
+Discovered: 1 (UX-001). Fixed: 1. Regression test added: 1.
+
+**PR.** `claude/ux-activity-failed-count`.
+
+---
 
 ### 2026-06-09 — first usability run
 
