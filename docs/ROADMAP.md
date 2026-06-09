@@ -400,7 +400,7 @@ plan to act on) and **P3** (new sports need profiles).
 
 ---
 
-## Phase 2 — Autonomy toggles + orchestration backbone · P2 · 🔵 **IN PROGRESS — substrate shipped; UI + per-type policy pending**
+## Phase 2 — Autonomy toggles + orchestration backbone · P2 · 🔵 **IN PROGRESS — substrate + per-type policy shipped; P2.2 partially subsumed; P2.3 partial**
 
 **Goal.** Put every content type on a durable workflow with an **optional
 human-approval signal**; implement the guardrails + kill switch + audit trail;
@@ -438,8 +438,9 @@ provenance. **Remaining:** wire these into a single per-type *publish gate* with
 brand-safety check and a global kill switch, on `recognition.schema.SafeToPost`. The
 safeguarding posture from ADR-0003 applies to minors' data.
 
-### P2.4 — Per-type autonomy controls in the workspace · ❌ **NOT STARTED**
+### P2.4 — Per-type autonomy controls in the workspace · ✅ **DONE**
 Surface the toggle; default everything gated; warn before enabling `fully_autonomous`.
+Shipped + live (PR #297): Settings>Autonomy tab with per-profile per-type policy defaulting to approval_required; publish gate consults the policy behind the global kill switch; /healthz/deps exposes per_type_autonomy. Canonical enum = sport_profiles.autonomy.AutonomyLevel; the second AutonomyLevel enum still needs reconciliation.
 
 **Building blocks.** **Temporal** (MIT — truly free to self-host; 3,000+ paying
 customers incl. Snap/Netflix/Stripe) for the backbone + human-in-the-loop signal.

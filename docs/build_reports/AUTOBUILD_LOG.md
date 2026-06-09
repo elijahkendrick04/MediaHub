@@ -40,6 +40,56 @@ lives at the top.
 
 ## Cycles (newest first)
 
+### 2026-06-09 — P2.4 per-type autonomy controls in workspace
+
+**Task chosen and why.** P2.4 was the next unblocked autonomy surface task:
+the runner substrate (P2.1) and global kill switch (P2.3 partial) already
+shipped; P2.2/P2.4 (the per-type toggle + workspace UI) were the missing product
+surface. All work is additive and default-gated — the production path is
+byte-identical with everything off.
+
+**Shipped via PR #297** (merged to `main`, commit `c63df08`, deployed live):
+
+- **`src/mediahub/publishing/per_type_policy.py`** (new) — per-profile JSON
+  policy store under `DATA_DIR/per_type_autonomy/<org_id>.json`. Maps each
+  `ContentType` to `AutonomyLevel`; defaults every type to `approval_required`
+  (most gated); old profiles with no file load cleanly as fully gated.
+- **`src/mediahub/publishing/type_gate.py`** (new) —
+  `assert_type_publishing_allowed(org_id, type)` checks the global kill switch
+  then the per-type policy; raises `TypeGated` (queue for human approval) unless
+  the type is `fully_autonomous`.
+- **`src/mediahub/web/web.py`** — `GET/POST /api/autonomy/policy` routes scoped
+  to the active org (403 with no active org); Settings > Autonomy controls tab
+  listing all 6 `ContentType`s with selects, a `fully_autonomous` warning callout,
+  and AJAX save; `/healthz/deps` additively exposes `per_type_autonomy` summary
+  (never affects `ok` flag).
+- **`tests/test_per_type_autonomy.py`** (new) — 25 tests: defaults are fully
+  gated; setting a level persists per-profile; cross-profile isolation; publish
+  gate blocks unless `fully_autonomous` AND kill switch off; old profiles load as
+  gated; UI round-trips (GET + POST).
+
+**Tests.** 3567 passed, 1 skipped (pre-existing opt-in render-diff regression),
+0 new failures. All 6 CI checks green. No test deleted/skipped/weakened. `ruff`
+v0.8.4 clean. Self-corrected two issues mid-build: (1) hex-literal CSS-var
+fallbacks (e.g. `var(--bg,#1a1a1a)`) tripping the theme-tokens hex-budget test
+— removed fallbacks; (2) ruff-format pre-commit CI failed on `web.py` cosmetic
+reformatting — re-ran `pre-commit run ruff-format` and pushed.
+
+**PR.** https://github.com/elijahkendrick04/MediaHub/pull/297
+
+**Canonical enum.** `sport_profiles.autonomy.AutonomyLevel`
+(`draft_only` / `approval_required` / `fully_autonomous`) — the publishing-policy
+axis. `autonomy.tools.AutonomyLevel` (`OFF/SUGGEST/DRAFT/PREPARE`) is the
+runner-reach axis; the two enums are NOT collapsed (ROADMAP.md guidance).
+Reconciliation queued for a future cycle.
+
+**Live-verify.** Post-deploy: `/healthz/deps` returns `per_type_autonomy` key
+with `ok:true`; `/settings` renders Autonomy tab with 6 selects defaulted to
+Approval required; persistence round-trip (`draft_only` → save → reload → restore)
+confirmed; core journey (`/` 200, `/make` 200) intact.
+
+---
+
 ### 2026-06-09 — P0.1 slice 1: reel render-engine selection seam
 
 **Task chosen and why.** The HANDOFF listed **P0.1 Remotion free-fallback** as
