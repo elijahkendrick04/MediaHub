@@ -12677,6 +12677,7 @@ Relay team broke club record"></textarea>
             deps["reel_engine"] = {"error": str(_re_err)[:200]}
         try:
             from mediahub.publishing.kill_switch import kill_switch_status
+
             deps["publish_kill_switch"] = kill_switch_status()
         except Exception as _ks_err:
             deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
@@ -14168,16 +14169,19 @@ Relay team broke club record"></textarea>
         channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
 
         from mediahub.publishing.kill_switch import publish_kill_switch_engaged
+
         if publish_kill_switch_engaged():
-            return jsonify({
-                "ok": False,
-                "error": "publishing_halted",
-                "message": (
-                    "Publishing is currently halted by the operator kill switch."
-                    " No post was sent."
-                ),
-                "caption": caption,
-            }), 503
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "publishing_halted",
+                    "message": (
+                        "Publishing is currently halted by the operator kill switch."
+                        " No post was sent."
+                    ),
+                    "caption": caption,
+                }
+            ), 503
 
         for cid in channel_ids:
             try:
