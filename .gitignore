@@ -86,3 +86,6 @@ autotest/cache/
 autotest/STOP
 autotest/reports/council/*
 !autotest/reports/council/.gitkeep
+
+# Background-agent isolated git worktrees (transient harness state; never commit)
+.claude/worktrees/
