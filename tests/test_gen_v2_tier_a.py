@@ -120,6 +120,20 @@ def test_picker_is_deterministic_and_spreads():
     assert picks == set(names)
 
 
+def test_picker_avoiding_walks_past_recent():
+    names = archetypes.list_archetypes()
+    # empty recents → identical to the strict seeded pick
+    first = archetypes.pick_archetype_avoiding(4, [])
+    assert first == archetypes.pick_archetype(4)
+    # the seeded pick was recently used → step to a different archetype
+    second = archetypes.pick_archetype_avoiding(4, [first])
+    assert second in names and second != first
+    # deterministic: same seed + same recents → same pick
+    assert archetypes.pick_archetype_avoiding(4, [first]) == second
+    # everything recently used → degrade to the strict seeded pick
+    assert archetypes.pick_archetype_avoiding(4, names) == archetypes.pick_archetype(4)
+
+
 # --------------------------------------------------------------------------- #
 # Archetype authoring convention (PAR-7 hygiene)
 # --------------------------------------------------------------------------- #
@@ -155,6 +169,107 @@ def test_generator_swaps_to_v2_when_flag_on(monkeypatch):
     # every chosen layout is a real v2 archetype, and a pack spans them all
     assert chosen <= set(archetypes.list_archetypes())
     assert len(chosen) >= 6
+
+
+def _brief_for_item(item, *, seed=0, recent=None):
+    return gen_brief(
+        item,
+        _eval(),
+        _brand(),
+        profile_id="test",
+        meet_name="Manchester Open",
+        variation_seed=seed,
+        recent_signatures=recent,
+    )
+
+
+def test_pack_without_seeds_still_spreads_archetypes(monkeypatch):
+    """The bulk-pack call shape (attach_visuals_to_pack) passes NO variation
+    seed. The floor must derive a per-card seed from the card id so a pack
+    still spreads across the library — not render one archetype 12 times."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    chosen = []
+    for i in range(12):
+        item = {
+            "id": f"card-{i}",
+            "post_angle": "individual_pb",
+            "achievement": {
+                "swimmer_name": "Eira Hughes",
+                "event_name": "200m Freestyle",
+                "result_time": "2:08.41",
+            },
+        }
+        chosen.append(_brief_for_item(item).layout_template)
+    assert set(chosen) <= set(archetypes.list_archetypes())
+    assert len(set(chosen)) >= 6  # §8C archetype-diversity floor
+    # …and the pick is stable per card (same id → same archetype on re-render)
+    item0 = {
+        "id": "card-0",
+        "post_angle": "individual_pb",
+        "achievement": {"swimmer_name": "Eira Hughes", "event_name": "200m Freestyle"},
+    }
+    assert _brief_for_item(item0).layout_template == chosen[0]
+
+
+def test_pack_with_threaded_recents_avoids_seed_collisions(monkeypatch):
+    """attach_visuals_to_pack threads each rendered signature into the next
+    card's recents (a 6-deep window), so two cards whose id-hashes collide on
+    the same archetype rotate apart. The structural guarantee — independent of
+    library size — is that any 7 consecutive cards are pairwise distinct."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    recents: list[str] = []
+    chosen = []
+    for i in range(10):
+        item = {
+            "id": f"swim-{i:03d}",
+            "post_angle": "individual_pb",
+            "achievement": {
+                "swimmer_name": "Eira Hughes",
+                "event_name": "200m Freestyle",
+                "result_time": "2:08.41",
+            },
+        }
+        brief = _brief_for_item(item, recent=recents[-6:])
+        chosen.append(brief.layout_template)
+        recents.append(brief.variation_signature)
+    for start in range(len(chosen) - 6):
+        window = chosen[start : start + 7]
+        assert len(set(window)) == 7, (start, window)
+    assert len(set(chosen)) >= 7  # comfortably above the §8C 0.60 floor
+
+
+def test_fresh_regenerate_rotates_without_a_provider(monkeypatch):
+    """The regenerate route's no-LLM floor: seed=0 plus the card's recent
+    signatures must walk the library, not return the same archetype forever."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    item = {
+        "id": "ci-1",
+        "post_angle": "individual_pb",
+        "achievement": {"swimmer_name": "Eira Hughes", "event_name": "200m Freestyle"},
+    }
+    recents: list[str] = []
+    seen = []
+    for _ in range(6):
+        brief = _brief_for_item(item, recent=recents[-6:])
+        seen.append(brief.layout_template)
+        recents.append(brief.variation_signature)
+    assert len(set(seen)) == 6, seen  # six regenerates → six distinct archetypes
+
+
+def test_explicit_seed_stays_reproducible_and_ignores_recents(monkeypatch):
+    """?stable / ?variation_seed=N contract: an explicit seed is an exact pick,
+    even when the history already contains that archetype."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    expected = archetypes.pick_archetype(5)
+    brief = _brief(seed=5)
+    assert brief.layout_template == expected
+    item = {
+        "id": "ci-1",
+        "post_angle": "individual_pb",
+        "achievement": {"swimmer_name": "Eira Hughes", "event_name": "200m Freestyle"},
+    }
+    again = _brief_for_item(item, seed=5, recent=[f"{expected}|#0E5BFF|gradient"])
+    assert again.layout_template == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -290,6 +405,138 @@ def test_fit_one_line_keeps_multiword_surname_on_one_line():
         surname, box_w, 1350 * 0.18, font_family="Anton", weight=400, min_px=44, max_px=132
     )
     assert em_width(surname, font_family="Anton", weight=400) * px <= box_w + 1
+
+
+# --------------------------------------------------------------------------- #
+# Medal tier, hero stat, and AI-background economy on the v2 path
+# --------------------------------------------------------------------------- #
+
+
+def _medal_item(place="1"):
+    return {
+        "id": "ci-medal",
+        "post_angle": "medal_gold",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+            "place": place,
+        },
+    }
+
+
+def test_medal_card_tints_v2_accent_with_the_metal(monkeypatch, tmp_path):
+    """v1 makes a gold card READ gold (the colour is the information). The v2
+    role resolver must do the same — APCA-gated, deep metal on light grounds."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    brief = _brief_for_item(_medal_item())
+    html = _render_html(monkeypatch, tmp_path, brief)
+    assert "--mh-accent:#FFD24A;" in html  # bright gold reads on the dark brand
+
+    # On a light club ground the bright gold fails the gate → deep gold.
+    import mediahub.graphic_renderer.render as R
+
+    light = BrandKit(
+        profile_id="light",
+        display_name="Light SC",
+        primary_colour="#F5F7FA",
+        secondary_colour="#101820",
+        short_name="LSC",
+    )
+    brief2 = gen_brief(
+        _medal_item(),
+        _eval(),
+        light,
+        profile_id="light",
+        meet_name="Manchester Open",
+        variation_seed=0,
+    )
+    captured = {}
+
+    def _fake_png(html, output_path, size):
+        captured["html"] = html
+        from pathlib import Path
+
+        Path(output_path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return 8
+
+    monkeypatch.setattr(R, "render_html_to_png", _fake_png)
+    R.render_brief(brief2, output_dir=tmp_path / "light", size=(1080, 1350), brand_kit=light)
+    assert "--mh-accent:#A77A07;" in captured["html"]
+
+
+def test_hero_stat_filled_from_measured_drop_only(monkeypatch, tmp_path):
+    """{{HERO_STAT}} carries a real measured fact (the detectors' drop_seconds)
+    and stays empty when nothing was measured — never a fabricated number."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    item = {
+        "id": "ci-1",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+            "raw_facts": {"drop_seconds": 2.4},
+        },
+    }
+    brief = _brief_for_item(item)
+    assert brief.text_layers.get("hero_stat") == "−2.40s on PB"
+    html = _render_html(monkeypatch, tmp_path, brief)
+    assert "−2.40s on PB" in html
+    # no measured facts → the slot is empty (and the layout collapses it)
+    assert _brief().text_layers.get("hero_stat", "") == ""
+
+
+def test_tenth_place_is_not_a_medal(monkeypatch, tmp_path):
+    """Tier detection parses the placing as a number: 10th/12th place must NOT
+    tint the card gold (the old prefix match did exactly that)."""
+    from mediahub.graphic_renderer.render import _detect_medal_tier
+
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    item = {
+        "id": "ci-12th",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+            "place": "12",
+        },
+    }
+    brief = _brief_for_item(item)
+    assert _detect_medal_tier(brief) is None
+    html = _render_html(monkeypatch, tmp_path, brief)
+    assert "--mh-accent:#FFD24A;" not in html
+
+
+def test_hero_stat_uses_placing_when_no_drop(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    item = {
+        "id": "ci-2",
+        "post_angle": "individual_pb",
+        "achievement": {
+            "swimmer_name": "Eira Hughes",
+            "event_name": "200m Freestyle",
+            "result_time": "2:08.41",
+            "place": "2",
+        },
+    }
+    assert _brief_for_item(item).text_layers.get("hero_stat") == "2nd place"
+    # on a medal angle the label already says it — don't repeat it in the slot
+    assert _brief_for_item(_medal_item(place="1")).text_layers.get("hero_stat", "") == ""
+
+
+def test_v2_render_never_fetches_the_ai_background(monkeypatch, tmp_path):
+    """v2 archetypes have no {{AI_BG_URI}} slot, so the (paid) background
+    fetch must not run for them even when the provider is configured."""
+    import mediahub.visual.ai_background as ai_bg
+
+    calls = []
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    monkeypatch.setattr(ai_bg, "is_available", lambda: True)
+    monkeypatch.setattr(ai_bg, "background_data_uri_for", lambda *a, **k: calls.append(a) or None)
+    _render_html(monkeypatch, tmp_path, _brief(seed=1))
+    assert calls == []
 
 
 # --------------------------------------------------------------------------- #

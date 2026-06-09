@@ -361,8 +361,15 @@ def attach_visuals_to_pack(
     formats: Optional[list[str]] = None,
     max_per_bucket: Optional[int] = None,
 ) -> dict:
-    """Walk the pack buckets and attach a ``visuals`` list to each item."""
+    """Walk the pack buckets and attach a ``visuals`` list to each item.
+
+    Each rendered brief's variation signature is threaded into the next item's
+    ``recent_signatures``, so the deterministic archetype floor rotates past a
+    seed collision instead of repeating a composition within the same pack —
+    the same dedupe the per-card route keeps in its variation history.
+    """
     only = set(only_buckets)
+    recent_sigs: list[str] = []
     for bucket_name, bucket in list(pack.items()):
         if bucket_name not in only:
             continue
@@ -384,11 +391,15 @@ def attach_visuals_to_pack(
                 media_assets=media_assets,
                 sponsor_name=sponsor_name,
                 formats=formats,
+                recent_signatures=recent_sigs[-6:],
             )
             item["visuals"] = res.get("visuals", [])
             item["visual_brief"] = res.get("brief")
             item["visual_evaluation"] = res.get("evaluation")
             item["visual_errors"] = res.get("errors") or None
+            sig = (res.get("brief") or {}).get("variation_signature")
+            if sig:
+                recent_sigs.append(sig)
             if res.get("visuals"):
                 rendered += 1
     return pack

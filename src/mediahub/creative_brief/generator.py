@@ -431,6 +431,28 @@ def generate(
         for k, v in nums.items():
             layers[f"stat_{k}"] = str(v)
 
+    # v2 archetypes carry an optional emphasis slot ({{HERO_STAT}}) so the
+    # composition can lead with a secondary fact. Honest by construction:
+    # only facts the detectors actually measured are offered — absent data
+    # leaves the slot empty and every archetype collapses it gracefully.
+    _drop_raw = raw_facts.get("drop_seconds") or raw_facts.get("improvement_seconds")
+    try:
+        _drop = abs(float(_drop_raw)) if _drop_raw not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        _drop = 0.0
+    hero_stat_options: dict[str, str] = {}
+    if _drop >= 0.01:
+        hero_stat_options["pb_delta"] = f"−{_drop:.2f}s on PB"
+    _place_line = _place_display(place)
+    if _place_line:
+        hero_stat_options["placing"] = _place_line
+    # Deterministic default: lead with the PB drop when measured; else the
+    # placing — except on medal angles, where the label already carries it.
+    if "pb_delta" in hero_stat_options:
+        layers["hero_stat"] = hero_stat_options["pb_delta"]
+    elif "placing" in hero_stat_options and not _is_medal_angle(angle):
+        layers["hero_stat"] = hero_stat_options["placing"]
+
     # Palette
     base_primary = getattr(brand_kit, "primary_colour", "#A30D2D")
     base_secondary = getattr(brand_kit, "secondary_colour", "#000000")
@@ -674,8 +696,31 @@ def generate(
                 if _spec.rationale:
                     brief.why_this_design = _spec.rationale
                 brief.ai_directed = True
+                # Lead the emphasis slot with the director's hero_stat when the
+                # named fact was actually measured — never fabricate one.
+                if _spec.hero_stat in hero_stat_options:
+                    layers["hero_stat"] = hero_stat_options[_spec.hero_stat]
             elif _names:
-                _arch = _v2_archetypes.pick_archetype(variation_seed)
+                if variation_seed:
+                    # Explicit seed (incl. ?stable / re-render): exact pick, so
+                    # the same seed always reproduces the same archetype.
+                    _arch = _v2_archetypes.pick_archetype(variation_seed)
+                else:
+                    # No seed supplied (bulk pack render / fresh regenerate):
+                    # the roadmap floor — seed from the card id so a pack
+                    # spreads across the library (stable per card, different
+                    # across cards), rotated past this card's recently-used
+                    # archetypes so regenerates vary without an LLM.
+                    _card_key = str(
+                        content_item.get("id")
+                        or content_item.get("swim_id")
+                        or ach.get("swim_id")
+                        or ""
+                    )
+                    _arch = _v2_archetypes.pick_archetype_avoiding(
+                        auto_variation_seed_for(_card_key or None),
+                        (s.split("|", 1)[0] for s in (recent_signatures or []) if s),
+                    )
                 if _arch:
                     brief.layout_template = _arch
     except Exception:  # never break brief generation for an optional feature
@@ -1087,6 +1132,26 @@ def _is_medal_angle(angle: str) -> bool:
         "bronze_medal",
         "podium_finish",
     }
+
+
+def _place_display(place) -> str:
+    """Human display for a placing fact — ``1`` / ``"1st"`` / ``"1."`` → ``"1st place"``.
+
+    Returns ``""`` for empty input; a non-numeric value that already reads as
+    an ordinal gets the " place" suffix, anything else passes through as-is
+    (never invent a placing that wasn't detected).
+    """
+    s = str(place or "").strip().rstrip(".")
+    if not s:
+        return ""
+    if s.isdigit():
+        n = int(s)
+        if 10 <= n % 100 <= 20:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+        return f"{n}{suffix} place"
+    return f"{s} place" if s.lower().endswith(("st", "nd", "rd", "th")) else s
 
 
 def random_variation_profile(
