@@ -107,6 +107,33 @@ and P5 (local-AI) are **deferred — not deleted** — behind two gates: *a club
 pay, and publish with zero founder involvement*, and *≥10 clubs paying annually*. Recorded
 in [adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md).
 
+**Realistic revenue by horizon (estimates — outcome odds, not guarantees).** The
+≈ £150k–£400k swimming-only ceiling above is a *saturation* figure; the table below
+decomposes it into horizons tied to the **PC.6 warm-first funnel's** club-count trajectory
+and the candidate **Club £49–£99/mo billed annually** price (≈ £588–£1,188 per club per
+year — **PC.4, unvalidated**). The *club-count↔ARR arithmetic and the sequencing are
+>95%-confidence-correct*; the *probability bands are honest estimates of the outcome*,
+flagged `[ESTIMATE]`, not commitments — they decline across horizons because each is
+conditional on the one before (compounding execution risk).
+
+| Horizon | Paying clubs | ARR @ £588–£1,188/club | Outcome probability `[ESTIMATE]` | Binding constraint |
+|---|---|---|---|---|
+| **H1 — Validation** (≤ ~12 mo) | ~10 (the traction gate) | ≈ £6k–£12k | **~40–55%**, *conditional on the founder actually running the warm + referral motion* — the dominant failure mode is the motion not being run, not the close rate | Founder selling-time; first revealed WTP (PC.4) |
+| **H2 — Early scale** (~1–2 yr) | ~30–60 | ≈ £18k–£71k | **~25–40%** — conditional on H1 + referral compounding + retention holding (annual prepay essential) | **PC.3 multi-tenancy** — single-instance ops collapse ~15–40 clubs |
+| **H3 — Swimming ceiling** (~2–4+ yr) | ~125–680 (price-dependent) | **≈ £150k–£400k** | **~10–20%** — needs sustained multi-year execution, meaningful UK *and* US penetration, and almost certainly a second person | Market size (~1,300 UK&I + ~2,740 USA clubs) + support capacity |
+| **H4 — £1M+ ARR** | (out of wedge) | **≥ £1M** | **low-double-digit-%** — only via multi-sport breadth (Route A) *and* institutional buyers (Route B) *and* a second person | Out-of-wedge expansion; not swimming-only |
+| **£1M/month (~£12M ARR)** | — | ~£12M | **not realistic** on any evidence reviewed | Directional north star only |
+
+> **Sequencing caveat (load-bearing):** every horizon past **~15–40 clubs is gated on PC.3
+> (true multi-tenancy)**, which is currently ⚠️ BLOCKING / escalated. Without it, per-club
+> ops cost rises linearly against fixed founder hours and caps revenue *below* the H3
+> market math regardless of demand — so the £150k–£400k ceiling is only reachable *if PC.3
+> ships*. Club-count↔ARR arithmetic and the ~£150k–£400k anchor derive from the sourced
+> market sizes and candidate price above (see
+> [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)); the
+> per-horizon probability bands are flagged estimates, consistent with the diligence's
+> low-double-digit-% confidence on £1M+.
+
 ---
 
 ## Roadmap status (auto-updated)
