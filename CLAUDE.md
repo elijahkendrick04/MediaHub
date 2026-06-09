@@ -44,7 +44,7 @@ data/                  — Runtime data: data.db (SQLite) + runs/cache under DAT
 
 ## Key Architecture Conventions
 
-- **Cloud-hosted SaaS** — MediaHub runs on the operator's managed deployment (Render is the reference target). Customers access via browser; there is no customer-facing local install path.
+- **Cloud-hosted SaaS, no self-host tier** — MediaHub is delivered solely as the operator's managed, hosted deployment (Render is the reference target); customers access it via the browser. There is **no customer-facing self-host or local-install path — free or paid**, and this is a deliberate commercial principle, not merely an architecture note. A "truly-free, no-hidden-fees self-host" tier was weighed and **rejected**: it hands power users a permanent zero-revenue escape hatch that cannibalises the SaaS. This closes the ADR-0011 "keep vs cap free self-host" question in the hosted-only direction (maintainer decision, 2026-06-09). Do NOT reintroduce a self-host/local-install *product* path, customer install docs, or "run it yourself" framing without explicit user sign-off. (The contributor dev setup in `docs/DEVELOPMENT.md` is engineering-only — not a customer path.)
 - **Flask monolith** — all routes in `web.py` via f-string Jinja2 templates
 - **DATA_DIR env var** — all storage paths derived from `DATA_DIR`; never hardcode `Path("data/...")`
 - **url_for() always** — never hardcode URL paths; use `url_for()` for all internal links
@@ -288,7 +288,9 @@ autonomously without human approval, gated only on green CI — `main` is a
 trunk that auto-deploys to Render production, so a red build must never be
 merged. (This replaces the former human-approval-before-`main` rule.)
 The product is delivered to customers as a hosted web application — there is
-no customer-facing self-host or local-install path.
+no customer-facing self-host or local-install path. This is a deliberate,
+decided commercial principle (hosted-only; no free or capped self-host tier) —
+see [`docs/adr/0011-commercial-reconcile-revenue-reality.md`](docs/adr/0011-commercial-reconcile-revenue-reality.md).
 
 ---
 

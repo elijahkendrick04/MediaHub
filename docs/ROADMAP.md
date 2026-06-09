@@ -65,7 +65,8 @@ themselves automatically whenever we ship something — you don't edit those by 
 **Strategic thesis:** MediaHub is a **content-strategy brain, not a results
 parser.** The moat is the intelligence layer — ingest → detect → rank → brand →
 generate → approve → export — now **generalised across sports** and made **largely
-autonomous**, on a stack that is **truly free to self-host with no hidden fees.**
+autonomous**, delivered as a **hosted SaaS** (hosted-only — no customer self-host
+tier; a decided principle, see [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)).
 Results ingestion is one spoke among many.
 
 **A commercial reality check (2026-06) — *commercialise before generalising*.** The
@@ -91,10 +92,11 @@ conclusions, now encoded below:
   £150k–£400k sustainable swimming business, with a low-double-digit-% shot at £1M+ only
   via sport/segment expansion plus a second person.
 - **Single-instance-per-club can't scale**, and **"truly free, no hidden fees"
-  self-host — as framed — cannibalises revenue.** Both are addressed by **Phase C** (true
-  multi-tenancy; and capping the free tier vs. consciously accepting a lower ceiling — an
-  open call recorded in the ADR). The **no-hidden-fees** product principle is now **in
-  tension** with the revenue goal; that tension is named, not hidden.
+  self-host — as framed — cannibalises revenue.** True multi-tenancy is delivered by
+  **Phase C**. The self-host tension is now **resolved (2026-06-09): hosted-only, no
+  customer self-host tier** — the "no-hidden-fees / truly-free self-host" product
+  principle is retired in favour of hosted SaaS (maintainer decision, see
+  [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)).
 - **The incumbent-bolts-on-content threat is currently LOW but is a *time advantage,
   not a moat*;** the horizontal commodity (Canva / Predis / Gipper's auto-achievement
   graphics) is the real pressure on price and narrative.
@@ -272,8 +274,11 @@ honest:
 
 ## Phase 0 — De-risk licensing & cost · P0 · 🔵 **IN PROGRESS**
 
-**Goal.** Guarantee the **no-hidden-fees / truly-free self-host** promise holds in
-the critical path *before* building on top of it.
+**Goal.** Keep the **operator's hosting cost and licensing liability low** in the
+critical path — no mandatory paid API and no embedded-AGPL lock-in. (Originally framed
+as guaranteeing a "truly-free self-host" promise; that promise is **retired** —
+hosted-only, see [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md) — but the
+cost/licensing de-risk still matters, now for the *hosted* deployment's margins.)
 
 **Exit criterion.** Zero **mandatory** paid API or dependency in the critical path;
 every paid option is behind a flag/env var with a documented free default; AGPL
@@ -424,7 +429,8 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 **Goal.** Make MediaHub **sellable without the founder in the loop**: self-serve signup +
 auth, Stripe billing, **true multi-tenancy** (org → workspace in one shared instance),
-validated pricing with annual prepay, a resolved free-self-host position, and a
+validated pricing with annual prepay, a resolved free-self-host position (**resolved:
+hosted-only** — [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)), and a
 go-to-market motion. Today there is **zero billing and zero customers** against ~164k LOC
 — the diligence's central "build/sell imbalance" finding.
 
@@ -463,14 +469,16 @@ real buyers** (a hypothesis, not a fixed price): **Club £49–£99/mo billed an
 3–7%/mo and annual billing cuts it ~30–40%. Kill the £30 anchor. *Ref: Appendix B Step 7
 tiers (annotated ⚠️ unvalidated there); [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
 
-### PC.5 — Resolve the free-self-host tension · ❌ **NOT STARTED — open call**
+### PC.5 — Free-self-host tension · ✅ **RESOLVED (2026-06-09): hosted-only**
 "Truly free, no hidden fees" self-host, as framed, hands power users a permanent
-zero-revenue escape hatch. **Default recommendation:** convert it into a **capped lead-gen
-tier** that deliberately lacks managed hosting, auto-publish, support SLAs, and
-multi-tenant admin (the things institutions pay for). **Alternative:** keep true-free
-self-host and *consciously accept a materially lower revenue ceiling.* This collides with
-the standing **no-hidden-fees** product principle, so it is an **open Council question**,
-not a unilateral flip — recorded in the ADR.
+zero-revenue escape hatch. **Resolved 2026-06-09 (maintainer decision): hosted-SaaS
+only — no customer self-host tier, free or capped.** Both earlier options — a capped
+lead-gen tier (the default recommendation) and keeping true-free self-host — were
+rejected in favour of hosted-only, the simplest principle that removes the zero-revenue
+escape hatch entirely rather than half-closing it. The standing **no-hidden-fees /
+truly-free self-host** product principle is retired; [`CLAUDE.md`](../CLAUDE.md) is the
+authoritative statement. Recorded in
+[adr/0011](adr/0011-commercial-reconcile-revenue-reality.md).
 
 ### PC.6 — Go-to-market / distribution · ❌ **NOT STARTED**
 Distribution kills solo ventures, not product gaps. The sub-track:
@@ -643,7 +651,7 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
 
 1. **Phase C — Commercialise & Distribute (🥇 top priority).** Self-serve signup + auth
    (PC.1), Stripe billing (PC.2), **true multi-tenancy** (PC.3), validated pricing with
-   annual prepay (PC.4), the free-self-host call (PC.5), and GTM/distribution (PC.6).
+   annual prepay (PC.4), the free-self-host call (PC.5, **resolved: hosted-only**), and GTM/distribution (PC.6).
    *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
    **Nothing below ships ahead of this.**
 2. **P1.4 graphics — finish only to the "sellable wedge" bar.** Tier A shipped (PR
