@@ -69,6 +69,12 @@ from .club_profile import (
 )
 from .bounded_cache import BoundedCache
 
+# PC.1/PC.2 — self-serve auth + Stripe billing (Phase C, Appendix B Step 7).
+# Both are import-safe with no env configured: auth has no required env, and
+# billing only touches Stripe lazily behind billing_configured().
+from . import auth as _auth
+from . import billing as _billing
+
 # V7 / brand feature flags. These packages are only ever imported lazily at
 # the call sites that use them (see e.g. build_spotlight_pack, BrandKit), so
 # here we just probe that they're importable to set the flag — find_spec keeps
@@ -2848,6 +2854,32 @@ function addGraphicToPack(btn, visualId) {
 """
 
 
+def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
+    """Render the per-card "Schedule" affordance, plan-gated.
+
+    PC.4 free-tier soft limit: Buffer scheduling is a paid feature. On a Free
+    plan (or signed-out, which resolves to Free) the button is swapped for a
+    non-functional "Upgrade to schedule" link to /pricing — a soft nudge, not a
+    hard lock (the card itself, its caption, graphics and motion all stay
+    usable; only the Buffer hand-off is gated). Premium plans get the live
+    button that opens the schedule modal. Reads the plan from the session via
+    ``auth.current_plan`` so the gate is consistent everywhere a card renders.
+    """
+    if not card_id_raw:
+        return ""
+    if _auth.is_premium(_auth.current_plan()):
+        return (
+            '<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
+            f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, {json.dumps(el_id)})'>"
+            "Schedule&hellip;</button>"
+        )
+    return (
+        f'<a class="btn secondary" href="{url_for("pricing_page")}" '
+        'style="font-size:11px;padding:4px 10px" '
+        'title="Buffer scheduling is on the Club plan">Upgrade to schedule</a>'
+    )
+
+
 def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
     """Per-card creative toolbar for the Content builder (post-approval):
     live AI caption tone tabs (AI / Warm / Hype / Precise), Copy, Regenerate,
@@ -2930,15 +2962,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
         )
 
     _wf_card_el_id = f"wf-{card_uuid}"
-    schedule_btn = (
-        (
-            f'<button class="btn" style="font-size:11px;padding:4px 10px" data-mh-schedule-btn '
-            f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"{_wf_card_el_id}\")'>"
-            f"Schedule&hellip;</button>"
-        )
-        if card_id_raw
-        else ""
-    )
+    schedule_btn = _schedule_button_html(run_id, card_id_raw, _wf_card_el_id)
 
     return (
         f'<div class="tone-picker" id="wf-{card_uuid}" data-caption-url="{_h(_caption_url)}" data-card="{card_uuid}" style="margin-top:10px;padding:12px;background:rgba(212,255,58,0.04);border:1px solid var(--border);border-radius:8px">'
@@ -6499,8 +6523,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         from flask import session as _sess
 
         signed_in_pid = (_sess.get("active_profile_id") or "").strip()
+        # Account-level identity (PC.1) — separate from the org pin above.
+        account_email = (_sess.get("user_email") or "").strip().lower()
     except Exception:
         signed_in_pid = ""
+        account_email = ""
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
@@ -6635,11 +6662,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
+    <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
     {% if signed_in %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
       <a href="{{ url_for('sign_out') }}">Sign out</a>
     {% else %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}">Sign in</a>
+    {% endif %}
+    {% if account_email %}
+      <a href="{{ url_for('billing_page') }}" title="{{ account_email }}">Billing</a>
+      <a href="{{ url_for('logout') }}">Log out</a>
+    {% else %}
+      <a href="{{ url_for('login_page') }}">Log in</a>
     {% endif %}
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
@@ -7440,6 +7474,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
         signed_in=bool(signed_in_pid),
+        account_email=account_email,
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
@@ -7612,6 +7647,32 @@ def create_app() -> Flask:
             pass
     app.config["SECRET_KEY"] = _secret
 
+    # ---- Session cookie hardening (PC.1) -------------------------------
+    # The session cookie carries the signed-in user's identity (auth.py),
+    # so lock it down. It is already cryptographically *signed* by the
+    # SECRET_KEY above. Make it HttpOnly (JS can't read it → XSS can't
+    # steal the session) and SameSite=Lax (CSRF defence-in-depth while
+    # still allowing top-level navigation). Mark it Secure (HTTPS-only)
+    # on real deployments — Render terminates TLS — but never under TESTING
+    # or local HTTP dev, where a Secure cookie would simply be dropped and
+    # break login. The operator can force it on/off with
+    # MEDIAHUB_SESSION_COOKIE_SECURE=1/0.
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    _secure_env = os.environ.get("MEDIAHUB_SESSION_COOKIE_SECURE", "").strip().lower()
+    if _secure_env in ("1", "true", "yes", "on"):
+        _cookie_secure = True
+    elif _secure_env in ("0", "false", "no", "off"):
+        _cookie_secure = False
+    else:
+        # Default: Secure on when an HTTPS-fronted deployment is detected
+        # (Render sets RENDER / a public URL), off otherwise so HTTP dev works.
+        _cookie_secure = bool(
+            os.environ.get("RENDER")
+            or (os.environ.get("RENDER_EXTERNAL_URL", "").startswith("https://"))
+        )
+    app.config["SESSION_COOKIE_SECURE"] = _cookie_secure
+
     # Apply SCRIPT_NAME middleware so url_for generates prefixed URLs when
     # running behind a reverse-proxy that mounts the app at a sub-path
     # (e.g. the pplx.app dev environment serves us under /port/5000/...).
@@ -7663,6 +7724,21 @@ def create_app() -> Flask:
             "sign_in_post",
             "sign_in_delete",
             "sign_out",
+            # PC.1/PC.2 — account auth + billing surfaces are reachable
+            # without an active organisation: a brand-new visitor must be
+            # able to view pricing, sign up, log in, and manage billing
+            # before they have set up a club. The org-setup gate still
+            # applies to content-production routes.
+            "signup_page",
+            "signup_post",
+            "login_page",
+            "login_post",
+            "logout",
+            "pricing_page",
+            "billing_page",
+            "billing_checkout",
+            "billing_portal",
+            "stripe_webhook",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
@@ -14424,6 +14500,7 @@ Relay team broke club record"></textarea>
             '<h1>What do you want<br>to <em class="editorial">make</em>?</h1>'
             '<p class="lede">Upload a file, paste a brief, or describe a moment in your own words. Pick a starting point and the engine takes it from there.</p>'
             "</section>"
+            f"{_free_tier_banner_html()}"
             f"{brand_strip_html}"
             f"{tiles_section}"
         )
@@ -17215,13 +17292,572 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # page: identity (name/type/country), sources (website + 5 social
     # links), and AI build (one click that hands everything to the LLM
     # and shows the result for confirmation). On save the org is pinned
+    # ==================================================================
+    # PC.1 / PC.2 — self-serve account auth + Stripe billing (Phase C).
+    #
+    # These are ACCOUNT-level (email + password → who is paying), distinct
+    # from the organisation-level /sign-in picker below (which club's brand
+    # is active). A deployment with no STRIPE_* env and no accounts never
+    # forces anyone here — every existing route stays open. Billing routes
+    # honest-error with 503 when Stripe is unconfigured.
+    # ==================================================================
+
+    def _user_store() -> "_auth.UserStore":
+        return _auth.UserStore()
+
+    def _runs_this_month() -> int:
+        """Count runs created in the current UTC month (free-tier soft limit).
+
+        Scoped to the active organisation when one is pinned so the banner
+        reflects the club the user is working in; falls back to a global
+        count otherwise. Best-effort — never raises into a page render.
+        """
+        since = time.strftime("%Y-%m-01T00:00:00", time.gmtime())
+        try:
+            conn = _db()
+            try:
+                pid = session.get("active_profile_id")
+                if pid:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM runs WHERE profile_id = ? AND created_at >= ?",
+                        (pid, since),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM runs WHERE created_at >= ?",
+                        (since,),
+                    ).fetchone()
+                return int(row[0]) if row else 0
+            finally:
+                conn.close()
+        except Exception:
+            return 0
+
+    def _free_tier_banner_html() -> str:
+        """A soft-limit banner for Free-plan users near/over the run cap.
+
+        Returns '' when there is nothing to show (premium plan, or well
+        under the cap). NEVER a hard lock — purely informational, with a
+        link to /pricing. Anonymous (signed-out) visitors are treated as
+        Free; we only nag once they've actually done some work this month.
+        """
+        if _auth.is_premium(_auth.current_plan(_user_store())):
+            return ""
+        used = _runs_this_month()
+        cap = _auth.FREE_TIER_RUNS_PER_MONTH
+        if used < cap:
+            return ""
+        over = used >= cap
+        pricing_url = url_for("pricing_page")
+        headline = (
+            "You&rsquo;ve used all 3 free runs this month."
+            if over
+            else "You&rsquo;re on the last of your 3 free runs this month."
+        )
+        accent = "var(--warn)"
+        return (
+            '<div class="mh-flash" role="status" style="'
+            "margin:0 0 var(--sp-5);padding:14px 18px;"
+            f"border:1px solid rgba(255,180,84,0.30);border-left:3px solid {accent};"
+            "background:rgba(255,180,84,0.06);color:var(--ink);"
+            'border-radius:var(--radius-sm);font-size:13px;line-height:1.5">'
+            f"<strong>{headline}</strong> "
+            "Free includes 3 content runs a month and a single brand profile. "
+            "You can keep working &mdash; nothing is locked &mdash; but for "
+            "unlimited runs and Buffer scheduling, "
+            f'<a href="{pricing_url}" style="color:var(--accent);font-weight:600">'
+            "see plans</a>."
+            "</div>"
+        )
+
+    # Expose the banner builder so content pages can include it.
+    app._free_tier_banner_html = _free_tier_banner_html  # type: ignore[attr-defined]
+
+    def _auth_form_page(
+        *,
+        title: str,
+        heading: str,
+        lede: str,
+        action_url: str,
+        submit_label: str,
+        alt_html: str,
+        prefill_email: str = "",
+        error: str = "",
+        min_password: bool = False,
+    ) -> str:
+        err_html = ""
+        if error:
+            err_html = (
+                '<div class="mh-flash error" role="alert" style="'
+                "margin:0 0 var(--sp-5);padding:14px 18px;"
+                "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
+                "background:var(--bad-bg,rgba(255,107,107,0.06));color:var(--ink);"
+                "border-radius:var(--radius-sm);font-family:var(--font-mono);"
+                'font-size:12px;letter-spacing:0.06em;text-transform:uppercase">'
+                f"[ ERROR ] {_h(error)}</div>"
+            )
+        pw_hint = (
+            '<div class="dim" style="font-size:12px;margin-top:6px">'
+            "At least 8 characters.</div>"
+            if min_password
+            else ""
+        )
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Account</span>'
+            f"<h1>{heading}</h1>"
+            f'<p class="lede">{lede}</p>'
+            "</section>"
+            f"{err_html}"
+            '<div class="card" style="padding:24px 28px;max-width:440px">'
+            f'<form method="post" action="{action_url}" data-loader-text="Working&hellip;">'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
+            f'<input type="email" name="email" autocomplete="email" required '
+            f'value="{_h(prefill_email)}" '
+            'style="width:100%;margin-bottom:16px" placeholder="you@club.org" />'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Password</label>'
+            '<input type="password" name="password" required '
+            + ('autocomplete="new-password" minlength="8" ' if min_password else 'autocomplete="current-password" ')
+            + 'style="width:100%" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
+            f"{pw_hint}"
+            f'<button type="submit" class="btn" style="margin-top:20px;width:100%">{_h(submit_label)}</button>'
+            "</form>"
+            f'<div class="dim" style="font-size:13px;margin-top:18px;text-align:center">{alt_html}</div>'
+            "</div>"
+        )
+        return _layout(title, body, active="signin")
+
+    @app.route("/signup", methods=["GET"])
+    def signup_page():
+        # Already signed in? Send them on to the app.
+        if _auth.current_user_email():
+            return redirect(url_for("make_page"))
+        return _auth_form_page(
+            title="Create account",
+            heading='Create your <em class="editorial">account</em>.',
+            lede=(
+                "One account runs your club's content. Free to start &mdash; "
+                "3 runs a month, no card required."
+            ),
+            action_url=url_for("signup_post"),
+            submit_label="Create account",
+            alt_html=(
+                f'Already have an account? <a href="{url_for("login_page")}" '
+                'style="color:var(--accent);font-weight:600">Log in</a>.'
+            ),
+            min_password=True,
+        )
+
+    @app.route("/signup", methods=["POST"])
+    def signup_post():
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        store = _user_store()
+        try:
+            user = store.create(email, password)
+        except _auth.AuthError as exc:
+            return (
+                _auth_form_page(
+                    title="Create account",
+                    heading='Create your <em class="editorial">account</em>.',
+                    lede="One account runs your club's content. Free to start.",
+                    action_url=url_for("signup_post"),
+                    submit_label="Create account",
+                    alt_html=(
+                        f'Already have an account? <a href="{url_for("login_page")}" '
+                        'style="color:var(--accent);font-weight:600">Log in</a>.'
+                    ),
+                    prefill_email=email,
+                    error=str(exc),
+                    min_password=True,
+                ),
+                400,
+            )
+        _auth.login_user(user)
+        # Land new users on the create surface (Step 7: redirect to /add-input).
+        return redirect(url_for("make_page"))
+
+    @app.route("/login", methods=["GET"])
+    def login_page():
+        if _auth.current_user_email():
+            return redirect(url_for("make_page"))
+        nxt = _safe_next(request.args.get("next"))
+        action = url_for("login_post", next=nxt) if nxt else url_for("login_post")
+        return _auth_form_page(
+            title="Log in",
+            heading='Welcome <em class="editorial">back</em>.',
+            lede="Log in to manage your content and billing.",
+            action_url=action,
+            submit_label="Log in",
+            alt_html=(
+                f'No account yet? <a href="{url_for("signup_page")}" '
+                'style="color:var(--accent);font-weight:600">Create one</a>.'
+            ),
+        )
+
+    @app.route("/login", methods=["POST"])
+    def login_post():
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        store = _user_store()
+        try:
+            user = store.authenticate(email, password)
+        except _auth.AuthError as exc:
+            return (
+                _auth_form_page(
+                    title="Log in",
+                    heading='Welcome <em class="editorial">back</em>.',
+                    lede="Log in to manage your content and billing.",
+                    action_url=url_for("login_post"),
+                    submit_label="Log in",
+                    alt_html=(
+                        f'No account yet? <a href="{url_for("signup_page")}" '
+                        'style="color:var(--accent);font-weight:600">Create one</a>.'
+                    ),
+                    prefill_email=email,
+                    error=str(exc),
+                ),
+                401,
+            )
+        _auth.login_user(user)
+        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        return redirect(nxt or url_for("make_page"))
+
+    @app.route("/logout", methods=["GET", "POST"])
+    def logout():
+        _auth.logout_user()
+        return redirect(url_for("home"))
+
+    def _safe_next(target: Optional[str]) -> str:
+        """Only allow same-site relative redirects (open-redirect guard)."""
+        t = (target or "").strip()
+        if not t.startswith("/") or t.startswith("//") or t.startswith("/\\"):
+            return ""
+        return t
+
+    # ---- /pricing -----------------------------------------------------
+    @app.route("/pricing", methods=["GET"])
+    def pricing_page():
+        configured = _billing.billing_configured()
+        plan_now = _auth.current_plan(_user_store())
+        signed_in = bool(_auth.current_user_email())
+
+        cards = ""
+        for tier in _billing.TIERS:
+            is_current = tier.plan == plan_now and signed_in
+            features = "".join(
+                f'<li style="margin-bottom:8px;display:flex;gap:8px;align-items:flex-start">'
+                '<span aria-hidden="true" style="color:var(--good);flex:0 0 auto">&check;</span>'
+                f"<span>{_h(f)}</span></li>"
+                for f in tier.features
+            )
+            # Price line: env-/Stripe-driven only. NO hardcoded amount.
+            if tier.plan == _auth.PLAN_FREE:
+                price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
+            else:
+                purchasable = _billing.plan_purchasable(tier.plan)
+                if purchasable:
+                    # The real amount lives on the Stripe Price (resolved from
+                    # the env id at checkout). We deliberately do not render a
+                    # committed number here while pricing is unvalidated.
+                    price_html = (
+                        '<div style="font-size:15px;color:var(--ink-muted)">'
+                        "Pricing set at checkout</div>"
+                    )
+                else:
+                    price_html = (
+                        '<div style="font-size:15px;color:var(--ink-muted)" '
+                        'title="Set STRIPE_PRICE_'
+                        + ("CLUB" if tier.plan == _auth.PLAN_CLUB else "FEDERATION")
+                        + ' to enable">Pricing TBC</div>'
+                    )
+
+            # CTA
+            if is_current:
+                cta = (
+                    '<div class="btn secondary" style="width:100%;text-align:center;'
+                    'pointer-events:none;opacity:0.75">Current plan</div>'
+                )
+            elif tier.plan == _auth.PLAN_FREE:
+                cta = (
+                    f'<a class="btn secondary" href="{url_for("signup_page")}" '
+                    'style="width:100%;text-align:center">Get started free</a>'
+                    if not signed_in
+                    else '<div class="dim" style="text-align:center;font-size:13px">Included</div>'
+                )
+            else:
+                if not configured:
+                    cta = (
+                        '<div class="btn secondary" style="width:100%;text-align:center;'
+                        'pointer-events:none;opacity:0.6" '
+                        'title="' + _billing.NOT_CONFIGURED_MESSAGE + '">Unavailable</div>'
+                    )
+                elif not signed_in:
+                    cta = (
+                        f'<a class="btn" href="{url_for("login_page", next=url_for("pricing_page"))}" '
+                        'style="width:100%;text-align:center">Log in to upgrade</a>'
+                    )
+                elif not _billing.plan_purchasable(tier.plan):
+                    cta = (
+                        '<div class="btn secondary" style="width:100%;text-align:center;'
+                        'pointer-events:none;opacity:0.6">Not yet available</div>'
+                    )
+                else:
+                    cta = (
+                        f'<form method="post" action="{url_for("billing_checkout")}" style="margin:0">'
+                        f'<input type="hidden" name="plan" value="{_h(tier.plan)}">'
+                        f'<button type="submit" class="btn" style="width:100%">'
+                        f"Upgrade to {_h(tier.name)}</button></form>"
+                    )
+
+            highlight = (
+                "border:1px solid var(--accent);box-shadow:0 0 0 1px var(--accent)"
+                if tier.plan == _auth.PLAN_CLUB
+                else "border:1px solid var(--border)"
+            )
+            cards += (
+                f'<div class="card" style="padding:24px;display:flex;flex-direction:column;gap:16px;{highlight}">'
+                f'<div><div style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;'
+                f'color:var(--ink-muted);margin-bottom:6px">{_h(tier.name)}</div>{price_html}'
+                f'<div class="dim" style="font-size:13px;margin-top:8px">{_h(tier.blurb)}</div></div>'
+                f'<ul style="list-style:none;padding:0;margin:0;font-size:13px;flex:1">{features}</ul>'
+                f"{cta}"
+                "</div>"
+            )
+
+        # Honest banner about where pricing stands (ADR-0011 / PC.4).
+        if configured:
+            note = (
+                "Paid plans are billed through Stripe. The exact price is shown "
+                "during checkout."
+            )
+        else:
+            note = (
+                "Billing is not configured on this deployment, so paid plans "
+                "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
+            )
+        note_html = (
+            '<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">'
+            f"{note}</p>"
+        )
+
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-6)">'
+            '<span class="mh-hero-eyebrow">Pricing</span>'
+            '<h1>Simple <em class="editorial">plans</em> for every club.</h1>'
+            '<p class="lede">Start free. Upgrade when your club is posting in earnest. '
+            "Annual prepay keeps it cheaper &mdash; ask us.</p>"
+            "</section>"
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">'
+            f"{cards}</div>"
+            f"{note_html}"
+        )
+        return _layout("Pricing", body, active="signin")
+
+    # ---- /billing -----------------------------------------------------
+    @app.route("/billing", methods=["GET"])
+    def billing_page():
+        # Auth gate: must be logged in to see/manage billing.
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("billing_page")))
+
+        if not _billing.billing_configured():
+            body = (
+                '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+                '<span class="mh-hero-eyebrow">Billing</span>'
+                '<h1>Billing</h1>'
+                '<p class="lede">Manage your subscription.</p>'
+                "</section>"
+                '<div class="card" style="padding:24px 28px;max-width:560px">'
+                '<p style="margin-top:0">'
+                f"{_h(_billing.NOT_CONFIGURED_MESSAGE.capitalize())}. "
+                "You&rsquo;re on the Free plan with full access to the core "
+                "features. There&rsquo;s nothing to manage here on this deployment."
+                "</p>"
+                f'<a class="btn secondary" href="{url_for("home")}">Back to home</a>'
+                "</div>"
+            )
+            return _layout("Billing", body, active="signin")
+
+        plan = _auth.plan_label(user.plan)
+        has_customer = bool(user.stripe_customer_id)
+        manage_html = ""
+        if has_customer:
+            manage_html = (
+                f'<form method="post" action="{url_for("billing_portal")}" style="margin:0">'
+                '<button type="submit" class="btn">Manage subscription &rarr;</button>'
+                "</form>"
+                '<div class="dim" style="font-size:12px;margin-top:10px">'
+                "Opens the Stripe Customer Portal to change card, switch plan, "
+                "or cancel.</div>"
+            )
+        elif _auth.is_premium(user.plan):
+            manage_html = (
+                '<div class="dim" style="font-size:13px">'
+                "Your plan is active. A management link will appear here once "
+                "your first payment is processed.</div>"
+            )
+        else:
+            manage_html = (
+                f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
+                '<div class="dim" style="font-size:12px;margin-top:10px">'
+                "Upgrade to unlock unlimited runs and Buffer scheduling.</div>"
+            )
+
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Billing</span>'
+            '<h1>Your <em class="editorial">plan</em>.</h1>'
+            '<p class="lede">Manage your MediaHub subscription.</p>'
+            "</section>"
+            '<div class="card" style="padding:24px 28px;max-width:560px">'
+            '<div style="display:flex;align-items:center;justify-content:space-between;'
+            'gap:16px;margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">'
+            "<div>"
+            '<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-muted)">Current plan</div>'
+            f'<div style="font-size:24px;font-weight:800;margin-top:4px">{_h(plan)}</div>'
+            "</div>"
+            f'<div class="pill">{_h(user.email)}</div>'
+            "</div>"
+            f"{manage_html}"
+            "</div>"
+        )
+        return _layout("Billing", body, active="signin")
+
+    @app.route("/billing/checkout", methods=["POST"])
+    def billing_checkout():
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("pricing_page")))
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        plan = (request.form.get("plan") or "").strip().lower()
+        if plan not in (_auth.PLAN_CLUB, _auth.PLAN_FEDERATION):
+            return _layout(
+                "Checkout",
+                _billing_error_body("That plan can&rsquo;t be purchased."),
+                active="signin",
+            ), 400
+        try:
+            checkout_url = _billing.create_checkout_session(
+                plan=plan,
+                customer_email=user.email,
+                success_url=url_for("billing_page", _external=True),
+                cancel_url=url_for("pricing_page", _external=True),
+                client_reference_id=user.email,
+                customer_id=user.stripe_customer_id or None,
+            )
+        except _billing.BillingNotConfigured:
+            return _billing_unconfigured_response()
+        except _billing.BillingError as exc:
+            return _layout(
+                "Checkout",
+                _billing_error_body(str(exc)),
+                active="signin",
+            ), 502
+        return redirect(checkout_url, code=303)
+
+    @app.route("/billing/portal", methods=["POST"])
+    def billing_portal():
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("billing_page")))
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        if not user.stripe_customer_id:
+            return _layout(
+                "Billing",
+                _billing_error_body("No active subscription to manage yet."),
+                active="signin",
+            ), 400
+        try:
+            portal_url = _billing.create_customer_portal_session(
+                customer_id=user.stripe_customer_id,
+                return_url=url_for("billing_page", _external=True),
+            )
+        except _billing.BillingNotConfigured:
+            return _billing_unconfigured_response()
+        except _billing.BillingError as exc:
+            return _layout(
+                "Billing",
+                _billing_error_body(str(exc)),
+                active="signin",
+            ), 502
+        return redirect(portal_url, code=303)
+
+    def _billing_unconfigured_response():
+        """The honest 503 for billing actions when Stripe is unset."""
+        return (
+            jsonify({"ok": False, "error": "billing_not_configured",
+                     "message": _billing.NOT_CONFIGURED_MESSAGE}),
+            503,
+        )
+
+    def _billing_error_body(message: str) -> str:
+        return (
+            '<section class="mh-hero" style="padding-top:var(--sp-7)">'
+            '<span class="mh-hero-eyebrow">Billing</span>'
+            "<h1>Something went wrong</h1>"
+            f'<p class="lede">{_h(message)}</p>'
+            f'<a class="btn secondary" href="{url_for("pricing_page")}" '
+            'style="margin-top:18px">Back to pricing</a>'
+            "</section>"
+        )
+
+    # ---- /webhooks/stripe ---------------------------------------------
+    @app.route("/webhooks/stripe", methods=["POST"])
+    def stripe_webhook():
+        """Receive Stripe subscription events → drive the user's plan.
+
+        The signature is verified against STRIPE_WEBHOOK_SECRET before the
+        payload is trusted (a forged body answers 400). Returns 503 when
+        billing isn't configured so Stripe surfaces a clear delivery error
+        rather than a silent 200.
+        """
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        sig = request.headers.get("Stripe-Signature", "")
+        payload = request.get_data()  # raw bytes — required for signature check
+        try:
+            update = _billing.verify_and_parse_webhook(payload, sig)
+        except _billing.BillingError as exc:
+            # Bad/forged signature or malformed payload → 400, do not act.
+            return jsonify({"ok": False, "error": "invalid_webhook",
+                            "message": str(exc)}), 400
+        if update is None:
+            # A verified event we simply don't act on.
+            return jsonify({"ok": True, "handled": False}), 200
+
+        store = _user_store()
+        target = None
+        if update.email:
+            target = store.get(update.email)
+        if target is None and update.customer_id:
+            target = store.find_by_customer_id(update.customer_id)
+        if target is None:
+            # Verified but we can't match it to a known account. Acknowledge
+            # so Stripe stops retrying; nothing to update.
+            return jsonify({"ok": True, "handled": False,
+                            "reason": "no_matching_user"}), 200
+        store.set_plan(
+            target.email,
+            update.plan,
+            stripe_customer_id=update.customer_id or target.stripe_customer_id,
+        )
+        return jsonify({"ok": True, "handled": True,
+                        "plan": update.plan}), 200
+
     # ---- /sign-in -----------------------------------------------------
     #
-    # Profile picker. No username, no password — we don't have a real
-    # auth model and the deployment is operator-managed single-instance.
-    # The page just lists every saved ClubProfile and lets the user
-    # pick one to pin into their session, OR delete a profile they no
-    # longer want, OR jump to /organisation/setup to create a fresh one.
+    # Organisation picker (distinct from the account auth above): which
+    # club's brand is active in this session. No password here — the
+    # account password lives on /login; this just pins a ClubProfile.
+    # The page lists every saved ClubProfile and lets the user pick one to
+    # pin into their session, OR delete a profile they no longer want, OR
+    # jump to /organisation/setup to create a fresh one.
     #
     # This is the *only* path to switch tenants once a profile is set
     # up; the home page links here, and the hero "Switch organisation"
@@ -20202,15 +20838,7 @@ function tiRegenerate() {{
                     f'<span class="tag {sched_pill_class}" data-schedule-pill="g-{card_uuid}" '
                     f'style="font-size:11px;{"display:none" if sched_state == "queued" else ""}">{_h(sched_state)}</span>'
                 )
-                schedule_btn = (
-                    (
-                        f'<button class="btn" style="font-size:12px;padding:4px 10px" data-mh-schedule-btn '
-                        f"onclick='mhScheduleOpen({json.dumps(run_id)}, {json.dumps(str(card_id_raw))}, \"g-{card_uuid}\")'>"
-                        f"Schedule&hellip;</button>"
-                    )
-                    if card_id_raw
-                    else ""
-                )
+                schedule_btn = _schedule_button_html(run_id, card_id_raw, f"g-{card_uuid}")
                 # Per-card motion download — the endpoint renders (or
                 # serves cached) MP4. New tab so the user lands on the
                 # video preview rather than blocking the pack page.

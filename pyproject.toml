@@ -42,6 +42,12 @@ dependencies = [
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
   "PyYAML>=6.0",
+  # Phase C commercial layer (web/auth.py + web/billing.py). bcrypt hashes
+  # account passwords; stripe is the official SDK for Checkout / Customer
+  # Portal / webhook verification. Both optional at runtime — no STRIPE_* env
+  # means billing 503s and the rest of the app is unaffected.
+  "bcrypt>=4.0",
+  "stripe>=7.0",
 ]
 
 [project.optional-dependencies]
