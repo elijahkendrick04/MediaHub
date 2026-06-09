@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   ticker_strip  (v2 archetype, PAR-7)
+
+   A broadcast-style composition stacked as full-width HORIZONTAL BANDS,
+   not a left/right or centred layout. Top to bottom:
+     1. a thin TOP RAIL on the surface colour carrying the club at left
+        and the meet at right, like a scoreboard header bar;
+     2. a dominant NAME BAND on the brand ground (an accent achievement
+        kicker, the first name in accent, then an oversized full-width
+        autofit surname);
+     3. a SCORELINE band on the surface colour, fenced by accent rules
+        top and bottom, with the event labelled at left and the result
+        value (monospaced) at right -- the broadcast "ticker" signature;
+     4. a FOOT band on the brand ground with the club lockup and an
+        optional emphasis/highlight chip.
+
+   Structural signature: the run of stacked full-bleed horizontal bands
+   with a fenced left-label / right-value scoreline reads at a glance as a
+   different card from the centred numeral (big_number_dominant), the
+   angled wedge (split_diagonal_hero), the vertical rail
+   (stat_stack_sidebar) and the flat type poster (minimal_type_poster).
+
+   Overflow safety: the name band is the FULL canvas width, so the
+   surname uses the renderer's full-canvas autofit var directly (it is
+   sized for exactly this) and wraps for a single giant token rather than
+   clipping. The result shares the scoreline row with the event, so it is
+   scaled to ~0.66 of the full-canvas result autofit var to leave the
+   event its half of the row; the event itself may wrap. Holds at both
+   1080x1350 and 1080x1920: the name band flexes to absorb the extra
+   height while the rails, scoreline and foot keep their intrinsic size.
+   No photo required; a supplied portrait sits as a quiet desaturated
+   wash behind the name band rather than as the focal element.
+   =================================================================== */
+
+.tk {
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mh-primary);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.tk *, .tk *::before, .tk *::after { box-sizing: border-box; }
+
+/* ---- 1. top rail (scoreboard header) ---- */
+.tk__rail {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px;
+  /* full-width ACCENT header band (brand-ground text). accent is gate-checked
+     to contrast the primary, so primary-on-accent is legible; the lit full-bleed
+     top row is the scoreboard-header signature and the layout's strongest
+     luminance feature (no other archetype carries a bright band at the top edge). */
+  background: var(--mh-accent);
+  color: var(--mh-primary);
+  border-bottom: 6px solid var(--mh-primary);
+  padding: 34px 64px;
+}
+.tk__rail-club {
+  display: flex; align-items: center; gap: 18px;
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 24px;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--mh-primary);
+}
+.tk__rail-club::before {
+  content: ""; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--mh-primary); flex: 0 0 auto;
+}
+.tk__rail-meet {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 21px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--mh-primary);
+  text-align: right;
+}
+
+/* ---- 2. name band (dominant, brand ground) ---- */
+.tk__name {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 76px 64px;
+  overflow: hidden;
+}
+.tk__photo { position: absolute; inset: 0; z-index: 0; opacity: 0.14; }
+.tk__photo img {
+  width: 100%; height: 100%; object-fit: cover;
+  object-position: var(--mh-photo-pos, center 28%);
+  filter: grayscale(1) contrast(1.05);
+}
+.tk__name > .tk__kicker, .tk__name > .tk__first, .tk__name > .tk__surname { position: relative; z-index: 1; }
+.tk__kicker {
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 16px;
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 25px; letter-spacing: 0.22em; text-transform: uppercase;
+  /* accent TEXT on the brand ground (a renderer-guaranteed legible pair),
+     fronted by a solid accent tab -- never dark text on an accent fill,
+     which is not one of the resolved --mh-* contrast-checked pairs. */
+  color: var(--mh-accent); margin-bottom: 26px;
+}
+.tk__kicker::before {
+  content: ""; width: 48px; height: 10px; border-radius: 5px;
+  background: var(--mh-accent); flex: 0 0 auto;
+}
+.tk__first {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 50px; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--mh-accent); margin-bottom: 4px;
+  /* a space-less single-token name cannot wrap at a space, so allow it to
+     break anywhere instead of clipping off the canvas edge (parity with the
+     autofit surname below). */
+  max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
+}
+.tk__surname {
+  font-family: 'Anton','Bebas Neue',Impact,sans-serif; font-weight: 400;
+  /* full-canvas autofit var used directly: this band spans the whole
+     canvas width, which is exactly what the renderer sizes the var for. */
+  font-size: var(--mh-fit-surname-px, 132px);
+  line-height: 0.84; letter-spacing: -0.01em; text-transform: uppercase;
+  color: var(--mh-on-primary);
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  max-width: 100%;
+}
+
+/* ---- 3. scoreline band (the ticker) ---- */
+.tk__score {
+  flex: 0 0 auto;
+  display: flex; align-items: stretch; gap: 0;
+  background: var(--mh-surface);
+  color: var(--mh-on-surface);
+  border-top: 6px solid var(--mh-accent);
+  border-bottom: 6px solid var(--mh-accent);
+}
+.tk__score-event {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 40px 48px;
+}
+.tk__score-result {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; justify-content: center; align-items: flex-end;
+  padding: 40px 56px;
+  /* the result is the lit-up "score": an ACCENT fill with brand-ground text.
+     the renderer's role resolver guarantees the accent contrasts the primary
+     (the APCA compliance gate picks/repairs the accent for exactly this), so
+     primary-on-accent is a gate-checked legible pair -- and the bright block
+     gives the horizontal-band layout a luminance signature no other archetype
+     carries in this position. */
+  background: var(--mh-accent); color: var(--mh-primary);
+  border-left: 6px solid var(--mh-primary);
+}
+.tk__score-result .tk__tag { color: var(--mh-primary); opacity: 0.72; }
+.tk__tag {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 16px;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--mh-accent);
+  margin-bottom: 12px;
+}
+.tk__event-val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 600;
+  font-size: 38px; line-height: 1.04; text-transform: uppercase;
+  color: var(--mh-on-surface); overflow-wrap: anywhere;
+}
+.tk__result-val {
+  font-family: 'JetBrains Mono','Space Grotesk',monospace;
+  font-feature-settings: "tnum"; font-weight: 700;
+  /* shares the row with the event, so scaled below the full-canvas var. */
+  font-size: calc(var(--mh-fit-result-px, 92px) * 0.66);
+  line-height: 0.9; color: var(--mh-primary); white-space: nowrap;
+}
+
+/* ---- 4. foot band (brand ground) ---- */
+.tk__foot {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 28px;
+  padding: 40px 64px;
+}
+.tk__foot-id { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.tk__logo { height: 60px; width: auto; flex: 0 0 auto; }
+.tk__logo img, .tk__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.tk__club {
+  font-family: 'Inter',sans-serif; font-weight: 800; font-size: 22px;
+  line-height: 1.16; text-transform: uppercase; color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.tk__hero {
+  flex: 0 0 auto; text-align: right;
+  padding-left: 28px; border-left: 4px solid var(--mh-accent);
+}
+.tk__hero-lab {
+  font-family: 'Inter',sans-serif; font-weight: 700; font-size: 14px;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--mh-accent);
+  margin-bottom: 8px;
+}
+.tk__hero-val {
+  font-family: 'Space Grotesk','Inter',sans-serif; font-weight: 700;
+  font-size: 26px; line-height: 1.1; color: var(--mh-on-primary);
+}
+/* the highlight block collapses entirely when no hero stat is supplied,
+   so an empty slot never leaves a dangling accent rule on the foot. */
+.tk__hero:has(.tk__hero-val:empty) { display: none; }
+.tk__sponsor { margin-left: 28px; flex: 0 0 auto; }
+</style>
+</head>
+<body>
+<div class="tk">
+
+  <div class="tk__rail">
+    <div class="tk__rail-club">{{CLUB_FULL}}</div>
+    <div class="tk__rail-meet">{{MEET_NAME}}</div>
+  </div>
+
+  <div class="tk__name">
+    <div class="tk__photo">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="tk__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="tk__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="tk__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  <div class="tk__score">
+    <div class="tk__score-event">
+      <div class="tk__tag">Event</div>
+      <div class="tk__event-val">{{EVENT_NAME}}</div>
+    </div>
+    <div class="tk__score-result">
+      <div class="tk__tag">Result</div>
+      <div class="tk__result-val">{{RESULT_VALUE}}</div>
+    </div>
+  </div>
+
+  <div class="tk__foot">
+    <div class="tk__foot-id">
+      <div class="tk__logo">{{LOGO_BLOCK}}</div>
+      <div class="tk__club">{{CLUB_FULL}}</div>
+    </div>
+    <div class="tk__hero">
+      <div class="tk__hero-lab">Highlight</div>
+      <div class="tk__hero-val">{{HERO_STAT}}</div>
+    </div>
+    <div class="tk__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+</div>
+</body>
+</html>
