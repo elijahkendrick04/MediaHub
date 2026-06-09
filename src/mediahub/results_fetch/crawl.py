@@ -174,6 +174,13 @@ class CrawlResult:
     blocked: int = 0
     render_budget_hit: bool = False
     total_bytes: int = 0
+    # Entry-page diagnostics — populated for the entry page so a "no results"
+    # outcome can say *why* honestly (tier, the exact resolved URL, how many
+    # links discovery saw, and how many of those survived the scope filter).
+    entry_tier: Optional[str] = None
+    entry_final_url: Optional[str] = None
+    entry_links_found: int = 0
+    entry_links_in_scope: int = 0
 
     @property
     def is_empty(self) -> bool:
@@ -267,6 +274,29 @@ def _discover_links(content: bytes, base_url: str) -> list[str]:
             seen.add(absolute)
             out.append(absolute)
     return out
+
+
+def _same_host(a: str, b: str) -> bool:
+    """True when two URLs share a hostname (case-insensitive; ignores path)."""
+    return (urlparse(a).hostname or "").lower() == (urlparse(b).hostname or "").lower()
+
+
+def _discovery_base(requested_url: str, final_url: str) -> str:
+    """The base to resolve a page's relative links against.
+
+    A rendered backend can report ``final_url`` without the requested
+    directory's trailing slash — and sometimes with an added ``#fragment`` or
+    ``?query``. Resolving relative links against that makes ``urljoin`` drop the
+    directory segment, so the links escape the path-prefix scope and a meet hub
+    yields "0 kept". When the request was for a directory (it ended in ``/``) and
+    the page is the same host, resolve against the slash-terminated URL we
+    actually asked for. Requests with no trailing slash are returned unchanged,
+    so genuine "page" entries (e.g. ``…/results/639/events``) still resolve their
+    relative links against the parent, exactly as before.
+    """
+    if requested_url.endswith("/") and _same_host(requested_url, final_url):
+        return requested_url
+    return final_url
 
 
 _EXT_FOR_TYPE = {
@@ -439,19 +469,32 @@ def crawl_results_site(
             ):
                 result.ai_candidates.append(read)
 
-            # Discover follow-ups from the (rendered when available) DOM.
+            # Discover follow-ups from the (rendered when available) DOM, unioned
+            # with the static HTML's links so a render that drops or rewrites
+            # anchors can't zero out discovery.
             if _is_html(page.content_type) and depth < limits.max_depth:
-                # Resolve relative links against the directory we actually
-                # requested. A rendered backend can report final_url without the
-                # requested directory's trailing slash; urljoin would then drop
-                # that segment and the relative links escape scope. Restore the
-                # slash only in that exact case — entry URLs that legitimately
-                # have no trailing slash are left untouched.
-                discovery_base = page.final_url
-                if norm_url.endswith("/") and page.final_url == norm_url[:-1]:
-                    discovery_base = norm_url
-                for link in _discover_links(page.content, discovery_base):
-                    if link.split("#", 1)[0] not in visited and in_scope(link, scope):
+                discovery_base = _discovery_base(norm_url, page.final_url)
+                discovered = _discover_links(page.content, discovery_base)
+                static_page = read.static_page
+                if (
+                    static_page is not None
+                    and static_page is not page
+                    and _is_html(static_page.content_type)
+                ):
+                    seen = set(discovered)
+                    for link in _discover_links(static_page.content, discovery_base):
+                        if link not in seen:
+                            seen.add(link)
+                            discovered.append(link)
+
+                in_scope_links = [link for link in discovered if in_scope(link, scope)]
+                if is_entry:
+                    result.entry_tier = page.tier
+                    result.entry_final_url = page.final_url
+                    result.entry_links_found = len(discovered)
+                    result.entry_links_in_scope = len(in_scope_links)
+                for link in in_scope_links:
+                    if link not in visited:
                         frontier.append((link, depth + 1))
     finally:
         if own_rendered is not None:

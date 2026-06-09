@@ -3531,12 +3531,17 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
             summary += " · render budget reached"
         _url_job_set(job_id, phase="reading", progress=summary)
 
+        # "No results" = nothing the engine could keep. The entry landing page is
+        # always recorded for provenance, so ``is_empty`` can be False even when
+        # nothing useful was kept; gate on ``kept`` instead.
+        no_results = crawl.kept == 0
+
         ai_extractions: list = []
         if crawl.ai_candidates:
             try:
                 ai_extractions = ai_read_candidates(crawl.ai_candidates)
             except ClaudeUnavailableError:
-                if crawl.is_empty:
+                if no_results:
                     _url_job_set(
                         job_id,
                         status="error",
@@ -3549,13 +3554,23 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
                     return
                 # Deterministic results exist — proceed without Tier C.
 
-        if crawl.is_empty and not ai_extractions:
+        if no_results and not ai_extractions:
+            # Honest "why no results": surface what the crawl actually saw on the
+            # entry page so a scope/discovery miss is diagnosable from the status
+            # endpoint instead of silently staging an empty landing page.
+            diag = (
+                " · diagnostics: "
+                f"entry tier={crawl.entry_tier or 'unknown'}, "
+                f"final_url={crawl.entry_final_url or 'n/a'}, "
+                f"links found={crawl.entry_links_found}, "
+                f"in scope={crawl.entry_links_in_scope}"
+            )
             _url_job_set(
                 job_id,
                 status="error",
                 error=(
                     "No competition results were found on that page. It may be "
-                    "login-walled, or the results live on a different URL."
+                    "login-walled, or the results live on a different URL." + diag
                 ),
             )
             return
