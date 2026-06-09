@@ -12662,6 +12662,7 @@ Relay team broke club record"></textarea>
         # does not affect the ok flag since remotion is the default.
         try:
             from mediahub.visual.reel_engine import reel_engine_status
+
             deps["reel_engine"] = reel_engine_status()
         except Exception as _re_err:
             deps["reel_engine"] = {"error": str(_re_err)[:200]}
