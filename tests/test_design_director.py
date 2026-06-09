@@ -175,3 +175,34 @@ def test_generate_falls_back_to_picker_without_provider(monkeypatch):
     )
     # honest floor: a real v2 archetype from the deterministic picker
     assert brief.layout_template in archetypes.list_archetypes()
+
+
+def test_director_hero_stat_choice_is_honoured_when_measured(monkeypatch):
+    """The spec's hero_stat names a fact; the brief leads the emphasis slot
+    with it ONLY when the detectors actually measured that fact."""
+    monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
+    _patch_ask(monkeypatch, returns=_GOOD)  # hero_stat: "pb_delta"
+    item = _item()
+    item["achievement"]["raw_facts"] = {"drop_seconds": 1.86}
+    brief = gen_brief(
+        item,
+        _ev(),
+        _brand(),
+        profile_id="t",
+        meet_name="Open",
+        variation_seed=3,
+        use_ai_director=True,
+    )
+    assert brief.text_layers.get("hero_stat") == "−1.86s on PB"
+
+    # the named fact was never measured → no fabricated stat line
+    brief2 = gen_brief(
+        _item(),
+        _ev(),
+        _brand(),
+        profile_id="t",
+        meet_name="Open",
+        variation_seed=3,
+        use_ai_director=True,
+    )
+    assert brief2.text_layers.get("hero_stat", "") == ""

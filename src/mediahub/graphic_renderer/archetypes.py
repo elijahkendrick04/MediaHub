@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Iterable
 
 V2_DIR = Path(__file__).parent / "layouts" / "v2"
 
@@ -92,3 +93,25 @@ def pick_archetype(seed: int) -> str | None:
     if not names:
         return None
     return names[int(seed) % len(names)]
+
+
+def pick_archetype_avoiding(seed: int, recent: Iterable[str]) -> str | None:
+    """Seeded pick that walks past recently-used archetypes.
+
+    The deterministic no-LLM floor for "give me a *fresh* direction": start at
+    the card's seeded archetype and step forward until one not in ``recent`` is
+    found, so consecutive regenerates (and the 3-variant picker) walk the
+    library instead of repeating one composition. Still fully deterministic —
+    same seed + same recent list → same pick. When every archetype is in
+    ``recent`` (or the library is empty) it degrades to :func:`pick_archetype`.
+    """
+    names = list_archetypes()
+    if not names:
+        return None
+    avoid = {r for r in recent if r}
+    start = int(seed) % len(names)
+    for offset in range(len(names)):
+        candidate = names[(start + offset) % len(names)]
+        if candidate not in avoid:
+            return candidate
+    return names[start]

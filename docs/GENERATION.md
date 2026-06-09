@@ -52,12 +52,12 @@ constraint and the reason accuracy (JTBD #3) is never traded for polish.
 ## 3. The pipeline, before and after
 
 ```
-TODAY (flag off):
+LEGACY (kill-switch MEDIAHUB_GEN_V2=0):
   card data ─▶ creative_brief.generator (random/seed enum tuple)
                  └─ ai_director: LLM PICKS a tuple from fixed enums
             ─▶ graphic_renderer.render (repaint one DOM) ─▶ 1 PNG
 
-v2 (MEDIAHUB_GEN_V2 on):
+v2 (the default engine):
   card data ─▶ DesignTokens contract (roles, lockups, type, voice)   [Layer 1]
             ─▶ ai_director: LLM EMITS a DesignSpec (schema-constrained) [Layer 3]
                  (archetype + colour roles + hero stat + hook + crop + mood)
@@ -76,20 +76,26 @@ the SEQ-3 cutover, after the replacement is proven).
 
 A single environment feature flag gates every behaviour change.
 
-- **Name:** `MEDIAHUB_GEN_V2` — env-read, **default off**.
-- **Off (production today):** the existing enum-permutation engine runs
-  unchanged. New v2 files (archetypes, design-spec schema, metrics) sit inert.
-- **On:** the create-graphic route uses the DesignTokens contract, the
-  `layouts/v2` archetypes, the design-spec director, and the pool/rank/compliance
-  shortlist.
+- **Name:** `MEDIAHUB_GEN_V2` — env-read, **default ON** (v2 is the production
+  engine; the Tier A default-flip is recorded in
+  [`build_reports/GEN_ENGINE_LOG.md`](build_reports/GEN_ENGINE_LOG.md)). Setting
+  `0` / `false` / `off` / `no` is the deployment-wide **kill-switch**.
+- **Kill-switch set (`MEDIAHUB_GEN_V2=0`):** the legacy enum-permutation engine
+  runs byte-for-byte as before. The v2 files (archetypes, design-spec schema,
+  metrics) sit inert.
+- **Default (on):** the create-graphic route uses the `layouts/v2` archetypes
+  with brand role tokens, autofit, and saliency crops; when an LLM provider is
+  configured the design-spec director picks the archetype/emphasis/hook per
+  moment. (The Tier B pool/rank/compliance shortlist is SEQ-2, still to come.)
 - **Provider unavailable while on:** the system falls back to the **deterministic
-  archetype-picker floor** (seed-rotated over the v2 archetypes) — a real, legible
-  card, never a fabricated or broken one. This honours the project's "honest
-  error, never a fake fallback" rule.
-- **Cutover (SEQ-3):** once v2 wins the A/B in review and the suite is green, the
-  flag default flips to on and the dead enum/menu-picker code is removed via
-  CLAUDE.md's gated-removal process. A second flag, `MEDIAHUB_GEN_BG` (default
-  off), independently gates optional generative backgrounds (SEQ-4, Tier C).
+  archetype-picker floor** — seeded per card from its id, rotated past the card's
+  recently-used archetypes — a real, legible card, never a fabricated or broken
+  one. This honours the project's "honest error, never a fake fallback" rule.
+- **Cutover (SEQ-3):** the default has already flipped to on (Tier A proved out);
+  what remains for SEQ-3 is removing the dead enum/menu-picker code via
+  CLAUDE.md's gated-removal process once Tier B lands. A second flag,
+  `MEDIAHUB_GEN_BG` (default off), independently gates optional generative
+  backgrounds (SEQ-4, Tier C).
 
 Read the flag in the route and in `resolve_design_tokens(profile_id)`; everything
 downstream branches on it. Seed the director and **cache the spec** (not just the

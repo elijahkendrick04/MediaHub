@@ -1084,11 +1084,16 @@ def _detect_medal_tier(brief) -> Optional[str]:
     place = str(layers.get("place") or "").strip()
     combined = " ".join([label, angle, pattern])
 
-    if "gold" in combined or place in ("1", "1st") or place.startswith("1"):
+    # Parse the placing as a NUMBER — a bare prefix match would paint a
+    # 10th/12th place gold and a 21st silver.
+    m = re.match(r"(\d+)", place)
+    place_n = int(m.group(1)) if m else 0
+
+    if "gold" in combined or place_n == 1:
         return "gold"
-    if "silver" in combined or place in ("2", "2nd") or place.startswith("2"):
+    if "silver" in combined or place_n == 2:
         return "silver"
-    if "bronze" in combined or place in ("3", "3rd") or place.startswith("3"):
+    if "bronze" in combined or place_n == 3:
         return "bronze"
     return None
 
@@ -1120,6 +1125,7 @@ def _common_replacements(
     logo_mark_mod: str = "",
     bg_photo_uri: str = "",
     theme_json: Optional[dict] = None,
+    skip_ai_bg: bool = False,
 ) -> dict[str, str]:
     palette = dict(brief.palette or {})
 
@@ -1240,27 +1246,30 @@ def _common_replacements(
     # Optional AI-generated brand-aware background. Activated only when
     # REPLICATE_API_TOKEN is set; otherwise the water-pattern + noise
     # overlay is used as before. Cached aggressively by content hash.
+    # v2 archetypes have no {{AI_BG_URI}} slot, so the caller skips the
+    # fetch for them — a paid API call whose output would be discarded.
     ai_bg_uri = None
-    try:
-        import os as _os
+    if not skip_ai_bg:
+        try:
+            import os as _os
 
-        if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
-            from mediahub.visual.ai_background import (
-                is_available as _ai_bg_ok,
-                background_data_uri_for,
-            )
-
-            if _ai_bg_ok():
-                # Map width/height back to a format name so the cache key
-                # is stable across cards of the same shape.
-                fmt_for_bg = (
-                    "feed_square"
-                    if width == height
-                    else ("story" if height > width * 1.5 else "feed_portrait")
+            if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
+                from mediahub.visual.ai_background import (
+                    is_available as _ai_bg_ok,
+                    background_data_uri_for,
                 )
-                ai_bg_uri = background_data_uri_for(brief, format_name=fmt_for_bg)
-    except Exception:
-        ai_bg_uri = None
+
+                if _ai_bg_ok():
+                    # Map width/height back to a format name so the cache key
+                    # is stable across cards of the same shape.
+                    fmt_for_bg = (
+                        "feed_square"
+                        if width == height
+                        else ("story" if height > width * 1.5 else "feed_portrait")
+                    )
+                    ai_bg_uri = background_data_uri_for(brief, format_name=fmt_for_bg)
+        except Exception:
+            ai_bg_uri = None
 
     # ---- Variation axes (V9 overhaul) ----
     # The brief now carries multi-axis variation: background_style picks the
@@ -2367,6 +2376,22 @@ def _fill_v2_archetype(
     repl["ACCENT_DECORATION"] = ""
 
     root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
+    # Medal tier: for gold/silver/bronze the accent colour IS the information
+    # (same rule the v1 engine applies via ``_MEDAL_ACCENTS``), so tint
+    # ``--mh-accent`` with the metal — but only when it clears the same APCA
+    # gate as every other resolved accent (kicker text on the ground AND a
+    # chip ground behind primary text). A light club ground gets the deep
+    # metal; if neither variant reads, the brand accent stays (legibility
+    # beats the tint, honestly).
+    tier = _detect_medal_tier(brief)
+    if tier and tier in _MEDAL_ACCENTS:
+        from mediahub.quality.compliance import is_legible
+
+        ground = root_vars["--mh-primary"]
+        for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
+            if is_legible(metal, ground) and is_legible(ground, metal):
+                root_vars["--mh-accent"] = metal
+                break
     # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
     # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
     # shrink rather than overflow. The per-layout defaults handle the short case.
@@ -2523,6 +2548,7 @@ def render_brief(
             (brief.text_layers or {}).get("result_value", ""),
         ),
         sponsor_block=_build_sponsor_block(sponsor_name) if sponsor_name else "",
+        skip_ai_bg=bool(_v2_archetype),
     )
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
 
