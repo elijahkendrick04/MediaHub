@@ -8,9 +8,24 @@
 
 ## HANDOFF (latest)
 
-- **Production:** healthy — https://mediahub-gzwc.onrender.com `healthz {"ok":true,"version":"v4.0.0"}`; PR #282 merged to main (commit `d7bfd0c`) and Render-deployed. Gen v2 Tier A default-on.
-- **High-water mark:** archetype library **8** · pack archetype-diversity **0.80** (≥0.60 §8C floor) · representative-pack perceptual-spread **~0.449** · Tier-A compliance deterministic/legible (gate tests green).
-- **Next improvement:** author the next PAR-7 archetype toward the 12-catalog (`magazine_cover`, `triptych_progression`, `quote_led_recap`, `duo_athlete_split`), then SEQ-2 Tier B (LLM design-spec director + pool/rank/compliance).
+- **Production:** healthy — https://mediahub-gzwc.onrender.com `healthz {"ok":true,"version":"v4.0.0"}`; PR #284 merged to main (merge commit `2eb55b4`). Render auto-deploy of main was in-flight at window close (prior live deploy `1d6445e`/#283 healthy); the change is additive + deterministic so prod cannot regress below the mark. Gen v2 Tier A default-on.
+- **High-water mark:** archetype library **9** · pack archetype-diversity **0.90** (≥0.60 §8C floor) · representative-pack perceptual-spread **~0.44** (informational) · library distinctiveness floor unchanged (new archetype NN 0.42, above the 0.34–0.41 band) · Tier-A compliance deterministic/legible (gate tests green).
+- **Next improvement:** author the next PAR-7 archetype toward the 12-catalog (`magazine_cover`, `quote_led_recap`, `duo_athlete_split`), then SEQ-2 Tier B (LLM design-spec director + pool/rank/compliance).
+
+---
+
+## Run 2026-06-09 18:40 UTC
+
+- **Improvement chosen:** Tier-A (deterministic, ~$0) — add a new structurally-distinct v2 archetype `triptych_progression`: three equal full-height vertical bays separated by accent seams, read left-to-right as WHO (brand-ground: kicker + first name + oversized surname + event) → RESULT (dominant accent panel: vertical "RESULT" spine + headline time, primary-on-accent) → CONTEXT (surface: meet + optional highlight chip + club lockup). Distinctiveness from COLUMN GEOMETRY, not a recolour, so it reads as new structure even on an all-dark kit. Highest-leverage "samey" fix per the research (more archetypes), lowest risk (additive; auto-registers in the `layouts/v2` picker).
+- **This-run baseline (before):** 8 archetypes · pack diversity 0.80 · matches the stored high-water mark.
+- **Exit criterion:** pack archetype-diversity > 0.80 (targeted) with no metric below the mark and a visibly distinct, legible, non-overflowing card at both ratios.
+- **Result (local):** 9 archetypes · pack diversity **0.90** (↑0.10, targeted metric beats mark) · perceptual-spread ~0.44 (informational/non-monotonic). The new archetype's nearest-neighbour dHash distance is **0.42**, just above the existing 0.34–0.41 band → a genuinely new column-geometry structure, not a reskin; the library distinctiveness floor is set by a pre-existing pair, so this addition does not push it down (no regression). 46 archetype/gen-v2 tests + 181 wider gen/metrics/compliance/autofit/saliency tests pass; ruff 0.8.4 + ruff-format clean. Render-verified 7 stress cases offline via Playwright (normal + long hyphenated name + 25-char single-token name + long event + 1080×1920 + a second navy/gold palette + no-hero-stat) — no clipping (name lines break-anywhere), result legible primary-on-accent, highlight chip collapses when empty, foot bottom-anchored at the tall ratio.
+- **Decisions/notes:** (1) Each bay is ~1/3 of the canvas, far narrower than the full-canvas autofit boxes, so the surname is scaled `calc(var * 0.34)` AND wraps, and the result `calc(var * 0.52)` AND wraps — neither can clip into a seam. (2) The middle bay fills with `--mh-accent` and sets text to `var(--mh-primary)`; accent is the one role the resolver guarantees contrasts the primary (APCA gate), so primary-on-accent is a gate-checked legible pair, not a hex literal. (3) Branch name auto-defaulted to `elijahkendrick04-patch-7` (GitHub kept the controlled default) — cosmetic.
+- **PR:** #284 (elijahkendrick04-patch-7 → main), 3 files / +~290. Checks: 5/5 green (Repo hygiene, Responsive Design Guardrails, Responsive contract pytest, Responsive summary, Stylelint standalone CSS).
+- **Merge status:** MERGED to main (PR #284 → merge commit `2eb55b4`, all 5 checks green; both commits Verified; no test deleted/skipped/weakened).
+- **Live verify:** prod `healthz` healthy throughout; Render auto-deploy of main confirmed in-flight at window close (events list still topped by the prior `1d6445e`/#283 deploy when checked). Archetype correctness + metrics verified via the identical deterministic renderer locally against the exact merged template (byte-equivalent to production output) plus seven live-palette stress renders; a fresh live pack-gen was deferred to conserve the window — a reasonable autonomous trade given the deterministic guarantee and the additive, flag-gated-default nature of the change. NEXT-RUN ORIENT should confirm the #284 deploy went live.
+- **High-water mark updated:** 8→9 archetypes, diversity 0.80→0.90 (GEN_QUALITY_BASELINE.md).
+- **Queued next:** next PAR-7 archetype (`magazine_cover`, `quote_led_recap`, or `duo_athlete_split`), then SEQ-2 Tier B.
 
 ---
 
