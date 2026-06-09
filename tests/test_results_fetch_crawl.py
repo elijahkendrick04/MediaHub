@@ -231,6 +231,72 @@ def test_page_cap_is_enforced():
 
 
 # ---------------------------------------------------------------------------
+# (d) Trailing-slash discovery base — rendered final_url drops the slash
+# ---------------------------------------------------------------------------
+
+
+# A minimal but valid PDF the keep-on-sight path accepts as results.
+_TINY_PDF = (
+    b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+    b"trailer<</Root 1 0 R>>\n%%EOF\n"
+)
+
+
+def _pdf(url: str) -> ReadResult:
+    page = FetchedPage(
+        content=_TINY_PDF,
+        final_url=url,
+        content_type="application/pdf",
+        tier="static",
+        text=None,
+    )
+    return ReadResult(url=url, page=page, tier="static", trigger=None)
+
+
+def test_rendered_entry_drops_trailing_slash_keeps_relative_links_in_scope():
+    """A meet hub whose rendered final_url loses the requested directory's
+    trailing slash must still resolve RELATIVE child links against the slashed
+    directory — otherwise urljoin drops the directory segment and every child
+    escapes scope. Mirrors results.rar-timing.co.uk/2025/sw-masters-lc/."""
+    entry = "https://meet.test/2025/champs/"
+    child = "https://meet.test/2025/champs/results/e1.pdf"
+    pages = {
+        # Rendered escalation reports final_url WITHOUT the trailing slash.
+        entry: _rendered(
+            entry.rstrip("/"),  # final_url == ".../champs" (no slash)
+            '<html><body><a href="results/e1.pdf">Event 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched, "relative child link escaped scope (trailing slash dropped)"
+    kept_pdf = {k for k in result.files if k.endswith(".pdf")}
+    assert kept_pdf, "the child PDF was not kept"
+
+
+def test_genuine_no_slash_entry_still_resolves_links():
+    """An entry URL that legitimately has no trailing slash (a page, not a
+    directory) must keep resolving relative links as before — the fix only
+    restores a slash the request actually carried. Mirrors
+    swimresults.co.uk/results/639/events."""
+    entry = "https://meet.test/results/639/events"
+    child = "https://meet.test/results/639/heat1.pdf"
+    pages = {
+        entry: _static(
+            entry,
+            '<html><body><a href="heat1.pdf">Heat 1</a></body></html>',
+        ),
+        child: _pdf(child),
+    }
+    result = crawl_results_site(entry, limits=_fast_limits(), fetch_page=_site_reader(pages))
+    fetched = {p.source_url for p in result.provenance.values()}
+    assert child in fetched
+
+
+# ---------------------------------------------------------------------------
 # shape_gate unit checks (sport-agnostic, structure + tokens)
 # ---------------------------------------------------------------------------
 

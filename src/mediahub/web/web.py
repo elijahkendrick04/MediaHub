@@ -3283,21 +3283,89 @@ def _results_url_enabled() -> bool:
     )
 
 
+def _url_jobs_dir() -> Path:
+    """The shared-disk directory holding per-job status JSON.
+
+    Lives under ``DATA_DIR`` (Render's persistent disk at ``/var/mediahub``) so
+    every gunicorn worker reads the same job state — the crawl thread runs in
+    one worker but the load-balanced status poll may land on another.
+    """
+    d = DATA_DIR / "url_jobs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _url_job_file_write(job_id: str, entry: dict) -> None:
+    """Persist a job's state to shared disk (atomic replace; best-effort)."""
+    try:
+        path = _url_jobs_dir() / f"{job_id}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(entry), encoding="utf-8")
+        tmp.replace(path)
+    except Exception:
+        pass
+
+
+def _url_job_file_read(job_id: str) -> Optional[dict]:
+    """Read a job's persisted state from shared disk, or ``None``."""
+    try:
+        path = _url_jobs_dir() / f"{job_id}.json"
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def _url_jobs_files_prune() -> None:
+    """Cap the on-disk job files, dropping finished jobs oldest-first.
+
+    Mirrors the in-memory ``_URL_JOBS_MAX`` cleanup but works across workers:
+    the files may have been written by any worker, so prune by directory listing
+    rather than by this worker's in-memory view.
+    """
+    try:
+        files = list(_url_jobs_dir().glob("*.json"))
+        if len(files) <= _URL_JOBS_MAX:
+            return
+        finished: list[tuple[float, Path]] = []
+        for f in files:
+            try:
+                status = (json.loads(f.read_text(encoding="utf-8")) or {}).get("status")
+            except Exception:
+                status = None
+            if status in ("done", "error"):
+                finished.append((f.stat().st_mtime, f))
+        finished.sort()
+        for _, f in finished[: max(0, len(files) - _URL_JOBS_MAX)]:
+            f.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def _url_job_set(job_id: str, **fields) -> None:
     with _url_jobs_lock:
         entry = _url_jobs.setdefault(job_id, {})
         entry.update(fields)
         entry["heartbeat"] = time.time()
+        snapshot = dict(entry)
         if len(_url_jobs) > _URL_JOBS_MAX:
             finished = [j for j, e in _url_jobs.items() if e.get("status") in ("done", "error")]
             for j in finished[: max(0, len(_url_jobs) - _URL_JOBS_MAX)]:
                 _url_jobs.pop(j, None)
+    # Write-through to shared disk so any worker can serve the status poll.
+    _url_job_file_write(job_id, snapshot)
+    _url_jobs_files_prune()
 
 
 def _url_job_get(job_id: str) -> Optional[dict]:
     with _url_jobs_lock:
         entry = _url_jobs.get(job_id)
-        return dict(entry) if entry else None
+        if entry:
+            return dict(entry)
+    # Not in this worker's memory — fall back to the shared-disk copy a sibling
+    # worker may have written (the write-through cache only sees its own jobs).
+    return _url_job_file_read(job_id)
 
 
 def _run_source_url(run_id: str) -> Optional[str]:
@@ -9895,8 +9963,7 @@ def create_app() -> Flask:
                 )
             _refetch_block = ""
             if _results_url_enabled():
-                _refetch_js = (
-                    """
+                _refetch_js = """
 <script>
 (function(){
   var b=document.getElementById('mh-refetch-btn');
@@ -9922,29 +9989,24 @@ def create_app() -> Flask:
   });
 })();
 </script>
-"""
-                    .replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id))
-                    .replace("__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID"))
+""".replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id)).replace(
+                    "__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID")
                 )
                 _refetch_block = (
                     '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
                     '<button id="mh-refetch-btn" type="button" class="btn secondary">Re-fetch latest results &rarr;</button>'
                     '<span id="mh-refetch-status" role="status" aria-live="polite" hidden '
                     'class="muted" style="font-family:var(--font-mono);font-size:12px"></span>'
-                    '</div>'
+                    "</div>"
                     '<p class="muted" style="font-size:12px;margin-top:8px">'
-                    'Re-fetching reads the site again and stages a <b>new</b> run &mdash; '
-                    'this one is left untouched.</p>'
-                    + _refetch_js
+                    "Re-fetching reads the site again and stages a <b>new</b> run &mdash; "
+                    "this one is left untouched.</p>" + _refetch_js
                 )
             _provenance_card = (
                 '<div class="card">'
                 '<div class="kv"><span class="k">Source</span><span>'
                 f'<a href="{_h(_src_url)}" target="_blank" rel="noopener">{_h(str(_src_host))}</a>'
-                '</span></div>'
-                + _ai_note
-                + _refetch_block
-                + '</div>'
+                "</span></div>" + _ai_note + _refetch_block + "</div>"
             )
 
         # --- V7: Workflow state
