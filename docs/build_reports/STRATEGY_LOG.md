@@ -10,27 +10,80 @@ edits docs only — never code, tests, infra, billing, or deploys.
 
 ## HANDOFF (current)
 
-- **Integrity state:** no high-confidence-core item is known to be below standard. This
-  cycle reality-checked the **binding-constraint (distribution) track**: PC.6's
-  "governing-body endorsement = the single highest-leverage channel (reaches hundreds of
-  clubs)" was asserted, never evidenced. Split it into **(a) evidenced, dated, open
-  approved-data-API access** (Swim England's Oct-2025 approved-systems API — concrete first
-  NGB action, grants *data + credibility*, **>95% step correct/available**) and **(b)
-  promotional NGB endorsement → DOWN-WEIGHTED to speculative** (no evidence any NGB
-  promotes a third-party content tool; partner slots category-exclusive and already held by
-  SportsEngine / GoCardless). Recorded in ROADMAP §PC.6, the diligence (Evidence refresh
-  cycle 3), and **ADR-0012**. PC.4 remains an evidence-gated price-discovery step; PC.3
-  (true multi-tenancy) remains correctly ⚠️ BLOCKING + escalated.
-- **Biggest open evidence gap:** revealed willingness-to-pay at the candidate Club tier
-  (closable only by the first ~10 hand-sold clubs / real annual payments — PC.6, can't be
-  closed from the desk). Secondary gap now logged: **Swim Wales** has no comparable public
-  approved-supplier/endorsement programme found — do not assert one exists until verified.
-- **Highest-impact next correction:** expand PC.6 into a concrete, evidence-banded
-  **direct + word-of-mouth** hand-sell sequence (now the de-facto primary channel after the
-  endorsement down-weight), or pressure-test **Route C** (sell/integrate with SportsEngine /
-  Swim Manager / Swim Club Manager — who now hold both the NGB endorsement and the official
-  data API) as the realistic distribution partner, with a current go/no-go read.
+- **Integrity state:** no high-confidence-core item is known to be below standard. This cycle
+  operationalised the now-**primary** distribution channel: after cycle 3 down-weighted
+  promotional NGB endorsement (ADR-0012), **direct + word-of-mouth hand-sell** became the
+  de-facto primary channel but PC.6 still described it in one asserted sentence. Expanded it
+  into a **warm-first + referral funnel** with sourced base rates (cold B2B reply ~2–5% vs warm
+  founder-led close ~30–50%; referrals = 20–50% of SaaS new customers / ~65% of B2B), an honest
+  cold-to-paid funnel (~0.3–1.0% → ~1,000–3,000 contacts to win 10 cold = infeasible solo), and a
+  realistic ~3–6+ month timeline. The >95% standard attaches to the *channel-design decision*
+  (warm+referral over cold broadcast); the *outcome* stays the unproven validation. Edited
+  ROADMAP §PC.6 + diligence (Evidence refresh cycle 4). No new ADR — elaboration of ADR-0012.
+- **Biggest open evidence gap:** still revealed willingness-to-pay at the candidate Club tier —
+  closable only by the first ~10 hand-sold clubs / real annual payments (PC.6/PC.4), not from the
+  desk. Secondary desk gap unchanged: Swim Wales has no public approved-supplier/endorsement
+  programme found — do not assert one exists until verified.
+- **Highest-impact next correction:** a current go/no-go pressure-test of **Route C** (sell/
+  integrate the content engine with SportsEngine / Swim Manager / Swim Club Manager — who now
+  hold both the NGB endorsement *and* the official data API), OR convert the £150k–£400k ceiling
+  + probability bands into an explicit per-horizon table tied to the warm-first funnel's realistic
+  club-count trajectory.
 ---
+
+## 2026-06-09 — Cycle 4 (PC.6: hand-sell funnel — direct + word-of-mouth, base-rate-grounded)
+
+**Assessed:** full roadmap against the standard; confirmed the prior handoff's #1 queued
+correction. Cycle 3 made direct + word-of-mouth the *de-facto primary* channel by down-weighting
+promotional NGB endorsement — but PC.6 still specified that primary channel as a single asserted
+sentence ("hand-sell the first ~10 clubs yourself"), with no funnel, channel mix, base rates, or
+timeline. On the binding-constraint (distribution) track, the design of the now-primary channel
+was the most load-bearing under-specified item.
+
+**Evidence gap researched + findings (captured in `research/SCALING_DILIGENCE_2026.md`, Evidence
+refresh cycle 4; current, dated, accessed 2026-06-09):** cold B2B outreach reply ~2–5% (SaaS as
+low as ~1.9%), cold-email→meeting ~0.8%; warm/founder-led close ~30–50% (≈10× cold); founder
+should personally close first 10–20 deals. Referral/word-of-mouth = 20–50% of new SaaS customers,
+~65% of B2B new business, ~37% better retention, amplified in niche communities. Reachable
+population is public but volunteer-run: Swim England ~1,200+ clubs, Swim Wales ~80–90 (~11,000
+members). *(Sources: builtforb2b.com, martal.ca, justinmckelvey.com, mailshake.com, saastr.com,
+thinkimpact.com, businessdasher.com, swimming.org, swimwales.org.)*
+
+**Improvement made:** rewrote PC.6's hand-sell line into a four-part **warm-first + referral
+sequence** — (i) local-warm base (Swansea/SE Wales) for the first ~3–5 clubs; (ii) a referral
+engine (2 named intros per signed club) to compound 5→10; (iii) meet/event presence as warmth-
+manufacture; (iv) cold outreach explicitly **capped to a supplement** with the honest ~0.3–1.0%
+cold-to-paid funnel showing ~1,000–3,000 contacts would be needed to win 10 cold (infeasible
+solo). Added an honest ~3–6+ month timeline and an explicit confidence split (design >95%-correct;
+outcome unproven = the validation). Added a funnel-math table to the diligence.
+
+**How it moved toward the standard:** the now-primary distribution channel is no longer asserted
+in one line — it is a defensible, base-rate-grounded sequence a hard-nosed operator would keep,
+with cold-broadcast (the tempting-but-wrong path) explicitly bounded by its own brutal math. The
+>95% standard cleanly attaches to the *channel-design decision*; the *outcome* stays the honest
+unproven validation that also closes PC.4's WTP gap. No revenue figure changed; vision unchanged;
+PC.3/PC.4 untouched; auto-update stamp/activity blocks not hand-edited.
+
+**Self-verify:** coherence ✓ (PC.6 funnel is internally consistent — local-warm + referral = the
+~10; cold supplements; sequencing references real public directories + ADR-0012; no un-built
+prereq); evidence ✓ (every external rate cited to a dated 2026-06-09 source and flagged ESTIMATE
+when applied to MediaHub's unproven case); standard ✓ (design >95%-correct; outcome quarantined as
+unproven validation); honesty ✓ (no inflated number; the cold-funnel math *lowers* apparent reach,
+the honest direction; timeline flagged as estimate, not a commitment); vision ✓ (unchanged —
+multi-sport, multi-tenant, human-gated content brain).
+
+**Discipline note:** no new ADR minted — this elaborates ADR-0012's already-recorded "lean on
+direct + word-of-mouth" decision rather than making a new strategic choice (avoids ADR inflation).
+
+**Realistic revenue ceiling + probability bands (unchanged this cycle, restated honestly):**
+swimming-only sustainable ≈ **£150k–£400k ARR** (most likely good outcome); **£1M+ ARR**
+low-double-digit-% and only via multi-sport breadth + institutional buyers + a second person;
+**£1M/month (~£12M ARR)** not realistic for a solo→small team on any evidence reviewed —
+directional north star only.
+
+**Queued next:** a current go/no-go pressure-test of Route C (SportsEngine / Swim Manager / Swim
+Club Manager as distribution partners), or convert the revenue ceiling + bands into an explicit
+per-horizon table tied to the warm-first funnel's realistic club-count trajectory.
 
 ## 2026-06-09 — Cycle 3 (PC.6: NGB distribution-channel reality check + re-weight)
 
