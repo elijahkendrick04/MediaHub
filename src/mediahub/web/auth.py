@@ -25,6 +25,7 @@ open. Nothing in this module imports Stripe or requires any billing env var.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import threading
@@ -42,7 +43,10 @@ from flask import session
 PLAN_FREE = "free"
 PLAN_CLUB = "club"
 PLAN_FEDERATION = "federation"
-VALID_PLANS = frozenset({PLAN_FREE, PLAN_CLUB, PLAN_FEDERATION})
+# Operator-only "unrestricted" tier — never purchasable and never set by Stripe;
+# granted solely by the env-gated developer sign-in (see login_dev_operator).
+PLAN_OWNER = "owner"
+VALID_PLANS = frozenset({PLAN_FREE, PLAN_CLUB, PLAN_FEDERATION, PLAN_OWNER})
 
 # bcrypt truncates silently at 72 bytes in older releases and *raises* in
 # 5.x. We cap explicitly so a long passphrase is handled identically on every
@@ -276,6 +280,49 @@ def _users_path() -> Path:
 
 _SESSION_KEY = "user_email"
 
+# ---- Operator / developer access ---------------------------------------
+# An env-gated, no-paywall sign-in for the operator running the deployment. It
+# does not exist unless MEDIAHUB_DEV_KEY is set in the environment, so it is
+# never a public backdoor. The key is read from the environment only — never
+# hardcoded, never logged — matching the project's API-keys-in-env rule.
+_DEV_SESSION_KEY = "dev_operator"
+
+
+def dev_login_enabled() -> bool:
+    """True only when the operator has configured MEDIAHUB_DEV_KEY in env."""
+    return bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
+
+
+def _dev_operator_email() -> str:
+    """The synthetic operator identity's email (configurable, never logged)."""
+    return normalize_email(os.environ.get("MEDIAHUB_DEV_EMAIL") or "developer@mediahub.local")
+
+
+def verify_dev_key(candidate: object) -> bool:
+    """Constant-time check of a submitted key against MEDIAHUB_DEV_KEY.
+
+    Always False when no key is configured, so the route cannot be coerced into
+    granting access on an unconfigured deployment.
+    """
+    key = (os.environ.get("MEDIAHUB_DEV_KEY") or "").strip()
+    if not key:
+        return False
+    return hmac.compare_digest(key, str(candidate or "").strip())
+
+
+def login_dev_operator() -> None:
+    """Establish an unrestricted operator session (Flask signed cookie)."""
+    session[_DEV_SESSION_KEY] = True
+
+
+def is_dev_operator() -> bool:
+    """True when the session is the operator AND the key is still configured.
+
+    Re-checking the env means removing MEDIAHUB_DEV_KEY instantly revokes every
+    outstanding operator session.
+    """
+    return bool(session.get(_DEV_SESSION_KEY)) and dev_login_enabled()
+
 
 def login_user(user: User) -> None:
     session[_SESSION_KEY] = user.email
@@ -283,6 +330,7 @@ def login_user(user: User) -> None:
 
 def logout_user() -> None:
     session.pop(_SESSION_KEY, None)
+    session.pop(_DEV_SESSION_KEY, None)
 
 
 def current_user_email() -> Optional[str]:
@@ -291,6 +339,10 @@ def current_user_email() -> Optional[str]:
 
 
 def current_user(store: Optional[UserStore] = None) -> Optional[User]:
+    # Operator developer session — a synthetic, non-persisted unrestricted
+    # identity. Checked first so it never depends on the users.jsonl ledger.
+    if is_dev_operator():
+        return User(email=_dev_operator_email(), hashed_password="", plan=PLAN_OWNER)
     email = current_user_email()
     if not email:
         return None
@@ -314,9 +366,10 @@ def current_plan(store: Optional[UserStore] = None) -> str:
 
 
 def is_premium(plan: Optional[str] = None) -> bool:
-    """True when the plan unlocks paid features (Club or Federation)."""
+    """True when the plan unlocks paid features (Club, Federation, or the
+    operator-only Owner tier)."""
     p = plan if plan is not None else current_plan()
-    return p in (PLAN_CLUB, PLAN_FEDERATION)
+    return p in (PLAN_CLUB, PLAN_FEDERATION, PLAN_OWNER)
 
 
 def plan_label(plan: str) -> str:
@@ -324,4 +377,5 @@ def plan_label(plan: str) -> str:
         PLAN_FREE: "Free",
         PLAN_CLUB: "Club",
         PLAN_FEDERATION: "Federation",
+        PLAN_OWNER: "Developer",
     }.get(_coerce_plan(plan), "Free")
