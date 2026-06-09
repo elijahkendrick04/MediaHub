@@ -591,7 +591,7 @@ def _render_why_inner(
         plain_lines.append("")
         plain_lines.append("Source lines:")
         for sl in source_lines:
-            plain_lines.append(f"  [{sl.get('label','source')}] {sl.get('raw_text','')}")
+            plain_lines.append(f"  [{sl.get('label', 'source')}] {sl.get('raw_text', '')}")
     plain_text = _h("\n".join(p for p in plain_lines if p is not None))
 
     bullets_block = (
@@ -721,9 +721,7 @@ def _render_why_this_card(
         )
     exp = _build_card_explanation(ra)
     return (
-        f"{shell_open}"
-        f"{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}"
-        f"</details>"
+        f"{shell_open}{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}</details>"
     )
 
 
@@ -1413,7 +1411,7 @@ def _reconcile_interrupted_runs():
     try:
         conn = _db()
         rows = conn.execute(
-            "SELECT id, heartbeat_at, created_at FROM runs " "WHERE status IN ('queued','running')"
+            "SELECT id, heartbeat_at, created_at FROM runs WHERE status IN ('queued','running')"
         ).fetchall()
         dead = []
         for r in rows:
@@ -1738,18 +1736,18 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
-        f'<span data-mh-wf-label>{_h(label)}</span></span>'
+        f"<span data-mh-wf-label>{_h(label)}</span></span>"
         f'<button class="btn" type="button" style="font-size:12px;padding:4px 10px;background:var(--good);color:var(--lane-ink);border:0"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("approved")}'
+        f"{_disabled_attrs('approved')}"
         f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">Approve</button>'
         f'<button class="btn danger" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="rejected" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("rejected")}'
+        f"{_disabled_attrs('rejected')}"
         f' title="Reject this card so it\'s kept out of the content builder.">Reject</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("queue")}'
+        f"{_disabled_attrs('queue')}"
         f' title="Send back to the queue — neither approved nor rejected.">Re-queue</button>'
     )
 
@@ -2948,10 +2946,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
             f'title="{_h(title)}" '
             f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-            f'cursor:pointer;background:{init_bg};color:{init_fg};'
-            f'font-family:inherit;margin-right:4px;font-weight:{"600" if is_active else "400"};'
+            f"cursor:pointer;background:{init_bg};color:{init_fg};"
+            f"font-family:inherit;margin-right:4px;font-weight:{'600' if is_active else '400'};"
             f'display:inline-flex;align-items:center;gap:5px">'
-            f'{status_dot}{_h(t_label)}</button>'
+            f"{status_dot}{_h(t_label)}</button>"
         )
         panels_html += (
             f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
@@ -3032,9 +3030,9 @@ def _render_turn_into_card(run_id: str) -> str:
         _ti_prior_html = (
             '<div style="margin-top:14px">'
             '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
-            'Previously generated packs</div>'
+            "Previously generated packs</div>"
             f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
-            '</div>'
+            "</div>"
         )
 
     return f"""
@@ -5496,8 +5494,7 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 # dark --surface card background while RESPONSIVE_GUARDRAILS_CSS remains the
 # cascade's final layer (see test_theme_tokens::test_guardrails_appended_last).
 _MH_AUDIENCE_ICON_CSS = (
-    "\n.mh-audience-icon { color: var(--lane); }"
-    "\n.mh-audience-icon svg { color: var(--lane); }\n"
+    "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
 BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
 
@@ -5808,8 +5805,8 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         colour_var = "--mh-success" if passed else "--mh-error"
         contrast_rows.append(
             f'<tr><td style="padding:4px 8px;font-family:var(--font-mono);'
-            f'font-size:11px">{esc(c.get("scheme",""))}</td>'
-            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("role_pair",""))}</td>'
+            f'font-size:11px">{esc(c.get("scheme", ""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("role_pair", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{c.get("apca_lc", 0):.1f}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
@@ -5826,9 +5823,9 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         colour_var = "--mh-success" if passed else "--mh-error"
         status_rows.append(
             f'<tr><td style="padding:4px 8px;font-size:12px">'
-            f'{esc(s.get("status_name",""))}</td>'
+            f"{esc(s.get('status_name', ''))}</td>"
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
-            f'font-size:11px">{esc(s.get("status_hex",""))}</td>'
+            f'font-size:11px">{esc(s.get("status_hex", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{s.get("delta_e_2000", 0):.1f}</td>'
             f'<td style="padding:4px 8px;text-align:center;'
@@ -5842,8 +5839,8 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         symbol = "✓" if passed else "✗"
         colour_var = "--mh-success" if passed else "--mh-warning"
         cvd_rows.append(
-            f'<tr><td style="padding:4px 8px;font-size:12px">{esc(c.get("cvd",""))}</td>'
-            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("pair",""))}</td>'
+            f'<tr><td style="padding:4px 8px;font-size:12px">{esc(c.get("cvd", ""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("pair", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{c.get("delta_e_2000", 0):.1f}</td>'
             f'<td style="padding:4px 8px;text-align:center;'
@@ -5854,12 +5851,12 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
     if harmonic and harmonic.get("template"):
         harmonic_html = (
             f'<p style="margin:0;font-size:12px;color:var(--mh-on-surface)">'
-            f'Best template: <b>{esc(harmonic["template"])}</b> @ '
-            f'<code>{harmonic.get("rotation", 0):.1f}°</code>, '
-            f'energy = <code>{harmonic.get("energy", 0):.1f}</code> '
-            f'across <code>{harmonic.get("hue_count", 0)}</code> hues '
-            f'(Cohen-Or 2006; lower energy = more harmonic).'
-            f'</p>'
+            f"Best template: <b>{esc(harmonic['template'])}</b> @ "
+            f"<code>{harmonic.get('rotation', 0):.1f}°</code>, "
+            f"energy = <code>{harmonic.get('energy', 0):.1f}</code> "
+            f"across <code>{harmonic.get('hue_count', 0)}</code> hues "
+            f"(Cohen-Or 2006; lower energy = more harmonic)."
+            f"</p>"
         )
     else:
         harmonic_html = (
@@ -5879,7 +5876,7 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
 
     seed_hct_str = ""
     if isinstance(seed_hct, (list, tuple)) and len(seed_hct) >= 3:
-        seed_hct_str = f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, " f"T={seed_hct[2]:.1f})"
+        seed_hct_str = f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, T={seed_hct[2]:.1f})"
 
     repaired_note = ""
     if was_repaired:
@@ -6163,7 +6160,7 @@ def _theme_seed_style_block() -> str:
     if accent_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", accent_hex):
         overrides.append(f"--mh-brand-accent: {accent_hex};")
 
-    return f'<style id="mh-theme-seed">' f':root {{ {" ".join(overrides)} }}' f'</style>'
+    return f'<style id="mh-theme-seed">:root {{ {" ".join(overrides)} }}</style>'
 
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
@@ -7965,7 +7962,7 @@ def create_app() -> Flask:
         # is the live dot + the CTA. Editorial italic does the emphasis work.
         if prof and prof.is_ready():
             # Returning user with a pinned org.
-            hero_h1 = f"{_h(prof.display_name)}.<br>" '<em class="editorial">Ready</em> to file.'
+            hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
             hero_lede = (
                 "Your brand voice, palette, and logo are loaded. Captions, "
                 "graphics, and motion videos will arrive on-brand. Nothing "
@@ -7973,17 +7970,17 @@ def create_app() -> Flask:
             )
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
-                'Create new content &rarr;</a>'
+                "Create new content &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                'Switch organisation</a>'
+                "Switch organisation</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
-                'Edit profile</a>'
+                "Edit profile</a>"
             )
             eyebrow = "Pinned organisation"
             lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = "Results in.<br>" '<em class="editorial">On-brand</em> stories out.'
+            hero_h1 = 'Results in.<br><em class="editorial">On-brand</em> stories out.'
             hero_lede = (
                 "MediaHub reads your club website, social profiles, and brand "
                 "guidelines, then writes captions, builds graphics, and renders "
@@ -7997,9 +7994,9 @@ def create_app() -> Flask:
                 # brand-new tenant.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
-                    f'Sign in &rarr;</a>'
+                    f"Sign in &rarr;</a>"
                     f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                    'Set up my organisation</a>'
+                    "Set up my organisation</a>"
                 )
             else:
                 # Fresh deployment with no organisations yet: lead with
@@ -8008,9 +8005,9 @@ def create_app() -> Flask:
                 # "no orgs yet" panel) and never looks broken.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    'Set up my organisation &rarr;</a>'
+                    "Set up my organisation &rarr;</a>"
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    'Sign in</a>'
+                    "Sign in</a>"
                 )
             eyebrow = "Sport content automation"
             lane_no = "01"
@@ -8019,11 +8016,11 @@ def create_app() -> Flask:
         meta_parts = []
         if n_orgs:
             meta_parts.append(
-                f'<span><b>{n_orgs:02d}</b> {"organisation" if n_orgs == 1 else "organisations"}</span>'
+                f"<span><b>{n_orgs:02d}</b> {'organisation' if n_orgs == 1 else 'organisations'}</span>"
             )
         if n_runs:
             meta_parts.append(
-                f'<span><b>{n_runs:03d}</b> total {"run" if n_runs == 1 else "runs"}</span>'
+                f"<span><b>{n_runs:03d}</b> total {'run' if n_runs == 1 else 'runs'}</span>"
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append("<span>Brand voice <b>captured</b></span>")
@@ -8225,34 +8222,34 @@ def create_app() -> Flask:
         if prof and prof.is_ready():
             final_cta_html = (
                 '<section class="mh-final-cta">'
-                '<div>'
+                "<div>"
                 f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
-                '<em>ready</em> in a sitting.</h2>'
+                "<em>ready</em> in a sitting.</h2>"
                 '<p class="mh-final-cta-sub">Drop the results file. We\'ll '
-                'rank the moments and write the captions; you spend the '
-                'evening approving instead of opening Photoshop.</p>'
-                '</div>'
+                "rank the moments and write the captions; you spend the "
+                "evening approving instead of opening Photoshop.</p>"
+                "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("make_page")}">Start a content pack &rarr;</a>'
                 f'<a class="btn secondary" href="{url_for("activity_page")}">All recent runs</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
         else:
             final_cta_html = (
                 '<section class="mh-final-cta">'
-                '<div>'
+                "<div>"
                 '<h2 class="mh-final-cta-headline">A minute to set up. '
-                '<em>Then</em> every week is easier.</h2>'
+                "<em>Then</em> every week is easier.</h2>"
                 '<p class="mh-final-cta-sub">Tell us your club\'s name and '
-                'website. We\'ll read your brand, palette and voice, and have '
-                'on-brand drafts ready the next time you upload a results file.</p>'
-                '</div>'
+                "website. We'll read your brand, palette and voice, and have "
+                "on-brand drafts ready the next time you upload a results file.</p>"
+                "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("organisation_setup")}">Create your organisation &rarr;</a>'
                 f'<a class="btn secondary" href="{url_for("sign_in_page")}">Sign in</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
 
         return _layout(
@@ -8419,12 +8416,12 @@ def create_app() -> Flask:
                     "so the run list is empty even if work was done earlier. "
                     "Try refreshing &mdash; if it keeps happening, ask your "
                     "operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("activity_page")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Activity", empty_body, active="activity")
             empty_body = (
@@ -8432,15 +8429,15 @@ def create_app() -> Flask:
                 '<span class="mh-hero-eyebrow">Activity</span>'
                 f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
-                'No runs yet for this organisation. Upload a results file, paste '
-                'a sponsor brief, or describe a moment in your own words &mdash; '
-                'every run lands here with the meet name, status, queue, and a '
-                'one-click link back into the review.'
-                '</p>'
+                "No runs yet for this organisation. Upload a results file, paste "
+                "a sponsor brief, or describe a moment in your own words &mdash; "
+                "every run lands here with the meet name, status, queue, and a "
+                "one-click link back into the review."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Activity", empty_body, active="activity")
 
@@ -8452,16 +8449,16 @@ def create_app() -> Flask:
             if s.get("scheduled"):
                 parts.append(
                     f'<span class="tag info" style="font-size:11px">'
-                    f'{s["scheduled"]} scheduled</span>'
+                    f"{s['scheduled']} scheduled</span>"
                 )
             if s.get("published"):
                 parts.append(
                     f'<span class="tag good" style="font-size:11px">'
-                    f'{s["published"]} published</span>'
+                    f"{s['published']} published</span>"
                 )
             if s.get("failed"):
                 parts.append(
-                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
                 )
             return " ".join(parts)
 
@@ -8545,7 +8542,7 @@ def create_app() -> Flask:
                     f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                     f'<button class="btn danger" type="submit" '
                     f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                    f'</form></td></tr>'
+                    f"</form></td></tr>"
                 )
                 if r["status"] == "error" and r["error"]:
                     err_text = str(r["error"])
@@ -8714,23 +8711,23 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity</span>'
-            '<h1>Recent runs</h1>'
+            "<h1>Recent runs</h1>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
-            f'<span>{len(rows):02d} {"run" if len(rows) == 1 else "runs"}</span>'
-            '</div>'
-            '</section>'
-            f'{summary_html}'
-            f'{failure_callout}'
-            f'{toolbar_html}'
+            f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
+            "</div>"
+            "</section>"
+            f"{summary_html}"
+            f"{failure_callout}"
+            f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
-            '<thead><tr><th>Input</th><th>Status</th>'
-            '<th>Matched</th><th>Achievements</th><th>Schedule</th>'
-            '<th>Started</th><th></th></tr></thead>'
-            f'<tbody>{rows_html}</tbody>'
-            '</table></div>'
-            f'{posting_panel_html}'
-            f'{filter_js}'
+            "<thead><tr><th>Input</th><th>Status</th>"
+            "<th>Matched</th><th>Achievements</th><th>Schedule</th>"
+            "<th>Started</th><th></th></tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            "</table></div>"
+            f"{posting_panel_html}"
+            f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
 
@@ -8821,16 +8818,16 @@ def create_app() -> Flask:
                         configure_href = url_for("upload_configure", run_id=r["id"])
                         n_swims = r["our_swims"] or 0
                         items_html += (
-                            '<li>'
+                            "<li>"
                             '<span class="ico">'
                             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
-                            '</span>'
+                            "</span>"
                             f'<div class="body"><span class="name">{_h(name)}</span>'
                             f'<span class="meta">{n_swims} swim{"" if n_swims == 1 else "s"} · '
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
-                            '</div>'
+                            "</div>"
                             f'<a class="go" href="{configure_href}">Re-configure &rarr;</a>'
-                            '</li>'
+                            "</li>"
                         )
                     recent_html = (
                         '<div class="card mh-recent-card">'
@@ -8950,7 +8947,7 @@ def create_app() -> Flask:
     <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn" type="submit">Continue &rarr;</button>
-      <a class="btn ghost" href="{url_for('home')}">Cancel</a>
+      <a class="btn ghost" href="{url_for("home")}">Cancel</a>
     </div>
   </form>
 </div>
@@ -9047,31 +9044,31 @@ def create_app() -> Flask:
             if byte_size < 2048:
                 headline = "That file doesn't look like a meet results file"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    f'is only {byte_size} bytes &mdash; far too small to be a real '
-                    'meet results file. The most common cause is a broken download '
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"is only {byte_size} bytes &mdash; far too small to be a real "
+                    "meet results file. The most common cause is a broken download "
                     '(an HTML "404 Not Found" page saved as a PDF, or a partial save).</p>'
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
-                    'Try downloading the file again from the source and re-uploading. '
-                    'A real Hytek PDF or HY3 is usually 100 KB or larger.</p>'
+                    "Try downloading the file again from the source and re-uploading. "
+                    "A real Hytek PDF or HY3 is usually 100 KB or larger.</p>"
                 )
             elif n_events == 0:
                 headline = "That file looks like a meet preview, not results"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    'parsed OK but doesn\'t contain any events with results.</p>'
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    "parsed OK but doesn't contain any events with results.</p>"
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
-                    'This usually means you uploaded an entry list, a heat sheet, or '
-                    'meet conditions document. Wait until the meet finishes and the '
-                    'organisers publish the actual results file.</p>'
+                    "This usually means you uploaded an entry list, a heat sheet, or "
+                    "meet conditions document. Wait until the meet finishes and the "
+                    "organisers publish the actual results file.</p>"
                 )
             else:
                 headline = "We couldn't read clubs from that file"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    f'has {n_events} events but no club information we can filter on. '
-                    'This is rare and usually means the file is from a meet management '
-                    'system MediaHub doesn\'t yet support.</p>'
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"has {n_events} events but no club information we can filter on. "
+                    "This is rare and usually means the file is from a meet management "
+                    "system MediaHub doesn't yet support.</p>"
                 )
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
@@ -9234,17 +9231,17 @@ def create_app() -> Flask:
             else:
                 prof_logo_html = (
                     '<p class="dim" style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
-                    'No logo on your organisation profile. '
+                    "No logo on your organisation profile. "
                     f'<a href="{url_for("organisation_page")}" '
                     'style="color:var(--warn);text-decoration:underline">Add one</a> '
-                    'so it flows through to every graphic.</p>'
+                    "so it flows through to every graphic.</p>"
                 )
 
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
   <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
-  <p class="lede">{_h(meet_name) or 'Meet uploaded.'} &mdash; {len(clubs)} club{'s' if len(clubs) != 1 else ''} detected. Pick yours, tune the palette for this one-off, and drop in any photos you want graphics to prefer.</p>
+  <p class="lede">{_h(meet_name) or "Meet uploaded."} &mdash; {len(clubs)} club{"s" if len(clubs) != 1 else ""} detected. Pick yours, tune the palette for this one-off, and drop in any photos you want graphics to prefer.</p>
 </section>
 
 <nav class="mh-stepper" aria-label="Upload progress">
@@ -9753,19 +9750,19 @@ def create_app() -> Flask:
                 _err_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
                     '<span class="mh-hero-eyebrow">Pipeline failed</span>'
-                    '<h1>Run didn\'t finish.</h1>'
+                    "<h1>Run didn't finish.</h1>"
                     '<p class="lede">'
-                    'The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn\'t parse &mdash; try a different format or check the file isn\'t corrupted.'
-                    '</p>'
+                    "The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn't parse &mdash; try a different format or check the file isn't corrupted."
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All recent runs</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                     '<div class="card" style="border-left:2px solid var(--bad)">'
                     '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
                     f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
-                    '</div>'
+                    "</div>"
                 )
                 return _layout("Run failed", _err_body, active="create")
             # Round-6 fix: when neither the in-memory cache nor the DB has
@@ -9801,8 +9798,8 @@ def create_app() -> Flask:
 
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
-    <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for('upload')}">Try another file</a>
-    <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
+    <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for("upload")}">Try another file</a>
+    <a id="home-link"   class="btn secondary" href="{url_for("home")}">View on home</a>
   </div>
 </div>
 
@@ -9966,7 +9963,7 @@ def create_app() -> Flask:
         # streamed progress log (not an empty one) and honour staleness.
         conn = _db()
         row = conn.execute(
-            "SELECT status, error, progress_log, heartbeat_at " "FROM runs WHERE id = ?", (run_id,)
+            "SELECT status, error, progress_log, heartbeat_at FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
         conn.close()
         if not row:
@@ -10072,10 +10069,10 @@ def create_app() -> Flask:
                     '<div class="kv" style="margin-top:10px">'
                     '<span class="k">AI-read</span><span>'
                     '<span class="tag warn">AI-read from page</span> '
-                    f'{_n_tables} table{"" if _n_tables == 1 else "s"} on this run '
-                    f'{"was" if _n_tables == 1 else "were"} read from the page by AI vision '
-                    f'(avg confidence {_avg:.0%}) and re-checked by the deterministic '
-                    'interpreter like any other input.</span></div>'
+                    f"{_n_tables} table{'' if _n_tables == 1 else 's'} on this run "
+                    f"{'was' if _n_tables == 1 else 'were'} read from the page by AI vision "
+                    f"(avg confidence {_avg:.0%}) and re-checked by the deterministic "
+                    "interpreter like any other input.</span></div>"
                 )
             _refetch_block = ""
             if _results_url_enabled():
@@ -10184,14 +10181,14 @@ def create_app() -> Flask:
 <div class="card">
   <h2>Meet context</h2>
   <div class="kv">
-    <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get('meet_level','open'))}</span></span>
-    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '—')}</span>
-    <span class="k">Has finals</span><span>{ctx_badge(mctx.get('has_finals'))}</span>
-    <span class="k">Has age groups</span><span>{ctx_badge(mctx.get('has_age_groups'))}</span>
-    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '—')}</span>
-    <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get('research_available') else '<span class="tag warn">unavailable</span>'}</span>
+    <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get("meet_level", "open"))}</span></span>
+    <span class="k">Governing body</span><span>{_h(mctx.get("governing_body") or "—")}</span>
+    <span class="k">Has finals</span><span>{ctx_badge(mctx.get("has_finals"))}</span>
+    <span class="k">Has age groups</span><span>{ctx_badge(mctx.get("has_age_groups"))}</span>
+    <span class="k">Age groups</span><span class="muted">{_h(", ".join(mctx.get("age_groups") or []) or "—")}</span>
+    <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get("research_available") else '<span class="tag warn">unavailable</span>'}</span>
   </div>
-  {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + '</div>') if ctx_sources_html else ''}
+  {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + "</div>") if ctx_sources_html else ""}
 </div>"""
 
         # --- Top achievements panel
@@ -10253,7 +10250,7 @@ def create_app() -> Flask:
                 ra, card_uuid=f"top-{_why_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
             ach_rows_html += f"""
-<div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
@@ -10300,12 +10297,12 @@ def create_app() -> Flask:
         not_gen_rows = ""
         for t in no_ach_traces[:30]:
             not_gen_rows += (
-                f'<tr data-swimmer="{t.get("swimmer_name","")}" data-event="{t.get("event","")}">'
-                f'<td>{_h(t.get("swimmer_name",""))}</td>'
-                f'<td>{_h(t.get("event",""))}</td>'
-                f'<td style="font-family:monospace">{_h(t.get("time_str",""))}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary",""))}</td>'
-                f'</tr>'
+                f'<tr data-swimmer="{t.get("swimmer_name", "")}" data-event="{t.get("event", "")}">'
+                f"<td>{_h(t.get('swimmer_name', ''))}</td>"
+                f"<td>{_h(t.get('event', ''))}</td>"
+                f'<td style="font-family:monospace">{_h(t.get("time_str", ""))}</td>'
+                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary", ""))}</td>'
+                f"</tr>"
             )
 
         # --- Legacy V4 cards (collapsed)
@@ -10323,7 +10320,7 @@ def create_app() -> Flask:
             sources_str = ", ".join(s.get("name", "") for s in (t.get("sources") or [])[:3])
             v4_rows.append(
                 f'<tr><td><span class="tag info">{_h(_humanise(c.get("card_type", "")))}</span><br>'
-                f'<strong>{_h((c.get("headline") or "")[:80])}</strong>'
+                f"<strong>{_h((c.get('headline') or '')[:80])}</strong>"
                 f'<div class="muted" style="font-size:12px">{_h((c.get("subhead") or "")[:120])}</div></td>'
                 f'<td><span class="tag {badge}">{_h(conf)}</span></td>'
                 f'<td><span class="tag {safe_badge}">{_h(safe)}</span></td>'
@@ -10344,7 +10341,7 @@ def create_app() -> Flask:
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "—")}</div></div>'
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "—")}</div></div>'
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "—")}</div></div>'
-                f'</div></div>'
+                f"</div></div>"
             )
 
         # Warnings
@@ -10354,13 +10351,13 @@ def create_app() -> Flask:
             for w in warnings[:10]:
                 cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
                 items.append(
-                    f'<li><span class="tag {cls}">{_h(w.get("severity",""))}</span> '
-                    f'<strong>{_h(w.get("code",""))}</strong> &mdash; {_h(w.get("message",""))}</li>'
+                    f'<li><span class="tag {cls}">{_h(w.get("severity", ""))}</span> '
+                    f"<strong>{_h(w.get('code', ''))}</strong> &mdash; {_h(w.get('message', ''))}</li>"
                 )
             warn_html = (
                 '<div class="card"><h2>Parse notes</h2>'
                 '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
-                f'<ul>{"".join(items)}</ul></div>'
+                f"<ul>{''.join(items)}</ul></div>"
             )
 
         # --- V6 PB Audit panel
@@ -10395,7 +10392,7 @@ def create_app() -> Flask:
             if _needs_verif_swimmers:
                 rows = ""
                 for sa in _needs_verif_swimmers[:10]:
-                    _sw_key = _h(sa.get("asa_id") or f"name:{sa.get('hy3_name','')}")
+                    _sw_key = _h(sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}")
                     _hy3 = _h(sa.get("hy3_name", ""))
                     _sr = _h(sa.get("sr_name") or "—")
                     _asa = _h(sa.get("asa_id") or "?")
@@ -10410,7 +10407,7 @@ def create_app() -> Flask:
                 _needs_verif_html = (
                     f'<div class="divider"></div>'
                     f'<div><strong style="color:var(--warn)">&#x26A0; {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
-                    f'{rows}</div>'
+                    f"{rows}</div>"
                 )
 
             _budget_note = (
@@ -10534,7 +10531,7 @@ def create_app() -> Flask:
                 _wf_filter_buttons += (
                     f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
                     f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
-                    f'{_wf_opt[1]}{_wf_count_html}</a>'
+                    f"{_wf_opt[1]}{_wf_count_html}</a>"
                 )
             # Progress maths — how much of the queue has the user actioned?
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
@@ -10665,7 +10662,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
@@ -10837,13 +10834,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Review queue</span>
-  <h1>{_h(meet.get('name', '(unknown meet)'))}</h1>
+  <h1>{_h(meet.get("name", "(unknown meet)"))}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{_h(data.get('profile_display','—'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('start_date','?'))} – {_h(meet.get('end_date','?'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('course','?'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('venue') or 'venue unknown')}</span><span class="sep">·</span>
-    <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}</span>
+    <span>{_h(data.get("profile_display", "—"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("start_date", "?"))} – {_h(meet.get("end_date", "?"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course", "?"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span><span class="sep">·</span>
+    <span style="color:var(--ink-faint)">{_h(dispatch_log.get("chosen_filename") or data.get("file_name", ""))}</span>
   </div>
 </section>
 
@@ -10882,12 +10879,12 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span class="muted" style="font-size:12px">Approve cards here &mdash; build graphics, video &amp; the reel in the content builder.</span>
   </div>
   <div class="filters-bar">
-    <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
+    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types")}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
-    <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, 'swimmers')}</select>
-    <select id="f-event" onchange="applyFilters()">{opts(events_set, 'events')}</select>
-    <select id="f-band" onchange="applyFilters()">{opts(bands_set, 'bands')}</select>
-    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, 'post types')}</select>
+    <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, "swimmers")}</select>
+    <select id="f-event" onchange="applyFilters()">{opts(events_set, "events")}</select>
+    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands")}</select>
+    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types")}</select>
     <button class="btn secondary" style="font-size:13px;padding:6px 12px" onclick="clearFilters()">Clear</button>
     <span id="f-count" class="muted" style="font-size:12px;align-self:center"></span>
     <button type="button" class="btn secondary" id="mh-expand-all-why" aria-pressed="false"
@@ -11772,19 +11769,19 @@ function copyWhyCard(btn, taId) {{
             empty_body = (
                 '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">PB audit</span>'
-                '<h1>No PB audit on file</h1>'
+                "<h1>No PB audit on file</h1>"
                 '<p class="lede">'
-                'This run was processed without PB fetching, so there\'s nothing to '
-                'reconcile here. Re-run the same input from the upload page with PB '
-                'fetching enabled and the audit detail will appear.'
-                '</p>'
+                "This run was processed without PB fetching, so there's nothing to "
+                "reconcile here. Re-run the same input from the upload page with PB "
+                "fetching enabled and the audit detail will appear."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">'
-                'Re-upload with PB fetching &rarr;</a>'
+                "Re-upload with PB fetching &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("review", run_id=run_id)}">'
-                'Back to the review queue</a>'
-                '</div>'
-                '</section>'
+                "Back to the review queue</a>"
+                "</div>"
+                "</section>"
             )
             return _layout("PB Audit", empty_body, active="")
         per_swimmer = pb_audit.get("per_swimmer") or []
@@ -11803,7 +11800,7 @@ function copyWhyCard(btn, taId) {{
                 "manual_override": ("Override", "info"),
             }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
             method_label, method_cls = method_meta
-            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name','')}"
+            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
             _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
             _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
             n_dec = len(sa.get("pb_decisions") or [])
@@ -11811,19 +11808,19 @@ function copyWhyCard(btn, taId) {{
                 1 for d in (sa.get("pb_decisions") or []) if d.get("status") == "CONFIRMED_PB"
             )
             rows += (
-                f'<tr>'
-                f'<td>{_h(sa.get("hy3_name",""))}</td>'
+                f"<tr>"
+                f"<td>{_h(sa.get('hy3_name', ''))}</td>"
                 f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
-                f'<td>{_h(sa.get("sr_name") or "—")}</td>'
+                f"<td>{_h(sa.get('sr_name') or '—')}</td>"
                 f'<td><span class="tag {method_cls}">{_h(method_label)}</span></td>'
-                f'<td>{n_dec}</td>'
+                f"<td>{n_dec}</td>"
                 f'<td style="color:var(--good)">{n_conf}</td>'
-                f'<td>'
+                f"<td>"
                 f'<a class="btn secondary" style="font-size:11px;padding:3px 8px" href="{_verify_url}">Verify</a>'
                 f' <form style="display:inline" method="post" action="{_ignore_url}">'
                 f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" type="submit">Ignore PBs</button></form>'
-                f'</td>'
-                f'</tr>'
+                f"</td>"
+                f"</tr>"
             )
 
         body = f"""
@@ -11831,18 +11828,18 @@ function copyWhyCard(btn, taId) {{
   <span class="mh-hero-eyebrow">PB audit</span>
   <h1>Personal-best reconciliation</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>run {_h(pb_audit.get('run_id', run_id)[:12])}</span><span class="sep">/</span>
+    <span>run {_h(pb_audit.get("run_id", run_id)[:12])}</span><span class="sep">/</span>
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
   </div>
 </section>
 <div class="card">
   <div class="stat-block">
-    <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get('swimmers_total',0)}</div></div>
-    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get('swimmers_matched_verified',0)}</div></div>
-    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get('swimmers_needs_verification',0)}</div></div>
-    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get('pb_confirmed_count',0)}</div></div>
-    <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get('pb_decisions_count',0)}</div></div>
-    <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get('fetch_total_seconds',0):.1f}s</div></div>
+    <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get("swimmers_total", 0)}</div></div>
+    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get("swimmers_matched_verified", 0)}</div></div>
+    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get("swimmers_needs_verification", 0)}</div></div>
+    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get("pb_confirmed_count", 0)}</div></div>
+    <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get("pb_decisions_count", 0)}</div></div>
+    <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get("fetch_total_seconds", 0):.1f}s</div></div>
   </div>
 </div>
 <div class="card">
@@ -12025,7 +12022,7 @@ function copyWhyCard(btn, taId) {{
                         f'<div class="stat"><div class="l">Precision</div><div class="v">{report.precision or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">Recall</div><div class="v">{report.recall or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">F1</div><div class="v">{report.f1 or "&mdash;"}</div></div>'
-                        f'</div></div>'
+                        f"</div></div>"
                     )
                 except Exception as e:
                     report_html = (
@@ -12135,19 +12132,19 @@ function copyWhyCard(btn, taId) {{
             for m in rep.matches:
                 badge = "good" if m.get("matched_card") else "bad"
                 rows += (
-                    f'<tr><td>{_h(m.get("moment",""))}</td>'
+                    f"<tr><td>{_h(m.get('moment', ''))}</td>"
                     f'<td><span class="tag {badge}">'
-                    f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
-                    f'<td>{_h(m.get("matched_headline") or "—")}</td>'
-                    f'<td>{_h(m.get("score",""))}</td></tr>'
+                    f"{'matched' if m.get('matched_card') else 'missed'}</span></td>"
+                    f"<td>{_h(m.get('matched_headline') or '—')}</td>"
+                    f"<td>{_h(m.get('score', ''))}</td></tr>"
                 )
             rep_html = f"""
 <div class="card">
   <h2>Result</h2>
   <div class="stat-block">
-    <div class="stat"><div class="l">Precision</div><div class="v">{rep.precision*100:.0f}%</div></div>
-    <div class="stat"><div class="l">Recall</div><div class="v">{rep.recall*100:.0f}%</div></div>
-    <div class="stat"><div class="l">F1</div><div class="v">{rep.f1*100:.0f}%</div></div>
+    <div class="stat"><div class="l">Precision</div><div class="v">{rep.precision * 100:.0f}%</div></div>
+    <div class="stat"><div class="l">Recall</div><div class="v">{rep.recall * 100:.0f}%</div></div>
+    <div class="stat"><div class="l">F1</div><div class="v">{rep.f1 * 100:.0f}%</div></div>
     <div class="stat"><div class="l">Matched</div><div class="v">{rep.n_matched_moments}/{rep.n_total_moments}</div></div>
   </div>
   <div class="divider"></div>
@@ -12278,7 +12275,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Actions</h2>
-  <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
@@ -12675,6 +12672,12 @@ Relay team broke club record"></textarea>
             deps["reel_engine"] = reel_engine_status()
         except Exception as _re_err:
             deps["reel_engine"] = {"error": str(_re_err)[:200]}
+        try:
+            from mediahub.publishing.kill_switch import kill_switch_status
+
+            deps["publish_kill_switch"] = kill_switch_status()
+        except Exception as _ks_err:
+            deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
         ok = (
             deps["playwright"].get("chromium")
             and deps["node"].get("available")
@@ -12798,10 +12801,10 @@ Relay team broke club record"></textarea>
             when = _humanize_when(top["to_ts"])
             last_incident_html = (
                 f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
-                f'(silent for {_h(duration)})</p>'
+                f"(silent for {_h(duration)})</p>"
                 f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
-                f'Detected from a gap in heartbeats between '
-                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+                f"Detected from a gap in heartbeats between "
+                f"{_h(top['from_ts'][:19])} and {_h(top['to_ts'][:19])} UTC.</p>"
             )
 
         # Build a compact incident table so operators can see the
@@ -12811,10 +12814,10 @@ Relay team broke club record"></textarea>
             for g in gaps:
                 gap_rows += (
                     f'<tr><td class="muted" style="font-size:12px">'
-                    f'{_h(g["to_ts"][:19])} UTC</td>'
-                    f'<td>{_h(_humanize_duration(g["duration_seconds"]))}</td>'
+                    f"{_h(g['to_ts'][:19])} UTC</td>"
+                    f"<td>{_h(_humanize_duration(g['duration_seconds']))}</td>"
                     f'<td class="muted" style="font-size:12px">'
-                    f'gap started {_h(g["from_ts"][:19])} UTC</td></tr>'
+                    f"gap started {_h(g['from_ts'][:19])} UTC</td></tr>"
                 )
             incidents_html = (
                 '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
@@ -12847,36 +12850,36 @@ Relay team broke club record"></textarea>
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
             f"Version <code>{_h(version_label)}</code>"
             + (
-                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-                f'({_h((latest.get("source") or "").lower())})'
+                f" &middot; last heartbeat {_h(_humanize_when(latest['ts']))} "
+                f"({_h((latest.get('source') or '').lower())})"
                 if latest
                 else ""
             )
-            + '</div></div></div>'
+            + "</div></div></div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:20px">'
             '<table style="width:100%"><thead>'
-            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
-            '<th>Downtime</th></tr></thead><tbody>'
-            f'<tr><td><b>24 hours</b></td>'
-            f'<td>{_format_uptime_pct(s24)}</td>'
-            f'<td>{_h(s24.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>7 days</b></td>'
-            f'<td>{_format_uptime_pct(s7d)}</td>'
-            f'<td>{_h(s7d.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>30 days</b></td>'
-            f'<td>{_format_uptime_pct(s30)}</td>'
-            f'<td>{_h(s30.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
-            '</tbody></table></div>'
+            "<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>"
+            "<th>Downtime</th></tr></thead><tbody>"
+            f"<tr><td><b>24 hours</b></td>"
+            f"<td>{_format_uptime_pct(s24)}</td>"
+            f"<td>{_h(s24.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s24.get('downtime_seconds', 0))) if s24.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>7 days</b></td>"
+            f"<td>{_format_uptime_pct(s7d)}</td>"
+            f"<td>{_h(s7d.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s7d.get('downtime_seconds', 0))) if s7d.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>30 days</b></td>"
+            f"<td>{_format_uptime_pct(s30)}</td>"
+            f"<td>{_h(s30.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
+            "</tbody></table></div>"
             f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
-            f'{last_incident_html}</div>'
-            f'{incidents_html}'
+            f"{last_incident_html}</div>"
+            f"{incidents_html}"
             '<p class="dim" style="margin-top:30px;font-size:12px">'
-            'Uptime is derived from heartbeat density: each platform ping or '
-            'health check inserts one row, and gaps over 5 minutes are counted '
-            'as downtime. Raw data at '
+            "Uptime is derived from heartbeat density: each platform ping or "
+            "health check inserts one row, and gaps over 5 minutes are counted "
+            "as downtime. Raw data at "
             f'<a href="{url_for("api_status_json")}">/api/status</a>.</p>'
         )
         html = _layout("Status", body, active="status")
@@ -13000,13 +13003,13 @@ Relay team broke club record"></textarea>
                 if b["provider"] == "gemini" and b["est_cost_usd"] == 0:
                     cost_disp = "$0.00 (free tier)"
                 prov_rows += (
-                    f'<tr><td><b>{_h(b["provider"])}</b></td>'
-                    f'<td>{_h(b["calls"])}</td>'
-                    f'<td>{_h(b["ok"])}</td>'
-                    f'<td>{_h(b["failed"])}</td>'
-                    f'<td>{_h(b.get("tokens_in", 0))}</td>'
-                    f'<td>{_h(b.get("tokens_out", 0))}</td>'
-                    f'<td>{_h(cost_disp)}</td></tr>'
+                    f"<tr><td><b>{_h(b['provider'])}</b></td>"
+                    f"<td>{_h(b['calls'])}</td>"
+                    f"<td>{_h(b['ok'])}</td>"
+                    f"<td>{_h(b['failed'])}</td>"
+                    f"<td>{_h(b.get('tokens_in', 0))}</td>"
+                    f"<td>{_h(b.get('tokens_out', 0))}</td>"
+                    f"<td>{_h(cost_disp)}</td></tr>"
                 )
             providers_html = (
                 '<div class="card"><table style="width:100%">'
@@ -13040,7 +13043,7 @@ Relay team broke club record"></textarea>
                 "</div>"
                 '<div style="height:10px;background:rgba(255,255,255,0.08);'
                 'border-radius:6px;overflow:hidden">'
-                f'<div style="height:100%;width:{min(pct,100):.1f}%;'
+                f'<div style="height:100%;width:{min(pct, 100):.1f}%;'
                 f'background:{bar_color}"></div></div>'
                 "</div>"
             )
@@ -13053,18 +13056,18 @@ Relay team broke club record"></textarea>
                 '<div class="card" style="padding:16px 22px;margin-bottom:18px;'
                 'border-left:3px solid var(--mh-prim-error-500)">'
                 f'<div style="font-weight:600;margin-bottom:4px">'
-                f'Last LLM error &mdash; {_h(last_err.get("provider", "unknown"))}</div>'
+                f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f'{_h(last_err.get("ts", "")[:19])} UTC'
+                f"{_h(last_err.get('ts', '')[:19])} UTC"
                 + (
-                    f' &middot; {_h(last_err.get("error_kind"))}'
+                    f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
                     else ""
                 )
-                + '</div>'
+                + "</div>"
                 f'<code style="font-size:12px">'
-                f'{_h(last_err.get("error_message", "")[:300])}</code>'
-                '</div>'
+                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                "</div>"
             )
         else:
             err_html = ""
@@ -13107,10 +13110,10 @@ Relay team broke club record"></textarea>
                 cost = f"${d['est_cost_usd']:.4f}" if d["est_cost_usd"] else "$0.00"
                 day_rows += (
                     f'<tr><td class="muted" style="font-size:12px">{_h(d["date"])}</td>'
-                    f'<td>{_h(d["calls"])}</td>'
-                    f'<td>{_h(d["ok"])}</td>'
-                    f'<td>{_h(d["failed"])}</td>'
-                    f'<td>{_h(cost)}</td></tr>'
+                    f"<td>{_h(d['calls'])}</td>"
+                    f"<td>{_h(d['ok'])}</td>"
+                    f"<td>{_h(d['failed'])}</td>"
+                    f"<td>{_h(cost)}</td></tr>"
                 )
             thirty_html = (
                 '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
@@ -13132,30 +13135,30 @@ Relay team broke club record"></textarea>
         body = (
             '<h1 style="margin-bottom:6px">Usage</h1>'
             '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
-            'LLM call counts, free-tier headroom, recent provider errors, '
-            'and publishing roll-up for this MediaHub deployment.</p>'
-            f'{err_html}'
-            f'{headroom_html}'
-            f'{post_html}'
+            "LLM call counts, free-tier headroom, recent provider errors, "
+            "and publishing roll-up for this MediaHub deployment.</p>"
+            f"{err_html}"
+            f"{headroom_html}"
+            f"{post_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            'Today (last 24h)</h2>'
+            "Today (last 24h)</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f'{_h(today["total_calls"])} calls &middot; '
-            f'<b>${today["est_cost_usd_total"]:.4f}</b> estimated cost &middot; '
-            f'{_h(today["failed_count"])} failed'
-            '</p>'
-            f'{providers_html}'
+            f"{_h(today['total_calls'])} calls &middot; "
+            f"<b>${today['est_cost_usd_total']:.4f}</b> estimated cost &middot; "
+            f"{_h(today['failed_count'])} failed"
+            "</p>"
+            f"{providers_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            'Last 7 days</h2>'
+            "Last 7 days</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f'{_h(seven_total)} calls &middot; '
-            f'<b>${seven_cost:.4f}</b> estimated cost.</p>'
-            f'{thirty_html}'
+            f"{_h(seven_total)} calls &middot; "
+            f"<b>${seven_cost:.4f}</b> estimated cost.</p>"
+            f"{thirty_html}"
             '<p class="dim" style="margin-top:30px;font-size:12px">'
-            'Estimated cost is derived from published list pricing for each '
-            'provider and is not a substitute for a real billing source. '
-            'Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated '
-            'as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>'
+            "Estimated cost is derived from published list pricing for each "
+            "provider and is not a substitute for a real billing source. "
+            "Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated "
+            "as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>"
         )
         return _layout("Usage", body, active="usage")
 
@@ -13249,11 +13252,11 @@ Relay team broke club record"></textarea>
         )
         if prof is None:
             return (
-                f'{section_header}'
+                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                'Sign in to an organisation to see its recent runs here. '
-                'Activity is scoped per-organisation so the data never '
-                'leaks between profiles.</p>'
+                "Sign in to an organisation to see its recent runs here. "
+                "Activity is scoped per-organisation so the data never "
+                "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
                 f'<a href="{url_for("sign_in_page")}">Sign in &rarr;</a></div>'
             )
@@ -13309,11 +13312,11 @@ Relay team broke club record"></textarea>
 
         if not rows:
             return (
-                f'{section_header}'
-                f'{section_intro}'
+                f"{section_header}"
+                f"{section_intro}"
                 '<div class="card empty">No runs yet for this organisation. '
                 f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
-                '</div>'
+                "</div>"
             )
 
         def _schedule_summary_html(rid: str) -> str:
@@ -13324,16 +13327,16 @@ Relay team broke club record"></textarea>
             if s.get("scheduled"):
                 parts.append(
                     f'<span class="tag info" style="font-size:11px">'
-                    f'{s["scheduled"]} scheduled</span>'
+                    f"{s['scheduled']} scheduled</span>"
                 )
             if s.get("published"):
                 parts.append(
                     f'<span class="tag good" style="font-size:11px">'
-                    f'{s["published"]} published</span>'
+                    f"{s['published']} published</span>"
                 )
             if s.get("failed"):
                 parts.append(
-                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
                 )
             return " ".join(parts)
 
@@ -13358,7 +13361,7 @@ Relay team broke club record"></textarea>
                 f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                 f'<button class="btn danger" type="submit" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                f'</form></td></tr>'
+                f"</form></td></tr>"
             )
             if r["status"] == "error" and r["error"]:
                 n_errored += 1
@@ -13453,7 +13456,7 @@ Relay team broke club record"></textarea>
             latest = _uptime.latest_heartbeat()
             gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
         except Exception:
-            return f"{section_header}" '<div class="card empty">Status data not available.</div>'
+            return f'{section_header}<div class="card empty">Status data not available.</div>'
 
         pill_label = "no data yet"
         pill_color = "#7a7a7a"
@@ -13490,10 +13493,10 @@ Relay team broke club record"></textarea>
             when = _humanize_when(top["to_ts"])
             last_incident_html = (
                 f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
-                f'(silent for {_h(duration)})</p>'
+                f"(silent for {_h(duration)})</p>"
                 f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
-                f'Detected from a gap in heartbeats between '
-                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+                f"Detected from a gap in heartbeats between "
+                f"{_h(top['from_ts'][:19])} and {_h(top['to_ts'][:19])} UTC.</p>"
             )
 
         version_label = APP_VERSION
@@ -13510,31 +13513,31 @@ Relay team broke club record"></textarea>
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
             f"Version <code>{_h(version_label)}</code>"
             + (
-                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-                f'({_h((latest.get("source") or "").lower())})'
+                f" &middot; last heartbeat {_h(_humanize_when(latest['ts']))} "
+                f"({_h((latest.get('source') or '').lower())})"
                 if latest
                 else ""
             )
-            + '</div></div></div>'
+            + "</div></div></div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<table style="width:100%"><thead>'
-            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
-            '<th>Downtime</th></tr></thead><tbody>'
-            f'<tr><td><b>24 hours</b></td>'
-            f'<td>{_format_uptime_pct(s24)}</td>'
-            f'<td>{_h(s24.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>7 days</b></td>'
-            f'<td>{_format_uptime_pct(s7d)}</td>'
-            f'<td>{_h(s7d.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>30 days</b></td>'
-            f'<td>{_format_uptime_pct(s30)}</td>'
-            f'<td>{_h(s30.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
-            '</tbody></table></div>'
+            "<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>"
+            "<th>Downtime</th></tr></thead><tbody>"
+            f"<tr><td><b>24 hours</b></td>"
+            f"<td>{_format_uptime_pct(s24)}</td>"
+            f"<td>{_h(s24.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s24.get('downtime_seconds', 0))) if s24.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>7 days</b></td>"
+            f"<td>{_format_uptime_pct(s7d)}</td>"
+            f"<td>{_h(s7d.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s7d.get('downtime_seconds', 0))) if s7d.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>30 days</b></td>"
+            f"<td>{_format_uptime_pct(s30)}</td>"
+            f"<td>{_h(s30.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
+            "</tbody></table></div>"
             f'<div class="card" style="padding:14px 22px">'
-            f'{last_incident_html}</div>'
+            f"{last_incident_html}</div>"
         )
 
     def _render_settings_privacy_section() -> str:
@@ -13593,7 +13596,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h3 style="margin-top:0">Actions</h3>
-  <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the activity section above and use the Delete button on the row.</p>
@@ -13665,29 +13668,29 @@ Relay team broke club record"></textarea>
             'Auto-refresh disabled here. Open the live <a href="'
             + url_for("status_page")
             + '">/status page</a> for the auto-refreshing version.</p>'
-            '</div>'
+            "</div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Health checks</h3>'
             '<table style="width:100%">'
-            '<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>'
-            f'<tbody>{check_rows}</tbody></table></div>'
+            "<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>"
+            f"<tbody>{check_rows}</tbody></table></div>"
             '<div class="card" style="padding:18px 22px">'
             '<h3 style="margin-top:0;font-size:16px">Operator dashboards</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">'
-            'Deep operations data lives behind these URLs. They are safe to share '
-            'with deployment operators but not user-facing.</p>'
+            "Deep operations data lives behind these URLs. They are safe to share "
+            "with deployment operators but not user-facing.</p>"
             '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.8">'
             f'<li><a href="{url_for("healthz_usage")}">LLM usage dashboard</a>'
-            ' &mdash; today\'s call counts, cost estimate, free-tier headroom.</li>'
+            " &mdash; today's call counts, cost estimate, free-tier headroom.</li>"
             f'<li><a href="{url_for("api_status_json")}">/api/status</a>'
-            ' &mdash; raw uptime JSON for external monitors.</li>'
+            " &mdash; raw uptime JSON for external monitors.</li>"
             f'<li><a href="{url_for("health")}">/health</a>'
-            ' &mdash; deep dependency probe (DB, dirs, profiles).</li>'
+            " &mdash; deep dependency probe (DB, dirs, profiles).</li>"
             f'<li><a href="{url_for("healthz_deps")}">/healthz/deps</a>'
-            ' &mdash; Playwright / Node / Remotion availability.</li>'
+            " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
-            ' &mdash; process RSS and active-run counters.</li>'
-            '</ul></div>'
+            " &mdash; process RSS and active-run counters.</li>"
+            "</ul></div>"
         )
 
     # ---- /api/settings/llm-status ----
@@ -14162,6 +14165,24 @@ Relay team broke club record"></textarea>
         # Cast every value to str up front for a consistent shape.
         channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
 
+        from mediahub.publishing.kill_switch import publish_kill_switch_engaged
+
+        if publish_kill_switch_engaged():
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "publishing_halted",
+                        "message": (
+                            "Publishing is currently halted by the operator kill switch."
+                            " No post was sent."
+                        ),
+                        "caption": caption,
+                    }
+                ),
+                503,
+            )
+
         for cid in channel_ids:
             try:
                 res = _buf_schedule(
@@ -14607,7 +14628,7 @@ Relay team broke club record"></textarea>
         approved: list[dict] = []
         for ra in pack["ranked_achievements"]:
             a = ra.get("achievement", {})
-            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
             st = wf_states.get(cid)
             if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
                 approved.append(ra)
@@ -14616,10 +14637,10 @@ Relay team broke club record"></textarea>
             # Fall through gracefully with a clear message — don't run the LLM
             # on an empty selection.
             body = (
-                '<h1>Build spotlight post</h1>'
+                "<h1>Build spotlight post</h1>"
                 '<div class="card"><p class="muted">No achievements approved yet. '
-                'Click the pill on the achievements below to approve the ones '
-                'you want to include, then come back here.</p>'
+                "Click the pill on the achievements below to approve the ones "
+                "you want to include, then come back here.</p>"
                 f'<p><a class="btn secondary" href="{url_for("spotlight_view", run_id=run_id, swimmer_key=swimmer_key)}">&larr; Back to spotlight</a></p></div>'
             )
             return _layout("Build spotlight post", body, active="create"), 400
@@ -14839,12 +14860,12 @@ Relay team broke club record"></textarea>
                     "The runs database wasn't readable on this deployment, "
                     "so the meet picker is empty. Try refreshing &mdash; if it "
                     "keeps happening, ask your operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("spotlight_landing")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Athlete Spotlight", empty_body, active="create")
             empty_body = (
@@ -14852,14 +14873,14 @@ Relay team broke club record"></textarea>
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
                 '<h1>One swimmer.<br><em class="editorial">One story.</em></h1>'
                 '<p class="lede">'
-                'Upload a meet first, and every swimmer in your club becomes '
-                'a single-athlete content pack — every achievement, ranked.'
-                '</p>'
+                "Upload a meet first, and every swimmer in your club becomes "
+                "a single-athlete content pack — every achievement, ranked."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">All input types</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Athlete Spotlight", empty_body, active="create")
 
@@ -14917,7 +14938,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Choose a meet</h2>
-  <form method="get" action="{url_for('spotlight_landing')}">
+  <form method="get" action="{url_for("spotlight_landing")}">
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
@@ -15026,7 +15047,7 @@ Relay team broke club record"></textarea>
             angle = _h(_humanise(a.get("angle_hint", "") or ""))
             event = _h(a.get("event", ""))
             atype = _h(_humanise(a.get("type", "")))
-            card_id_raw = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            card_id_raw = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
             card_id_safe = _h(card_id_raw)
 
             # Workflow status
@@ -15098,7 +15119,7 @@ Relay team broke club record"></textarea>
   </div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
-    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
+    <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
       <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
     <span class="muted" style="font-size:12px">Approve the achievements below to choose which go into the post.</span>
@@ -15457,7 +15478,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<p style="margin-top:var(--sp-5);display:flex;gap:var(--sp-4);flex-wrap:wrap">'
                 f'<a href="{_packs_url}">View your saved drafts &rarr;</a>'
                 f'<a href="{url_for("make_page")}">&larr; All input types</a>'
-                f'</p>'
+                f"</p>"
             )
         except Exception:
             body += f'<p style="margin-top:var(--sp-5)"><a href="{url_for("make_page")}">&larr; All input types</a></p>'
@@ -15578,8 +15599,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it.get("title") or "Untitled chat")}</a></td>'
-                f'<td>{badge}</td>'
-                f'<td>{it.get("n_messages", 0)}</td>'
+                f"<td>{badge}</td>"
+                f"<td>{it.get('n_messages', 0)}</td>"
                 f'<td class="muted">{_h(ts)}</td></tr>'
             )
         new_url = url_for("free_text_chat_new")
@@ -15604,19 +15625,26 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 <div class="card">
   <h2>Past chats</h2>
-  {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
-    '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
-   if rows_html else (
-       '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
-       'readable. You can still start a new chat above; if this persists, ask '
-       'your operator to check the data volume.</p>'
-       if store_failed else
-       '<p class="muted">No chats yet.</p>'
-   )}
+  {
+            (
+                "<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>"
+                "<th>Updated</th></tr></thead><tbody>" + rows_html + "</tbody></table>"
+            )
+            if rows_html
+            else (
+                '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
+                "readable. You can still start a new chat above; if this persists, ask "
+                "your operator to check the data volume.</p>"
+                if store_failed
+                else '<p class="muted">No chats yet.</p>'
+            )
+        }
 </div>
 
 <p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
-  Prefer the one-shot form? <a href="{url_for('stub_free_text_quick')}">Use the legacy quick generator →</a>
+  Prefer the one-shot form? <a href="{
+            url_for("stub_free_text_quick")
+        }">Use the legacy quick generator →</a>
 </p>
 """
         return _layout("Free text — chat", body, active="create")
@@ -15667,7 +15695,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             msgs_html += (
                 f'<div class="chat-msg" data-role="{_h(role)}" '
                 f'style="margin-bottom:var(--sp-3);padding:var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);'
-                f'background:var(--surface);border:1px solid var(--hairline);'
+                f"background:var(--surface);border:1px solid var(--hairline);"
                 f'border-left:2px solid {rail};border-radius:var(--radius)">'
                 f'<div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;'
                 f'color:{"var(--lane)" if is_user else "var(--ink-muted)"};letter-spacing:0.18em;margin-bottom:6px">{who}</div>'
@@ -15727,10 +15755,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div class="strap" style="color:var(--good);margin-bottom:var(--sp-3)">Proposed brief</div>
   {_format_brief_html(s.pending_brief)}
   <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3)">
-    <form method="post" action="{url_for('free_text_chat_accept', chat_id=chat_id)}" style="display:inline">
+    <form method="post" action="{url_for("free_text_chat_accept", chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn">Accept &amp; generate</button>
     </form>
-    <form method="post" action="{url_for('free_text_chat_decline', chat_id=chat_id)}" style="display:inline">
+    <form method="post" action="{url_for("free_text_chat_decline", chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn secondary">Decline — keep refining</button>
     </form>
   </div>
@@ -15763,7 +15791,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h1>{title}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{msg_count:02d} {"message" if msg_count == 1 else "messages"}</span><span class="sep">/</span>
-    <a href="{url_for('free_text_chat_page')}" style="color:var(--ink-muted);text-decoration:none">← All chats</a>
+    <a href="{url_for("free_text_chat_page")}" style="color:var(--ink-muted);text-decoration:none">← All chats</a>
   </div>
 </section>
 
@@ -15977,12 +16005,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     "so the list is empty even if you saved drafts earlier. "
                     "Try refreshing &mdash; if it keeps happening, ask your "
                     "operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("stub_packs_list")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("make_page")}">Start fresh</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Saved drafts", body, active="create")
             body = (
@@ -15990,14 +16018,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
                 '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
                 '<p class="lede">'
-                'Content packs you generate from Free Text, Event Preview, '
-                'Sponsor Post and Session Update are kept here so you can '
-                'come back, edit, and approve later.'
-                '</p>'
+                "Content packs you generate from Free Text, Event Preview, "
+                "Sponsor Post and Session Update are kept here so you can "
+                "come back, edit, and approve later."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Start creating &rarr;</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Saved drafts", body, active="create")
 
@@ -16010,12 +16038,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it["title"])}</a></td>'
                 f'<td><span class="tag info">{_h(label)}</span></td>'
-                f'<td>{it["n_cards"]}</td>'
+                f"<td>{it['n_cards']}</td>"
                 f'<td class="muted">{_h(ts)}</td>'
                 f'<td><form method="post" action="{delete_url}" style="display:inline" '
-                f'onsubmit="return confirm(\'Delete this draft?\')">'
+                f"onsubmit=\"return confirm('Delete this draft?')\">"
                 f'<button class="btn secondary" type="submit" style="font-size:11px;padding:4px 10px;color:var(--bad);border-color:rgba(244,63,94,0.3)">Delete</button>'
-                f'</form></td></tr>'
+                f"</form></td></tr>"
             )
 
         body = f"""
@@ -16023,7 +16051,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <span class="mh-hero-eyebrow">Saved drafts</span>
   <h1>Drafts</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{len(items):02d} pack{'s' if len(items) != 1 else ''} saved</span>
+    <span>{len(items):02d} pack{"s" if len(items) != 1 else ""} saved</span>
   </div>
 </section>
 <div class="card">
@@ -16569,7 +16597,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "summary and keywords are empty). Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
+                            f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
                         )
                     else:
                         # Surface the failure clearly but keep the form usable.
@@ -16578,7 +16606,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "fetch_failed": "Could not reach that URL &mdash; check it loads in a browser.",
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
+                            f'<p class="tag bad" style="margin-bottom:20px">{_h(reason)}</p>'
                         )
                 profile = existing
 
@@ -16644,7 +16672,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
+                            f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
                         )
                     else:
                         reason = {
@@ -16656,7 +16684,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             ),
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
+                            f'<p class="tag bad" style="margin-bottom:20px">{_h(reason)}</p>'
                         )
                 profile = existing
 
@@ -16800,7 +16828,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     )
                 else:
                     saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">' "Organisation saved.</p>"
+                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
                     )
                 # Persist any social-link edits made on the full form.
                 social_edits: dict[str, str] = {}
@@ -16893,21 +16921,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
                 f'border-radius:8px;background:var(--panel)">'
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
-                f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
+                f"Voice profile (from {len(profile.voice_examples or [])} examples)</div>"
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
-                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
-                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
-                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
-                f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
-                f'</div>'
+                f"<div>Avg sentence length: <b>{_h(vp.get('sentence_length_avg', '—'))}</b> words</div>"
+                f"<div>P90 sentence length: <b>{_h(vp.get('sentence_length_p90', '—'))}</b> words</div>"
+                f"<div>Emojis / caption: <b>{_h(vp.get('emoji_rate_per_caption', '—'))}</b></div>"
+                f"<div>Hashtags / caption: <b>{_h(vp.get('hashtag_count_avg', '—'))}</b></div>"
+                f"<div>Swimmer address: <b>{_h(vp.get('preferred_swimmer_address', 'first_name'))}</b></div>"
+                f"</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
-                f'<div>{_list_chips(vp.get("characteristic_openers"))}</div>'
+                f"<div>{_list_chips(vp.get('characteristic_openers'))}</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
-                f'<div>{_list_chips(vp.get("characteristic_closers"))}</div>'
+                f"<div>{_list_chips(vp.get('characteristic_closers'))}</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
-                f'<div>{_list_chips(vp.get("forbidden_phrases"))}</div>'
-                f'</div>'
+                f"<div>{_list_chips(vp.get('forbidden_phrases'))}</div>"
+                f"</div>"
             )
         else:
             voice_profile_html = (
@@ -17003,11 +17031,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Voice summary</div>
-      <p style="margin:0;font-size:13px;color:var(--ink);line-height:1.5">{_h(profile.brand_voice_summary or '(no summary yet)')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink);line-height:1.5">{_h(profile.brand_voice_summary or "(no summary yet)")}</p>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Palette</div>
       <div>{swatches or '<span class="dim" style="font-size:12px">(none detected)</span>'}</div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Typography hint</div>
-      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '—')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or "—")}</p>
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Detected logo</div>
@@ -17071,16 +17099,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             n_examples = len(profile.voice_examples or [])
             voice_profile_html = f"""
 <div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(167,139,250,0.04)">
-  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview &middot; {n_examples} example{'s' if n_examples != 1 else ''}</h3>
+  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview &middot; {n_examples} example{"s" if n_examples != 1 else ""}</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:8px">Style metrics</div>
-      {_stat_row('Avg sentence length (words)', vp.get('sentence_length_avg', 0))}
-      {_stat_row('Sentence length p90', vp.get('sentence_length_p90', 0))}
-      {_stat_row('Avg emoji per caption', vp.get('emoji_rate_per_caption', 0))}
-      {_stat_row('Avg hashtags per caption', vp.get('hashtag_count_avg', 0))}
-      {_stat_row('Capitalisation style', cap_style)}
-      {_stat_row('Swimmer address', address)}
+      {_stat_row("Avg sentence length (words)", vp.get("sentence_length_avg", 0))}
+      {_stat_row("Sentence length p90", vp.get("sentence_length_p90", 0))}
+      {_stat_row("Avg emoji per caption", vp.get("emoji_rate_per_caption", 0))}
+      {_stat_row("Avg hashtags per caption", vp.get("hashtag_count_avg", 0))}
+      {_stat_row("Capitalisation style", cap_style)}
+      {_stat_row("Swimmer address", address)}
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Typical openers</div>
@@ -17109,7 +17137,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Organisation profile</span>
-  <h1>{_h(profile.display_name) if profile.display_name else 'Your organisation'}</h1>
+  <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
 
@@ -17122,33 +17150,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
     <div style="margin-bottom:10px">
       <label>Website</label>
-      <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
+      <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or "")}"
              placeholder="https://your-club.example" style="{_input_style};max-width:600px"/>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;max-width:780px">
       <div style="margin-bottom:10px">
         <label>Instagram</label>
-        <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get('instagram',''))}"
+        <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get("instagram", ""))}"
                placeholder="https://instagram.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>Facebook</label>
-        <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get('facebook',''))}"
+        <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get("facebook", ""))}"
                placeholder="https://facebook.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>Twitter / X</label>
-        <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get('twitter',''))}"
+        <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get("twitter", ""))}"
                placeholder="https://x.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>TikTok</label>
-        <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get('tiktok',''))}"
+        <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get("tiktok", ""))}"
                placeholder="https://tiktok.com/@your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>LinkedIn</label>
-        <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get('linkedin',''))}"
+        <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get("linkedin", ""))}"
                placeholder="https://linkedin.com/company/your-club" style="{_input_style}"/>
       </div>
     </div>
@@ -17212,7 +17240,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     </div>
     <div>
       <label>Result file codes</label>
-      <input type="text" name="club_codes" value="{_h(', '.join(profile.club_codes or []))}"
+      <input type="text" name="club_codes" value="{_h(", ".join(profile.club_codes or []))}"
              placeholder="e.g. CMA, COMA" style="{_input_style}"/>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Comma-separated codes that identify your members in results files.</p>
     </div>
@@ -17300,7 +17328,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
     <div>
       <label>Primary sponsor name</label>
-      <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or '')}"
+      <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or "")}"
              placeholder="e.g. Acme Sports" style="{_input_style}"/>
     </div>
     <div>
@@ -17430,7 +17458,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"[ ERROR ] {_h(error)}</div>"
             )
         pw_hint = (
-            '<div class="dim" style="font-size:12px;margin-top:6px">' "At least 8 characters.</div>"
+            '<div class="dim" style="font-size:12px;margin-top:6px">At least 8 characters.</div>'
             if min_password
             else ""
         )
@@ -17738,16 +17766,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
-            note = (
-                "Paid plans are billed through Stripe. The exact price is shown " "during checkout."
-            )
+            note = "Paid plans are billed through Stripe. The exact price is shown during checkout."
         else:
             note = (
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
         note_html = (
-            '<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">' f"{note}</p>"
+            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
         )
 
         body = (
@@ -17775,7 +17801,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body = (
                 '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
                 '<span class="mh-hero-eyebrow">Billing</span>'
-                '<h1>Billing</h1>'
+                "<h1>Billing</h1>"
                 '<p class="lede">Manage your subscription.</p>'
                 "</section>"
                 '<div class="card" style="padding:24px 28px;max-width:560px">'
@@ -18070,16 +18096,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 f'<button type="submit" class="btn-sign-in">'
-                f'{"Continue" if is_current else "Sign in"} &rarr;</button>'
-                '</form>'
+                f"{'Continue' if is_current else 'Sign in'} &rarr;</button>"
+                "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
-                f'onsubmit="return confirm(\'Delete the &quot;{_h(p.display_name)}&quot; profile? '
-                f'Its runs stay on disk but it disappears from this picker. This cannot be undone.\')">'
+                f"onsubmit=\"return confirm('Delete the &quot;{_h(p.display_name)}&quot; profile? "
+                f"Its runs stay on disk but it disappears from this picker. This cannot be undone.')\">"
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 f'<button type="submit" class="btn-delete" aria-label="Delete profile" title="Delete profile">&times;</button>'
-                '</form>'
-                '</div>'
-                '</div>'
+                "</form>"
+                "</div>"
+                "</div>"
             )
 
         new_org_url = url_for("organisation_setup", fresh="1")
@@ -18113,10 +18139,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '<span class="mh-hero-eyebrow">Sign in</span>'
             '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
-            'Picking one loads its brand voice, palette, logo, and history. '
-            'Switch any time from the home page.</p>'
-            '</section>'
-            f'{err_html}'
+            "Picking one loads its brand voice, palette, logo, and history. "
+            "Switch any time from the home page.</p>"
+            "</section>"
+            f"{err_html}"
             f'<div class="mh-profile-grid">{cards_html}</div>'
         )
         return _layout("Sign in", body, active="signin")
@@ -18135,7 +18161,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prof = load_profile(pid)
         if prof is None:
             session["sign_in_error"] = (
-                f"Couldn't find a profile with id '{pid}'. " "It may have been deleted."
+                f"Couldn't find a profile with id '{pid}'. It may have been deleted."
             )
             return redirect(url_for("sign_in_page"))
         _pin_active_profile(prof.profile_id)
@@ -18326,10 +18352,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         '<details style="margin-top:10px">'
                         '<summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);'
                         'user-select:none">Where these colours came from '
-                        f'({len(sources_dict)} source{"s" if len(sources_dict) != 1 else ""})</summary>'
+                        f"({len(sources_dict)} source{'s' if len(sources_dict) != 1 else ''})</summary>"
                         f'<div style="margin-top:8px;padding:10px;background:rgba(255,255,255,0.02);'
                         f'border-radius:6px">{"".join(rows)}</div>'
-                        '</details>'
+                        "</details>"
                     )
 
             reasoning_html = ""
@@ -18552,7 +18578,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
      background:rgba(212,255,58,0.04)">
   <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
   <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
-    {_h(prof.brand_voice_summary or '(no voice summary yet — capture again from a richer source)')}</p>
+    {_h(prof.brand_voice_summary or "(no voice summary yet — capture again from a richer source)")}</p>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Keywords</div>
   <div style="margin-bottom:10px">{kw_chips or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Palette in use</div>
@@ -18561,7 +18587,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="margin-bottom:6px">{ai_row}</div>
   {reasoning_html}
   {sources_html}
-  <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or "—")} &middot; captured {_h((prof.brand_captured_at or "")[:19])}</p>
   {reorder_block_html}
   {confirm_form_html}
   {_repair_callout_html}
@@ -18618,8 +18644,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 else:
                     preview = (
                         '<div style="display:flex;align-items:center;justify-content:center;'
-                        'height:96px;background:rgba(245,242,232,0.04);border-radius:4px;'
-                        'font-family:var(--font-mono,monospace);font-size:11px;'
+                        "height:96px;background:rgba(245,242,232,0.04);border-radius:4px;"
+                        "font-family:var(--font-mono,monospace);font-size:11px;"
                         f'color:var(--ink-muted,#7A7869)">{_h(mime.split("/")[-1] or "FILE")}</div>'
                     )
                 colours = logo.get("ai_dominant_colours") or []
@@ -18727,15 +18753,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
                 f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
                 f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
-                f' &middot; {_h(prof.brand_guidelines_status or "")} via {_h(prof.brand_guidelines_extractor or "")}</div>'
+                f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
                 + (
                     f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
                     if summary
                     else ""
                 )
                 + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
-                f'{n_dos} do{"s" if n_dos != 1 else ""}, {n_donts} don\'t{"s" if n_donts != 1 else ""}, '
-                f'{n_prohib} prohibited word{"s" if n_prohib != 1 else ""}.</div>'
+                f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
+                f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
                 + rules_html
                 + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
                 "</div>"
@@ -19996,15 +20022,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span class="mh-hero-eyebrow">Content builder</span>'
                 '<h1>Nothing <em class="editorial">approved</em> yet.</h1>'
                 '<p class="lede">'
-                f'The content builder holds the cards you approve in <strong>{meet_name}</strong>. '
-                'Approve a few in the review queue and they land here &mdash; ready to caption, turn into '
-                'graphics and video, then schedule to Buffer or download.'
-                '</p>'
+                f"The content builder holds the cards you approve in <strong>{meet_name}</strong>. "
+                "Approve a few in the review queue and they land here &mdash; ready to caption, turn into "
+                "graphics and video, then schedule to Buffer or download."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{_review_url}">Go to review &amp; approve &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All runs</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Content builder", body, active="home")
 
@@ -20599,7 +20625,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         skipped_html = ""
         if skipped:
             items = "".join(
-                f'<li><strong>{_h(s.get("type",""))}</strong>: ' f'{_h(s.get("reason",""))}</li>'
+                f"<li><strong>{_h(s.get('type', ''))}</strong>: {_h(s.get('reason', ''))}</li>"
                 for s in skipped
             )
             skipped_html = (
@@ -20662,7 +20688,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         sub += (
                             f'<div style="margin-bottom:10px">'
                             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-                            f'<span class="muted" style="font-size:11px">Post {ti+1}</span>'
+                            f'<span class="muted" style="font-size:11px">Post {ti + 1}</span>'
                             f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
                             f"</div>"
                             f'<textarea class="ti-cap" data-artefact="{art_idx}" '
@@ -20715,10 +20741,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     rows += (
                         '<div style="padding:10px;background:rgba(255,255,255,0.03);'
                         'border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
-                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer",""))} '
-                        f'&middot; {_h(c.get("event",""))}</div>'
-                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline",""))}</div>'
-                        '</div>'
+                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer", ""))} '
+                        f"&middot; {_h(c.get('event', ''))}</div>"
+                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline", ""))}</div>'
+                        "</div>"
                     )
                 sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
 
@@ -21010,7 +21036,7 @@ function tiRegenerate() {{
                     _prio_num = 0.0
                 rows += f"""
 <div class="card mh-pack-card" id="g-{card_uuid}"
-     data-quality-band="{_h(item.get('quality_band') or '')}"
+     data-quality-band="{_h(item.get("quality_band") or "")}"
      data-band-rank="{_band_rank}"
      data-priority="{_prio_num:.4f}"
      style="margin-bottom:12px">
@@ -21084,7 +21110,7 @@ function tiRegenerate() {{
   <summary style="cursor:pointer;font-size:16px;font-weight:700;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px;list-style:none">Weekend in numbers</summary>
   <div class="card">
     <div class="stat-block">{stats_html}</div>
-    {f'<ul style="margin-top:10px">'+ hl_html +'</ul>' if hl_html else ""}
+    {f'<ul style="margin-top:10px">' + hl_html + "</ul>" if hl_html else ""}
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'win-cap')">Copy caption</button>
       <textarea id="win-cap" style="display:none">{cap_txt}</textarea>
@@ -21119,10 +21145,10 @@ function tiRegenerate() {{
                     }.get(fmt, fmt)
                     tiles.append(f"""
 <div class="card" style="padding:10px;display:flex;flex-direction:column;gap:8px;width:200px;flex:0 0 200px">
-  <img src="{url_for('api_visual_png', vid=vid, format_name=fmt)}" alt="" style="width:100%;border-radius:6px;display:block" loading="lazy">
+  <img src="{url_for("api_visual_png", vid=vid, format_name=fmt)}" alt="" style="width:100%;border-radius:6px;display:block" loading="lazy">
   <div style="font-size:11px;color:var(--ink-dim)">{_h(fmt_label)}</div>
   <div style="font-size:12px;line-height:1.3">{_h(cap)}</div>
-  <a class="btn secondary" style="font-size:12px;padding:4px 10px" target="_blank" rel="noopener" href="{url_for('api_visual_png', vid=vid, format_name=fmt)}">Download PNG</a>
+  <a class="btn secondary" style="font-size:12px;padding:4px 10px" target="_blank" rel="noopener" href="{url_for("api_visual_png", vid=vid, format_name=fmt)}">Download PNG</a>
 </div>""")
                 if tiles:
                     _zip_url = url_for("content_pack_zip", run_id=run_id)
@@ -21463,11 +21489,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             rows_html += f"""
 <tr>
   <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
-  <td>{ad.get('type','')}</td>
+  <td>{ad.get("type", "")}</td>
   <td>{athlete_names}</td>
-  <td>{ad.get('linked_venue') or ad.get('linked_event') or ''}</td>
-  <td>{ad.get('permission_status','')}</td>
-  <td><code>{ad.get('id','')[:12]}</code></td>
+  <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
+  <td>{ad.get("permission_status", "")}</td>
+  <td><code>{ad.get("id", "")[:12]}</code></td>
 </tr>"""
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
@@ -21482,7 +21508,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <div class="card">
   <h2>Upload a photo</h2>
   <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
-  <form method="POST" action="{url_for('api_media_library_upload')}" enctype="multipart/form-data" data-loader-text="Uploading photo">
+  <form method="POST" action="{
+            url_for("api_media_library_upload")
+        }" enctype="multipart/form-data" data-loader-text="Uploading photo">
     <label class="req" for="ml-file">File</label>
     <input id="ml-file" type="file" name="file" accept="image/*" required>
     <label for="ml-desc">Description</label>
@@ -21502,16 +21530,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </div>
 
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
+  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
+            "asset" if len(assets) == 1 else "assets"
+        } in library</div>
   <table style="width:100%">
     <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th></tr></thead>
-    <tbody>{rows_html or (
-        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
-        'Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. '
-        'Uploads above still work; if this persists, ask your operator to check the data volume.'
-        '</td></tr>' if store_failed else
-        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
-    )}</tbody>
+    <tbody>{
+            rows_html
+            or (
+                '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
+                "Uploads above still work; if this persists, ask your operator to check the data volume."
+                "</td></tr>"
+                if store_failed
+                else '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+            )
+        }</tbody>
   </table>
 </div>
 """
@@ -22056,13 +22090,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not sponsor_name:
             body = (
                 f'<p class="dim"><a href="{url_for("content_pack_grouped", run_id=run_id)}">'
-                f'&larr; Back to recommendations</a></p>'
-                '<h1>Sponsor variant unavailable</h1>'
+                f"&larr; Back to recommendations</a></p>"
+                "<h1>Sponsor variant unavailable</h1>"
                 '<div class="card empty">'
-                '<p>No sponsor is configured for this organisation.</p>'
+                "<p>No sponsor is configured for this organisation.</p>"
                 f'<p><a class="btn" href="{url_for("organisation_page")}">'
-                'Add a sponsor name on the Organisation page &rarr;</a></p>'
-                '</div>'
+                "Add a sponsor name on the Organisation page &rarr;</a></p>"
+                "</div>"
             )
             return _layout("Sponsor variant", body, active="home")
 
@@ -22192,7 +22226,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         event = _h(ach.get("event") or "")
         body = f"""
 <p class="dim"><a href="{_pack_url}">&larr; Back to recommendations</a></p>
-<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' · ' + event) if event else ''}</h1>
+<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(" · " + event) if event else ""}</h1>
 <p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
   <div class="card">
@@ -23232,14 +23266,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = (
             '<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">Page not found</span>'
-            '<h1>Off the lane.</h1>'
+            "<h1>Off the lane.</h1>"
             f'<p class="lede">The page <code>{_h(request.path)}</code> doesn\'t exist on this deployment. '
-            'It may have been moved, renamed, or never minted.</p>'
+            "It may have been moved, renamed, or never minted.</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
             f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Recent activity</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("Not found", body, active=""), 404
 
@@ -23255,18 +23289,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = (
             '<section class="mh-hero" data-lane="500" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">Server error</span>'
-            '<h1>The engine stalled.</h1>'
+            "<h1>The engine stalled.</h1>"
             '<p class="lede">'
-            'Something failed on the server. Nothing you uploaded was lost — '
-            'refresh, or try a different action. If it keeps happening, the '
-            'deployment status page has the latest health signal.'
-            '</p>'
+            "Something failed on the server. Nothing you uploaded was lost — "
+            "refresh, or try a different action. If it keeps happening, the "
+            "deployment status page has the latest health signal."
+            "</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
             '<a class="mh-cta-secondary" href="javascript:history.back()">Go back</a>'
             f'<a class="mh-cta-secondary" href="{url_for("status_page")}">Check status</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("Error", body, active=""), 500
 
@@ -23278,16 +23312,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         body = (
             '<section class="mh-hero" data-lane="413" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">413 / payload too large</span>'
-            '<h1>File too big.</h1>'
+            "<h1>File too big.</h1>"
             '<p class="lede">'
-            'The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first '
-            '— most meet exports are well under 5&nbsp;MB.'
-            '</p>'
+            "The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first "
+            "— most meet exports are well under 5&nbsp;MB."
+            "</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("upload")}">Try a smaller file &rarr;</a>'
             f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("File too large", body, active=""), 413
 
