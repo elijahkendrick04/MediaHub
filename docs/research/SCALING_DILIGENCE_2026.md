@@ -81,3 +81,24 @@ Diligence found **no swim-data incumbent shipping auto social-content generation
 - The >95% confidence band applies only to the *decisions/tactics* listed, never to a revenue outcome. No pre-launch solo venture can have >95% confidence of any specific ARR.
 - Precise UK secondary-school/university counts and an exact global swim-club total could not be fully verified within research budget and are estimated; the strategic conclusions do not hinge on their exact values.
 - **"£1M/month" (~£12M ARR) is not a realistic target for a solo→small team in this market on any evidence reviewed, and should be dropped.** Be honest with yourself: the most likely good outcome here is a £150k–£400k sustainable swimming business, with a low-double-digit-percent shot at £1M+ if and only if you expand sport coverage or buyer segment and add a second person.
+
+---
+
+## Evidence refresh — 2026-06-09 (strategy engine)
+
+Re-verified the two load-bearing market-size anchors the swimming-only revenue
+ceiling rests on; both still hold, so the £150k–£400k swimming-only cap is unchanged:
+
+- **USA Swimming ≈ 2,740 member clubs/teams** — confirmed for 2024 (the body added 63
+  club teams to reach 2,740). Some sources cite "2,800+" or "3,100+ registered via LSCs";
+  ~2,740 remains the conservative, defensible figure used here. *[Source: SwimSwam,
+  "USA Swimming Membership Stays Stable In 2024", swimswam.com.]*
+- **Swim England 1,200+ affiliated clubs** — Swim England states it "supports over 1,200
+  affiliated swimming clubs". The roadmap's "~1,300 UK&I affiliated" (England + Wales +
+  Scotland + Ireland) is consistent with this once the other home nations are added.
+  *[Source: Swim England, swimming.org/swimengland.]*
+
+Implication: no change to the revenue-ceiling math or to Routes A/B/C. The arithmetic
+that caps swimming-only at ≈ £150k–£400k ARR (and forces multi-sport breadth +
+institutional buyers + a second person for £1M+) stands on current figures. Logged so the
+anchors carry a 2026-06 verification date rather than drifting unverified.

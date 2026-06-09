@@ -199,6 +199,11 @@ Three facts shape the work ahead.
   `tests/test_run_route_isolation_invariant.py`) — see
   [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md).
 - Gemini→Anthropic provider failover (`media_ai/llm.py`, `ai_core/llm.py`).
+- **Self-serve signup + auth + Stripe billing** (`web/auth.py`, `web/billing.py`): routes
+  `/signup` `/login` `/logout`, bcrypt + a signed session cookie, a `users.jsonl` ledger,
+  plus Stripe Checkout + Customer Portal + a signed webhook. Merged **PR #267**
+  (2026-06-09); billing **honest-503s until `STRIPE_*` keys are set**. This is
+  **PC.1 + PC.2** — see Phase C.
 
 **Not yet shipped (❌)** — the reframe's new surface:
 
@@ -211,9 +216,13 @@ Three facts shape the work ahead.
 - **Direct-to-platform** publishing (only Buffer today).
 - The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
   rembg present).
-- **No commercial layer** — zero billing, signup, or true multi-tenancy against ~164k
-  LOC and 2,836 tests. This "build/sell imbalance" is the binding constraint per the
-  2026 scaling diligence; it is now **Phase C**, the top priority (see below).
+- **The rest of the commercial layer** — signup + billing themselves now ship (see
+  above), but **true multi-tenancy** (org → workspace in one shared instance; **PC.3**,
+  blocking), **validated pricing** (**PC.4**) and a **go-to-market motion** (**PC.6**) are
+  still missing, and because billing is unconfigured there are **zero paying customers**.
+  This "build/sell imbalance" is the binding constraint per the 2026 scaling diligence;
+  closing it is **Phase C**, the top priority (see below) — now **half-closed on the build
+  side, fully open on the sell side**.
 
 **In progress (🔵):** the Generative Content Engine v2 (decided in
 [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
@@ -431,8 +440,13 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 auth, Stripe billing, **true multi-tenancy** (org → workspace in one shared instance),
 validated pricing with annual prepay, a resolved free-self-host position (**resolved:
 hosted-only** — [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)), and a
-go-to-market motion. Today there is **zero billing and zero customers** against ~164k LOC
-— the diligence's central "build/sell imbalance" finding.
+go-to-market motion. **Update 2026-06-09:** the *build* half is now half-closed —
+self-serve signup + auth (**PC.1**) and Stripe billing (**PC.2**) shipped and are live
+(merged PR #267). But billing **honest-503s until the operator sets `STRIPE_*` keys**, so
+there are still **zero paying customers** against ~164k LOC. The diligence's central
+"build/sell imbalance" is therefore **half-closed on the build side and entirely open on
+the sell side** — the remaining gates are true multi-tenancy (**PC.3**), validated
+pricing (**PC.4**) and a go-to-market motion (**PC.6**).
 
 **Exit criteria (both are hard gates on later phases).**
 1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
