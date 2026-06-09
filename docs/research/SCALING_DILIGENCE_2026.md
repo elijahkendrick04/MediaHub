@@ -196,3 +196,51 @@ both the NGB partner endorsement *and* (now) the official data integration are t
 realistic distribution partners, raising Route C's relative attractiveness vs a direct NGB
 content endorsement. No revenue figure changed; the £150k–£400k swimming-only ceiling and
 Routes A/B/C stand. Recorded as **[adr/0012](../adr/0012-ngb-distribution-channel-reality-check.md).**
+
+## Evidence refresh — 2026-06-09 (strategy engine, cycle 4: hand-sell funnel base rates — direct + word-of-mouth)
+
+**Why:** after cycle 3 down-weighted promotional NGB endorsement to speculative (ADR-0012),
+**direct + word-of-mouth hand-sell became the de-facto *primary* distribution channel** — yet
+PC.6 described it in a single sentence ("hand-sell the first ~10 clubs yourself") with **no
+funnel, no channel mix, no base rates, and no timeline.** Distribution is the binding
+constraint, so the design of the now-primary channel was the most load-bearing under-specified
+item on the plan. This cycle grounds it in current, sourced conversion base rates so the
+sequence is evidence-banded rather than asserted.
+
+**Findings (current benchmarks; all flagged ESTIMATE where they are external base rates applied
+to MediaHub's unproven case):**
+
+- **Cold founder-led outreach converts poorly; warm converts ~10× better.** Cold B2B outreach
+  reply rates run **~2–5%** (SaaS as low as ~1.9% due to inbox saturation), and cold-email→meeting
+  averages **~0.8%** (>0.4% is "good"). Warm intros / founder-led warm outreach convert at
+  **~30–50%**. The founder should personally close the first **10–20** deals before any process is
+  declared repeatable. *[Sources: builtforb2b.com B2B cold-email benchmark 2025; martal.ca cold-email
+  statistics 2026; justinmckelvey.com / mailshake.com founder-led-sales guides; accessed 2026-06-09.]*
+- **Referral / word-of-mouth is the dominant SMB acquisition channel.** **20–50%** of new SaaS
+  customers come from referrals/word-of-mouth; **~65%** of B2B new business is referral-driven; **82%**
+  of small businesses cite referrals as their main acquisition source; referred customers retain
+  **~37%** better. These effects are *amplified* inside tight niche communities. *[Sources: saastr.com;
+  thinkimpact.com B2B referral statistics 2026; businessdasher.com; accessed 2026-06-09.]*
+- **Reachable population is large and publicly listed, but contactability ≠ conversion.** Swim
+  England lists **~1,200+** affiliated clubs and Swim Wales **~80–90** (~11,000 members) in public
+  club directories — so the *list* is free, but volunteer-run, no-budget clubs convert cold at the
+  low end above. *[Sources: swimming.org; swimwales.org / en.wikipedia.org/wiki/Swim_Wales; accessed
+  2026-06-09.]*
+
+**Funnel math (the correction this cycle makes — honest, adversarial):**
+
+| Channel | Per-step rates (ESTIMATE) | Implied volume for the 10-club gate | Verdict |
+|---|---|---|---|
+| **Local-warm (Swansea / SE Wales)** | warm close ~30–50% | a handful of high-touch contacts → ~3–5 clubs | **Primary; do first.** Founder is locally embedded. |
+| **Referral chains** | 2 named intros / signed club × ~30–50% warm close | compounds ~5 → ~10 | **Primary compounding mechanism.** Niche-community amplified. |
+| **Cold outreach** | reply ~2–5% × reply→mtg ~30–50% × mtg→paid ~15–30% ≈ **0.3–1.0% cold-to-paid** | ~1,000–3,000 quality contacts to win 10 cold — **infeasible solo at quality** | **Capped supplement only** (book a few discovery calls); never the path to the gate. |
+
+**Implication for the plan:** the now-primary distribution channel is specified as a **warm-first +
+referral sequence**, with cold outreach explicitly bounded to a supplement. The **>95% standard**
+attaches to the *channel-design decision* (warm + referral over cold broadcast — overwhelmingly
+supported by the base rates above); the *outcome* (10 paying clubs in ~3–6+ months at a tested
+price) remains **unproven and is itself the validation**, also closing the PC.4 WTP gap. No revenue
+figure changed; the £150k–£400k swimming-only ceiling and Routes A/B/C stand. This operationalises
+**[adr/0012](../adr/0012-ngb-distribution-channel-reality-check.md)** (which concluded "lean on
+direct + word-of-mouth"); it is an elaboration of that recorded decision, not a new strategic
+choice, so no new ADR is minted this cycle.
