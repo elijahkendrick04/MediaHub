@@ -45,7 +45,7 @@ A realistic Serviceable Obtainable Market for a swimming-first tool, sold solo f
 - **Volunteer grassroots club:** £0–£40/mo. Anchored by ~£150/yr NGB affiliation and free Canva. Highest churn. Lowest WTP.
 - **School athletic dept (US):** $625–$3,000/yr (Gipper-proven), fixed budgets, strong retention, **2–18 month procurement, committee buying.** Best volume + retention combination.
 - **University / college athletics:** mid-four to low-five figures/yr (FanWord multi-year deals), relationship-led.
-- **National federation/governing body:** five-to-six figures, very long cycles, but one deal can endorse hundreds of clubs (the highest-leverage channel).
+- **National federation/governing body:** five-to-six figures, very long cycles. One deal *could* reach hundreds of clubs, but the *promotional-endorsement* form of this channel is now down-weighted to speculative — see **Evidence refresh — cycle 3** (NGB distribution-channel reality check) below; the *evidenced* NGB mechanism is approved data-API access, not promotion.
 
 ### Incumbent-bolts-on-content threat: currently LOW, but watch closely
 Diligence found **no swim-data incumbent shipping auto social-content generation.** SwimTopia, TeamUnify/SportsEngine, Swimcloud and Hy-Tek/MeetMobile auto-surface PBs/results (Swimcloud Pro auto best-times; SwimTopia "Best Times"; MeetMobile personal bests) but stop at data display and manual sharing. The white space MediaHub targets is genuinely open. Caveats: (1) SwimTopia's own 2025 marketing already describes auto-flagging records and making them "instantly shareable" as where software "should" go — intent is visible; (2) SportsEngine/TeamUnify changed ownership (PlayMetrics, 2026), which could refocus or de-prioritise swim; (3) any incumbent already holding clean results + PB data could bolt this on faster than MediaHub can build distribution. The moat is a time advantage, not a defensible wall.
@@ -65,7 +65,7 @@ Diligence found **no swim-data incumbent shipping auto social-content generation
 4. Hand-sell to the first ~10 paying Swansea/Wales/England swim clubs yourself. *Benchmark: 10 clubs paying annually before spending a day on football/basketball.*
 
 **Stage 1 — Saturate UK swimming, prove retention (~60–70% confidence this yields a repeatable pipeline; revenue outcome lower)**
-5. Pursue a Swim Wales / regional Swim England endorsement or reseller arrangement — the single highest-leverage channel (one deal reaches hundreds of clubs). *Threshold: if no NGB/region will pilot after 6 months, treat the governing-body channel as speculative and lean on direct + word-of-mouth.*
+5. Engage the governing-body channel as **two distinct mechanisms** (re-weighted cycle 3, see below): **(a)** apply for **approved data-API access** (Swim England’s Oct-2025 approved-systems API, open to commercial orgs) — evidenced, available, and the concrete first action, but it grants *data, not promotion*; **(b)** a *promotional* NGB endorsement that reaches hundreds of clubs — **down-weighted to speculative** (no evidence any NGB promotes a third-party content tool; partner slots are category-exclusive and already held). *Threshold: if no NGB/region will pilot or promote after 6 months, treat the promotional channel as speculative and lean on direct + word-of-mouth.*
 6. Target ~150–250 paying UK&I swim clubs at £49–£99/mo annual = **~£90k–£250k ARR.** *This is the realistic swimming-only ceiling; if you stall below ~50 clubs, product-market fit isn't there — fix retention before expanding.*
 
 **Stage 2 — The only credible £1M+ routes (require a second person; mark expansion steps <80% confidence)**
@@ -73,7 +73,7 @@ Diligence found **no swim-data incumbent shipping auto social-content generation
 - **Route B — US schools/colleges (highest WTP, proven by Gipper/FanWord):** reposition as results-driven achievement graphics for US athletic departments at $625–$3,000/yr. *Requires US sales presence and competing with funded incumbents, but offers the strongest math and a wedge incumbents lack (auto results-to-graphics). Confidence of £1M solo: <15%; meaningfully higher with a US-based partner/hire.*
 - **Route C — Integration/content layer for swim-data incumbents (de-risks distribution):** rather than fight SwimTopia/TeamUnify, license/sell the content engine as the layer they lack. *Trades upside for survival probability and could be the most realistic high-value exit. Confidence it beats going direct: ~50/50.*
 
-**Highest-leverage combination overall:** governing-body endorsement (Stage 1 #5) for *distribution* + US-schools repositioning (Route B) for *revenue*. These two change the math more than anything else.
+**Highest-leverage combination overall:** governing-body **data-API access + incumbent integration (Route C)** (Stage 1 #5) for *distribution* + US-schools repositioning (Route B) for *revenue*. (Earlier drafts named *promotional NGB endorsement* here; cycle 3 down-weighted it to speculative — see below.)
 
 ## Caveats
 - Several scale figures are vendor self-claims or third-party algorithmic estimates (Gipper's 20,000 customers and ~$4.4M revenue; Hudl's ARR range $132M–$730M; global swim-club totals). Treated as directional, not audited.
@@ -136,3 +136,63 @@ step* — the candidate Club £49–£99/mo / Federation £250+/mo levels remain
 unvalidated hypothesis, to be confirmed by revealed WTP (≥5 clubs paying annual prepay at
 a tested price) before any public list price is locked. The >95% standard attaches to that
 gating *decision*, never to the price levels or a revenue outcome.
+
+
+---
+
+## Evidence refresh — 2026-06-09 (strategy engine, cycle 3: NGB distribution-channel reality check)
+
+**Why:** the body of this report calls a national-governing-body (NGB) "endorsement or
+reseller arrangement" *"the single highest-leverage channel (one deal reaches hundreds of
+clubs)"* and the roadmap's PC.6 leaned on it as the top distribution play — but that claim
+was **asserted, never evidenced.** Distribution is the binding constraint, so this is the
+most load-bearing unproven assumption on the revenue path. Reality-checked against current,
+dated Swim England / Swim Wales sources.
+
+**Findings (Swim England, the largest UK&I home nation, ~1,200+ affiliated clubs):**
+
+- **There IS a real, dated NGB software channel — but it is a DATA-ACCESS programme, not a
+  promotional endorsement.** Swim England launched a **secure "approved-systems" API**
+  (announced **1 Oct 2025**, updated 17 Oct 2025) that lets *approved* platforms read
+  official swim times/PBs directly from its databases. Initial approved partners are the
+  **club-administration platforms Swim Club Manager and Swim Manager.** The announcement
+  explicitly invites *"commercial organisations interested in benefiting from the Swim
+  England API"* to apply (a named contact route), and states it is *"a small step towards
+  our strategic goal of a connected digital eco-system, with more to follow in 2026."*
+  *[Source: Swim England, "Swim England teams up with club management systems to simplify
+  swim-time access," swimming.org, published 2025-10-01, accessed 2026-06-09.]*
+  → **Implication:** approved API access is a high-confidence-available, evidenced first
+  NGB action that strengthens MediaHub's deterministic **data moat** + credibility. It is
+  **not** a mechanism that pushes the tool to hundreds of clubs.
+
+- **No evidence any NGB *promotes/endorses* a third-party CONTENT tool to its member
+  clubs.** Swim England's partner slots are **category-exclusive and already occupied** by
+  incumbents: **SportsEngine (ex-TeamUnify) = "preferred technology supplier" for swim
+  schools** with discounted pricing for affiliated swim schools *[Source:
+  sportsengine.com/motion/uk/swim-england, accessed 2026-06-09]*; **GoCardless = "Official
+  Payments Partner"** *[Source: gocardless.com/swim-england-official-payments-partner,
+  accessed 2026-06-09]*. The NGB **corporate-partner** tier (Speedo, Sport England,
+  SportsHotels) is sponsorship-based and brand-led, with **no content/social category and
+  no route found for a solo vendor to have its product endorsed to all clubs** *[Source:
+  swimming.org/swimengland/swim-england-corporate-partners, accessed 2026-06-09]*.
+
+- **Swim Wales:** no comparable public approved-supplier/endorsement programme for
+  third-party software was found this cycle (searched 2026-06-09). Treated as **unknown —
+  do not assert a Swim Wales endorsement mechanism exists** until verified. *(Gap logged.)*
+
+**Re-weighting (the correction this cycle makes):**
+
+| Mechanism | Prior framing | Evidence-based framing |
+|---|---|---|
+| **Approved data-API access** | implicit / merged into "endorsement" | **Evidenced, dated, open to commercial orgs.** Concrete first NGB action. Grants *data + credibility*, not promotion. **>95% this step is correct/available.** |
+| **Promotional NGB endorsement → hundreds of clubs** | *"the single highest-leverage channel"* | **Down-weighted to speculative.** No evidence NGBs promote third-party content tools; partner categories are exclusive and already held by incumbents. Keep the 6-month threshold; do not plan around it as the primary channel. |
+
+**Implication for the plan:** the binding-constraint (distribution) sequence no longer
+rests on an unevidenced "endorsement reaches hundreds of clubs" assumption. The *>95%
+standard* attaches to the **API-access step** (correct and available) and to the
+*decision* to down-weight promotional endorsement; the promotional upside is **quarantined
+as speculative**, not deleted. This also **reinforces Route C** — the incumbents who hold
+both the NGB partner endorsement *and* (now) the official data integration are the
+realistic distribution partners, raising Route C's relative attractiveness vs a direct NGB
+content endorsement. No revenue figure changed; the £150k–£400k swimming-only ceiling and
+Routes A/B/C stand. Recorded as **[adr/0012](../adr/0012-ngb-distribution-channel-reality-check.md).**
