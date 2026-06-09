@@ -22,6 +22,7 @@ Design notes
 - Brand-kit ingest accepts either a ``BrandKit`` dataclass or a plain dict
   (so the renderer doesn't have to import the brand package).
 """
+
 from __future__ import annotations
 
 import base64
@@ -34,6 +35,11 @@ from dataclasses import is_dataclass, asdict
 from pathlib import Path
 from typing import Any, Optional
 
+
+from mediahub.visual.reel_engine import (
+    ReelEngineUnavailable,
+    select_reel_engine,
+)
 
 REMOTION_DIR = Path(__file__).resolve().parents[1] / "remotion"
 RENDER_SCRIPT = REMOTION_DIR / "render.js"
@@ -127,6 +133,7 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     if pid:
         try:
             from mediahub.theming.theme_store import read_theme, palette_for_motion
+
             theme_json = read_theme(pid)
             if theme_json:
                 theme_palette = palette_for_motion(theme_json)
@@ -135,9 +142,11 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
             # palette — but surface the cause in logs so a broken
             # theme_store integration is visible.
             import logging as _log
+
             _log.getLogger(__name__).warning(
                 "motion: theme_store lookup failed for profile_id=%r: %s",
-                pid, e,
+                pid,
+                e,
             )
             theme_palette = None
 
@@ -146,18 +155,9 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     brand_accent = src.get("accent_colour") or src.get("accent")
     used_brand_kit = bool(brand_primary or brand_secondary or brand_accent)
 
-    primary = (
-        brand_primary
-        or (theme_palette or {}).get("primary") or "#0A2540"
-    )
-    secondary = (
-        brand_secondary
-        or (theme_palette or {}).get("secondary") or "#000000"
-    )
-    accent = (
-        brand_accent
-        or (theme_palette or {}).get("accent") or "#FFFFFF"
-    )
+    primary = brand_primary or (theme_palette or {}).get("primary") or "#0A2540"
+    secondary = brand_secondary or (theme_palette or {}).get("secondary") or "#000000"
+    accent = brand_accent or (theme_palette or {}).get("accent") or "#FFFFFF"
 
     return {
         "primary": primary,
@@ -168,7 +168,9 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
         "logoDataUri": _logo_to_data_uri(
             src.get("logo_svg") or src.get("logoSvg") or src.get("logoDataUri")
         ),
-        "themeSource": "brand-kit" if used_brand_kit else ("theme-store" if theme_palette else "brand-kit"),
+        "themeSource": "brand-kit"
+        if used_brand_kit
+        else ("theme-store" if theme_palette else "brand-kit"),
     }
 
 
@@ -211,14 +213,8 @@ def _card_to_props(
         or card.get("athlete_name")
         or ""
     )
-    first = (
-        layers.get("athlete_first_name")
-        or (athlete.split()[0] if athlete else "")
-    )
-    surname = (
-        layers.get("athlete_surname")
-        or (athlete.split()[-1] if athlete else "")
-    )
+    first = layers.get("athlete_first_name") or (athlete.split()[0] if athlete else "")
+    surname = layers.get("athlete_surname") or (athlete.split()[-1] if athlete else "")
     event = (
         layers.get("event_name")
         or ach.get("event_name")
@@ -244,18 +240,8 @@ def _card_to_props(
         or card.get("confidence_label")
         or "STRONG SWIM"
     )
-    meet_name = (
-        layers.get("meet_name")
-        or card.get("meet_name")
-        or ach.get("meet_name")
-        or ""
-    )
-    place = (
-        layers.get("place")
-        or ach.get("place")
-        or raw_facts.get("place")
-        or ""
-    )
+    meet_name = layers.get("meet_name") or card.get("meet_name") or ach.get("meet_name") or ""
+    place = layers.get("place") or ach.get("place") or raw_facts.get("place") or ""
 
     # Pull variation axes from the brief (when supplied). Every field
     # is optional — empty strings tell the TSX composition to fall
@@ -341,19 +327,41 @@ def _run_remotion(
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip().splitlines()
         tail = "\n".join(stderr[-15:]) if stderr else "(no stderr)"
-        raise RuntimeError(
-            f"Remotion render failed (exit {proc.returncode}):\n{tail}"
-        )
+        raise RuntimeError(f"Remotion render failed (exit {proc.returncode}):\n{tail}")
     if not out_path.exists() or out_path.stat().st_size < 1024:
-        raise RuntimeError(
-            f"Remotion reported success but {out_path} is missing or empty"
-        )
+        raise RuntimeError(f"Remotion reported success but {out_path} is missing or empty")
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Engine dispatch
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_engine() -> None:
+    """Validate the configured engine; raise for any non-remotion selection.
+
+    Called at the entry of each public render function.  When the engine
+    resolves to 'remotion' (the default) this is a pure no-op and the
+    existing _run_remotion path continues completely unchanged.
+
+    The 'satori' engine is registered as a future placeholder but is not
+    yet implemented; callers receive an honest ReelEngineUnavailable rather
+    than a fake/placeholder asset (CLAUDE.md AI-surfaces rule).
+    """
+    engine = select_reel_engine()
+    if engine != "remotion":
+        raise ReelEngineUnavailable(
+            f"The '{engine}' render engine is not yet implemented. "
+            "Set MEDIAHUB_REEL_ENGINE=remotion (or leave it unset) to use "
+            "the production Remotion renderer."
+        )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def render_story_card(
     card_payload: dict,
@@ -375,10 +383,13 @@ def render_story_card(
     accent/mood) to the TSX composition. Without a brief the render
     falls back to variationSeed-only behaviour for backwards compat.
     """
+    _dispatch_engine()
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
     card_dict = _card_to_props(
-        card_payload, variation_seed=variation_seed, brief=brief,
+        card_payload,
+        variation_seed=variation_seed,
+        brief=brief,
     )
 
     cache_key = _content_hash(
@@ -430,6 +441,7 @@ def render_meet_reel(
                   first card's ``meet_name`` if blank.
       duration_sec total reel duration; default 15s.
     """
+    _dispatch_engine()
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
 
@@ -455,6 +467,7 @@ def render_meet_reel(
                         from mediahub.creative_brief.generator import (
                             auto_variation_seed_for,
                         )
+
                         seed = auto_variation_seed_for(str(cid))
                     except Exception:
                         seed = 1
@@ -504,9 +517,9 @@ __all__ = [
     "node_available",
     "remotion_installed",
     "REMOTION_DIR",
+    "ReelEngineUnavailable",
 ]
 
 
 # Re-exported for tests; underscore-prefixed names are intentionally not in
 # __all__ but stay importable as ``from mediahub.visual.motion import _logo_to_data_uri``.
-

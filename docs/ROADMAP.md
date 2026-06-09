@@ -199,6 +199,11 @@ Three facts shape the work ahead.
   `tests/test_run_route_isolation_invariant.py`) — see
   [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md).
 - Gemini→Anthropic provider failover (`media_ai/llm.py`, `ai_core/llm.py`).
+- **Self-serve signup + auth + Stripe billing** (`web/auth.py`, `web/billing.py`): routes
+  `/signup` `/login` `/logout`, bcrypt + a signed session cookie, a `users.jsonl` ledger,
+  plus Stripe Checkout + Customer Portal + a signed webhook. Merged **PR #267**
+  (2026-06-09); billing **honest-503s until `STRIPE_*` keys are set**. This is
+  **PC.1 + PC.2** — see Phase C.
 
 **Not yet shipped (❌)** — the reframe's new surface:
 
@@ -211,9 +216,13 @@ Three facts shape the work ahead.
 - **Direct-to-platform** publishing (only Buffer today).
 - The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
   rembg present).
-- **No commercial layer** — zero billing, signup, or true multi-tenancy against ~164k
-  LOC and 2,836 tests. This "build/sell imbalance" is the binding constraint per the
-  2026 scaling diligence; it is now **Phase C**, the top priority (see below).
+- **The rest of the commercial layer** — signup + billing themselves now ship (see
+  above), but **true multi-tenancy** (org → workspace in one shared instance; **PC.3**,
+  blocking), **validated pricing** (**PC.4**) and a **go-to-market motion** (**PC.6**) are
+  still missing, and because billing is unconfigured there are **zero paying customers**.
+  This "build/sell imbalance" is the binding constraint per the 2026 scaling diligence;
+  closing it is **Phase C**, the top priority (see below) — now **half-closed on the build
+  side, fully open on the sell side**.
 
 **In progress (🔵):** the Generative Content Engine v2 (decided in
 [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
@@ -431,8 +440,13 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 auth, Stripe billing, **true multi-tenancy** (org → workspace in one shared instance),
 validated pricing with annual prepay, a resolved free-self-host position (**resolved:
 hosted-only** — [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)), and a
-go-to-market motion. Today there is **zero billing and zero customers** against ~164k LOC
-— the diligence's central "build/sell imbalance" finding.
+go-to-market motion. **Update 2026-06-09:** the *build* half is now half-closed —
+self-serve signup + auth (**PC.1**) and Stripe billing (**PC.2**) shipped and are live
+(merged PR #267). But billing **honest-503s until the operator sets `STRIPE_*` keys**, so
+there are still **zero paying customers** against ~164k LOC. The diligence's central
+"build/sell imbalance" is therefore **half-closed on the build side and entirely open on
+the sell side** — the remaining gates are true multi-tenancy (**PC.3**), validated
+pricing (**PC.4**) and a go-to-market motion (**PC.6**).
 
 **Exit criteria (both are hard gates on later phases).**
 1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
@@ -467,11 +481,50 @@ Step 14.*
 Escalation (2026-06-09, autobuild): the remaining work binds user-account identity to org membership and generalises cross-org isolation in one shared instance, which directly touches the locked cross-tenant isolation invariant (ADR-0003). Per CLAUDE.md governance this is a high-stakes, hard-to-reverse architecture fork that must be Council-pressure-tested and operator-signed-off before the org to workspace schema is committed; the autonomous build loop must NOT rearchitect it unattended. NEEDS OPERATOR/COUNCIL sign-off on the schema before implementation.
 
 ### PC.4 — Repricing & packaging (validate, don't assume) · ❌ **NOT STARTED**
-The £30/£250 tiers are **unvalidated and too low**. Candidate repricing **to test with
-real buyers** (a hypothesis, not a fixed price): **Club £49–£99/mo billed annually**,
-**Federation £250+/mo**. **Annual prepay is essential** — SMB/volunteer churn runs
-3–7%/mo and annual billing cuts it ~30–40%. Kill the £30 anchor. *Ref: Appendix B Step 7
-tiers (annotated ⚠️ unvalidated there); [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
+The £30/£250 tiers in the code are **unvalidated and too low**, and the £30 anchor must
+die. But the corrective is **not** to swap in a new fixed price — it is to **discover the
+price from revealed willingness-to-pay before locking any public list price.** WTP at the
+candidate tiers is the single most load-bearing *unproven* assumption on the whole revenue
+path, so PC.4 is structured as an evidence gate, not a one-off reprice:
+
+- **Candidate hypothesis (to test, not to publish):** Club **£49–£99/mo billed
+  annually**, Federation **£250+/mo**. Annual prepay is non-negotiable — SMB/volunteer
+  churn runs 3–7%/mo and annual billing cuts it ~30–40% ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)).
+- **Validation method:** treat the first ~10 hand-sold clubs (**PC.6**) as live price
+  discovery. Quote a *real* annual price, vary it across clubs, and record accept/decline
+  plus the price each club will actually pay — i.e. **revealed** WTP from real payments,
+  not survey-stated WTP.
+- **Gate (the >95%-confidence-correct step):** keep `/pricing` at the honest
+  *"Pricing TBC"* it already shows until **≥5 clubs have paid an annual prepay at a tested
+  price**; only then commit a public list price, set at the highest tested point that
+  still cleared. Below that signal, any fixed list price is a guess.
+- **Why this sequencing:** under-pricing is hard to reverse (re-pricing existing annual
+  contracts upward churns volunteer buyers), and over-pricing with no buyers teaches
+  nothing. Revealed WTP from real annual payments is the only evidence that de-risks the
+  tier — and it costs nothing extra because the first ~10 sales happen anyway under PC.6.
+
+**Sourced price comparators (anchor the hypothesis; every figure dated):**
+
+| Comparator | Segment | Current price | What it anchors |
+|---|---|---|---|
+| **Gipper** (closest analog) | US K-12/college athletic depts | **$625 / $1,500 / $3,000 per year, annual-only** *(gipper.com/pricing, verified 2026-06-09)* | The institutional ceiling a results-graphics tool can reach *with a sales motion*. |
+| **Predis.ai** (horizontal AI) | Any SMB / creator | **$19 / $40 / $212 per month** *(predis.ai/pricing, verified 2026-06-09)* | The buyer's mental price ceiling for "AI makes my posts." |
+| **SwimTopia** (swim incumbent that touches money) | Swim clubs | ~$150–$699/yr annual *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | What a club *will* pay when software is mission-critical (registration/billing) — MediaHub is not, yet. |
+| **Canva Free** | Volunteer creator | **£0** | The free substitute every volunteer already has. |
+| **Swim Wales affiliation** | Whole NGB relationship | £150/yr *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | The volunteer treasurer's anchor for "what anything costs." |
+
+Read together: the commodity floor (£0 Canva / ~$19/mo Predis) and the £150/yr NGB anchor
+pull the Club tier **down**, while Gipper proves the institutional ceiling is far higher
+($625–$3,000/yr) **but only for a schools/federation buyer with a budget, not a volunteer
+club.** That gap is exactly why Route B (US schools) and PC.6 governing-body endorsement
+carry the revenue weight, and why the Club tier must be set by revealed WTP rather than
+assumed.
+
+*Confidence: the **step** — gate the public price on ≥5 revealed annual payments before
+publishing a list price — is >95%-confidence-correct; it is what a hard-nosed operator
+would insist on. The **price levels themselves remain an unvalidated hypothesis** and are
+flagged as such, not stated as fact. Ref: Appendix B Step 7 tiers (⚠️ unvalidated there);
+[`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
 
 ### PC.5 — Free-self-host tension · ✅ **RESOLVED (2026-06-09): hosted-only**
 "Truly free, no hidden fees" self-host, as framed, hands power users a permanent
@@ -486,12 +539,16 @@ authoritative statement. Recorded in
 
 ### PC.6 — Go-to-market / distribution · ❌ **NOT STARTED**
 Distribution kills solo ventures, not product gaps. The sub-track:
-- **Governing-body endorsement** — pursue a Swim Wales / regional Swim England pilot or
-  reseller arrangement (one deal can reach hundreds of clubs — the highest-leverage
-  channel). *Threshold: if no NGB/region will pilot after ~6 months, treat it as
-  speculative and lean on direct + word-of-mouth.*
-- **Hand-sell the first ~10 clubs** yourself (Swansea / Wales / England) — this *is* the
-  traction gate, not a growth tactic.
+- **Governing-body channel — split into two mechanisms with very different evidence (reality-checked 2026-06-09):**
+  - **(a) Official data-API access — REAL, dated, the concrete first NGB action.** Swim England launched a secure **approved-systems API** (announced 1 Oct 2025) letting approved platforms read official swim times/PBs directly from its databases; initial partners are the club-admin platforms Swim Club Manager and Swim Manager, and it explicitly invites *“commercial organisations interested in benefiting from the Swim England API”* to apply, with *“more to follow in 2026”* toward a “connected digital eco-system.” Applying for approved access is high-confidence-available and strengthens the deterministic data moat + credibility — but it grants **data, not promotion.** *(>95% this step is correct/available; sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).)*
+  - **(b) Promotional NGB endorsement to hundreds of clubs — DOWN-WEIGHTED to speculative.** No evidence any NGB promotes a third-party *content* tool to its member clubs. Swim England’s partner slots are **category-exclusive and already held** (SportsEngine = “preferred technology supplier” for swim schools; GoCardless = “Official Payments Partner”); the corporate-partner tier (Speedo, Sport England, SportsHotels) is sponsorship-based and slow. So “one deal reaches hundreds of clubs” is a *possibility, not the assumed highest-leverage channel.* **Threshold: if no NGB/region will pilot or promote after ~6 months, treat it as speculative and lean on direct + word-of-mouth.** This re-weighting reinforces **Route C** — the incumbents who already hold the endorsement *and* the official data integration are the realistic distribution partners. *([adr/0012](adr/0012-ngb-distribution-channel-reality-check.md).)*
+- **Hand-sell the first ~10 clubs yourself — the traction gate, designed as a warm-first sequence (expanded + evidence-banded 2026-06-09).** This is *the* Phase C exit gate, not a growth tactic, and it is now the **de-facto primary channel** after the promotional-endorsement down-weight (PC.6(b) / ADR-0012). The base rates say the gate is reached by **manufactured warmth + referral chains, not cold broadcast**:
+  - **(i) Local-warm base first (Swansea / South-East Wales).** The founder is locally embedded; Swim Wales has ~80–90 affiliated clubs (~11,000 members) — a tight regional network. Warm / in-person founder-led sales convert at **~30–50%** vs **~2–5%** for cold. *Win the first ~3–5 paying clubs here, high-touch, in person.* `[Founder-led sales benchmark — ESTIMATE; warm 30–50% vs cold 2–5%.]`
+  - **(ii) Referral engine on every signed club.** Coaches and volunteers know each other across county squads and meets. In SaaS, **20–50% of new customers come from referral / word-of-mouth** (≈65% of B2B new business; referred customers ~37% higher retention) — *amplified* in a community this tight. Ask each signed club for **2 named intros** to peer clubs; warm-intro close stays in the 30–50% band. *This is the mechanism that compounds 5 → 10.* `[SaaS referral benchmark — ESTIMATE.]`
+  - **(iii) Meet / event presence as warmth-manufacture.** County and regional meets are where the community physically gathers; producing real branded output for host / visiting clubs turns strangers into warm leads — it is not cold outreach.
+  - **(iv) Cold outreach = a capped supplement, never the path to the gate.** The public Swim England (~1,200+ clubs) and Swim Wales club directories make contacts reachable, but the honest funnel for a brand-new, unproven tool sold to a no-budget volunteer buyer is brutal: cold reply **~2–5%** × reply→meeting **~30–50%** × meeting→paid **~15–30%** ≈ **~0.3–1.0% cold-to-paid.** Reaching 10 clubs cold would need **~1,000–3,000 quality contacts** — not achievable solo at quality. *Use cold only to book a handful of discovery calls; do not plan the gate around it.* `[Blended from cold-email + founder-led benchmarks — ESTIMATE.]`
+  - **Honest funnel to the gate:** ~5 local-warm + ~5 referral; cold supplements top-of-funnel only. **Realistic timeline ~3–6+ months** to 10 paying clubs given seasonal calendars, volunteer decision-making and no standing budget line (founder-led SaaS cycles run 4–8 weeks for *budgeted* buyers; volunteer clubs are slower). `[ESTIMATE — flagged, not a commitment.]`
+  - **Confidence split (the >95% discipline):** the *design* — warm + referral over cold broadcast — is **>95%-confidence-correct** on the cited base rates; the *outcome* (10 paying clubs in N months at price X) is **unproven and IS the validation** (it also closes the PC.4 willingness-to-pay gap). Do not conflate the two. Sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) (Evidence refresh cycle 4).
 - **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
 
 **Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
@@ -524,7 +581,7 @@ revenue in mind. Each carries the report's confidence band. **All figures are es
   them. *Trades upside for survival probability; possibly the most realistic high-value
   exit. Confidence it beats going direct: ~50/50.*
 
-**Highest-leverage combination:** governing-body endorsement (PC.6) for *distribution* +
+**Highest-leverage combination:** governing-body **data-API access + incumbent integration (Route C)** (PC.6) for *distribution* +
 US-schools repositioning (Route B) for *revenue*.
 
 ---
@@ -997,6 +1054,8 @@ top. The archetype must read *structurally distinct* from `individual_hero` /
 `full_bleed_photo_lower_third`, `editorial_numbers_grid`, `centered_medal_spotlight`,
 `magazine_cover`, `ticker_strip`, `stat_stack_sidebar`, `triptych_progression`,
 `quote_led_recap`, `big_number_dominant`, `duo_athlete_split`, `minimal_type_poster`.
+
+**Progress (PAR-7 catalog, auto-run):** 10 of 12 archetypes live — `magazine_cover` added 2026-06-09 (a sports-magazine cover: masthead + headline-over-photo + marginal cover-line column + circular coverstar burst). Representative seeds-0..9 pack archetype-diversity 0.90 → **1.00**; library distinctiveness floor unchanged (new archetype nearest-neighbour dHash 0.38, in-band, not a reskin). Remaining: `quote_led_recap`, `duo_athlete_split`. See `docs/build_reports/GEN_QUALITY_BASELINE.md`.
 
 **Implementation prompt (template — fill in `<NAME>`):**
 > [Preamble.] Author ONE new graphic archetype `graphic_renderer/layouts/v2/<NAME>.html`

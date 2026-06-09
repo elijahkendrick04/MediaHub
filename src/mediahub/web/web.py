@@ -7264,6 +7264,15 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   // === Scroll reveals + number counters (Phase 10) ===
   var prefersReduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Formats a number with thousands commas, matching Python's ':,' format spec.
+  // Ensures single-digit values render as "1" not "01", and large values as "3,198".
+  function _fmtN(n, dp) {
+    var s = n.toFixed(dp);
+    var dot = s.indexOf('.');
+    var intPart = dot < 0 ? s : s.slice(0, dot);
+    var fracPart = dot < 0 ? '' : s.slice(dot);
+    return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + fracPart;
+  }
   function animateCount(el) {
     var target = parseFloat(el.getAttribute('data-mh-count'));
     if (isNaN(target)) return;
@@ -7272,7 +7281,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var prefix = el.getAttribute('data-mh-count-prefix') || '';
     var suffix = el.getAttribute('data-mh-count-suffix') || '';
     if (prefersReduced) {
-      el.textContent = prefix + target.toFixed(dp) + suffix;
+      el.textContent = prefix + _fmtN(target, dp) + suffix;
       return;
     }
     var start = null;
@@ -7282,9 +7291,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       // ease-out cubic
       var eased = 1 - Math.pow(1 - p, 3);
       var val = target * eased;
-      el.textContent = prefix + val.toFixed(dp) + suffix;
+      el.textContent = prefix + _fmtN(val, dp) + suffix;
       if (p < 1) requestAnimationFrame(tick);
-      else el.textContent = prefix + target.toFixed(dp) + suffix;
+      else el.textContent = prefix + _fmtN(target, dp) + suffix;
     }
     requestAnimationFrame(tick);
   }
@@ -8615,12 +8624,12 @@ def create_app() -> Flask:
         # Values count up on scroll-in via the Phase 10 motion system.
         summary_html = (
             '<div class="mh-activity-summary mh-reveal">'
-            f'<div class="stat live"><div class="l">Total runs</div><div class="v" data-mh-count="{total_unfiltered}">{total_unfiltered:02d}</div></div>'
+            f'<div class="stat live"><div class="l">Total runs</div><div class="v" data-mh-count="{total_unfiltered}">{total_unfiltered:,}</div></div>'
             f'<div class="stat medal"><div class="l">Achievements detected</div><div class="v" data-mh-count="{ach_unfiltered}">{ach_unfiltered:,}</div></div>'
-            f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):02d}</div></div>'
+            f'<div class="stat good"><div class="l">Completed</div><div class="v" data-mh-count="{unfiltered_counts.get("done", 0)}">{unfiltered_counts.get("done", 0):,}</div></div>'
         )
         if unfiltered_counts.get("error", 0):
-            summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):02d}</div></div>'
+            summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):,}</div></div>'
         summary_html += "</div>"
 
         # Toolbar — search input + status segment filter.
@@ -12658,6 +12667,20 @@ Relay team broke club record"></textarea>
             "available": node_modules.exists(),
             "dir": str(remotion_dir),
         }
+        # Reel-engine selection seam (P0.1).  Purely informational —
+        # does not affect the ok flag since remotion is the default.
+        try:
+            from mediahub.visual.reel_engine import reel_engine_status
+
+            deps["reel_engine"] = reel_engine_status()
+        except Exception as _re_err:
+            deps["reel_engine"] = {"error": str(_re_err)[:200]}
+        try:
+            from mediahub.publishing.kill_switch import kill_switch_status
+
+            deps["publish_kill_switch"] = kill_switch_status()
+        except Exception as _ks_err:
+            deps["publish_kill_switch"] = {"error": str(_ks_err)[:200]}
         ok = (
             deps["playwright"].get("chromium")
             and deps["node"].get("available")
@@ -14144,6 +14167,21 @@ Relay team broke club record"></textarea>
         # and produce a per-channel "channel id is required" failure.
         # Cast every value to str up front for a consistent shape.
         channel_ids = [str(c).strip() for c in channel_ids if str(c).strip()]
+
+        from mediahub.publishing.kill_switch import publish_kill_switch_engaged
+
+        if publish_kill_switch_engaged():
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "publishing_halted",
+                    "message": (
+                        "Publishing is currently halted by the operator kill switch."
+                        " No post was sent."
+                    ),
+                    "caption": caption,
+                }
+            ), 503
 
         for cid in channel_ids:
             try:
