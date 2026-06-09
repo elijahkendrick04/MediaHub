@@ -10,21 +10,66 @@ edits docs only — never code, tests, infra, billing, or deploys.
 
 ## HANDOFF (current)
 
-- **Integrity state:** the Phase-C badge reconcile (PC.1/PC.2 → ✅, header → 🔵) already
-  landed on `main` via a **peer autobuild, PR #275** (merged 2026-06-09 14:47). This cycle
-  closed the **two residual consistency gaps PR #275 left behind**: the "Where we are
-  today" honesty section still claimed "No commercial layer — zero billing, signup," and
-  the Phase C **Goal** paragraph still said "zero billing and zero customers." Both now
-  reconciled. No high-confidence-core item is now known to be below standard; PC.3 (true
-  multi-tenancy) remains correctly ⚠️ BLOCKING + escalated for operator/Council sign-off.
-- **Biggest open evidence gap:** willingness-to-pay by segment at the proposed PC.4 prices
-  (Club £49–£99/mo annual; Federation £250+/mo) is still an unvalidated hypothesis — the
-  single most load-bearing unproven assumption on the whole revenue path.
-- **Highest-impact next correction:** turn PC.4 from an assumed reprice into an explicit,
-  evidence-gated *"validate WTP with ≥N real buyers before locking price"* step, with a
-  sourced comparator set (Gipper/FanWord/Predis/Canva current pricing).
-
+- **Integrity state:** no high-confidence-core item is known to be below standard. This
+  cycle hardened **PC.4** from an assumed reprice into an **evidence-gated price-discovery
+  step** (gate the public list price on ≥5 clubs paying annual prepay at a tested price;
+  candidate Club £49–£99/mo / Federation £250+/mo kept as an explicitly *unvalidated
+  hypothesis*) and added a **sourced 2026 comparator table**. PC.3 (true multi-tenancy)
+  remains correctly ⚠️ BLOCKING + escalated for operator/Council sign-off.
+- **Biggest open evidence gap:** revealed willingness-to-pay at the candidate Club tier is
+  still unproven — but it is now correctly *structured as a gate to be closed by the first
+  ~10 hand-sold clubs (PC.6)*, not papered over with an assumed price. It cannot be closed
+  from the desk; it needs real annual payments.
+- **Highest-impact next correction:** expand the **PC.6 GTM / distribution** track into a
+  concrete, evidence-banded sequence (the binding constraint), or sanity-check the PC.6
+  governing-body-endorsement assumption against a current Swim Wales / Swim England
+  partner-programme reality check.
 ---
+
+## 2026-06-09 — Cycle 2 (PC.4: assumed reprice → evidence-gated price discovery)
+
+**Assessed:** full roadmap against the standard; confirmed the prior handoff's queued
+correction was the highest-impact open item. PC.4 named candidate prices and said
+"validate, don't assume" but defined **no validation method, no buyer threshold, and no
+current sourced comparator** — so the load-bearing WTP assumption was asserted, not gated.
+
+**Evidence gap researched + findings (captured in `research/SCALING_DILIGENCE_2026.md`,
+Evidence refresh cycle 2):** verified current competitor pricing directly from vendor
+pages. **Gipper = $625 / $1,500 / $3,000 per year, annual-only** (gipper.com/pricing) —
+exact public tiers replacing the old "$625 up to ~$3,000 quote" estimate, and confirming
+the proven analog sells to budgeted schools, not volunteer clubs, on annual billing.
+**Predis.ai = $19 / $40 / $212 per month** (predis.ai/pricing) — narrows the old
+"$19–$249/mo" commodity band to current figures.
+
+**Improvement made:** rewrote ROADMAP §PC.4 as an evidence gate — (1) candidate prices
+flagged as a hypothesis to test, not publish; (2) explicit validation method (first ~10
+hand-sold PC.6 clubs as live price discovery, recording *revealed* WTP); (3) a hard gate
+(keep `/pricing` at the live honest "Pricing TBC" until ≥5 clubs pay annual prepay at a
+tested price, then lock the highest cleared point); (4) a sourced, dated comparator table
+(Gipper, Predis, SwimTopia, Canva Free, Swim Wales affiliation).
+
+**How it moved toward the standard:** the single most load-bearing *unproven* assumption
+on the revenue path is no longer asserted — it is fenced behind an explicit, dated,
+sourced gate that a hard-nosed operator would keep. Confidence is split cleanly: the
+*gating step* is >95%-confidence-correct; the *price levels* stay an unvalidated
+hypothesis. No revenue figure inflated; product vision unchanged; speculative Routes A/B/C
+untouched; auto-update stamp/activity blocks not hand-edited.
+
+**Self-verify:** coherence ✓ (PC.4 references PC.6 + the live "Pricing TBC" state, both
+real; no un-built prereq); evidence ✓ (Gipper/Predis verified today and cited with access
+date; SwimTopia/Canva/Swim Wales cited to the diligence; price levels flagged estimate);
+standard ✓ (step >95%-correct, hypothesis quarantined as such); honesty ✓ (no inflated
+number; outcome odds untouched); vision ✓ (unchanged).
+
+**Realistic revenue ceiling + probability bands (unchanged this cycle, restated honestly):**
+swimming-only sustainable ≈ **£150k–£400k ARR** (most likely good outcome); **£1M+ ARR**
+low-double-digit-% and only via multi-sport breadth + institutional buyers + a second
+person; **£1M/month (~£12M ARR)** not realistic for a solo→small team on any evidence
+reviewed — directional north star only.
+
+**Queued next:** expand the PC.6 GTM/distribution track into a concrete evidence-banded
+sequence, or reality-check the governing-body-endorsement assumption against current Swim
+Wales / Swim England partner-programme terms.
 
 ## 2026-06-09 — Cycle 1 (Phase-C reality reconcile — residual consistency pass)
 
