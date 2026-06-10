@@ -671,4 +671,103 @@ def ai_design_spec(
     return spec
 
 
-__all__ = ["ai_creative_direction", "ai_creative_directions", "ai_fresh_hook", "ai_design_spec"]
+def ai_design_specs(
+    *,
+    content_item: dict,
+    brand_kit,
+    archetypes: list[str],
+    token_roles: list[str],
+    angle: str = "",
+    recent_archetypes: Optional[list[str]] = None,
+    count: int = 5,
+):
+    """One call → ``count`` mutually-distinct validated DesignSpecs (Tier B §5.5).
+
+    The candidate-pool builder asks for the whole pool in a single response so
+    the model sees — and is held to — the distinctness rule (the same lesson as
+    ``ai_creative_directions``: N parallel identical prompts return the same
+    "best" answer N times). Every object is run through ``design_spec.normalise``
+    so each returned spec is renderable and brand-legal regardless of what the
+    model emitted; client-side dedupe drops repeated archetypes.
+
+    Returns a list of specs (possibly shorter than ``count`` if the model
+    under-delivers — the caller fills the gap with the deterministic Tier A
+    picker), or ``None`` when no provider is configured / the call fails.
+    """
+    if not archetypes or not token_roles:
+        return None
+    try:
+        from mediahub.ai_core import ask, ProviderNotConfigured, ProviderError
+        from mediahub.creative_brief.design_spec import normalise
+    except Exception as e:
+        log.debug("ai_design_specs: import failed: %s", e)
+        return None
+
+    count = max(2, min(int(count or 5), 6))
+    sys = (
+        _design_spec_system_prompt(list(archetypes), list(token_roles))
+        + "\n\nPOOL MODE: return a JSON ARRAY of exactly "
+        + str(count)
+        + " spec objects (schema above). Hard pool rules:\n"
+        + "- Every object must use a DIFFERENT archetype.\n"
+        + "- Vary the emphasis: do not give "
+        + str(count)
+        + " variations of one idea — different hero_stat / focal_element / "
+        + "mood across the pool.\n"
+        + "- Output the JSON array ONLY."
+    )
+    user = _design_spec_user_prompt(
+        _achievement_summary(content_item),
+        _brand_context(brand_kit),
+        angle,
+        recent_archetypes or [],
+    )
+    try:
+        out = ask(sys, user, max_tokens=350 * count)
+    except ProviderNotConfigured:
+        log.info("ai_design_specs: no provider — caller falls back to the Tier A picker")
+        return None
+    except ProviderError as e:
+        log.warning("ai_design_specs: provider error: %s", str(e)[:300])
+        return None
+    except Exception as e:
+        log.warning("ai_design_specs: unexpected error: %s", str(e)[:300])
+        return None
+    if not out:
+        log.warning("ai_design_specs: provider returned empty output")
+        return None
+    arr = _parse_strict_json_array(out)
+    if not arr:
+        log.warning("ai_design_specs: could not parse JSON array (len=%d)", len(out or ""))
+        return None
+
+    specs = []
+    seen_archetypes: set[str] = set()
+    for raw in arr[: count + 2]:
+        try:
+            spec = normalise(raw, archetypes=list(archetypes), token_roles=list(token_roles))
+        except Exception as e:
+            log.warning("ai_design_specs: normalise failed: %s", e)
+            continue
+        if spec.archetype in seen_archetypes:
+            continue
+        seen_archetypes.add(spec.archetype)
+        specs.append(spec)
+        if len(specs) >= count:
+            break
+    log.info(
+        "ai_design_specs: pool returned %d/%d usable specs: %s",
+        len(specs),
+        count,
+        [(s.archetype, s.hero_stat) for s in specs],
+    )
+    return specs or None
+
+
+__all__ = [
+    "ai_creative_direction",
+    "ai_creative_directions",
+    "ai_fresh_hook",
+    "ai_design_spec",
+    "ai_design_specs",
+]

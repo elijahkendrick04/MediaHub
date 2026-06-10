@@ -768,6 +768,7 @@ try:
     from mediahub.content_pack_visual.integration import (
         attach_visuals_to_pack as _v8_attach_visuals,
         create_visual_for_item as _v8_create_visual_for_item,
+        create_candidate_pool_for_item as _v8_create_candidate_pool,
         visuals_dir_for_run as _v8_visuals_dir,
     )
     from mediahub.venue_search.search import search as _v8_search_venue
@@ -780,6 +781,7 @@ except ImportError as _v8_err:
     _v8_parse_description = None
     _v8_attach_visuals = None
     _v8_create_visual_for_item = None
+    _v8_create_candidate_pool = None
     _v8_visuals_dir = None
     _v8_search_venue = None
 
@@ -22109,6 +22111,76 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         "label": _label,
                     }
                 )
+
+        # Gen v2 Tier B: ``?candidates=N`` (or JSON ``{"candidates": N}``)
+        # renders a ranked candidate POOL — N design-spec-directed
+        # alternatives, each carrying a deterministic brand-compliance
+        # score — and returns the shortlist additively. The legacy
+        # single-visual fields are populated from the top candidate so
+        # existing callers are unaffected; omitting the param keeps the
+        # classic single render below byte-for-byte.
+        pool_n = 0
+        try:
+            if _req.is_json and _req.json and _req.json.get("candidates") is not None:
+                pool_n = int(_req.json.get("candidates"))
+        except Exception:
+            pool_n = 0
+        if not pool_n:
+            try:
+                pool_n = int(_req.args.get("candidates", "0"))
+            except (TypeError, ValueError):
+                pool_n = 0
+        if pool_n > 1 and _v8_create_candidate_pool is not None:
+            _pool_history = _v9_load_variation_history(run_id, card_id)
+            _pool_recent = _pool_history.get("signatures", [])[-6:]
+            try:
+                with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                    pool = _v8_create_candidate_pool(
+                        item,
+                        brand_kit,
+                        profile_id=profile_id,
+                        run_id=run_id,
+                        n=min(pool_n, 5),
+                        media_assets=media_assets,
+                        recent_signatures=_pool_recent,
+                        forced_hero_asset_id=forced_hero_asset_id,
+                        formats=formats_kw,
+                    )
+            except _RenderBusy:
+                return _render_busy_response("graphic")
+            except Exception as e:
+                return jsonify({"error": f"render_failed: {e}"}), 500
+            cands = pool.get("candidates") or []
+            if not cands:
+                return jsonify(
+                    {"error": "pool_failed", "detail": (pool.get("errors") or [])[:3]}
+                ), 500
+            top = cands[0]
+            top_brief = top.get("brief") or {}
+            new_sig = top_brief.get("variation_signature") or ""
+            if new_sig:
+                _v9_save_variation_history(
+                    run_id, card_id, new_sig, top_brief.get("primary_hook") or ""
+                )
+            return jsonify(
+                {
+                    "ok": True,
+                    "ai_directed": bool(top.get("ai_directed")),
+                    "variation_signature": new_sig,
+                    "explanation": _build_card_explanation(target),
+                    "available_photos": available_photos,
+                    "chosen_asset_id": chosen_asset_id,
+                    "no_photo": force_no_photo,
+                    # Legacy single-visual fields ← the top-ranked candidate.
+                    "visuals": top.get("visuals") or [],
+                    "brief": top_brief,
+                    "evaluation": pool.get("evaluation"),
+                    "errors": pool.get("errors") or None,
+                    # Additive Tier B surface.
+                    "candidates": cands,
+                    "pool_metrics": pool.get("pool_metrics") or {},
+                }
+            )
 
         # V9 variation overhaul: every regenerate produces a fresh random
         # creative direction (different layout family + background style +

@@ -185,6 +185,17 @@ class CreativeBrief:
     mood: str = ""  # one or two mood words
     ai_directed: bool = False  # True when AI chose the direction
     variation_signature: str = ""  # short signature for dedup/audit
+    # --- Gen Engine v2 Tier B (additive; default-safe for legacy callers) ---
+    # The measured emphasis facts this card can honestly lead with, keyed by
+    # design_spec.STAT_KEYS ("pb_delta" → "−0.42s on PB"). Only facts the
+    # detectors actually measured appear; the design-spec director picks among
+    # them and the motion render reuses them.
+    hero_stat_options: dict[str, str] = field(default_factory=dict)
+    # The director's colour-role assignment (slot → token role name, e.g.
+    # {"ground": "secondary"}). The renderer honours it ONLY when the
+    # reassigned set clears the APCA compliance gate; empty dict = Tier A
+    # brand-default roles.
+    colour_role_assignment: dict[str, str] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 
@@ -661,6 +672,7 @@ def generate(
         decoration_strength=decoration_strength,
         mood=mood,
         ai_directed=ai_directed,
+        hero_stat_options=hero_stat_options,
     )
     # Gen Engine v2: choose the v2 archetype for this card. Tier B (§5.4): when AI
     # direction is requested and a provider is configured, the design-spec director
@@ -688,18 +700,7 @@ def generate(
                 except Exception:
                     _spec = None
             if _spec is not None:
-                brief.layout_template = _spec.archetype
-                if _spec.headline_hook:
-                    brief.primary_hook = _spec.headline_hook
-                if _spec.mood:
-                    brief.mood = _spec.mood
-                if _spec.rationale:
-                    brief.why_this_design = _spec.rationale
-                brief.ai_directed = True
-                # Lead the emphasis slot with the director's hero_stat when the
-                # named fact was actually measured — never fabricate one.
-                if _spec.hero_stat in hero_stat_options:
-                    layers["hero_stat"] = hero_stat_options[_spec.hero_stat]
+                apply_design_spec(brief, _spec)
             elif _names:
                 if variation_seed:
                     # Explicit seed (incl. ?stable / re-render): exact pick, so
@@ -727,13 +728,47 @@ def generate(
         log.debug("gen-v2 archetype selection skipped", exc_info=True)
 
     # Stamp a signature so callers can dedupe / audit recent renders.
-    sig = (
+    _stamp_signature(brief)
+    return brief
+
+
+def _stamp_signature(brief: CreativeBrief) -> None:
+    """(Re)compute the dedupe/audit signature from the brief's final axes."""
+    brief.variation_signature = (
         f"{brief.layout_template}|{brief.palette.get('primary', '')}|"
         f"{brief.background_style}|{brief.accent_style}|"
         f"{brief.typography_pair}|{brief.composition}|"
         f"{brief.photo_treatment}|{brief.primary_hook[:40]}"
     )
-    brief.variation_signature = sig
+
+
+def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
+    """Apply a validated ``DesignSpec`` onto a brief (Gen v2 Tier B §5.4).
+
+    The single mapping between the director's contract and the brief, shared
+    by ``generate()``'s per-card path and the candidate-pool builder so the
+    two can never drift. Honest by construction: the hero-stat slot is filled
+    only when the named fact was actually measured (``hero_stat_options``),
+    and the colour-role assignment is recorded for the renderer's APCA-gated
+    application — never painted unconditionally. Re-stamps the variation
+    signature so dedupe/audit reflects the applied direction.
+    """
+    brief.layout_template = spec.archetype
+    if spec.headline_hook:
+        brief.primary_hook = spec.headline_hook
+    if spec.mood:
+        brief.mood = spec.mood
+    if spec.rationale:
+        brief.why_this_design = spec.rationale
+    brief.ai_directed = True
+    opts = brief.hero_stat_options or {}
+    if spec.hero_stat in opts:
+        brief.text_layers["hero_stat"] = opts[spec.hero_stat]
+    try:
+        brief.colour_role_assignment = dict(spec.colour_roles.to_dict())
+    except Exception:
+        brief.colour_role_assignment = {}
+    _stamp_signature(brief)
     return brief
 
 
@@ -1314,6 +1349,7 @@ def _profile_from_ai_direction(
 
 __all__ = [
     "generate",
+    "apply_design_spec",
     "CreativeBrief",
     "VariationProfile",
     "vision_creative_direction",

@@ -122,6 +122,76 @@ def _safe_for_post(item: dict) -> bool:
     return False
 
 
+def _resolve_asset_paths(
+    evaluation,
+    media_assets,
+    brand_kit,
+    *,
+    forced_hero_asset_id=None,
+    forced_bg_asset_id=None,
+) -> tuple:
+    """Resolve (athlete, venue, logo, bg_photo) paths for a render.
+
+    Shared by the single-render pipeline and the Tier B candidate pool so a
+    pool candidate uses exactly the photos the single path would. The
+    automatic scorer's matches are the default; a user-forced hero/background
+    asset id always wins; the brand-kit logo is the logo fallback.
+    """
+    athlete_path = None
+    venue_path = None
+    logo_path = None
+    if hasattr(evaluation, "matched") and evaluation.matched:
+        for role, scored in evaluation.matched.items():
+            if not scored:
+                continue
+            top = scored[0]
+            asset = (top.get("asset") if isinstance(top, dict) else None) or {}
+            fp = asset.get("path") or asset.get("file_path")
+            if not fp:
+                continue
+            if role.startswith("hero") and not athlete_path:
+                athlete_path = fp
+            elif role == "venue" and not venue_path:
+                venue_path = fp
+            elif role == "logo" and not logo_path and asset.get("id") != "_brand_logo_":
+                logo_path = fp
+
+    # User-chosen hero photo: when the caller forces a specific asset id, it
+    # wins over the automatic scorer so the user controls exactly which photo
+    # lands on this graphic.
+    if forced_hero_asset_id:
+        for a in media_assets or []:
+            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
+            if str(ad.get("id")) == str(forced_hero_asset_id):
+                fp = ad.get("path") or ad.get("file_path")
+                if fp:
+                    athlete_path = fp
+                break
+
+    # User-chosen BACKGROUND photo (caption-led graphics): the photo fills the
+    # canvas behind the text rather than being cut out as a hero.
+    bg_photo_path = None
+    if forced_bg_asset_id:
+        for a in media_assets or []:
+            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
+            if str(ad.get("id")) == str(forced_bg_asset_id):
+                bg_photo_path = ad.get("path") or ad.get("file_path")
+                break
+
+    # Fallback: pull the logo straight from the brand kit if the media-library
+    # match didn't supply one. This is the path saved by the upload flow at
+    # /upload/configure (brand_kit_upload.save_logo_bytes).
+    if not logo_path:
+        bk_logo = getattr(brand_kit, "logo_path", None)
+        if bk_logo:
+            try:
+                if Path(bk_logo).exists():
+                    logo_path = str(bk_logo)
+            except Exception:
+                pass
+    return athlete_path, venue_path, logo_path, bg_photo_path
+
+
 def create_visual_for_item(
     item: dict,
     brand_kit,
@@ -215,59 +285,14 @@ def create_visual_for_item(
     except Exception as e:
         out["errors"].append(f"brief_persist_failed: {e}")
 
-    # 3. Resolve athlete photo path from matched assets (if any)
-    athlete_path = None
-    venue_path = None
-    logo_path = None
-    if hasattr(evaluation, "matched") and evaluation.matched:
-        for role, scored in evaluation.matched.items():
-            if not scored:
-                continue
-            top = scored[0]
-            asset = (top.get("asset") if isinstance(top, dict) else None) or {}
-            fp = asset.get("path") or asset.get("file_path")
-            if not fp:
-                continue
-            if role.startswith("hero") and not athlete_path:
-                athlete_path = fp
-            elif role == "venue" and not venue_path:
-                venue_path = fp
-            elif role == "logo" and not logo_path and asset.get("id") != "_brand_logo_":
-                logo_path = fp
-
-    # User-chosen hero photo: when the caller forces a specific asset id, it
-    # wins over the automatic scorer so the user controls exactly which photo
-    # lands on this graphic.
-    if forced_hero_asset_id:
-        for a in media_assets or []:
-            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
-            if str(ad.get("id")) == str(forced_hero_asset_id):
-                fp = ad.get("path") or ad.get("file_path")
-                if fp:
-                    athlete_path = fp
-                break
-
-    # User-chosen BACKGROUND photo (caption-led graphics): the photo fills the
-    # canvas behind the text rather than being cut out as a hero.
-    bg_photo_path = None
-    if forced_bg_asset_id:
-        for a in media_assets or []:
-            ad = a if isinstance(a, dict) else (a.to_dict() if hasattr(a, "to_dict") else {})
-            if str(ad.get("id")) == str(forced_bg_asset_id):
-                bg_photo_path = ad.get("path") or ad.get("file_path")
-                break
-
-    # Fallback: pull the logo straight from the brand kit if the media-library
-    # match didn't supply one. This is the path saved by the upload flow at
-    # /upload/configure (brand_kit_upload.save_logo_bytes).
-    if not logo_path:
-        bk_logo = getattr(brand_kit, "logo_path", None)
-        if bk_logo:
-            try:
-                if Path(bk_logo).exists():
-                    logo_path = str(bk_logo)
-            except Exception:
-                pass
+    # 3. Resolve photo/logo paths from matched assets + user choices
+    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
+        evaluation,
+        media_assets,
+        brand_kit,
+        forced_hero_asset_id=forced_hero_asset_id,
+        forced_bg_asset_id=forced_bg_asset_id,
+    )
 
     # 4. Render variants
     try:
@@ -331,6 +356,306 @@ def create_visual_for_item(
         )
 
     out["visuals"] = visuals_summary
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Tier B — candidate pool: emit N specs, render, compliance-check, rank
+# ---------------------------------------------------------------------------
+
+POOL_DEFAULT_N = 5
+POOL_MAX_N = 6
+# One cheap format per candidate keeps the pool render ~the cost of the
+# existing 3-variant fan-out; the chosen candidate re-renders all formats
+# through the normal path.
+POOL_FORMATS = ("feed_portrait",)
+
+
+def _archetype_sponsor_slot(name: str) -> bool:
+    """True when the archetype template carries a ``{{SPONSOR_BLOCK}}`` slot."""
+    try:
+        from mediahub.graphic_renderer.archetypes import V2_DIR
+
+        return "{{SPONSOR_BLOCK}}" in (V2_DIR / f"{name}.html").read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+
+def _candidate_compliance(brief, brand_kit, spec, *, lockups, sponsor_name: str) -> dict:
+    """The deterministic, explainable brand-compliance verdict for one candidate.
+
+    APCA legibility over the exact ``--mh-*`` set the render paints
+    (``resolved_role_vars_for_brief`` — including the gated colour-role
+    assignment and medal tint), plus the logo-lockup fit for the resolved
+    ground and, when a sponsor is in play, whether this archetype actually has
+    a sponsor slot. Everything here is evidence, never a guess.
+    """
+    from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+    from mediahub.quality.compliance import check_roles
+
+    roles = resolved_role_vars_for_brief(brief, brand_kit)
+    report = check_roles(roles)
+    out: dict[str, Any] = {
+        "score": report.score,
+        "passes": report.passes,
+        "explain": report.explain(),
+        "pairs": {k: round(v, 1) for k, v in report.pairs.items()},
+    }
+    if lockups:
+        try:
+            from mediahub.theming.logo_chip import select_logo_lockup
+
+            choice = select_logo_lockup(
+                lockups, roles.get("--mh-primary", ""), prefer_form=spec.logo_lockup
+            )
+            if choice is not None:
+                out["logo"] = {
+                    "form": choice.lockup.get("form"),
+                    "mode": choice.mode,
+                    "reasoning": choice.reasoning,
+                }
+        except Exception:
+            pass
+    if sponsor_name:
+        out["sponsor_slot_present"] = _archetype_sponsor_slot(brief.layout_template)
+    return out
+
+
+def create_candidate_pool_for_item(
+    item: dict,
+    brand_kit,
+    *,
+    profile_id: str,
+    run_id: str,
+    n: int = POOL_DEFAULT_N,
+    voice_profile=None,
+    formats: Optional[list[str]] = None,
+    media_assets: Optional[list[dict]] = None,
+    sponsor_name: str = "",
+    recent_signatures: Optional[list[str]] = None,
+    forced_hero_asset_id: Optional[str] = None,
+) -> dict:
+    """Tier B §5.5: emit N candidate DesignSpecs, render the pool, score each
+    with the deterministic brand-compliance gate, and return a ranked shortlist.
+
+    The specs come from ONE batch director call (``ai_design_specs``) when a
+    provider is configured; the deterministic Tier A archetype walk fills any
+    gap (and the whole pool when no provider exists — the honest floor, never
+    a fabricated card). All candidates share the card's stable variation seed,
+    so they differ by *direction* (archetype, hook, emphasis, colour roles),
+    not by accidental noise.
+
+    Returns::
+
+        { "candidates": [ {rank, archetype, ai_directed, spec, brief,
+                           visuals, compliance}, ... ],   # rank 1 = best
+          "pool_metrics": {archetype_diversity, perceptual_spread, n},
+          "evaluation": {...}, "errors": [...] }
+    """
+    out: dict[str, Any] = {"errors": [], "candidates": []}
+
+    from mediahub.graphic_renderer import archetypes as _arch
+
+    names = _arch.list_archetypes() if _arch.is_enabled() else []
+    if not names:
+        out["errors"].append("gen_v2_disabled_or_no_archetypes")
+        return out
+    n = max(2, min(int(n or POOL_DEFAULT_N), POOL_MAX_N, len(names)))
+
+    # 1. Requirements evaluation (once for the whole pool)
+    try:
+        from mediahub.media_requirements.evaluator import evaluate
+        from mediahub.media_library.models import MediaAsset
+
+        library = []
+        for a in media_assets or []:
+            if isinstance(a, MediaAsset):
+                library.append(a)
+            elif isinstance(a, dict):
+                try:
+                    library.append(MediaAsset.from_dict(a))
+                except Exception:
+                    pass
+        evaluation = evaluate(
+            item,
+            library_assets=library,
+            profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
+        )
+        out["evaluation"] = (
+            evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
+        )
+    except Exception as e:
+        out["errors"].append(f"evaluation_failed: {e}")
+        traceback.print_exc()
+        return out
+    if str(getattr(evaluation, "status", "")).lower() == "skip_low_confidence":
+        out["skipped"] = "low_confidence"
+        return out
+
+    # 2. N candidate specs: one batch director call + the deterministic floor
+    from mediahub.creative_brief.design_spec import normalise
+    from mediahub.creative_brief.generator import (
+        apply_design_spec,
+        auto_variation_seed_for,
+        generate as gen_brief,
+    )
+
+    angle = _flat_post_angle(item)
+    recent_archetypes = [s.split("|", 1)[0] for s in (recent_signatures or []) if s]
+    token_roles = list(_arch.TOKEN_ROLES)
+
+    ai_specs = None
+    try:
+        from mediahub.creative_brief.ai_director import ai_design_specs
+
+        ai_specs = ai_design_specs(
+            content_item=item,
+            brand_kit=brand_kit,
+            archetypes=names,
+            token_roles=token_roles,
+            angle=angle,
+            recent_archetypes=recent_archetypes,
+            count=n,
+        )
+    except Exception as e:
+        out["errors"].append(f"director_failed: {e}")
+        ai_specs = None
+
+    specs: list[tuple[Any, bool]] = [(s, True) for s in (ai_specs or [])[:n]]
+    card_key = str(item.get("id") or item.get("swim_id") or "")
+    base_seed = auto_variation_seed_for(card_key or None)
+    used = [s.archetype for s, _ in specs]
+    while len(specs) < n:
+        arch_name = _arch.pick_archetype_avoiding(base_seed, used + recent_archetypes)
+        if arch_name is None:
+            break
+        specs.append(
+            (normalise({"archetype": arch_name}, archetypes=names, token_roles=token_roles), False)
+        )
+        used.append(arch_name)
+
+    # Logo lockups resolve once per pool (they depend on brand, not candidate).
+    lockups: list[dict] = []
+    try:
+        from mediahub.brand.design_tokens import resolve_design_tokens
+
+        lockups = resolve_design_tokens(profile_id, brand_kit=brand_kit).get("logo_lockups", [])
+    except Exception:
+        lockups = []
+
+    # 3. Brief + render + compliance per candidate
+    from mediahub.graphic_renderer.variants import render_all_formats
+
+    athlete_path, venue_path, logo_path, bg_photo_path = _resolve_asset_paths(
+        evaluation, media_assets, brand_kit, forced_hero_asset_id=forced_hero_asset_id
+    )
+    pool_formats = list(formats) if formats else list(POOL_FORMATS)
+    candidates: list[dict] = []
+    png_paths: list[str] = []
+    for idx, (spec, ai_directed) in enumerate(specs):
+        try:
+            # variation_seed=0 keeps the identity palette: Tier B candidates
+            # differ by DIRECTION (the spec's archetype / colour roles / hook),
+            # never by the v1 seed-permutation, which can rotate the brand
+            # primary into the accent slot and fail the compliance gate.
+            brief = gen_brief(
+                item,
+                evaluation,
+                brand_kit,
+                voice_profile=voice_profile,
+                profile_id=profile_id,
+                meet_name=_meet_name(item),
+                venue_name=item.get("venue_name") or "",
+                sponsor={"name": sponsor_name} if sponsor_name else None,
+                variation_seed=0,
+                use_ai_director=False,
+            )
+            apply_design_spec(brief, spec)
+            if not ai_directed:
+                brief.ai_directed = False
+            try:
+                (briefs_dir_for_run(run_id) / f"{brief.id}.json").write_text(
+                    json.dumps(brief.to_dict(), indent=2, default=str), encoding="utf-8"
+                )
+            except Exception as e:
+                out["errors"].append(f"brief_persist_failed_{idx}: {e}")
+
+            per_brief_dir = visuals_dir_for_run(run_id) / brief.id
+            per_brief_dir.mkdir(parents=True, exist_ok=True)
+            skip_photo = brief.photo_treatment == "no-photo" and not forced_hero_asset_id
+            results = render_all_formats(
+                brief,
+                output_dir=per_brief_dir,
+                formats=pool_formats,
+                athlete_path=None if skip_photo else athlete_path,
+                venue_path=venue_path,
+                logo_path=logo_path,
+                bg_photo_path=bg_photo_path,
+                brand_kit=brand_kit,
+                sponsor_name=sponsor_name,
+            )
+            visuals_summary: list[dict] = []
+            for r in results:
+                try:
+                    persist_visual(r.visual, run_id=run_id, brief=brief)
+                except Exception as e:
+                    out["errors"].append(f"persist_failed_{r.visual.id}: {e}")
+                visuals_summary.append(
+                    {
+                        "id": r.visual.id,
+                        "format_name": r.visual.format_name,
+                        "width": r.visual.width,
+                        "height": r.visual.height,
+                        "file_path": r.visual.file_path,
+                        "layout_template": r.visual.layout_template,
+                        "confidence_label": r.visual.confidence_label,
+                        "why_this_design": r.visual.why_this_design,
+                        "safety_notes": r.visual.safety_notes,
+                        "sourced_asset_ids": r.visual.sourced_asset_ids,
+                    }
+                )
+                if r.visual.file_path:
+                    png_paths.append(r.visual.file_path)
+            candidates.append(
+                {
+                    "archetype": spec.archetype,
+                    "ai_directed": ai_directed,
+                    "spec": spec.to_dict(),
+                    "brief": brief.to_dict(),
+                    "visuals": visuals_summary,
+                    "compliance": _candidate_compliance(
+                        brief, brand_kit, spec, lockups=lockups, sponsor_name=sponsor_name
+                    ),
+                }
+            )
+        except Exception as e:
+            out["errors"].append(f"candidate_failed_{idx}: {e}")
+            traceback.print_exc()
+
+    # 4. Rank: legibility first (gate pass, then score), stable on entry order.
+    order = sorted(
+        range(len(candidates)),
+        key=lambda i: (
+            not candidates[i]["compliance"]["passes"],
+            -candidates[i]["compliance"]["score"],
+            i,
+        ),
+    )
+    out["candidates"] = [candidates[i] for i in order]
+    for rank, cand in enumerate(out["candidates"], start=1):
+        cand["rank"] = rank
+
+    # 5. Pool metrics (§8C success measures) — deterministic, best-effort.
+    metrics: dict[str, Any] = {"n": len(out["candidates"])}
+    try:
+        from mediahub.quality.variant_metrics import archetype_diversity, perceptual_spread
+
+        metrics["archetype_diversity"] = archetype_diversity([c["spec"] for c in out["candidates"]])
+        if len(png_paths) >= 2:
+            metrics["perceptual_spread"] = perceptual_spread(png_paths)
+    except Exception:
+        pass
+    out["pool_metrics"] = metrics
     return out
 
 
@@ -408,8 +733,11 @@ def attach_visuals_to_pack(
 __all__ = [
     "attach_visuals_to_pack",
     "create_visual_for_item",
+    "create_candidate_pool_for_item",
     "visuals_dir_for_run",
     "briefs_dir_for_run",
     "persist_visual",
     "DEFAULT_VISUAL_BUCKETS",
+    "POOL_DEFAULT_N",
+    "POOL_MAX_N",
 ]
