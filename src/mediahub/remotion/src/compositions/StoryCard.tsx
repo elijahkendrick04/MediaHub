@@ -28,6 +28,11 @@ const cardSchema = z.object({
   accentStyle: z.string().default(""),
   mood: z.string().default(""),
   photoTreatment: z.string().default(""),
+  // Gen v2 (SEQ-4): the still graphic's archetype + measured emphasis line,
+  // so the motion render of a card visually matches its still. Empty keeps
+  // the pre-v2 behaviour for cards rendered by older callers.
+  archetype: z.string().default(""),
+  heroStat: z.string().default(""),
 });
 
 const brandSchema = z.object({
@@ -160,6 +165,30 @@ function springConfigFor(mood: string): { damping: number; stiffness: number; ma
     return { damping: 15, stiffness: 110, mass: 0.7 };
   }
   return { damping: 18, stiffness: 90, mass: 0.7 };
+}
+
+// Map the still graphic's v2 archetype → the motion scene's structural
+// emphasis, so the reel beat for a card reads like its still (SEQ-4).
+// Type-led archetypes make the result numeral THE hero; spotlight/centred
+// archetypes centre the composition. Unknown / v1 names get no treatment —
+// the variationSeed + axis behaviour stays exactly as before.
+function archetypeTreatment(archetype: string): {
+  typeLed: boolean;
+  centred: boolean;
+} {
+  switch (archetype) {
+    case "big_number_dominant":
+    case "minimal_type_poster":
+    case "editorial_numbers_grid":
+    case "stat_stack_sidebar":
+    case "ticker_strip":
+    case "quote_led_recap":
+      return { typeLed: true, centred: archetype !== "stat_stack_sidebar" };
+    case "centered_medal_spotlight":
+      return { typeLed: false, centred: true };
+    default:
+      return { typeLed: false, centred: false };
+  }
 }
 
 // Map brief.composition → where the surname/result block lives. The
@@ -326,8 +355,15 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
   const roles = rolesForSeed(brand, card.variationSeed || 0);
   const fontStack = fontStackFor(card.typographyPair || "");
   const springCfg = springConfigFor(card.mood || "");
-  const layout = compositionLayoutFor(card.composition || "left", width);
+  const treatment = archetypeTreatment(card.archetype || "");
+  // The archetype's centring only fills in when the brief didn't pin an
+  // explicit composition — an explicit axis always wins.
+  const layout = compositionLayoutFor(
+    card.composition || (treatment.centred ? "center" : "left"),
+    width,
+  );
   const bgPattern = bgPatternFor(card.backgroundStyle || "", roles);
+  const resultFontSize = treatment.typeLed ? 196 : 132;
 
   // Intro: spring-eased big surname swoop + result fade. The spring
   // config is mood-driven so an "electric" card snaps in quickly while
@@ -517,13 +553,13 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         {event}
       </div>
 
-      {/* Result value — hero metric */}
+      {/* Result value — hero metric (type-led archetypes upsize it) */}
       <div
         style={{
           position: "absolute",
           left: layout.textLeft,
           top: height * 0.70,
-          fontSize: 132,
+          fontSize: resultFontSize,
           fontWeight: 800,
           color: roles.accent,
           letterSpacing: "-0.01em",
@@ -536,6 +572,28 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
       >
         {result || "—"}
       </div>
+
+      {/* Measured emphasis line (e.g. "−0.42s on PB") — only real data,
+          rendered as an accent kicker under the result. Collapses when
+          the pipeline measured nothing. */}
+      {card.heroStat ? (
+        <div
+          style={{
+            position: "absolute",
+            left: layout.textLeft,
+            top: height * (treatment.typeLed ? 0.795 : 0.78),
+            fontSize: 40,
+            fontWeight: 700,
+            color: roles.accent,
+            letterSpacing: "0.08em",
+            opacity: resultOpacity * 0.9,
+            textAlign: layout.textAlign,
+            textTransform: "uppercase",
+          }}
+        >
+          {card.heroStat}
+        </div>
+      ) : null}
 
       {/* Bottom strip — meet + club */}
       <div

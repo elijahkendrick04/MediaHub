@@ -768,6 +768,7 @@ try:
     from mediahub.content_pack_visual.integration import (
         attach_visuals_to_pack as _v8_attach_visuals,
         create_visual_for_item as _v8_create_visual_for_item,
+        create_candidate_pool_for_item as _v8_create_candidate_pool,
         visuals_dir_for_run as _v8_visuals_dir,
     )
     from mediahub.venue_search.search import search as _v8_search_venue
@@ -780,6 +781,7 @@ except ImportError as _v8_err:
     _v8_parse_description = None
     _v8_attach_visuals = None
     _v8_create_visual_for_item = None
+    _v8_create_candidate_pool = None
     _v8_visuals_dir = None
     _v8_search_venue = None
 
@@ -16601,29 +16603,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     }
                 )
 
-        # The AI Director chooses the full visual treatment (palette role,
-        # background, accent, typography, composition, hook, mood) — same as
-        # meet-recap graphics — but is HARD-CONSTRAINED to the text-led layout
-        # (a caption card has no swim achievement for a photo-led family). A
-        # chosen photo rides as the background, so the layout stays text-led.
-        # The random text-led profile below is only the no-provider fallback;
-        # palette roles are restricted to the dark-primary-safe set so white
-        # headline text never disappears.
-        variation_profile = None
-        try:
-            import dataclasses as _dc
-            from mediahub.creative_brief.generator import random_variation_profile
+        # The v2 design-spec director chooses the treatment when a provider is
+        # configured; the deterministic archetype rotation is the no-provider
+        # floor. The explicit text-led profile pins the v1 path (kill switch /
+        # no archetypes) to a safe no-photo treatment with the identity
+        # palette role, so white headline text never disappears. A chosen
+        # photo rides as the background either way.
+        from mediahub.creative_brief.generator import VariationProfile
 
-            vp = random_variation_profile(angle="recap_mention")
-            role = vp.palette_role_index if vp.palette_role_index in (0, 1, 3) else 0
-            variation_profile = _dc.replace(
-                vp,
-                layout_family="text_led_recap",
-                photo_treatment="no-photo",
-                palette_role_index=role,
-            )
-        except Exception:
-            variation_profile = None
+        variation_profile = VariationProfile(
+            layout_family="text_led_recap",
+            photo_treatment="no-photo",
+            background_style="clean",
+            accent_style="minimal",
+            composition="center",
+        )
 
         try:
             from mediahub.content_pack_visual.integration import create_visual_for_item
@@ -22134,6 +22128,76 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     }
                 )
 
+        # Gen v2 Tier B: ``?candidates=N`` (or JSON ``{"candidates": N}``)
+        # renders a ranked candidate POOL — N design-spec-directed
+        # alternatives, each carrying a deterministic brand-compliance
+        # score — and returns the shortlist additively. The legacy
+        # single-visual fields are populated from the top candidate so
+        # existing callers are unaffected; omitting the param keeps the
+        # classic single render below byte-for-byte.
+        pool_n = 0
+        try:
+            if _req.is_json and _req.json and _req.json.get("candidates") is not None:
+                pool_n = int(_req.json.get("candidates"))
+        except Exception:
+            pool_n = 0
+        if not pool_n:
+            try:
+                pool_n = int(_req.args.get("candidates", "0"))
+            except (TypeError, ValueError):
+                pool_n = 0
+        if pool_n > 1 and _v8_create_candidate_pool is not None:
+            _pool_history = _v9_load_variation_history(run_id, card_id)
+            _pool_recent = _pool_history.get("signatures", [])[-6:]
+            try:
+                with _render_slot("graphic", card_id, timeout=_RENDER_TRY_TIMEOUT):
+                    pool = _v8_create_candidate_pool(
+                        item,
+                        brand_kit,
+                        profile_id=profile_id,
+                        run_id=run_id,
+                        n=min(pool_n, 5),
+                        media_assets=media_assets,
+                        recent_signatures=_pool_recent,
+                        forced_hero_asset_id=forced_hero_asset_id,
+                        formats=formats_kw,
+                    )
+            except _RenderBusy:
+                return _render_busy_response("graphic")
+            except Exception as e:
+                return jsonify({"error": f"render_failed: {e}"}), 500
+            cands = pool.get("candidates") or []
+            if not cands:
+                return jsonify(
+                    {"error": "pool_failed", "detail": (pool.get("errors") or [])[:3]}
+                ), 500
+            top = cands[0]
+            top_brief = top.get("brief") or {}
+            new_sig = top_brief.get("variation_signature") or ""
+            if new_sig:
+                _v9_save_variation_history(
+                    run_id, card_id, new_sig, top_brief.get("primary_hook") or ""
+                )
+            return jsonify(
+                {
+                    "ok": True,
+                    "ai_directed": bool(top.get("ai_directed")),
+                    "variation_signature": new_sig,
+                    "explanation": _build_card_explanation(target),
+                    "available_photos": available_photos,
+                    "chosen_asset_id": chosen_asset_id,
+                    "no_photo": force_no_photo,
+                    # Legacy single-visual fields ← the top-ranked candidate.
+                    "visuals": top.get("visuals") or [],
+                    "brief": top_brief,
+                    "evaluation": pool.get("evaluation"),
+                    "errors": pool.get("errors") or None,
+                    # Additive Tier B surface.
+                    "candidates": cands,
+                    "pool_metrics": pool.get("pool_metrics") or {},
+                }
+            )
+
         # V9 variation overhaul: every regenerate produces a fresh random
         # creative direction (different layout family + background style +
         # accent decoration + typography pair + composition + headline
@@ -22173,18 +22237,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             except Exception:
                 variation_seed = 1
         else:
-            # Fresh random direction. The AI director runs inside
+            # Fresh direction. The v2 design-spec director runs inside
             # generate() when a provider is configured; otherwise the
-            # random profile picker provides the variety.
-            try:
-                from mediahub.creative_brief.generator import random_variation_profile
-
-                variation_profile = random_variation_profile(
-                    angle=item.get("post_angle") or "",
-                    avoid_signatures=recent_sigs,
-                )
-            except Exception:
-                variation_profile = None
+            # deterministic archetype rotation (seeded per card, walking
+            # past recent_signatures) provides the variety — the honest
+            # no-LLM floor, never a random tuple.
             ai_directed = True  # generate() will try the AI director first
 
         try:
@@ -22590,81 +22647,68 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         _variant_job_save(job)
 
         def _worker() -> None:
-            import dataclasses as _dc
-            from mediahub.creative_brief.generator import (
-                _profile_from_ai_direction,
-                random_variation_profile,
-            )
+            # v2 (SEQ-3 cutover): the three variants are three distinct
+            # DesignSpecs — ONE batch director call when a provider is
+            # configured, the deterministic archetype walk as the floor.
+            # Distinctness is by construction (each spec pins a different
+            # archetype), so the old signature re-roll guard is gone.
+            from mediahub.creative_brief.design_spec import normalise as _ds_normalise
+            from mediahub.creative_brief.generator import auto_variation_seed_for
+            from mediahub.graphic_renderer import archetypes as _arch
 
             try:
                 history = _v9_load_variation_history(run_id, card_id)
                 recent_sigs = history.get("signatures", [])[-6:]
-                recent_hooks = history.get("hooks", [])[-6:]
                 angle = item.get("post_angle") or ""
-                default_family = _choice_families[0] if _choice_families else "individual_hero"
+                names = _arch.list_archetypes() if _arch.is_enabled() else []
+                token_roles = list(_arch.TOKEN_ROLES)
+                recent_archetypes = [s.split("|", 1)[0] for s in recent_sigs if s]
 
-                directions: list = []
-                try:
-                    from mediahub.creative_brief.ai_director import ai_creative_directions
+                specs: list[Any] = []
+                if names:
+                    try:
+                        from mediahub.creative_brief.ai_director import ai_design_specs
 
-                    directions = (
-                        ai_creative_directions(
-                            content_item=item,
-                            brand_kit=brand_kit,
-                            angle=angle,
-                            default_family=default_family,
-                            recent_signatures=recent_sigs,
-                            recent_hooks=recent_hooks,
-                            allowed_families=_choice_families,
-                            count=3,
+                        specs = list(
+                            ai_design_specs(
+                                content_item=item,
+                                brand_kit=brand_kit,
+                                archetypes=names,
+                                token_roles=token_roles,
+                                angle=angle,
+                                recent_archetypes=recent_archetypes,
+                                count=3,
+                            )
+                            or []
+                        )[:3]
+                    except Exception as e:
+                        log.warning("variants %s: batch specs failed: %s", job_id[:8], e)
+                        specs = []
+                    base_seed = auto_variation_seed_for(card_id)
+                    used = [s.archetype for s in specs]
+                    while len(specs) < 3:
+                        arch_name = _arch.pick_archetype_avoiding(
+                            base_seed, used + recent_archetypes
                         )
-                        or []
-                    )
-                except Exception as e:
-                    log.warning("variants %s: batch direction failed: %s", job_id[:8], e)
-                    directions = []
-
-                def _pin(prof):
-                    if (
-                        _choice_families
-                        and getattr(prof, "layout_family", None) not in _choice_families
-                    ):
-                        try:
-                            return _dc.replace(prof, layout_family=_choice_families[0])
-                        except Exception:
-                            return prof
-                    return prof
+                        if arch_name is None:
+                            break
+                        specs.append(
+                            _ds_normalise(
+                                {"archetype": arch_name},
+                                archetypes=names,
+                                token_roles=token_roles,
+                            )
+                        )
+                        used.append(arch_name)
+                # Kill-switch / no-archetype fallback: render the three
+                # variants through the plain v1 path (spec=None) — the brief
+                # generator then keeps the legacy family; they differ by the
+                # per-variant render only. This path exists so the variants
+                # button still works with MEDIAHUB_GEN_V2=0.
+                spec_slots: list[Any] = specs if specs else [None, None, None]
 
                 sigs_so_far = list(recent_sigs)
-                profiles: list[Any] = []
-                for i in range(3):
-                    prof = None
-                    if i < len(directions) and isinstance(directions[i], dict):
-                        try:
-                            prof = _profile_from_ai_direction(
-                                directions[i],
-                                default_family=default_family,
-                                allowed_families=_choice_families,
-                            )
-                        except Exception:
-                            prof = None
-                    if prof is None:
-                        prof = _pin(
-                            random_variation_profile(angle=angle, avoid_signatures=sigs_so_far)
-                        )
-                    prof = _pin(prof)
-                    # Final distinctness guard: never render two variants
-                    # from the same signature, whatever upstream produced.
-                    for _ in range(6):
-                        if prof.signature() not in sigs_so_far:
-                            break
-                        prof = _pin(
-                            random_variation_profile(angle=angle, avoid_signatures=sigs_so_far)
-                        )
-                    profiles.append(prof)
-                    sigs_so_far.append(prof.signature())
-
-                for idx, prof in enumerate(profiles, start=1):
+                for idx, spec in enumerate(spec_slots, start=1):
                     entry: dict = {
                         "seed": idx,
                         "option": idx,
@@ -22688,10 +22732,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                                 # render on demand after "Pick this one".
                                 # 3 variants x 1 format, not 3 x 3.
                                 formats=["feed_portrait"],
-                                variation_profile=prof,
-                                # The direction is already fixed per-variant;
-                                # letting the director run again here is
-                                # exactly the convergence bug this replaces.
+                                # The direction is already fixed per-variant
+                                # (one batch call upstream); letting the
+                                # director run again here is exactly the
+                                # convergence bug the batch call replaced.
+                                design_spec=spec,
                                 use_ai_director=False,
                                 recent_signatures=sigs_so_far,
                                 allowed_families=_choice_families,
@@ -22713,12 +22758,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                             }
                         )
                         # Persist immediately so the NEXT regenerate avoids
-                        # these directions even if the user never picks one.
-                        # Also feed it back into THIS job's avoid-list: the
-                        # profile signatures appended above carry v1 families,
-                        # so without the rendered brief's signature (which
-                        # leads with the actual archetype) the v2 picker
-                        # would give every variant the same archetype.
+                        # these directions even if the user never picks one,
+                        # and feed it back into THIS job's avoid-list so the
+                        # fallback (spec=None) path can't repeat a signature.
                         new_sig = brief_d.get("variation_signature") or ""
                         if new_sig:
                             sigs_so_far.append(new_sig)

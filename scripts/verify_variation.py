@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Verification harness for the V9 content-generation overhaul.
+"""Verification harness for regenerate variety (Gen Engine v2).
 
 Goal
 ----
 Prove that regenerating a graphic for ONE swim produces visibly
-different output every time. The user's bug report was: clicking
-"regenerate" used to hash the card_id into a deterministic seed, so
-every render came back with identical layout / palette / hook.
+different output every time — with no LLM key. Under v2 the variety is
+the deterministic archetype rotation: each regenerate walks the
+``layouts/v2`` library past the card's recent signatures (the same
+mechanism the create-graphic route persists between clicks), so
+consecutive briefs land on different archetypes by construction.
 
 This script:
   1. Builds a fixed synthetic swim (Eira Hughes, 200m Freestyle, 2:08.41 PB).
-  2. Calls ``creative_brief.generator.generate()`` 10 times with fresh
-     random VariationProfiles.
+  2. Calls ``creative_brief.generator.generate()`` N times, threading each
+     brief's variation_signature into the next call's ``recent_signatures``.
   3. Asserts every brief has a distinct variation_signature.
   4. Prints a per-iteration table so the human can eyeball the variety.
-  5. (Optional) renders 10 PNGs and confirms their byte hashes differ
+  5. (Optional) renders N PNGs and confirms their byte hashes differ
      when Playwright + Chromium are available.
 
-Exit code 0 on success, non-zero on failure. Designed to run with NO
-external API keys (Anthropic/Gemini) — variety comes from the random
-profile picker; AI direction is layered on transparently when a key is
-configured.
+Exit code 0 on success, non-zero on failure. Runs with NO external API
+keys — the deterministic floor provides the variety; the design-spec
+director layers on transparently when a key is configured.
 
 Usage
 -----
@@ -93,35 +94,25 @@ def _truncate(s: str, n: int) -> str:
 
 
 def _generate_briefs(count: int) -> list:
-    """Build ``count`` briefs using random variation profiles."""
-    from mediahub.creative_brief.generator import generate, random_variation_profile
+    """Build ``count`` briefs via the deterministic v2 archetype rotation."""
+    from mediahub.creative_brief.generator import generate
 
     item = _build_swim()
     brand = _build_brand()
     ev = _build_eval()
     briefs = []
     recent_sigs: list[str] = []
-    recent_hooks: list[str] = []
     for i in range(count):
-        profile = random_variation_profile(
-            angle=item["post_angle"],
-            avoid_signatures=recent_sigs,
-        )
         brief = generate(
             item, ev, brand,
             profile_id="verify",
             meet_name="County Long Course Championships",
-            variation_profile=profile,
             recent_signatures=recent_sigs,
-            recent_hooks=recent_hooks,
-            # use_ai_director defaults to False here; the AI path is
-            # exercised by the route. The verification's job is to prove
-            # the deterministic random path produces variety on its own.
+            # use_ai_director stays False: the verification's job is to
+            # prove the deterministic floor produces variety on its own.
         )
         briefs.append(brief)
         recent_sigs.append(brief.variation_signature)
-        if brief.primary_hook:
-            recent_hooks.append(brief.primary_hook)
     return briefs
 
 

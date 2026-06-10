@@ -136,10 +136,12 @@ def test_action_photo_hero_filler_sets_result_and_ribbon():
 
 
 def test_new_families_registered_for_selection():
-    from mediahub.creative_brief.generator import _GENERIC_FAMILIES, _TEXT_LED_FAMILIES
+    # The random-pick family pool (_GENERIC_FAMILIES) went with the
+    # enum-permutation engine (SEQ-3); selection now happens via the pattern
+    # library (v1 path) and the v2 archetype registry.
+    from mediahub.creative_brief.generator import _TEXT_LED_FAMILIES
     from mediahub.inspiration.pattern_library import PATTERNS
 
     fams = {p["family"] for p in PATTERNS}
     assert {"action_photo_hero", "stat_line"} <= fams
     assert "stat_line" in _TEXT_LED_FAMILIES
-    assert "stat_line" in _GENERIC_FAMILIES
