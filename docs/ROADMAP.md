@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `d1dbdd16a` · Merge pull request #310 from elijahkendrick04/claude/exciting-johnson-drqqc3
+**Last updated:** 2026-06-10 · `dda0d8e8c` · Merge pull request #309 from elijahkendrick04/autotest/fix-cea6db4058b3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -32,6 +32,8 @@ in any commit message to move an item:
 | 2026-06-10 | `5e758bced` | docs: regenerate ENV_INVENTORY for MEDIAHUB_FFMPEG + MEDIAHUB_TTS_PROVIDER |
 | 2026-06-10 | `cc255f513` | docs(roadmap): fold the archive back in — one in-depth document |
 | 2026-06-10 | `e3b227c51` | feat(p0): complete Phase 0 — free reel engine, paid-dep guards, provider slots, AGPL isolation |
+| 2026-06-10 | `c6aea1433` | fix: a11y: Documents must have <title> element to aid in navigati |
+| 2026-06-10 | `c3f58776d` | autotest: refresh bug report [skip ci] |
 | 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 | 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
@@ -39,8 +41,6 @@ in any commit message to move an item:
 | 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
 | 2026-06-10 | `c1e540f32` | style: apply pre-commit hygiene to PR-touched files (ruff-format 0.8.4, EOF fixer) |
 | 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
-| 2026-06-10 | `4a8623c1f` | docs(build): SEQ-4 verification evidence + suite table in the spine report |
-| 2026-06-10 | `52470c085` | feat(gen-v2): SEQ-4 — data-driven reel scene structure + archetype-matched motion + opt-in gen backg |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
