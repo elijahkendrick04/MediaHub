@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `13639bf75` · Merge pull request #307 from elijahkendrick04/claude/cool-lovelace-g3494x
+**Last updated:** 2026-06-10 · `d1dbdd16a` · Merge pull request #310 from elijahkendrick04/claude/exciting-johnson-drqqc3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,9 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-10 | `5e758bced` | docs: regenerate ENV_INVENTORY for MEDIAHUB_FFMPEG + MEDIAHUB_TTS_PROVIDER |
+| 2026-06-10 | `cc255f513` | docs(roadmap): fold the archive back in — one in-depth document |
+| 2026-06-10 | `e3b227c51` | feat(p0): complete Phase 0 — free reel engine, paid-dep guards, provider slots, AGPL isolation |
 | 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 | 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
@@ -38,9 +41,6 @@ in any commit message to move an item:
 | 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
 | 2026-06-10 | `4a8623c1f` | docs(build): SEQ-4 verification evidence + suite table in the spine report |
 | 2026-06-10 | `52470c085` | feat(gen-v2): SEQ-4 — data-driven reel scene structure + archetype-matched motion + opt-in gen backg |
-| 2026-06-10 | `e64f604cd` | fix(gen-v2): explicit seed 0 must be an exact archetype pick, not 'no seed' |
-| 2026-06-10 | `968d37d2d` | style: ruff-format touched files (pinned hook v0.8.4) |
-| 2026-06-10 | `97ed87e94` | refactor(gen-v2)!: SEQ-3 cutover — remove the dead enum-permutation variation engine |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
