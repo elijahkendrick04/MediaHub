@@ -4,8 +4,9 @@
 #   1. refreshes the "Last updated" stamp (date · short SHA · subject),
 #   2. refreshes the "Recent activity" feed (last ~12 non-bot commits),
 #   3. applies any `roadmap: <ID> <status>` directives found in the pushed
-#      commit messages (e.g. `roadmap: SEQ-1 done`) by flipping the status
-#      badge on the matching roadmap heading.
+#      commit messages (e.g. `roadmap: P1.2 done`): `done` MOVES the item
+#      from the To-do list into the Completed list (date-stamped); any other
+#      status sets the item's badge and returns it to To do.
 #
 # Landing mechanism (fixed 2026-06-10): `main` is branch-protected and
 # REQUIRES changes via pull request, so the old direct commit-back was

@@ -12,75 +12,148 @@ import roadmap_autoupdate as ru  # noqa: E402
 
 def test_parse_directives_basic():
     msg = (
-        "Implement Tier A\n\n"
-        "roadmap: SEQ-1 done\n"
+        "Implement multi-tenancy\n\n"
+        "roadmap: PC.3 done\n"
+        "roadmap: p1.2 wip\n"
         "roadmap: par-3 wip\n"
-        "roadmap: 1.7 wip\n"
         "roadmap: Step 8 blocked\n"
         "not a directive: roadmap stuff in prose\n"
     )
     got = dict(ru.parse_directives(msg))
     assert got == {
-        "SEQ-1": "done",
+        "PC.3": "done",
+        "P1.2": "wip",
         "PAR-3": "wip",
-        "1.7": "wip",
         "Step 8": "blocked",
     }
 
 
 def test_parse_directives_last_wins_and_ignores_garbage():
-    got = dict(ru.parse_directives(["roadmap: PAR-1 todo", "roadmap: PAR-1 done", "roadmap: PAR-1 banana"]))
-    assert got == {"PAR-1": "done"}  # invalid status 'banana' ignored, last valid wins
+    got = dict(ru.parse_directives(["roadmap: PC.4 todo", "roadmap: PC.4 done", "roadmap: PC.4 banana"]))
+    assert got == {"PC.4": "done"}  # invalid status 'banana' ignored, last valid wins
 
 
-# --- set_status -------------------------------------------------------------
+# --- set_item_status (the To-do / Completed list contract) -------------------
 
-def test_set_status_adds_badge_when_absent():
-    text = "#### PAR-1 · Caption quality pack\nbody\n"
-    out, changed = ru.set_status(text, "PAR-1", "done")
+DOC = (
+    "# Roadmap\n\n"
+    "## To do\n\n"
+    "<!-- ROADMAP:TODO -->\n"
+    "- **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace · ⚠️ **BLOCKED**\n"
+    "- **PC.4** · Phase C 🥇 — Pricing by revealed WTP · ❌ **NOT STARTED**\n"
+    "- **P1.40** · Phase 1 — A decoy id for boundary tests · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO -->\n\n"
+    "## Completed\n\n"
+    "<!-- ROADMAP:DONE -->\n"
+    "- ✅ **PC.1** · Phase C — Self-serve signup + auth *(completed 2026-06-09, PR #267)*\n"
+    "<!-- /ROADMAP:DONE -->\n"
+)
+
+
+def _todo_block(text: str) -> str:
+    return text.split("<!-- ROADMAP:TODO -->")[1].split("<!-- /ROADMAP:TODO -->")[0]
+
+
+def _done_block(text: str) -> str:
+    return text.split("<!-- ROADMAP:DONE -->")[1].split("<!-- /ROADMAP:DONE -->")[0]
+
+
+def test_done_moves_item_from_todo_to_completed_with_date():
+    out, changed = ru.set_item_status(DOC, "PC.4", "done", today="2026-06-11")
     assert changed
-    assert "#### PAR-1 · Caption quality pack · ✅ **DONE**" in out
+    assert "PC.4" not in _todo_block(out)
+    assert (
+        "- ✅ **PC.4** · Phase C 🥇 — Pricing by revealed WTP *(completed 2026-06-11)*"
+        in _done_block(out)
+    )
+    # the badge is gone from the moved line; the untouched items survive intact
+    assert "Pricing by revealed WTP · ❌" not in out
+    assert "- **PC.3**" in _todo_block(out)
+    assert "PR #267" in _done_block(out)
 
 
-def test_set_status_replaces_existing_badge():
-    text = "### 1.6 Adaptive Theming Engine · \U0001F535 **NEW — IN FLIGHT**\n"
-    out, changed = ru.set_status(text, "1.6", "done")
+def test_badge_update_in_place_within_todo():
+    out, changed = ru.set_item_status(DOC, "PC.3", "wip")
     assert changed
-    # exactly one badge, the old one gone
-    assert out.count("**") == 2
-    assert "✅ **DONE**" in out
-    assert "IN FLIGHT" not in out
+    line = next(l for l in _todo_block(out).splitlines() if "**PC.3**" in l)
+    assert line.endswith("· \U0001F535 **IN PROGRESS**")
+    assert "⚠️" not in line
+    assert "PC.3" not in _done_block(out)
 
 
-def test_set_status_token_boundary_no_false_match():
-    # 'PAR-1' must not touch 'PAR-10'; '1.6' must not touch '1.60'
-    text = "#### PAR-10 · Something\n### 1.60 Other\n"
-    out1, c1 = ru.set_status(text, "PAR-1", "done")
-    out2, c2 = ru.set_status(text, "1.6", "done")
-    assert not c1 and out1 == text
-    assert not c2 and out2 == text
+def test_demotion_moves_completed_item_back_to_todo():
+    out, changed = ru.set_item_status(DOC, "PC.1", "wip")
+    assert changed
+    assert "PC.1" not in _done_block(out)
+    line = next(l for l in _todo_block(out).splitlines() if "**PC.1**" in l)
+    assert line == (
+        "- **PC.1** · Phase C — Self-serve signup + auth · \U0001F535 **IN PROGRESS**"
+    )
+    # the completion annotation is stripped on the way back
+    assert "completed 2026-06-09" not in line
 
 
-def test_set_status_step_and_seq():
-    text = "#### Step 7: Commercial Layer — Stripe\n#### SEQ-0 · DesignTokens contract\n"
-    out, _ = ru.set_status(text, "Step 7", "blocked")
-    out, _ = ru.set_status(out, "SEQ-0", "wip")
-    assert "Step 7: Commercial Layer — Stripe · ⚠️ **BLOCKED**" in out
-    assert "SEQ-0 · DesignTokens contract · \U0001F535 **IN PROGRESS**" in out
+def test_redone_completed_item_keeps_original_annotation():
+    out, changed = ru.set_item_status(DOC, "PC.1", "done", today="2026-06-12")
+    # re-affirming an already-completed item must not rewrite its history
+    assert "*(completed 2026-06-09, PR #267)*" in _done_block(out)
+    assert "2026-06-12" not in out
+    assert not changed  # nothing material changed
 
 
-def test_set_status_unknown_id_is_noop():
-    text = "### 1.6 X\n"
-    out, changed = ru.set_status(text, "ZZ-9", "done")
-    assert not changed and out == text
+def test_token_boundary_no_false_match():
+    # 'P1.4' must not touch the decoy 'P1.40'
+    out, changed = ru.set_item_status(DOC, "P1.4", "done", today="2026-06-11")
+    assert not changed and out == DOC
 
 
-def test_set_status_idempotent():
-    text = "#### PAR-2 · Auto-fit\n"
-    once, _ = ru.set_status(text, "PAR-2", "done")
-    twice, changed = ru.set_status(once, "PAR-2", "done")
-    assert once == twice  # re-applying the same status changes nothing material
-    assert "· ✅ **DONE**" in twice and twice.count("✅") == 1
+def test_unknown_id_is_noop():
+    out, changed = ru.set_item_status(DOC, "ZZ-9", "done")
+    assert not changed and out == DOC
+
+
+def test_unknown_status_is_noop():
+    out, changed = ru.set_item_status(DOC, "PC.4", "banana")
+    assert not changed and out == DOC
+
+
+def test_missing_marker_blocks_is_noop():
+    out, changed = ru.set_item_status("# no lists here\n", "PC.4", "done")
+    assert not changed
+
+
+def test_done_then_demote_round_trips_the_core_text():
+    once, _ = ru.set_item_status(DOC, "PC.4", "done", today="2026-06-11")
+    back, changed = ru.set_item_status(once, "PC.4", "todo")
+    assert changed
+    line = next(l for l in _todo_block(back).splitlines() if "**PC.4**" in l)
+    assert line == "- **PC.4** · Phase C 🥇 — Pricing by revealed WTP · ❌ **NOT STARTED**"
+
+
+def test_markers_and_structure_survive_every_move():
+    out, _ = ru.set_item_status(DOC, "PC.4", "done", today="2026-06-11")
+    out, _ = ru.set_item_status(out, "PC.1", "blocked")
+    for marker in (
+        "<!-- ROADMAP:TODO -->",
+        "<!-- /ROADMAP:TODO -->",
+        "<!-- ROADMAP:DONE -->",
+        "<!-- /ROADMAP:DONE -->",
+    ):
+        assert out.count(marker) == 1
+    # every list line is still a well-formed bullet
+    for block in (_todo_block(out), _done_block(out)):
+        for line in filter(None, (l.strip() for l in block.splitlines())):
+            assert line.startswith("- ")
+
+
+def test_live_roadmap_file_satisfies_the_list_contract():
+    """The real docs/ROADMAP.md must carry both blocks with parseable items."""
+    text = ru.ROADMAP.read_text(encoding="utf-8")
+    assert ru._block_re("TODO").search(text)
+    assert ru._block_re("DONE").search(text)
+    # a known to-do item is movable: the transform engages on the real file
+    moved, changed = ru.set_item_status(text, "P0.1", "done", today="2026-01-01")
+    assert changed and "- ✅ **P0.1**" in moved
 
 
 # --- replace_block ----------------------------------------------------------
