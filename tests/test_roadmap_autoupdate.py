@@ -148,12 +148,19 @@ def test_markers_and_structure_survive_every_move():
 
 def test_live_roadmap_file_satisfies_the_list_contract():
     """The real docs/ROADMAP.md must carry both blocks with parseable items."""
+    import re
+
     text = ru.ROADMAP.read_text(encoding="utf-8")
-    assert ru._block_re("TODO").search(text)
+    todo = ru._block_re("TODO").search(text)
+    assert todo
     assert ru._block_re("DONE").search(text)
-    # a known to-do item is movable: the transform engages on the real file
-    moved, changed = ru.set_item_status(text, "P0.1", "done", today="2026-01-01")
-    assert changed and "- ✅ **P0.1**" in moved
+    # The first live to-do item is movable: the transform engages on the real
+    # file. Resolved dynamically so this test doesn't go stale every time an
+    # item ships (a hardcoded id rotted the moment P0.1 completed).
+    ids = re.findall(r"^- \*\*([^*]+)\*\*", todo.group(1), re.MULTILINE)
+    assert ids, "the To-do block must carry at least one parseable item"
+    moved, changed = ru.set_item_status(text, ids[0], "done", today="2026-01-01")
+    assert changed and f"- ✅ **{ids[0]}**" in moved
 
 
 # --- replace_block ----------------------------------------------------------

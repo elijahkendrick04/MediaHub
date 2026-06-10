@@ -346,24 +346,27 @@ def _run_remotion(
 # ---------------------------------------------------------------------------
 
 
-def _dispatch_engine() -> None:
-    """Validate the configured engine; raise for any non-remotion selection.
+def _dispatch_engine() -> str:
+    """Resolve and validate the configured engine; return its name.
 
     Called at the entry of each public render function.  When the engine
-    resolves to 'remotion' (the default) this is a pure no-op and the
-    existing _run_remotion path continues completely unchanged.
+    resolves to 'remotion' (the default) the existing _run_remotion path
+    continues completely unchanged.  'ffmpeg' routes to the free fallback
+    in :mod:`mediahub.visual.reel_ffmpeg` (roadmap P0.1).
 
-    The 'satori' engine is registered as a future placeholder but is not
-    yet implemented; callers receive an honest ReelEngineUnavailable rather
-    than a fake/placeholder asset (CLAUDE.md AI-surfaces rule).
+    The 'satori' engine is registered as a future placeholder (P5.4) but
+    is not yet implemented; callers receive an honest ReelEngineUnavailable
+    rather than a fake/placeholder asset (CLAUDE.md AI-surfaces rule).
     """
     engine = select_reel_engine()
-    if engine != "remotion":
+    if engine == "satori":
         raise ReelEngineUnavailable(
-            f"The '{engine}' render engine is not yet implemented. "
-            "Set MEDIAHUB_REEL_ENGINE=remotion (or leave it unset) to use "
-            "the production Remotion renderer."
+            "The 'satori' render engine is not yet implemented. "
+            "Set MEDIAHUB_REEL_ENGINE=remotion (or leave it unset) for the "
+            "production Remotion renderer, or MEDIAHUB_REEL_ENGINE=ffmpeg "
+            "for the free still-graphic + FFmpeg fallback."
         )
+    return engine
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +394,7 @@ def render_story_card(
     accent/mood) to the TSX composition. Without a brief the render
     falls back to variationSeed-only behaviour for backwards compat.
     """
-    _dispatch_engine()
+    engine = _dispatch_engine()
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
     card_dict = _card_to_props(
@@ -399,6 +402,18 @@ def render_story_card(
         variation_seed=variation_seed,
         brief=brief,
     )
+
+    if engine == "ffmpeg":
+        from mediahub.visual import reel_ffmpeg
+
+        return reel_ffmpeg.render_story_card_from_props(
+            card_dict,
+            brand_dict,
+            brand_kit,
+            out_path,
+            duration_sec=duration_sec,
+            brief_dict=brief,
+        )
 
     cache_key = _content_hash(
         {"card": card_dict, "brand": brand_dict, "duration": duration_sec},
@@ -473,7 +488,7 @@ def render_meet_reel(
                   reel's structure follows the number of ranked moments
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
     """
-    _dispatch_engine()
+    engine = _dispatch_engine()
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
 
@@ -516,6 +531,19 @@ def render_meet_reel(
 
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
+
+    if engine == "ffmpeg":
+        from mediahub.visual import reel_ffmpeg
+
+        return reel_ffmpeg.render_meet_reel_from_props(
+            cards_props,
+            brand_dict,
+            brand_kit,
+            out_path,
+            meet_name=meet_name,
+            duration_sec=duration_sec,
+            brief_dicts=briefs_list,
+        )
 
     cache_key = _content_hash(
         {

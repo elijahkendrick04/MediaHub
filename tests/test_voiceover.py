@@ -293,3 +293,72 @@ def test_route_approved_card_synthesizes(app_env):
         audio = c.get(f"/api/runs/{run_id}/card/c1/voiceover")
     assert audio.status_code == 200
     assert audio.mimetype == "audio/mpeg"
+
+
+# ---------------------------------------------------------------------------
+# TTS provider seam (P0.4) — a local-capable slot for the speech surface
+# ---------------------------------------------------------------------------
+
+
+def test_tts_provider_defaults_to_edge(monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
+    assert voiceover.select_tts_provider() == "edge"
+
+
+def test_tts_provider_blank_means_edge(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "  ")
+    assert voiceover.select_tts_provider() == "edge"
+
+
+def test_tts_provider_piper_is_a_recognised_slot(monkeypatch):
+    """The local slot must be selectable — that is the P0.4 contract: the
+    interface admits a local provider even before P5.2 implements it."""
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "PIPER")
+    assert voiceover.select_tts_provider() == "piper"
+
+
+def test_tts_provider_unknown_raises_honest_error(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "espeak")
+    with pytest.raises(voiceover.VoiceoverError, match="not a recognised"):
+        voiceover.select_tts_provider()
+
+
+def test_piper_synthesis_raises_honest_error_not_fake_voice(tmp_path, monkeypatch):
+    """Selecting piper before P5.2 ships must produce a clear operator
+    error — never a silent fallback to the cloud backend."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "piper")
+    with pytest.raises(voiceover.VoiceoverError, match="[Pp]iper"):
+        voiceover.synthesize("A real caption", apply_pronunciation=False)
+
+
+def test_is_available_false_for_piper_until_p52(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "piper")
+    assert voiceover.is_available() is False
+
+
+def test_is_available_false_for_bad_provider(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "espeak")
+    assert voiceover.is_available() is False
+
+
+def test_tts_provider_status_shape(monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_TTS_PROVIDER", raising=False)
+    status = voiceover.tts_provider_status()
+    required = {
+        "configured",
+        "active",
+        "edge_available",
+        "piper_available",
+        "available_providers",
+    }
+    assert required <= set(status.keys())
+    assert status["active"] == "edge"
+    assert status["piper_available"] is False
+
+
+def test_tts_provider_status_surfaces_bad_value_verbatim(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_TTS_PROVIDER", "espeak")
+    status = voiceover.tts_provider_status()
+    assert status["configured"] == "espeak"
+    assert status["active"] == "espeak"

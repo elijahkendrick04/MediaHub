@@ -18,10 +18,19 @@ error is far harder to catch than a written one. The caller passes the human-app
 caption text; we (optionally) apply deterministic pronunciation overrides for swimmer
 names, then synthesise.
 
-Synthesis uses `edge-tts` (pure-Python, CPU-only, no GPU). It is an **online**
-dependency: it streams audio from a Microsoft endpoint, which means the caption text
-leaves the box. That is why the feature is operator-gated and off by default. When
-`edge-tts` is not installed or the endpoint is unreachable we raise `VoiceoverError`
+Synthesis is provider-selected via ``MEDIAHUB_TTS_PROVIDER`` (roadmap P0.4 — every
+AI surface carries a local-capable provider slot):
+
+    edge   (default) `edge-tts` — pure-Python, CPU-only, no GPU. It is an
+           **online** dependency: it streams audio from a Microsoft endpoint,
+           which means the caption text leaves the box. That is why the feature
+           is operator-gated and off by default.
+    piper  the local-TTS slot (Piper, MIT). Registered so no cloud endpoint is
+           ever *required* by this interface; the implementation ships with
+           roadmap P5.2 and until then selecting it raises `VoiceoverError`
+           honestly.
+
+When the selected backend is not installed or unreachable we raise `VoiceoverError`
 — an honest error, in the spirit of `ClaudeUnavailableError` / `ProviderNotConfigured`
 — and **never** fall back to a degraded/robot voice or a fabricated clip.
 
@@ -57,10 +66,68 @@ _MAX_CUE_MS = 3000
 class VoiceoverError(RuntimeError):
     """Raised when voiceover cannot be produced honestly.
 
-    Covers: edge-tts not installed, the synthesis endpoint unreachable, or the
-    engine returning no audio. We surface this rather than emit a fallback voice —
-    a silent/clear failure is better than a fake narration of a child's result.
+    Covers: the selected TTS backend not installed, the synthesis endpoint
+    unreachable, or the engine returning no audio. We surface this rather than
+    emit a fallback voice — a silent/clear failure is better than a fake
+    narration of a child's result.
     """
+
+
+# ---------------------------------------------------------------------------
+# Provider selection (P0.4 — local-capable slot for the TTS surface)
+# ---------------------------------------------------------------------------
+
+_VALID_TTS_PROVIDERS: frozenset[str] = frozenset({"edge", "piper"})
+_DEFAULT_TTS_PROVIDER = "edge"
+
+
+def select_tts_provider() -> str:
+    """Return the active TTS provider name.
+
+    Reads ``MEDIAHUB_TTS_PROVIDER``; unset/blank means the historical
+    default ``'edge'`` so existing deployments are byte-identical. An
+    unrecognised value raises `VoiceoverError` — an honest configuration
+    error beats silently synthesising with the wrong backend.
+    """
+    raw = os.environ.get("MEDIAHUB_TTS_PROVIDER", "").strip().lower()
+    if not raw:
+        return _DEFAULT_TTS_PROVIDER
+    if raw not in _VALID_TTS_PROVIDERS:
+        raise VoiceoverError(
+            f"MEDIAHUB_TTS_PROVIDER={raw!r} is not a recognised TTS provider. "
+            f"Valid choices: {sorted(_VALID_TTS_PROVIDERS)}. 'edge' is the "
+            "default; 'piper' is the local slot (ships with roadmap P5.2)."
+        )
+    return raw
+
+
+def tts_provider_status() -> dict:
+    """Diagnostics dict for health / observability surfaces.
+
+    Mirrors ``reel_engine_status()``: configured raw value, resolved active
+    provider (bad values echoed verbatim), per-provider availability, and
+    the list of providers that would synthesise right now.
+    """
+    configured = os.environ.get("MEDIAHUB_TTS_PROVIDER", "").strip()
+    try:
+        active = select_tts_provider()
+    except VoiceoverError:
+        active = configured
+    try:
+        import edge_tts  # noqa: F401
+
+        edge_ok = True
+    except Exception:
+        edge_ok = False
+    piper_ok = False  # local implementation ships with P5.2
+    available = [name for name, ok in (("edge", edge_ok), ("piper", piper_ok)) if ok]
+    return {
+        "configured": configured,
+        "active": active,
+        "edge_available": edge_ok,
+        "piper_available": piper_ok,
+        "available_providers": available,
+    }
 
 
 @dataclass(frozen=True)
@@ -91,13 +158,19 @@ class VoiceoverResult:
 
 
 def is_available() -> bool:
-    """True when the synthesis backend is importable.
+    """True when the *selected* synthesis backend is importable.
 
     This deliberately does NOT probe the network — reachability is discovered at
     synthesis time and surfaced as `VoiceoverError`, the same honest-error shape
     the LLM wrapper uses. Import-ability is the cheap, side-effect-free signal a
     route uses to decide between 503-unavailable and attempting a render.
     """
+    try:
+        provider = select_tts_provider()
+    except VoiceoverError:
+        return False
+    if provider == "piper":
+        return False  # local implementation ships with P5.2
     try:
         import edge_tts  # noqa: F401
     except Exception:
@@ -185,12 +258,19 @@ def build_srt(boundaries: list[WordBoundary]) -> str:
 
 
 def _synthesize_raw(text: str, voice: str) -> tuple[bytes, list[WordBoundary]]:
-    """Call edge-tts and return (mp3_bytes, word_boundaries).
+    """Call the selected TTS backend and return (mp3_bytes, word_boundaries).
 
     Isolated so the entire network/codec surface sits behind one seam that tests
     monkeypatch. Any failure (missing dependency, unreachable endpoint, empty
     audio) becomes a `VoiceoverError` — there is no fallback path.
     """
+    provider = select_tts_provider()
+    if provider == "piper":
+        raise VoiceoverError(
+            "The local Piper TTS backend is not implemented yet (it ships "
+            "with roadmap P5.2). Set MEDIAHUB_TTS_PROVIDER=edge (or unset "
+            "it) to use the edge-tts backend."
+        )
     try:
         import edge_tts
     except Exception as exc:  # pragma: no cover - exercised via is_available()

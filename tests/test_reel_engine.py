@@ -62,6 +62,12 @@ def test_satori_is_a_recognised_registered_engine(monkeypatch):
     assert select_reel_engine() == "satori"
 
 
+def test_ffmpeg_is_a_recognised_engine(monkeypatch):
+    """The P0.1 free fallback is a first-class engine selection."""
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    assert select_reel_engine() == "ffmpeg"
+
+
 def test_unknown_engine_raises_unavailable(monkeypatch):
     monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg_standalone")
     with pytest.raises(ReelEngineUnavailable, match="not a recognised engine"):
@@ -89,6 +95,7 @@ def test_reel_engine_status_has_required_keys(monkeypatch):
         "configured",
         "active",
         "remotion_available",
+        "ffmpeg_available",
         "satori_available",
         "available_engines",
     }
@@ -243,3 +250,64 @@ def test_reelengine_unavailable_is_re_exported_from_motion():
     from mediahub.visual.motion import ReelEngineUnavailable as _ReuseAlias  # noqa: F401
 
     assert _ReuseAlias is ReelEngineUnavailable
+
+
+# ---------------------------------------------------------------------------
+# ffmpeg engine dispatch (P0.1) — the free fallback must be reached and the
+# Remotion path must never run when it is selected.
+# ---------------------------------------------------------------------------
+
+
+def test_render_story_card_dispatches_to_ffmpeg_engine(tmp_path, monkeypatch):
+    """MEDIAHUB_REEL_ENGINE=ffmpeg routes story renders to reel_ffmpeg and
+    never spawns the Node/Remotion path."""
+    from mediahub.visual import reel_ffmpeg
+
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    calls: dict = {}
+
+    def _fake_ffmpeg_story(card_props, brand_dict, brand_kit, out_path, **kw):
+        calls["props"] = card_props
+        calls["brand"] = brand_dict
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_story_card_from_props", _fake_ffmpeg_story)
+    with patch.object(motion, "_run_remotion") as mock_remotion:
+        out = tmp_path / "story.mp4"
+        result = motion.render_story_card(_fake_card(), _fake_brand(), out)
+        assert not mock_remotion.called, "remotion must not run under the ffmpeg engine"
+    assert Path(result).exists()
+    assert calls["props"]["athleteFullName"] == "Engine Tester"
+    assert calls["brand"]["primary"] == "#112233"
+
+
+def test_render_meet_reel_dispatches_to_ffmpeg_engine(tmp_path, monkeypatch):
+    from mediahub.visual import reel_ffmpeg
+
+    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "ffmpeg")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    calls: dict = {}
+
+    def _fake_ffmpeg_reel(cards_props, brand_dict, brand_kit, out_path, **kw):
+        calls["cards"] = cards_props
+        calls["duration"] = kw.get("duration_sec")
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 4096)
+        return out
+
+    monkeypatch.setattr(reel_ffmpeg, "render_meet_reel_from_props", _fake_ffmpeg_reel)
+    with patch.object(motion, "_run_remotion") as mock_remotion:
+        out = tmp_path / "reel.mp4"
+        result = motion.render_meet_reel([_fake_card()], _fake_brand(), out)
+        assert not mock_remotion.called
+    assert Path(result).exists()
+    assert len(calls["cards"]) == 1
+    # The data-driven duration arithmetic must flow through to the fallback.
+    assert calls["duration"] == motion.reel_duration_for(1)
