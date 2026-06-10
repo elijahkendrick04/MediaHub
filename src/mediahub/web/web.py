@@ -11452,6 +11452,30 @@ function copyWhyCard(btn, taId) {{
                 except Exception:
                     _mem_examples = []
 
+                # PAR-1 few-shot voice store: the most recent captions a human
+                # actually approved for this club (populated by the content-pack
+                # approval seam). Unlike semantic recall it needs no embedding
+                # backend and no corpus floor, so the approve → learn-the-voice
+                # loop works for every club from the first approval. Semantic
+                # hits lead (they are moment-matched), recents fill the rest;
+                # deduped, capped at 5 (the injection cap in ai_caption).
+                try:
+                    from mediahub.web.caption_examples import (
+                        load_examples as _load_caption_examples,
+                    )
+
+                    _approved_examples = (
+                        _load_caption_examples(run_profile_id) if run_profile_id else []
+                    )
+                except Exception:
+                    _approved_examples = []
+                _few_shot_examples: list[str] = []
+                for _ex in list(_mem_examples) + list(_approved_examples):
+                    _ex = (_ex or "").strip()
+                    if _ex and _ex not in _few_shot_examples:
+                        _few_shot_examples.append(_ex)
+                _few_shot_examples = _few_shot_examples[:5]
+
                 def _gen_one():
                     try:
                         return _gen_tone(
@@ -11461,7 +11485,7 @@ function copyWhyCard(btn, taId) {{
                             voice_profile=_run_voice_profile,
                             club_profile=club_profile_obj,
                             recent_captions=_recent_captions,
-                            few_shot_examples=_mem_examples,
+                            few_shot_examples=_few_shot_examples,
                         )
                     except _ClaudeUE:
                         # Terminal-shaped errors must propagate so the

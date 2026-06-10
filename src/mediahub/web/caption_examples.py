@@ -55,7 +55,12 @@ def load_examples(profile_id: str) -> list[str]:
 
 
 def append_example(profile_id: str, caption: str) -> None:
-    """Append an approved caption to the store. Total stored entries capped at 50."""
+    """Append an approved caption to the store. Total stored entries capped at 50.
+
+    Idempotent for an already-stored caption — the approval seam runs on every
+    content-pack build, so re-approving (or re-viewing) the same card must not
+    fill the store with duplicates of one caption.
+    """
     _validate_profile_id(profile_id)
     caption = caption.strip()
     if not caption:
@@ -70,6 +75,8 @@ def append_example(profile_id: str, caption: str) -> None:
                 if isinstance(data, list) else []
         except Exception:
             existing = []
+    if caption in existing:
+        return
     existing.append(caption)
     existing = existing[-_MAX_STORED:]
     with path.open("w", encoding="utf-8") as f:
