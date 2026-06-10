@@ -5,8 +5,8 @@
   12-archetype `layouts/v2` library with the deterministic seeded picker is the
   **production default**, with `MEDIAHUB_GEN_V2=0` as the kill-switch back to
   the legacy engine. The design-spec director + pool/rank/compliance (SEQ-2),
-  the enum/menu-picker removal (SEQ-3) and video scene structure (SEQ-4)
-  remain to be built. *(Status updated 2026-06-09.)*
+  the enum/menu-picker removal (SEQ-3) and video scene structure (SEQ-4) are
+  in flight in a separate build session. *(Status updated 2026-06-09.)*
 - **Date:** 2026-05-21
 - **Deciders:** MediaHub maintainer
 - **Context source:** [`../research/mediahub-generative-ai-thesis.md`](../research/mediahub-generative-ai-thesis.md)

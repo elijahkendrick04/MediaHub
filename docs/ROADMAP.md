@@ -386,9 +386,10 @@ route injection), autofit, saliency, design-spec contract, variant metrics,
 brand bootstrap, the complete 12-archetype catalog (each with director notes),
 and docs/ADR. **Tier A (SEQ-1) shipped** (PR #259, grown since): the archetype
 library + deterministic picker + autofit/saliency/role tokens, now the
-**production default** (`MEDIAHUB_GEN_V2=0` kill-switch). **Tier B (SEQ-2)** is
-the active next step — the LLM design-spec director, generate-pool, rank, and
-brand-compliance check.
+**production default** (`MEDIAHUB_GEN_V2=0` kill-switch). **Tier B (SEQ-2 →
+SEQ-4)** — the LLM design-spec director, generate-pool, rank, brand-compliance
+check, cutover and video scene structure — is in flight in a separate build
+session.
 
 ### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
 Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +

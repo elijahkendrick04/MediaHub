@@ -428,7 +428,9 @@ with director notes) · PAR-8 docs/ADR (this document).
 **Spine:** SEQ-0 + SEQ-1 (Tier A) ✅ shipped — v2 is the production default
 with `MEDIAHUB_GEN_V2=0` as the kill-switch. SEQ-2 (design-spec director +
 pool/rank/compliance shortlist), SEQ-3 (cutover + gated removal of the
-enum/menu-picker engine) and SEQ-4 (video scene structure) are ❌ not started.
+enum/menu-picker engine) and SEQ-4 (video scene structure) are 🔵 in flight in
+a separate build session — not yet merged here; that workstream owns updating
+this status when each stage lands.
 
 **Sequential spine (in order, flag-gated):**
 
