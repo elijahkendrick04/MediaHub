@@ -489,7 +489,12 @@ def generate(
         decoration_strength = variation_profile.decoration_strength
         mood = variation_profile.mood
     else:
-        bg_style, accent_style, type_pair, composition = ("water", "brackets", "anton-inter", "right")
+        bg_style, accent_style, type_pair, composition = (
+            "water",
+            "brackets",
+            "anton-inter",
+            "right",
+        )
         photo_treatment = "no-photo" if variation_seed == 3 else "cutout"
         decoration_strength = 0.5
         mood = ""

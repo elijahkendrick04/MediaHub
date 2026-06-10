@@ -32,6 +32,7 @@ References:
   - Sharma, Wu & Dalal (2005) — CIEDE2000 spec.
   - Andrew Somers — SAPC-APCA reference (apca-w3 v0.1.9).
 """
+
 from __future__ import annotations
 
 import re
@@ -68,16 +69,17 @@ _HEX_RE = re.compile(r"#[0-9A-Fa-f]{3,8}\b")
 class LogoChipDecision:
     """The output of decide_logo_chip(). Carries enough detail for
     the audit panel and the Stage H 'why?' explainer."""
+
     mode: Literal["chip", "bare"]
-    chip_color: str            # background hex (only used when mode == "chip")
-    dominant_hex: str          # canonicalised input
-    surface_hex: str           # canonicalised input
-    delta_e_2000: float        # gate 1 metric
-    apca_lc: float             # signed APCA Lc, dominant on surface
-    apca_abs: float            # |Lc|
+    chip_color: str  # background hex (only used when mode == "chip")
+    dominant_hex: str  # canonicalised input
+    surface_hex: str  # canonicalised input
+    delta_e_2000: float  # gate 1 metric
+    apca_lc: float  # signed APCA Lc, dominant on surface
+    apca_abs: float  # |Lc|
     gate_de_passed: bool
     gate_apca_passed: bool
-    reasoning: str             # human-readable, one sentence
+    reasoning: str  # human-readable, one sentence
 
 
 def _normalise(hex_str: str) -> str:
@@ -173,8 +175,7 @@ def decide_logo_chip(
         if not apca_ok:
             which.append(f"|Lc|={lc_abs:.1f} < {apca_min}")
         reasoning = (
-            f"chip: dominant {dominant} too close to surface {surface} "
-            f"({', '.join(which)})"
+            f"chip: dominant {dominant} too close to surface {surface} " f"({', '.join(which)})"
         )
 
     return LogoChipDecision(
@@ -206,11 +207,11 @@ def decide_logo_chip(
 class LogoLockupChoice:
     """The selected lockup + how it should sit on the background."""
 
-    lockup: dict                 # the chosen lockup entry (as supplied)
+    lockup: dict  # the chosen lockup entry (as supplied)
     mode: Literal["chip", "bare"]
-    chip_color: str              # only meaningful when mode == "chip"
-    decision: LogoChipDecision   # full gate metrics for the audit panel
-    reasoning: str               # one sentence
+    chip_color: str  # only meaningful when mode == "chip"
+    decision: LogoChipDecision  # full gate metrics for the audit panel
+    reasoning: str  # one sentence
 
 
 def select_logo_lockup(
