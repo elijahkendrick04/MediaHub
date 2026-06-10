@@ -100,10 +100,18 @@ jobs:
           else
             echo "Reusing open roadmap PR #$PR"
           fi
+          # Two landing paths: --auto arms auto-merge while checks are
+          # pending; a docs-only PR is often ALREADY clean by now, and
+          # GitHub refuses to arm auto-merge on a clean PR — so fall
+          # through to an immediate merge. Only if both fail (auto-merge
+          # disabled repo-side AND checks pending/failed) is the PR left
+          # open for a human — preserved, never lost.
           if gh pr merge "$PR" --merge --auto; then
             echo "Auto-merge armed on PR #$PR — lands when checks pass."
+          elif gh pr merge "$PR" --merge; then
+            echo "PR #$PR was already clean — merged directly."
           else
-            echo "::warning::Could not arm auto-merge on PR #$PR. Enable"
+            echo "::warning::Could not land PR #$PR automatically. Enable"
             echo "::warning::Settings → General → 'Allow auto-merge', or merge"
             echo "::warning::the PR by hand — the update is preserved either way."
           fi
