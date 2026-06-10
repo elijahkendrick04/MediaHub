@@ -1,12 +1,14 @@
 # 1. Replace the enum-permutation generation engine with a design-spec director
 
-- **Status:** Accepted — partially implemented. The parallel bucket (PAR-1 →
-  PAR-8) and the spine through Tier A (SEQ-0, SEQ-1) are shipped: the
-  12-archetype `layouts/v2` library with the deterministic seeded picker is the
-  **production default**, with `MEDIAHUB_GEN_V2=0` as the kill-switch back to
-  the legacy engine. The design-spec director + pool/rank/compliance (SEQ-2),
-  the enum/menu-picker removal (SEQ-3) and video scene structure (SEQ-4) are
-  in flight in a separate build session. *(Status updated 2026-06-09.)*
+- **Status:** Accepted — **implemented**. The parallel bucket (PAR-1 → PAR-8)
+  and the full spine (SEQ-0 → SEQ-4) are shipped: the 12-archetype
+  `layouts/v2` library + deterministic picker is the **production default**
+  (`MEDIAHUB_GEN_V2=0` kill-switch), the design-spec director + candidate pool
+  + compliance-ranked shortlist are live, the old enum/menu-picker permutation
+  engine was removed at the SEQ-3 cutover via CLAUDE.md's gated-removal
+  process, and SEQ-4's data-driven video landed. Build evidence:
+  [`../build_reports/SEQ_SPINE_2026-06-10.md`](../build_reports/SEQ_SPINE_2026-06-10.md).
+  *(Status updated 2026-06-10.)*
 - **Date:** 2026-05-21
 - **Deciders:** MediaHub maintainer
 - **Context source:** [`../research/mediahub-generative-ai-thesis.md`](../research/mediahub-generative-ai-thesis.md)

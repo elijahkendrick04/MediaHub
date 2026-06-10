@@ -9,7 +9,7 @@
 > [`GEN_ENGINE_LOG.md`](GEN_ENGINE_LOG.md) for the per-run history.
 
 **Established:** 2026-06-09 13:30 UTC (first baseline) · **Updated:** 2026-06-09 (duo_athlete_split → 12 archetypes, catalog complete; renderer font fix + Anton autofit recalibration)
-**Engine state:** Gen Engine v2 Tier A live (default-on; `MEDIAHUB_GEN_V2=0` kill-switch). Tier B (SEQ-2 director + pool/rank/compliance) not yet wired.
+**Engine state:** Gen Engine v2 live end-to-end (default-on; `MEDIAHUB_GEN_V2=0` kill-switch): Tier A library + Tier B design-spec director, candidate pool and compliance-ranked shortlist (SEQ-0 → SEQ-4 shipped; see `SEQ_SPINE_2026-06-10.md`).
 
 ## Tracked metrics (the bar that only ratchets up)
 
@@ -19,7 +19,7 @@
 | **Pack archetype diversity** | `quality.variant_metrics.archetype_diversity` over a representative 10-card pack (distinct archetypes / cards); §8C floor is 0.60 | **1.00** |
 | **Representative-pack perceptual spread** | `quality.variant_metrics.perceptual_spread` (mean pairwise dHash distance) over the same 10-card pack — *informational for library growth (not monotonic under insertion); the SEQ-2 candidate-pool path is where this is the gating metric* | **~0.442 (font-fixed renderer)** |
 | **Library distinctiveness floor** | smallest nearest-neighbour dHash distance across the library; a genuine new structure (not a reskin) lands well clear of reskin territory (~0.10). A new archetype must not push this floor down. | **0.285 (`minimal_type_poster`↔`quote_led_recap`, font-fixed renderer; set by a pre-existing pair)** |
-| **Brand-compliance pass-rate** | Tier A: deterministic `--mh-*` role resolution + APCA/ΔE2000 legibility guarantees every shipped card is legible/on-brand (compliance gate tests green). SEQ-2 per-candidate compliance scoring not yet wired. | **100% (deterministic, Tier A)** |
+| **Brand-compliance pass-rate** | Deterministic `--mh-*` role resolution + APCA/ΔE2000 legibility guarantees every shipped card is legible/on-brand; the SEQ-2 candidate pool scores every candidate with the same gate and ranks the shortlist by it (compliance + pool tests green). | **100% (deterministic)** |
 | **Caption non-repetition** | `quality.variant_metrics.caption_repetition` — unchanged this run (captions not touched) | n/a this run |
 
 ## Representative pack (methodology)

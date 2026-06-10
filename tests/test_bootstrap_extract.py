@@ -162,7 +162,8 @@ def test_logo_form_and_theme_inference(monkeypatch, llm_off):
     assert fav["confidence"] == "high"
 
     horiz = by_url["https://city.example/img/logo-horizontal-white.svg"]
-    assert horiz["form"] == "horizontal"   # inferred from filename
+    # canonical DesignTokens lockup vocabulary (brand/design_tokens.py)
+    assert horiz["form"] == "full_horizontal"   # inferred from filename
     assert horiz["theme"] == "light"       # "white" → light-on-dark mark
     assert horiz["source"] == "img"
 

@@ -163,6 +163,17 @@ def test_archetype_has_authoring_notes(name):
     assert len(text) > 200, f"{name}.notes.md is too thin to brief the director"
 
 
+@pytest.mark.parametrize("name", archetypes.list_archetypes())
+def test_director_note_extracted_for_every_archetype(name):
+    # The director's catalog line is derived from the notes (PAR-7's purpose):
+    # bounded, plain-text, and substantive for every archetype in the library.
+    note = archetypes.director_note(name)
+    assert note, f"{name}: director_note extracted nothing from its notes"
+    assert len(note) <= archetypes._NOTE_MAX_CHARS + 2, f"{name}: note unbounded"
+    assert "**" not in note and "`" not in note, f"{name}: markdown leaked into the prompt line"
+    assert len(note) >= 60, f"{name}: note too thin to guide an archetype choice"
+
+
 # --------------------------------------------------------------------------- #
 # Generator integration: flag flips the layout to a v2 archetype
 # --------------------------------------------------------------------------- #

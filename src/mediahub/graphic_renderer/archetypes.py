@@ -29,6 +29,7 @@ Authoring convention for a ``layouts/v2/<name>.html`` archetype:
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
@@ -115,3 +116,48 @@ def pick_archetype_avoiding(seed: int, recent: Iterable[str]) -> str | None:
         if candidate not in avoid:
             return candidate
     return names[start]
+
+
+# Marker introducing the when-to-pick passage in every <name>.notes.md. The
+# authored notes use a few phrasings ("When the director should pick it:",
+# "The director should pick this archetype when/for …", "Why the director
+# should pick it."); match at the bold marker so the passage that follows —
+# the when-clause itself — becomes the catalog line.
+_WHEN_TO_PICK_RE = re.compile(
+    r"\*\*\s*(?:Why\s+|When\s+)?the\s+director\s+should\s+pick\s+(?:it|this\s+archetype)\b",
+    re.IGNORECASE,
+)
+# Inline markdown the prompt line should not carry.
+_MD_NOISE_RE = re.compile(r"[*`]")
+
+_NOTE_MAX_CHARS = 320
+
+
+@lru_cache(maxsize=None)
+def director_note(name: str) -> str:
+    """One bounded plain-text line briefing the design-spec director on ``name``.
+
+    Sourced from the archetype's authored ``<name>.notes.md`` (PAR-7), which
+    every archetype must ship (test-enforced): the passage after **"When the
+    director should pick it"** — falling back to the start of the notes body
+    when the marker is absent. Markdown emphasis is stripped and the text is
+    clipped at a word boundary so twelve catalog lines stay prompt-sized.
+    Returns ``""`` when the notes file is missing/unreadable; the director
+    keeps its static fallback line in that case.
+    """
+    path = V2_DIR / f"{name}.notes.md"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = _WHEN_TO_PICK_RE.search(raw)
+    # slice at the marker and shed its trailing punctuation/bold-close, so the
+    # line reads as the when-clause itself ("when there is a strong photo …")
+    body = raw[m.end() :].lstrip(" .:*\n") if m else raw
+    # drop a leading "# name" heading when falling back to the body
+    body = re.sub(r"\A#[^\n]*\n", "", body).strip()
+    text = " ".join(_MD_NOISE_RE.sub("", body).split())
+    if len(text) > _NOTE_MAX_CHARS:
+        clipped = text[:_NOTE_MAX_CHARS].rsplit(" ", 1)[0].rstrip(",;:")
+        text = clipped + " …"
+    return text

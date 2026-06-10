@@ -376,7 +376,7 @@ Extend `content_engine` (planner) + `context_engine` to fuse own/external/direct
 signals into a ranked plan keyed by sport profile. The swim newsworthiness ranker
 generalises into the cross-source prioritiser.
 
-### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · 🔵 **IN PROGRESS — Tier A done, Tier B next**
+### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · ✅ **DONE — full spine shipped (Tier A + Tier B + cutover + video)**
 The asset-quality stream: replace the enum-permutation variation mechanism with an
 archetype library + design-spec director, keeping the deterministic engine. Decided
 in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
@@ -387,9 +387,11 @@ brand bootstrap, the complete 12-archetype catalog (each with director notes),
 and docs/ADR. **Tier A (SEQ-1) shipped** (PR #259, grown since): the archetype
 library + deterministic picker + autofit/saliency/role tokens, now the
 **production default** (`MEDIAHUB_GEN_V2=0` kill-switch). **Tier B (SEQ-2 →
-SEQ-4)** — the LLM design-spec director, generate-pool, rank, brand-compliance
-check, cutover and video scene structure — is in flight in a separate build
-session.
+SEQ-4) shipped** (PR #301): the LLM design-spec director (briefed by each
+archetype's authored notes), the candidate pool with the deterministic
+APCA-compliance-ranked shortlist, the SEQ-3 cutover (enum/menu-picker
+permutation engine removed via the gated process), and data-driven video.
+Evidence: [`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md).
 
 ### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
 Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
