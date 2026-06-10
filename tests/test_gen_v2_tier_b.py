@@ -482,6 +482,33 @@ def test_route_returns_additive_shortlist_with_legacy_fields(web_app):
     assert body["variation_signature"] == cands[0]["brief"]["variation_signature"]
 
 
+def test_regenerate_variants_sync_yields_three_distinct_archetypes(web_app):
+    """SEQ-3: the 3-variant worker now rides the design-spec pool.
+
+    No provider → the deterministic archetype walk must still produce three
+    mutually-distinct variants (distinct by construction, no re-roll guard).
+    """
+    app, run_id = web_app
+    with mock.patch.object(ai_director, "ai_design_specs", return_value=None), mock.patch(
+        "mediahub.graphic_renderer.variants.render_all_formats",
+        side_effect=_fake_render_all_formats,
+    ):
+        with app.test_client() as client:
+            resp = client.post(
+                f"/api/runs/{run_id}/cards/swim-tb-1/regenerate-variants?sync=1"
+            )
+    assert resp.status_code == 200, resp.get_data(as_text=True)[:400]
+    body = resp.get_json()
+    variants = body.get("variants") or []
+    assert len(variants) == 3
+    archetypes = [
+        (v.get("variation_signature") or "").split("|", 1)[0] for v in variants
+    ]
+    assert len(set(archetypes)) == 3
+    assert all(a in list_archetypes() for a in archetypes)
+    assert all(v.get("visual") for v in variants)
+
+
 def test_route_without_param_keeps_classic_single_shape(web_app):
     app, run_id = web_app
 

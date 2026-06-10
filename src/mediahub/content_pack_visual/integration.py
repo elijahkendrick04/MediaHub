@@ -210,11 +210,17 @@ def create_visual_for_item(
     allowed_families: Optional[list[str]] = None,
     forced_hero_asset_id: Optional[str] = None,
     forced_bg_asset_id: Optional[str] = None,
+    design_spec=None,
 ) -> dict:
     """Full pipeline for one content item. Returns a dict of:
         { brief, evaluation, visuals (list of dicts with file_path), errors }
 
     The caller normally writes the returned ``visuals`` list back onto the item.
+
+    ``design_spec``: a validated ``DesignSpec`` to apply onto the brief (the
+    regenerate-variants worker pre-computes distinct specs in one batch call
+    and pins one per variant). Applied via ``generator.apply_design_spec`` —
+    the same mapping the candidate pool uses.
     """
     out: dict[str, Any] = {"errors": []}
 
@@ -270,6 +276,10 @@ def create_visual_for_item(
             recent_hooks=recent_hooks,
             allowed_families=allowed_families,
         )
+        if design_spec is not None:
+            from mediahub.creative_brief.generator import apply_design_spec
+
+            apply_design_spec(brief, design_spec)
         out["brief"] = brief.to_dict()
     except Exception as e:
         out["errors"].append(f"brief_failed: {e}")
