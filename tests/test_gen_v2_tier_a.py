@@ -138,6 +138,17 @@ def test_archetype_follows_convention(name):
         assert ph in _ALLOWED_PLACEHOLDERS, f"{name} uses unknown placeholder {ph}"
 
 
+@pytest.mark.parametrize("name", archetypes.list_archetypes())
+def test_archetype_has_authoring_notes(name):
+    # GENERATION.md §7: every archetype ships a one-paragraph <name>.notes.md
+    # describing the composition and when the director should pick it — the
+    # notes feed the SEQ-2 design-spec director's archetype catalog.
+    notes = archetypes.V2_DIR / f"{name}.notes.md"
+    assert notes.exists(), f"{name} is missing its .notes.md (director catalog entry)"
+    text = notes.read_text(encoding="utf-8").strip()
+    assert len(text) > 200, f"{name}.notes.md is too thin to brief the director"
+
+
 # --------------------------------------------------------------------------- #
 # Generator integration: flag flips the layout to a v2 archetype
 # --------------------------------------------------------------------------- #
