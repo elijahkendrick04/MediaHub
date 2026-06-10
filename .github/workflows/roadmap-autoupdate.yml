@@ -6,22 +6,31 @@
 #   3. applies any `roadmap: <ID> <status>` directives found in the pushed
 #      commit messages (e.g. `roadmap: SEQ-1 done`) by flipping the status
 #      badge on the matching roadmap heading.
-# Then it commits the updated ROADMAP.md back to main.
+#
+# Landing mechanism (fixed 2026-06-10): `main` is branch-protected and
+# REQUIRES changes via pull request, so the old direct commit-back was
+# rejected with GH006 on every run (the fail-soft step swallowed it as a
+# warning, which is how the stamp silently stalled for ~38 merges). The
+# refreshed file is now pushed to the single-purpose branch
+# `bot/roadmap-autoupdate` and landed through a PR with auto-merge — it
+# merges itself the moment the required checks pass, with no human in the
+# loop and no protection bypass. One repo setting must stay on for the
+# hands-free landing: Settings → General → "Allow auto-merge". If that is
+# ever switched off, the PR is still created and left open with a warning
+# (one click to land) — updates are never silently lost again.
 #
 # Why only `main`? So the file-disjoint feature-branch PRs (Appendix A's
 # parallel bucket) never collide on ROADMAP.md — the roadmap moves when work
 # *lands* on the mainline, not on every feature-branch push.
 #
-# Loop safety: the commit-back is pushed with the built-in GITHUB_TOKEN, and
-# GitHub does NOT trigger `push` workflows for commits made with GITHUB_TOKEN —
-# so this cannot recurse. The auto-commit also carries `[skip ci]` as a
-# belt-and-braces guard, and we only commit when ROADMAP.md actually changed.
-#
-# Branch protection: if `main` requires PRs / blocks direct pushes, the final
-# push step will fail. It is written fail-soft (logs and exits 0) so it never
-# shows a spurious red X; to let the update land, allow the github-actions bot
-# to push to main (Settings → Actions → "Read and write permissions", and a
-# branch-protection bypass for the bot if protection is on).
+# Loop safety, three layers:
+#   1. pushes/merges made with the built-in GITHUB_TOKEN do not trigger
+#      `push` workflows, so the bot's own merge cannot recurse;
+#   2. the job-level `if` skips bot-roadmap merge commits anyway;
+#   3. the diff-quiet guard exits early when nothing changed.
+# The bot commit deliberately does NOT carry `[skip ci]`: the required
+# checks must run on the bot PR or branch protection would hold the
+# auto-merge forever.
 
 name: Roadmap auto-update
 
@@ -32,19 +41,26 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
-  group: roadmap-autoupdate-${{ github.ref }}
+  group: roadmap-autoupdate
   cancel-in-progress: false
 
 jobs:
   update:
     name: Update roadmap
     runs-on: ubuntu-latest
+    # Belt-and-braces loop guard (layer 2): never re-run for the bot's own
+    # roadmap landing. workflow_dispatch has no head_commit — always allowed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!contains(github.event.head_commit.message, 'bot/roadmap-autoupdate') &&
+       !startsWith(github.event.head_commit.message, 'docs: auto-update roadmap'))
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for the commit range + push-back
+          fetch-depth: 0  # full history for the commit range + activity feed
 
       - uses: actions/setup-python@v5
         with:
@@ -56,19 +72,46 @@ jobs:
           ROADMAP_AFTER: ${{ github.sha }}
         run: python scripts/roadmap_autoupdate.py
 
-      - name: Commit & push if changed
+      - name: Land via auto-merge PR (main requires PRs)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet -- docs/ROADMAP.md; then
-            echo "No roadmap changes — nothing to commit."
+            echo "No roadmap changes — nothing to land."
             exit 0
           fi
+          BRANCH=bot/roadmap-autoupdate
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
           git add docs/ROADMAP.md
-          git commit -m "docs: auto-update roadmap [skip ci]"
-          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            echo "Roadmap auto-update pushed."
+          git commit -m "docs: auto-update roadmap"
+          # Single-purpose branch: force-push is safe and refreshes any
+          # still-open bot PR to the newest computed state.
+          git push --force origin "$BRANCH"
+          PR=$(gh pr list --head "$BRANCH" --base main --state open \
+                 --json number --jq '.[0].number' || true)
+          if [ -z "$PR" ]; then
+            URL=$(gh pr create --head "$BRANCH" --base main \
+              --title "docs: auto-update roadmap" \
+              --body "Automated ROADMAP.md refresh (stamp, activity feed, status directives) for the latest push to main. Lands itself via auto-merge once the required checks pass.")
+            PR=${URL##*/}
+            echo "Opened roadmap PR #$PR"
           else
-            echo "::warning::Could not push roadmap update (branch protection or"
-            echo "::warning::workflow write-permission?). Update computed but not landed."
+            echo "Reusing open roadmap PR #$PR"
+          fi
+          # Two landing paths: --auto arms auto-merge while checks are
+          # pending; a docs-only PR is often ALREADY clean by now, and
+          # GitHub refuses to arm auto-merge on a clean PR — so fall
+          # through to an immediate merge. Only if both fail (auto-merge
+          # disabled repo-side AND checks pending/failed) is the PR left
+          # open for a human — preserved, never lost.
+          if gh pr merge "$PR" --merge --auto; then
+            echo "Auto-merge armed on PR #$PR — lands when checks pass."
+          elif gh pr merge "$PR" --merge; then
+            echo "PR #$PR was already clean — merged directly."
+          else
+            echo "::warning::Could not land PR #$PR automatically. Enable"
+            echo "::warning::Settings → General → 'Allow auto-merge', or merge"
+            echo "::warning::the PR by hand — the update is preserved either way."
           fi

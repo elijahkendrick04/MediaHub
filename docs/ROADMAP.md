@@ -147,13 +147,20 @@ directive line. The directives are **human-authored** — the autonomous roadmap
 builder that used to emit them was removed in #214; the script still applies any
 you write by hand in a commit message:
 
-> ⚠️ **Automation note (2026-06):** the auto-refresh stalled — the stamp sat on
-> `2026-06-02` while ~38 merges landed. The script itself is fine (it ran clean
-> here); the failure is the Action's *commit-back step* not landing on a
-> branch-protected `main`. Until the `github-actions[bot]` is allowed to push to
-> `main` (Settings → Actions → write permission + a branch-protection bypass for
-> the bot), refresh by hand: `python scripts/roadmap_autoupdate.py` then commit
-> `docs/ROADMAP.md`. The stamp/activity above were last refreshed that way.
+> ✅ **Automation note (resolved 2026-06-10):** the auto-refresh had stalled —
+> the stamp sat on `2026-06-08` while ~38 merges landed, because the Action's
+> direct commit-back was rejected by `main`'s branch protection
+> (`GH006: Changes must be made through a pull request`), and the fail-soft
+> push swallowed the rejection so every run showed green. The workflow now
+> lands each refresh through a **PR with auto-merge** from the single-purpose
+> branch `bot/roadmap-autoupdate` — protection-compliant, no bypass, merges
+> itself once the required checks pass. Keep **Settings → General → "Allow
+> auto-merge"** enabled for the hands-free landing; if it's off, the bot PR is
+> left open with a warning (one click to land — never silently lost). Manual
+> fallback remains: `python scripts/roadmap_autoupdate.py` then commit
+> `docs/ROADMAP.md` via a PR. The missed 2026-06-08 → 2026-06-10 range
+> (including the Appendix A `SEQ-*` directives) was caught up by hand with the
+> same script as part of the fix.
 
 > `roadmap: <ID> <status>` — where `<ID>` is a new phase (`P0`, `P3`) or item
 > (`P0.1`, `P1.2`), a legacy phase (`1.6`, `2.1`), or an Appendix item (`PAR-1`,
@@ -161,7 +168,7 @@ you write by hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-08 · `75dde80c1` · Roadmap reconcile + env-doc fix + Gen-v2 Tier A graphics (#259)
+**Last updated:** 2026-06-10 · `3f233319b` · Merge pull request #304 from elijahkendrick04/claude/cool-lovelace-g3494x
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -169,18 +176,18 @@ you write by hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-08 | `e4a71e623` | fix(gfx): address code-review findings on Gen-v2 Tier A |
-| 2026-06-08 | `b842dc34c` | style: ruff-format touched files (pinned hook v0.8.4) |
-| 2026-06-08 | `e2ba101c9` | docs(debt): record structural tech debt — monolith, persistence, autonomy enums |
-| 2026-06-08 | `535aa7c0e` | feat(gfx): wire Gen Engine v2 Tier A — archetype library behind MEDIAHUB_GEN_V2 |
-| 2026-06-08 | `aa8303b9a` | docs+fix: make env-var documentation complete and regenerable |
-| 2026-06-08 | `034acfccc` | docs: reconcile roadmap with shipped reality |
-| 2026-06-04 | `006c53210` | style: ruff-format touched files (pinned hook v0.8.4) |
-| 2026-06-04 | `f82b47f4f` | Upgrade card graphics: brand-accent fidelity, de-clutter, two new layouts |
-| 2026-06-04 | `bc4ef4fdc` | feat(web): finish results-from-a-link review surfaces (Steps 7-8) |
-| 2026-06-04 | `ca8d1a16d` | style: ruff-format ai_caption.py at repo line length |
-| 2026-06-04 | `cbd0c97bd` | style: ruff-format ai_caption.py |
-| 2026-06-04 | `3c4d32a09` | docs(skills): newline-terminated SKILL.md |
+| 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
+| 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
+| 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
+| 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
+| 2026-06-10 | `4a8623c1f` | docs(build): SEQ-4 verification evidence + suite table in the spine report |
+| 2026-06-10 | `52470c085` | feat(gen-v2): SEQ-4 — data-driven reel scene structure + archetype-matched motion + opt-in gen backg |
+| 2026-06-10 | `968d37d2d` | style: ruff-format touched files (pinned hook v0.8.4) |
+| 2026-06-10 | `97ed87e94` | refactor(gen-v2)!: SEQ-3 cutover — remove the dead enum-permutation variation engine |
+| 2026-06-10 | `6dcc6ba2d` | feat(gen-v2): SEQ-2 — Tier B candidate pool, batch director, compliance-ranked shortlist |
+| 2026-06-10 | `f8ba3c901` | feat(gen-v2): SEQ-0 — DesignTokens contract + deterministic lockup selection |
+| 2026-06-09 | `d12cfeb05` | fix(gen-v2): SEQ-1 review — repair the deterministic floor, medal tier, hero stat |
+| 2026-06-09 | `4be9d9fdc` | docs(p2.4): flip P2.4 to DONE + AUTOBUILD_LOG cycle entry |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
@@ -251,17 +258,20 @@ Three facts shape the work ahead.
   closing it is **Phase C**, the top priority (see below) — now **half-closed on the build
   side, fully open on the sell side**.
 
-**In progress (🔵):** the Generative Content Engine v2 (decided in
-[`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); build
-prompts in Appendix A). **Tier A shipped (PR #259, 2026-06):** `render.py` now
-loads **6 structurally-distinct `layouts/v2/` archetypes** behind `MEDIAHUB_GEN_V2`
-(default off) with a deterministic seeded picker, autofit, saliency crops, and
-contrast-checked brand role tokens; the deterministic engine is untouched and the
-flag-off path is byte-identical. **Next: Tier B (SEQ-2)** — the LLM design-spec
-director + generate-pool / rank / brand-compliance, whose building blocks
-(`creative_brief/design_spec.py`, `quality/variant_metrics.py`) already exist;
-`ai_director.py` still emits the old enum tuple until then. The sport-profile
-scaffolding remains inert.
+**Shipped (✅ 2026-06-10):** the Generative Content Engine v2 — the full
+Appendix A **Sequential Spine** (SEQ-0 → SEQ-4) merged in **PR #301** on top of
+Tier A (PR #259): the DesignTokens contract (`brand/design_tokens.py` +
+lockup selection), the Tier B design-spec director with the candidate
+pool / APCA compliance ranking / additive `?candidates=N` route, the **SEQ-3
+cutover** (the old enum-permutation engine removed under the gated 15+15-step
+process; `MEDIAHUB_GEN_V2=0` remains the kill switch; the "A/B beats the old
+engine" gate was reviewed and approved — 6/6 vs ≤1/6 approvable), and the
+SEQ-4 video stage (data-driven reel scene structure, archetype-matched
+motion, opt-in `MEDIAHUB_GEN_BG`). v2 is the **default engine**; the
+archetype library stands at 11/12 (PAR-7's `duo_athlete_split` outstanding,
+picked up automatically when it lands). Evidence:
+[`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md);
+suite 3628 passed / 1 skipped. The sport-profile scaffolding remains inert.
 
 #### Also shipped since this plan was written — *not* in the Phase 0–5 spine
 
@@ -376,22 +386,24 @@ Extend `content_engine` (planner) + `context_engine` to fuse own/external/direct
 signals into a ranked plan keyed by sport profile. The swim newsworthiness ranker
 generalises into the cross-source prioritiser.
 
-### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · ✅ **DONE — full spine shipped (Tier A + Tier B + cutover + video)**
+### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · ✅ **DONE**
 The asset-quality stream: replace the enum-permutation variation mechanism with an
 archetype library + design-spec director, keeping the deterministic engine. Decided
 in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
-build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Parallel bucket (PAR-1 →
-PAR-8) all shipped** — captions live end-to-end (approval seam → few-shot store →
-route injection), autofit, saliency, design-spec contract, variant metrics,
-brand bootstrap, the complete 12-archetype catalog (each with director notes),
-and docs/ADR. **Tier A (SEQ-1) shipped** (PR #259, grown since): the archetype
-library + deterministic picker + autofit/saliency/role tokens, now the
-**production default** (`MEDIAHUB_GEN_V2=0` kill-switch). **Tier B (SEQ-2 →
-SEQ-4) shipped** (PR #301): the LLM design-spec director (briefed by each
-archetype's authored notes), the candidate pool with the deterministic
-APCA-compliance-ranked shortlist, the SEQ-3 cutover (enum/menu-picker
-permutation engine removed via the gated process), and data-driven video.
-Evidence: [`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md).
+build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Complete (2026-06-10):** Tier A
+(SEQ-1, PR #259) + the full Sequential Spine SEQ-0→SEQ-4 (PR #301) — tokens, the
+Tier B director/pool/compliance ranking, the gated SEQ-3 cutover (old engine
+removed; A/B review approved; `MEDIAHUB_GEN_V2=0` kill switch retained), and the
+SEQ-4 video stage. All seven Appendix A §5 acceptance criteria met; evidence in
+[`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md).
+The **parallel bucket (PAR-1 → PAR-8) is likewise all shipped** (PR #300):
+captions live end-to-end (approval seam → few-shot store → route injection,
+also feeding the SEQ-0 voice block), autofit with measured Anton calibration,
+saliency, the design-spec contract, variant metrics, brand bootstrap aligned to
+the DesignTokens lockup vocabulary, the complete 12-archetype catalog
+(`duo_athlete_split` closes it) with every archetype's authored notes briefing
+the director's catalog, and the docs/ADR refresh — plus the renderer
+self-hosted-font fix, regression-pinned.
 
 ### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
 Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
@@ -751,12 +763,12 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    annual prepay (PC.4), the free-self-host call (PC.5, **resolved: hosted-only**), and GTM/distribution (PC.6).
    *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
    **Nothing below ships ahead of this.** (Update 2026-06-09: PC.1 + PC.2 shipped and live; PC.3 is the remaining engineering item but its org->workspace schema needs operator/Council sign-off — see PC.3.)
-2. **P1.4 graphics — finish only to the "sellable wedge" bar.** Tier A shipped (PR
-   #259); Tier B (the LLM design-spec director, SEQ-2) continues — but **scoped to what
-   makes the swim wedge demonstrably good enough to sell, not gold-plated**, and **no
-   longer ranked above billing.** *Exit:* swim packs are good enough that a club will pay;
-   then stop polishing and sell. (Building blocks `design_spec.py` / `variant_metrics.py`
-   exist; keep the Tier A picker as the honest fallback floor.)
+2. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
+   director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
+   the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar
+   is cleared. **Per the standing rule: stop polishing and sell.** Anything further on
+   graphics (the 12th archetype, the floor's no-photo bias, the logo-chip polish) is
+   strictly behind Phase C sell-side work.
 3. **P0.1 — Remotion fallback.** Add the Satori+FFmpeg free reel path behind a flag.
    *Exit:* a zero-license deployment renders reels. (Biggest hidden-cost win.)
 4. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
@@ -1145,7 +1157,7 @@ in order, each as its own PR, after the parallel bucket is merged. Everything th
 changes live behaviour is gated by the `MEDIAHUB_GEN_V2` feature flag until SEQ-3's
 cutover, so production never regresses.
 
-#### SEQ-0 · DesignTokens contract + feature-flag scaffolding
+#### SEQ-0 · DesignTokens contract + feature-flag scaffolding · ✅ **DONE**
 **Depends on:** ROADMAP §1.6 Stage G (DTCG `derived_palette` JSON) if merged; else
 coordinate. **Touches:** `brand/kit.py`, a new `config`/flag read, `theming/` (read).
 **Thesis ref:** §5.3.
@@ -1175,7 +1187,7 @@ coordinate. **Touches:** `brand/kit.py`, a new `config`/flag read, `theming/` (r
 > persisted profiles still load. Suite green (no new failures); the change is purely
 > additive (no removals).
 
-#### SEQ-1 · Tier A — archetype library + layout intelligence (the immediate fix)
+#### SEQ-1 · Tier A — archetype library + layout intelligence (the immediate fix) · ✅ **DONE**
 **Depends on:** SEQ-0, PAR-2 (autofit), PAR-3 (saliency), PAR-7 (archetypes),
 optionally PAR-6. **Touches:** `graphic_renderer/render.py`,
 `creative_brief/generator.py`, `legacy/swim_content_v5/ranker_v3.py` (read-only
@@ -1207,7 +1219,7 @@ addition). **Thesis ref:** §5.3.1. **This stage alone is expected to fix "samey
 > CLAUDE.md engine rule). Walk upload→process→review with the flag on; cards render,
 > captions/confidence intact. Suite green. Report the archetype-diversity number.
 
-#### SEQ-2 · Tier B — design-spec director + pool, rank, compliance
+#### SEQ-2 · Tier B — design-spec director + pool, rank, compliance · ✅ **DONE**
 **Depends on:** SEQ-1, PAR-4 (design_spec), PAR-5 (variant_metrics). **Touches:**
 `creative_brief/ai_director.py`, `content_pack_visual/integration.py`,
 `web/web.py` (the create-graphic route response). **Thesis ref:** §5.4–5.5.
@@ -1245,7 +1257,7 @@ addition). **Thesis ref:** §5.3.1. **This stage alone is expected to fix "samey
 > fabricated output). Flag OFF = old behaviour. Suite green. Confirm no spine file
 > outside the three named was touched.
 
-#### SEQ-3 · Cutover + gated removal of the dead engine (the "full removal")
+#### SEQ-3 · Cutover + gated removal of the dead engine (the "full removal") · ✅ **DONE**
 **Depends on:** SEQ-2 proven (A/B beats the old engine in review + suite green).
 **Touches (removals):** `creative_brief/generator.py`,
 `creative_brief/ai_director.py`. **Thesis ref:** §5.1, §7 cutover. **This is a
@@ -1279,7 +1291,7 @@ route/data-structure-adjacent removal — follow CLAUDE.md's gated process exact
 > edits; dead-code sweep actually happened (no orphaned helpers, `_unused` vars, or
 > "removed" placeholder comments). Report the checklist with pass/fail per step.
 
-#### SEQ-4 · Video — data-driven scene structure (+ optional Tier C)
+#### SEQ-4 · Video — data-driven scene structure (+ optional Tier C) · ✅ **DONE**
 **Depends on:** SEQ-1/2 (the richer brief). **Touches:** `visual/motion.py`,
 `remotion/src/compositions/`, optionally `visual/ai_background.py`. **Thesis ref:**
 §5.7.
