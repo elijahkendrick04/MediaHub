@@ -22712,8 +22712,14 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         )
                         # Persist immediately so the NEXT regenerate avoids
                         # these directions even if the user never picks one.
+                        # Also feed it back into THIS job's avoid-list: the
+                        # profile signatures appended above carry v1 families,
+                        # so without the rendered brief's signature (which
+                        # leads with the actual archetype) the v2 picker
+                        # would give every variant the same archetype.
                         new_sig = brief_d.get("variation_signature") or ""
                         if new_sig:
+                            sigs_so_far.append(new_sig)
                             _v9_save_variation_history(
                                 run_id, card_id, new_sig, brief_d.get("primary_hook") or ""
                             )

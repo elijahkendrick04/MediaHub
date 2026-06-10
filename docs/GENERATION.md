@@ -7,12 +7,14 @@ library and its `layouts/v2` slot convention, the LLM design-spec director, the
 pool/rank/compliance step, the caption extensions, and the video path — all
 gated behind the `MEDIAHUB_GEN_V2` flag.
 
-> **Status: specified, staged, not yet built.** This describes the *target*
-> architecture from the thesis, not as-shipped code. Build order, owners, and
-> per-stage prompts live in [`ROADMAP.md`](ROADMAP.md) Appendix A (SEQ-0 → SEQ-4,
-> PAR-1 → PAR-8); every spine stage is flag-gated until the SEQ-3 cutover so
-> production never regresses. The full diagnosis, cost model, and rejected
-> alternatives are in
+> **Status: partially shipped — Tier A is the production default.** The
+> parallel bucket (PAR-1 → PAR-8) and the spine through Tier A (SEQ-0, SEQ-1)
+> are live; SEQ-2 → SEQ-4 (Tier B pool/rank/compliance, cutover, video) are in
+> flight in a separate build session — see §13 for the per-stage state. Build
+> order, owners, and per-stage prompts live in [`ROADMAP.md`](ROADMAP.md)
+> Appendix A (SEQ-0 → SEQ-4, PAR-1 → PAR-8); every remaining spine stage is
+> flag-gated until the SEQ-3 cutover so production never regresses. The full
+> diagnosis, cost model, and rejected alternatives are in
 > [`research/mediahub-generative-ai-thesis.md`](research/mediahub-generative-ai-thesis.md);
 > the field study is in
 > [`research/generation-engine-competitor-evaluation.md`](research/generation-engine-competitor-evaluation.md).
@@ -57,7 +59,7 @@ LEGACY (kill-switch MEDIAHUB_GEN_V2=0):
                  └─ ai_director: LLM PICKS a tuple from fixed enums
             ─▶ graphic_renderer.render (repaint one DOM) ─▶ 1 PNG
 
-v2 (the default; Tier A live, Tier B pending SEQ-2):
+v2 (the default engine; Tier B pool/rank/compliance pending SEQ-2):
   card data ─▶ DesignTokens contract (roles, lockups, type, voice)   [Layer 1]
             ─▶ ai_director: LLM EMITS a DesignSpec (schema-constrained) [Layer 3]
                  (archetype + colour roles + hero stat + hook + crop + mood)
@@ -77,25 +79,28 @@ the SEQ-3 cutover, after the replacement is proven).
 A single environment flag gates the engine. **v2 Tier A is the production
 default**; the flag is now a kill-switch, not an opt-in.
 
-- **Name:** `MEDIAHUB_GEN_V2` — env-read. **Unset (or any non-kill value) = v2
-  ON.** Set `0` / `false` / `off` / `no` to fall back to the legacy engine
-  (the deployment-wide kill-switch; see `graphic_renderer/archetypes.is_enabled`).
-- **Kill-switch engaged:** the old enum-permutation engine runs byte-identical
-  to its pre-v2 behaviour. The v2 files sit inert.
-- **Default (v2 on, Tier A):** rendering uses the `--mh-*` brand-role tokens,
-  the `layouts/v2` archetype library with the deterministic seeded picker, the
-  autofit hero sizing, and the saliency photo position. The design-spec
-  director and the pool/rank/compliance shortlist are **not yet wired** —
-  they land with SEQ-2.
-- **Provider unavailable:** Tier A is already the **deterministic
-  archetype-picker floor** (seed-rotated over the v2 archetypes) — a real,
-  legible card, never a fabricated or broken one. This honours the project's
-  "honest error, never a fake fallback" rule and remains the floor under the
-  SEQ-2 director.
-- **Cutover (SEQ-3):** once the SEQ-2 director wins the A/B in review and the
-  suite is green, the dead enum/menu-picker code is removed via CLAUDE.md's
-  gated-removal process. A second flag, `MEDIAHUB_GEN_BG` (default off),
-  independently gates optional generative backgrounds (SEQ-4, Tier C).
+- **Name:** `MEDIAHUB_GEN_V2` — env-read, **default ON** (v2 is the production
+  engine; the Tier A default-flip is recorded in
+  [`build_reports/GEN_ENGINE_LOG.md`](build_reports/GEN_ENGINE_LOG.md)). Setting
+  `0` / `false` / `off` / `no` is the deployment-wide **kill-switch** (see
+  `graphic_renderer/archetypes.is_enabled`).
+- **Kill-switch set (`MEDIAHUB_GEN_V2=0`):** the legacy enum-permutation engine
+  runs byte-for-byte as before. The v2 files (archetypes, design-spec schema,
+  metrics) sit inert.
+- **Default (on):** the create-graphic route uses the `layouts/v2` archetypes
+  with brand role tokens, autofit, and saliency crops; when an LLM provider is
+  configured the design-spec director picks the archetype/emphasis/hook per
+  moment. (The Tier B pool/rank/compliance shortlist is SEQ-2, still to come.)
+- **Provider unavailable while on:** the system falls back to the **deterministic
+  archetype-picker floor** — seeded per card from its id, rotated past the card's
+  recently-used archetypes — a real, legible card, never a fabricated or broken
+  one. This honours the project's "honest error, never a fake fallback" rule and
+  remains the floor under the SEQ-2 director.
+- **Cutover (SEQ-3):** the default has already flipped to on (Tier A proved out);
+  what remains for SEQ-3 is removing the dead enum/menu-picker code via
+  CLAUDE.md's gated-removal process once Tier B lands. A second flag,
+  `MEDIAHUB_GEN_BG` (default off), independently gates optional generative
+  backgrounds (SEQ-4, Tier C).
 
 Read the flag in the route and in `resolve_design_tokens(profile_id)`; everything
 downstream branches on it. Seed the director and **cache the spec** (not just the
