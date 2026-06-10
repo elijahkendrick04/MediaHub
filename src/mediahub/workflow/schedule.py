@@ -29,7 +29,7 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -145,8 +145,8 @@ def _ensure_schema(db_path: Optional[Path] = None) -> None:
 
 
 def _to_cron(kind: str, expr: str) -> str:
-    """Map a schedule kind to a 5-field cron string. ``cron`` passes through;
-    daily/weekly/monthly are convenience forms over croniter."""
+    """Map a schedule kind to a 5-field cron string (used for raw cron validation
+    and as the croniter input for the ``cron`` kind only)."""
     expr = (expr or "").strip()
     if kind == "cron":
         return expr
@@ -162,6 +162,56 @@ def _to_cron(kind: str, expr: str) -> str:
         hh, mm = hm.split(":")
         return f"{int(mm)} {int(hh)} {int(dom)} * *"
     raise ValueError(f"unsupported schedule kind: {kind}")
+
+
+def _prev_daily_slot(expr: str, tz, now_utc: datetime) -> datetime:
+    """Most-recent 'HH:MM' slot that is <= now_utc, returned as UTC."""
+    hh, mm = expr.strip().split(":")
+    now_local = now_utc.astimezone(tz)
+    slot = now_local.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    if slot > now_local:
+        slot -= timedelta(days=1)
+    return slot.astimezone(timezone.utc)
+
+
+def _prev_weekly_slot(expr: str, tz, now_utc: datetime) -> datetime:
+    """Most-recent 'DOW HH:MM' slot (DOW 0=Sun) <= now_utc, returned as UTC."""
+    dow_str, hm = expr.strip().split(" ", 1)
+    hh, mm = hm.split(":")
+    cron_dow = int(dow_str)  # 0=Sun … 6=Sat
+    # Python isoweekday: Mon=1 … Sun=7; convert cron DOW
+    py_dow = 7 if cron_dow == 0 else cron_dow
+    now_local = now_utc.astimezone(tz)
+    days_back = (now_local.isoweekday() - py_dow) % 7
+    candidate = now_local - timedelta(days=days_back)
+    slot = candidate.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    if slot > now_local:
+        slot -= timedelta(weeks=1)
+    return slot.astimezone(timezone.utc)
+
+
+def _prev_monthly_slot(expr: str, tz, now_utc: datetime) -> datetime:
+    """Most-recent 'DOM HH:MM' slot (DOM 1-28+) <= now_utc, returned as UTC."""
+    dom_str, hm = expr.strip().split(" ", 1)
+    hh, mm = hm.split(":")
+    dom = int(dom_str)
+    now_local = now_utc.astimezone(tz)
+    # Try this month's slot; if it doesn't exist (e.g. DOM 31 in April) fall back.
+    try:
+        slot = now_local.replace(day=dom, hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        if slot <= now_local:
+            return slot.astimezone(timezone.utc)
+    except ValueError:
+        pass
+    # Go to last day of the previous month and try there.
+    first_of_month = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_prev = first_of_month - timedelta(days=1)
+    try:
+        slot = last_prev.replace(day=dom, hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    except ValueError:
+        # DOM doesn't exist in that month either — use last day of that month.
+        slot = last_prev.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    return slot.astimezone(timezone.utc)
 
 
 def _tz(name: str):
@@ -193,17 +243,26 @@ def due_slot_utc(task: ScheduledTask, now_utc: datetime, catchup_secs: int) -> O
             return slot.isoformat()
         return None
 
+    tz = _tz(task.timezone)
     try:
-        from croniter import croniter  # noqa: PLC0415
+        if task.schedule_kind == "daily":
+            prev_utc = _prev_daily_slot(task.schedule_expr, tz, now_utc)
+        elif task.schedule_kind == "weekly":
+            prev_utc = _prev_weekly_slot(task.schedule_expr, tz, now_utc)
+        elif task.schedule_kind == "monthly":
+            prev_utc = _prev_monthly_slot(task.schedule_expr, tz, now_utc)
+        else:  # "cron" — requires croniter
+            try:
+                from croniter import croniter  # noqa: PLC0415
+            except Exception:
+                return None
+            cron = _to_cron(task.schedule_kind, task.schedule_expr)
+            base_local = now_utc.astimezone(tz)
+            prev_local = croniter(cron, base_local).get_prev(datetime)
+            prev_utc = prev_local.astimezone(timezone.utc).replace(microsecond=0)
     except Exception:
         return None
-    try:
-        cron = _to_cron(task.schedule_kind, task.schedule_expr)
-        base_local = now_utc.astimezone(_tz(task.timezone))
-        prev_local = croniter(cron, base_local).get_prev(datetime)
-        prev_utc = prev_local.astimezone(timezone.utc).replace(microsecond=0)
-    except Exception:
-        return None
+    prev_utc = prev_utc.replace(microsecond=0)
     if (now_utc - prev_utc).total_seconds() <= catchup_secs:
         return prev_utc.isoformat()
     return None
@@ -222,14 +281,31 @@ def next_fire_utc(task: ScheduledTask, after_utc: Optional[datetime] = None) -> 
             dt = dt.replace(tzinfo=_tz(task.timezone))
         slot = dt.astimezone(timezone.utc).replace(microsecond=0)
         return slot.isoformat() if slot > after else None
+    tz = _tz(task.timezone)
     try:
-        from croniter import croniter  # noqa: PLC0415
-
-        cron = _to_cron(task.schedule_kind, task.schedule_expr)
-        nxt = croniter(cron, after.astimezone(_tz(task.timezone))).get_next(datetime)
-        return nxt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+        if task.schedule_kind == "daily":
+            prev = _prev_daily_slot(task.schedule_expr, tz, after)
+            nxt = prev + timedelta(days=1)
+        elif task.schedule_kind == "weekly":
+            prev = _prev_weekly_slot(task.schedule_expr, tz, after)
+            nxt = prev + timedelta(weeks=1)
+        elif task.schedule_kind == "monthly":
+            # Advance by ~31 days then compute the prev slot from there.
+            candidate = after + timedelta(days=32)
+            nxt = _prev_monthly_slot(task.schedule_expr, tz, candidate)
+            if nxt <= after:
+                nxt = _prev_monthly_slot(task.schedule_expr, tz, candidate + timedelta(days=32))
+        else:  # "cron" — requires croniter
+            try:
+                from croniter import croniter  # noqa: PLC0415
+            except Exception:
+                return None
+            cron = _to_cron(task.schedule_kind, task.schedule_expr)
+            nxt_local = croniter(cron, after.astimezone(tz)).get_next(datetime)
+            nxt = nxt_local.astimezone(timezone.utc).replace(microsecond=0)
     except Exception:
         return None
+    return nxt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
 # ── task CRUD ──────────────────────────────────────────────────────────────

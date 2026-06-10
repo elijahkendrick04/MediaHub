@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "generated_at": "2026-06-03T04:28:48+00:00",
+  "generated_at": "2026-06-10T20:40:41+00:00",
   "bugs": {
     "e6f9dc3b346d": {
       "fingerprint": "e6f9dc3b346d",
@@ -26,7 +26,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e883e6f0bbc7": {
@@ -61,7 +61,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "71e02f586c45": {
@@ -96,7 +96,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "5cebfcb079da": {
@@ -123,7 +123,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "55093f7335f8": {
@@ -150,7 +150,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "76196fe6a36b": {
@@ -178,7 +178,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ca523d57abfe": {
@@ -202,13 +202,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 25,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "37d87cf5f107": {
@@ -232,7 +232,7 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 25,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "fix_attempts": 2,
@@ -246,7 +246,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "c078dfe0fd10": {
@@ -276,7 +276,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "1a292d42c2a2": {
@@ -306,7 +306,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ee92220cff28": {
@@ -341,7 +341,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e9e98e5f2b67": {
@@ -371,7 +371,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "510d8919d03e": {
@@ -401,7 +401,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b07572c63c13": {
@@ -430,7 +430,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "3f77367bbf6c": {
@@ -458,7 +458,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -487,7 +487,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -515,7 +515,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f07b0a820cda": {
@@ -542,7 +542,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "1db920390f08": {
@@ -572,7 +572,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "a95a57febaa6": {
@@ -602,7 +602,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "bfc627098c98": {
@@ -637,7 +637,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "c9862d27b7c0": {
@@ -665,7 +665,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -693,7 +693,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e8455cdfdedb": {
@@ -728,7 +728,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7c66fb1350e3": {
@@ -763,7 +763,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "aff50d6aa9db": {
@@ -793,7 +793,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b47311d05103": {
@@ -821,7 +821,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -852,7 +852,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7eeacfc2cb14": {
@@ -880,7 +880,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -909,7 +909,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -937,7 +937,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7d64d57158d0": {
@@ -967,7 +967,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f39cf22df1f0": {
@@ -997,7 +997,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "0622ce8f5bb6": {
@@ -1025,7 +1025,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1056,7 +1056,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "1e132430ab96": {
@@ -1084,7 +1084,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1113,7 +1113,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1142,7 +1142,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1174,7 +1174,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "5e0405b2f9bd": {
@@ -1202,7 +1202,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1230,7 +1230,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "35ff22e13091": {
@@ -1261,7 +1261,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "8ab0ccd13904": {
@@ -1296,7 +1296,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "76ad189abd62": {
@@ -1326,7 +1326,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e79087027f38": {
@@ -1355,7 +1355,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1384,7 +1384,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1413,7 +1413,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1441,7 +1441,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b51047bfbf12": {
@@ -1469,7 +1469,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "83bce121b5f8": {
@@ -1497,7 +1497,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ea20d7e182fc": {
@@ -1528,7 +1528,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e0fa559c5718": {
@@ -1556,7 +1556,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1587,7 +1587,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "29a7575d591e": {
@@ -1615,7 +1615,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -1644,7 +1644,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ec9c93777b73": {
@@ -1672,7 +1672,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e38c136559e9": {
@@ -1703,7 +1703,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "33868b7dcd6e": {
@@ -1733,7 +1733,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "0fa38c738838": {
@@ -1763,7 +1763,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "5e3472d6dbaf": {
@@ -1791,7 +1791,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "9625591d5a68": {
@@ -1818,7 +1818,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "a70617621ebf": {
@@ -1849,7 +1849,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "3e82b43412ba": {
@@ -1884,7 +1884,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b3fcfc7348e7": {
@@ -1914,7 +1914,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "02d8cfb3993c": {
@@ -1944,7 +1944,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "a5b0c6b6d911": {
@@ -1974,7 +1974,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e3829b484a1f": {
@@ -2002,7 +2002,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2031,7 +2031,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2060,7 +2060,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2088,7 +2088,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "4f1d8d41781e": {
@@ -2123,7 +2123,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d5e8229ef41c": {
@@ -2160,26 +2160,26 @@
     "fd111afb7b70": {
       "fingerprint": "fd111afb7b70",
       "category": "semantic:functional",
-      "severity": "low",
-      "title": "404 on /web-research with no redirect to /research",
+      "severity": "medium",
+      "title": "/upload/configure returns 404 while /upload succeeds",
       "route": "/upload/configure",
-      "expected": "/web-research should return 200 or redirect (301/302) to /research if the route was renamed",
-      "actual": "404 returned; /research returns 200, suggesting a rename without a redirect",
-      "evidence": "AI judge (functional, confidence medium):\nroutes list shows: 404 /web-research, 200 /research \u2014 any in-app link or bookmark to /web-research silently dead-ends",
+      "expected": "200 OK \u2014 a configure step after file upload should be reachable if the upload wizard exposes it",
+      "actual": "404 Not Found",
+      "evidence": "AI judge (functional, confidence medium):\nRoute audit shows /upload \u2192 200 but /upload/configure \u2192 404; if the upload flow links to a configure sub-step (e.g. club selection, column mapping), users would hit a dead end silently \u2014 the upload itself appears to succeed but configuration would be unreachable",
       "suspect": "",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the functional aspect described above"
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the functional aspect described above"
       ],
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 15,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 16,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] 404 on /upload/configure breaks navigation from a reachable parent route",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Speculative but potentially a silent dead end in production; requires one engineer to verify whether any UI path links to /upload/configure before closing",
       "invalidated_reason": "invalid: /upload/configure returns HTTP 302 (real test client), never 404 \u2014 the route exists (web.py) and handles no-run_id with a recovery page. Transient sweep-state artifact, not a product defect.",
       "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
       "confirmations": 0,
@@ -2191,26 +2191,26 @@
     "3dab958fe4dd": {
       "fingerprint": "3dab958fe4dd",
       "category": "semantic:user_brain",
-      "severity": "medium",
-      "title": "'DEVELOPER TOOLS' section visible to end users on the review page",
+      "severity": "low",
+      "title": "'Governing body \u2014 ' is blank on a national-level meet, with no fallback or explanation",
       "route": "review page",
-      "expected": "Developer or debug tooling should not be visible to a volunteer end-user; it adds confusion and erodes confidence",
-      "actual": "A 'DEVELOPER TOOLS' label is rendered inline on the review page with no explanation",
-      "evidence": "AI judge (user_brain, confidence high):\n'DEVELOPER TOOLS' appears as a visible section heading on the review queue page",
+      "expected": "For a national meet, the governing body (e.g. Swim England, British Swimming) should be shown, or a note like 'not detected in file' so the volunteer knows whether this is a parse failure or a data gap",
+      "actual": "'Governing body \u2014' with a dash and nothing else. At a national level meet this is a meaningful omission that a volunteer would notice and distrust",
+      "evidence": "AI judge (user_brain, confidence high):\nMeet Context panel: 'Meet level NATIONAL / Governing body \u2014 / Has finals NO'",
       "suspect": "",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "wontfix",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 16,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 17,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
-      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] DEVELOPER TOOLS label visible on the production review page is a productization failure; fix soon.",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Blank governing body is minor but real; volunteers posting national-level content without attribution will face credibility questions",
       "invalidated_reason": "invalid: the 'raw status string' is the tester's own flow_result control token (autotest/run.py); grep flow_result src/mediahub == 0 matches. Not product code. Closed by PR #197 provenance guard.",
       "invalidated_by": "decontamination post-merge (PR #197), code/HTTP-proven",
       "confirmations": 0,
@@ -2244,7 +2244,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2273,7 +2273,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2303,7 +2303,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2333,7 +2333,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2363,7 +2363,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "25cd61befbd6": {
@@ -2383,9 +2383,9 @@
       "screenshot": "autotest/screenshots/25cd61befbd6.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 10,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 11,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/209",
       "fix_branch": "autotest/fix-25cd61befbd6",
@@ -2413,9 +2413,9 @@
       "screenshot": "autotest/screenshots/a12292408770.png",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 10,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 11,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/210",
       "fix_branch": "autotest/fix-a12292408770",
@@ -2446,14 +2446,14 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 8,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/211",
       "fix_branch": "autotest/fix-0fc5bf4cd758",
       "fix_attempts": 1,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "a31b1bda242d": {
@@ -2483,7 +2483,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "343e7a7dbbd7": {
@@ -2512,30 +2512,30 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
     "f51fbb0c9424": {
       "fingerprint": "f51fbb0c9424",
       "category": "semantic:user_brain",
-      "severity": "medium",
-      "title": "Review queue says 3/57 reviewed (5%) but 'Approve all in queue' button exists alongside individual card actions \u2014 bulk-approve scope is ambi",
+      "severity": "high",
+      "title": "Duplicate cards for the same swimmer, event, and medal with only a time difference \u2014 no explanation",
       "route": "review queue",
-      "expected": "It should be clear whether 'Approve all in queue' approves all 57 cards or only the remaining 54 in-queue cards, and what happens next",
-      "actual": "The button label says 'Approve all in queue' but the queue count (57), approved count (3), and rejected count (0) make the scope unclear. A volunteer could accidentally approve cards they haven't read.",
-      "evidence": "AI judge (user_brain, confidence high):\n'QUEUE 57 / APPROVED 3 / REJECTED 0' shown alongside 'Approve all in queue' button with no confirmation dialog or scope clarification indicated",
+      "expected": "Duplicate or near-duplicate achievements (same swimmer, same event, same medal colour, 0.18s apart) should be flagged, merged, or explained so a volunteer can tell which is the correct card to approve",
+      "actual": "Cards #2 and #3 are both 'Michael Gillespie \u00b7 50m Butterfly (LC) \u00b7 GOLD \u00b7 27.42' and '27.24' \u2014 no label, no note, no dedup warning. Cards #6 and #7 are both 'Simon Harrison \u00b7 50m Backstroke (LC) \u00b7 BRONZE \u00b7 31.33' and '31.49'. A volunteer has no idea which time is right or why both exist",
+      "evidence": "AI judge (user_brain, confidence high):\nCard #2: '27.42', Card #3: '27.24' \u2014 same event, same medal, same swimmer. Card #6: '31.33', Card #7: '31.49' \u2014 same event, same medal, same swimmer",
       "suspect": "",
-      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Unlabeled bulk-approve alongside a 57-card queue is a real workflow trap; confirmation modal showing exact card count required.",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Same systematic multi-gold defect as [9]; second swimmer pair (cards 6/7) confirms it is not isolated",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "fixing",
       "first_seen": "2026-05-31T19:29:01+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": "https://github.com/elijahkendrick04/MediaHub/pull/219",
       "fix_branch": "autotest/fix-f51fbb0c9424",
@@ -2572,7 +2572,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "cc71c8b724ba": {
@@ -2601,7 +2601,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2631,7 +2631,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2659,7 +2659,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2687,7 +2687,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2718,7 +2718,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2748,7 +2748,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2778,7 +2778,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2808,7 +2808,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2838,7 +2838,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2868,7 +2868,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2898,7 +2898,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2928,7 +2928,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2958,7 +2958,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -2988,7 +2988,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3018,7 +3018,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3048,7 +3048,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3076,7 +3076,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3106,7 +3106,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3136,7 +3136,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3166,7 +3166,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3196,7 +3196,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3226,7 +3226,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3256,7 +3256,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3286,7 +3286,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3316,7 +3316,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3346,7 +3346,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3376,7 +3376,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3404,7 +3404,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3434,7 +3434,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3464,7 +3464,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3492,37 +3492,38 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
     "4fe01d0e3bb7": {
       "fingerprint": "4fe01d0e3bb7",
       "category": "council:blind_spot",
-      "severity": "medium",
-      "title": "Scope of hollow cards unknown \u2014 remaining 45 cards likely equally affected",
+      "severity": "high",
+      "title": "Cards lack round/heat label \u2014 prelim and final swims appear as impossible duplicates",
       "route": "output",
-      "expected": "Hollow-card failure isolated to sampled 12 cards, or scope otherwise bounded",
-      "actual": "Systemic pipeline failure implies all cards produced across all runs are equally hollow; only 12 of 57 cards have been confirmed",
-      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nChairman verdict: failure is structural and upstream; 12-card sample may understate full impact \u2014 scope must be confirmed before fix urgency is finalised",
+      "expected": "Each card identifies the round (e.g. Prelim, Final, Heat 3) so that two legitimate first-place finishes by the same swimmer in different rounds are distinguishable",
+      "actual": "Cards show swimmer, event, medal, and time but no round or heat designation; a prelim gold and a final gold by the same swimmer are rendered as duplicate impossible medals with no context",
+      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nChairman analysis: '27.42 / 27.24 split is almost certainly prelims and finals, not a deduplication error \u2014 both are genuine first-place finishes in their respective rounds'; source file MISM-2024-RESULTS.PDF must be read before any fix is written",
       "suspect": "",
       "rationale": "",
       "repro": [],
       "screenshot": "",
-      "status": "auto-closed",
+      "status": "regressed",
       "first_seen": "2026-06-01T21:43:18+00:00",
-      "last_seen": "2026-06-01T21:43:18+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260601T213618Z-fca6",
-      "present_last_run": false,
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 0,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
-      "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
+      "archived_reason": "decayed: not reproduced for 3 consecutive sweeps",
+      "regressed_at": "2026-06-10T20:40:41+00:00"
     },
     "f59bd5466e32": {
       "fingerprint": "f59bd5466e32",
@@ -3550,7 +3551,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3581,7 +3582,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 2,
+      "absent_streak": 3,
       "auto_closed_at": null
     },
     "de60580f5f59": {
@@ -3610,7 +3611,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3640,7 +3641,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3670,7 +3671,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3692,13 +3693,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 2,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "9f26a216eca5": {
@@ -3727,7 +3728,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3757,7 +3758,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3787,7 +3788,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": "2026-06-03T04:28:48+00:00",
       "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
@@ -3818,7 +3819,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 2,
+      "absent_streak": 3,
       "auto_closed_at": null
     },
     "8641be41aab0": {
@@ -3839,9 +3840,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3869,9 +3870,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3899,9 +3900,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3932,13 +3933,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 3,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "cea6db4058b3": {
@@ -3959,9 +3960,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -3989,9 +3990,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4019,9 +4020,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4049,9 +4050,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4079,9 +4080,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4109,9 +4110,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4139,9 +4140,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4169,9 +4170,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4199,9 +4200,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4229,9 +4230,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4259,9 +4260,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4289,9 +4290,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4319,9 +4320,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4349,9 +4350,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4379,9 +4380,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4409,9 +4410,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4439,9 +4440,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4469,9 +4470,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4499,9 +4500,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4529,9 +4530,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4559,9 +4560,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4589,9 +4590,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4619,9 +4620,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4649,9 +4650,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4679,9 +4680,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 5,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4709,9 +4710,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4739,9 +4740,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4769,9 +4770,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4799,9 +4800,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4829,9 +4830,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4859,9 +4860,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4889,9 +4890,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4919,9 +4920,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4949,9 +4950,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -4979,9 +4980,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5012,13 +5013,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 3,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "6cb6c25455c7": {
@@ -5039,9 +5040,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5072,13 +5073,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 3,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "eb1cd90c76da": {
@@ -5099,9 +5100,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5132,13 +5133,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 3,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "32bd4fde5062": {
@@ -5159,9 +5160,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5189,9 +5190,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5219,9 +5220,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5249,9 +5250,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5279,9 +5280,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5309,9 +5310,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5339,9 +5340,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5366,7 +5367,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "pending",
+      "status": "auto-closed",
       "first_seen": "2026-06-02T14:40:53+00:00",
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
@@ -5377,8 +5378,9 @@
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
-      "absent_streak": 2,
-      "auto_closed_at": null
+      "absent_streak": 3,
+      "auto_closed_at": "2026-06-10T20:40:41+00:00",
+      "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
     "01518d3f5513": {
       "fingerprint": "01518d3f5513",
@@ -5395,7 +5397,7 @@
         "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
-      "status": "pending",
+      "status": "auto-closed",
       "first_seen": "2026-06-02T14:40:53+00:00",
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
@@ -5406,8 +5408,9 @@
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
-      "absent_streak": 2,
-      "auto_closed_at": null
+      "absent_streak": 3,
+      "auto_closed_at": "2026-06-10T20:40:41+00:00",
+      "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
     "b6f86c8a8de9": {
       "fingerprint": "b6f86c8a8de9",
@@ -5422,7 +5425,7 @@
       "rationale": "",
       "repro": [],
       "screenshot": "",
-      "status": "pending",
+      "status": "auto-closed",
       "first_seen": "2026-06-02T14:40:53+00:00",
       "last_seen": "2026-06-02T14:40:53+00:00",
       "seen_count": 1,
@@ -5433,8 +5436,9 @@
       "confirmations": 0,
       "first_pending_run_id": "20260602T143545Z-d1f9",
       "first_pending_at": "2026-06-02T14:40:53+00:00",
-      "absent_streak": 2,
-      "auto_closed_at": null
+      "absent_streak": 3,
+      "auto_closed_at": "2026-06-10T20:40:41+00:00",
+      "archived_reason": "decayed: not reproduced for 3 consecutive sweeps"
     },
     "0f6e3d0734b5": {
       "fingerprint": "0f6e3d0734b5",
@@ -5462,7 +5466,7 @@
       "confirmations": 0,
       "first_pending_run_id": "20260602T163757Z-5175",
       "first_pending_at": "2026-06-02T16:43:29+00:00",
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "e9d842e21100": {
@@ -5489,7 +5493,7 @@
       "confirmations": 0,
       "first_pending_run_id": "20260602T163757Z-5175",
       "first_pending_at": "2026-06-02T16:43:29+00:00",
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "33893e777a30": {
@@ -5510,9 +5514,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-03T04:28:48+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5540,9 +5544,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-03T04:28:48+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5570,9 +5574,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-03T04:28:48+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5600,9 +5604,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-03T04:28:48+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5630,9 +5634,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-03T04:28:48+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 1,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -5662,13 +5666,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 1,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": "20260603T042239Z-0163",
       "first_pending_at": "2026-06-03T04:28:48+00:00",
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "b2b3f3a13b74": {
@@ -5691,13 +5695,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 1,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": "20260603T042239Z-0163",
       "first_pending_at": "2026-06-03T04:28:48+00:00",
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "0b69213d8c61": {
@@ -5720,12 +5724,694 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 2,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 1,
       "first_pending_run_id": "20260603T042239Z-0163",
       "first_pending_at": "2026-06-03T04:28:48+00:00",
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "ac6f77e15778": {
+      "fingerprint": "ac6f77e15778",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/manifest.webmanifest",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /manifest.webmanifest",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "bea9ae54f585": {
+      "fingerprint": "bea9ae54f585",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/manifest.webmanifest",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /manifest.webmanifest",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "30d531502850": {
+      "fingerprint": "30d531502850",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/manifest.webmanifest",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /manifest.webmanifest",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "368e92fc5b85": {
+      "fingerprint": "368e92fc5b85",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/manifest.webmanifest",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /manifest.webmanifest",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "90df51637703": {
+      "fingerprint": "90df51637703",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/manifest.webmanifest",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /manifest.webmanifest",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "ef6ee7575c50": {
+      "fingerprint": "ef6ee7575c50",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Select element must have an accessible name (select-name)",
+      "route": "/settings",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'select-name' violation (critical) on 6 element(s)",
+      "evidence": "axe-core rule: select-name\nhelp: Select element must have an accessible name\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/select-name?application=axeAPI\nexample targets:\n  select[name=\"meet_recap\"]\n  select[name=\"athlete_spotlight\"]\n  select[name=\"weekend_preview\"]\n  select[name=\"sponsor_post\"]\n  select[name=\"session_update\"]",
+      "suspect": "axe:select-name",
+      "rationale": "",
+      "repro": [
+        "Open /settings",
+        "Run axe-core; rule 'select-name' flags 6 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "9698135cc3ef": {
+      "fingerprint": "9698135cc3ef",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/sw.js",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /sw.js",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "9bd4cc2d3544": {
+      "fingerprint": "9bd4cc2d3544",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/sw.js",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /sw.js",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "15237b62a84b": {
+      "fingerprint": "15237b62a84b",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/sw.js",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /sw.js",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "432c837c0f96": {
+      "fingerprint": "432c837c0f96",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/sw.js",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /sw.js",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3803be40dbd7": {
+      "fingerprint": "3803be40dbd7",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/sw.js",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /sw.js",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "4fc6114844ea": {
+      "fingerprint": "4fc6114844ea",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Heading levels should only increase by one (heading-order)",
+      "route": "/upload",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'heading-order' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: heading-order\nhelp: Heading levels should only increase by one\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/heading-order?application=axeAPI\nexample targets:\n  h3",
+      "suspect": "axe:heading-order",
+      "rationale": "",
+      "repro": [
+        "Open /upload",
+        "Run axe-core; rule 'heading-order' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "eabe061321f4": {
+      "fingerprint": "eabe061321f4",
+      "category": "network_error",
+      "severity": "medium",
+      "title": "font failed on /favicon.ico",
+      "route": "/favicon.ico",
+      "expected": "All same-origin sub-requests succeed",
+      "actual": "font \u2192 failed: https://mediahub-gzwc.onrender.com/static/fonts/bigshoulders-latin-normal-600.woff2",
+      "evidence": "{\n  \"url\": \"https://mediahub-gzwc.onrender.com/static/fonts/bigshoulders-latin-normal-600.woff2\",\n  \"status\": \"failed\",\n  \"type\": \"font\",\n  \"failure\": \"net::ERR_ABORTED\"\n}",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Open https://mediahub-gzwc.onrender.com/favicon.ico"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "cc9f715751f8": {
+      "fingerprint": "cc9f715751f8",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: Documents must have <title> element to aid in navigation (document-title)",
+      "route": "/api/status",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'document-title' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: document-title\nhelp: Documents must have <title> element to aid in navigation\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/document-title?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:document-title",
+      "rationale": "",
+      "repro": [
+        "Open /api/status",
+        "Run axe-core; rule 'document-title' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "dcfa5b232547": {
+      "fingerprint": "dcfa5b232547",
+      "category": "a11y",
+      "severity": "high",
+      "title": "a11y: <html> element must have a lang attribute (html-has-lang)",
+      "route": "/api/status",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'html-has-lang' violation (serious) on 1 element(s)",
+      "evidence": "axe-core rule: html-has-lang\nhelp: <html> element must have a lang attribute\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/html-has-lang?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:html-has-lang",
+      "rationale": "",
+      "repro": [
+        "Open /api/status",
+        "Run axe-core; rule 'html-has-lang' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "b832f31cafe1": {
+      "fingerprint": "b832f31cafe1",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Document should have one main landmark (landmark-one-main)",
+      "route": "/api/status",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'landmark-one-main' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: landmark-one-main\nhelp: Document should have one main landmark\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/landmark-one-main?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:landmark-one-main",
+      "rationale": "",
+      "repro": [
+        "Open /api/status",
+        "Run axe-core; rule 'landmark-one-main' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "41903654cf40": {
+      "fingerprint": "41903654cf40",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: Page should contain a level-one heading (page-has-heading-one)",
+      "route": "/api/status",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'page-has-heading-one' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: page-has-heading-one\nhelp: Page should contain a level-one heading\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/page-has-heading-one?application=axeAPI\nexample targets:\n  html",
+      "suspect": "axe:page-has-heading-one",
+      "rationale": "",
+      "repro": [
+        "Open /api/status",
+        "Run axe-core; rule 'page-has-heading-one' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "8ab8f4d7c6cb": {
+      "fingerprint": "8ab8f4d7c6cb",
+      "category": "a11y",
+      "severity": "medium",
+      "title": "a11y: All page content should be contained by landmarks (region)",
+      "route": "/api/status",
+      "expected": "The page meets the WCAG rule axe-core checks",
+      "actual": "axe-core 'region' violation (moderate) on 1 element(s)",
+      "evidence": "axe-core rule: region\nhelp: All page content should be contained by landmarks\nhelpUrl: https://dequeuniversity.com/rules/axe/4.12/region?application=axeAPI\nexample targets:\n  pre",
+      "suspect": "axe:region",
+      "rationale": "",
+      "repro": [
+        "Open /api/status",
+        "Run axe-core; rule 'region' flags 1 node(s)"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "6cffaefaa3ab": {
+      "fingerprint": "6cffaefaa3ab",
+      "category": "semantic:user_brain",
+      "severity": "high",
+      "title": "'Sources used \u2014 0 source(s)' contradicts the claim that every caption is source-grounded",
+      "route": "review queue / trust",
+      "expected": "Each card links back to a parsed result source so the volunteer can verify times and places are real",
+      "actual": "The sources section reads '0 source(s)' despite 8 cards being generated from a named PDF file (MISM-2024-RESULTS.PDF). This directly contradicts the home-page promise 'Every claim links back to the parsed result'",
+      "evidence": "AI judge (user_brain, confidence high):\n'Sources used \u2014 0 source(s)' shown at the bottom of the review page; the file 'MISM-2024-RESULTS.PDF' is named in the header but zero sources are linked",
+      "suspect": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] '0 source(s)' on a page that processed a named PDF breaks the product's verifiability promise in plain text",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260610T203427Z-0be5",
+      "first_pending_at": "2026-06-10T20:40:41+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "485e71b47606": {
+      "fingerprint": "485e71b47606",
+      "category": "semantic:output",
+      "severity": "medium",
+      "title": "Simon Harrison awarded bronze twice in 50m Backstroke with different times",
+      "route": "achievement",
+      "expected": "Only one swim can be the bronze-medal result; cards 6 and 7 both claim 3rd place with different times (31.33 and 31.49)",
+      "actual": "Two cards both assert 'wins bronze medal (3rd) in 50m Backstroke (LC)' with distinct times",
+      "evidence": "AI judge (output, confidence high):\nCard 6 achievement: 'Simon Harrison wins bronze medal (3rd) in 50m Backstroke (LC) \u2014 31.33' | Card 7 achievement: 'Simon Harrison wins bronze medal (3rd) in 50m Backstroke (LC) \u2014 31.49'",
+      "suspect": "",
+      "rationale": "[3-advisor council (The Contrarian, The Executor, The Outsider) + chairman] Core output defect: one swimmer cannot finish first twice in the same race; root cause must be diagnosed via source PDF before any code change",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the output aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 2,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 1,
+      "first_pending_run_id": "20260610T203427Z-0be5",
+      "first_pending_at": "2026-06-10T20:40:41+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "0be118e5ece6": {
+      "fingerprint": "0be118e5ece6",
+      "category": "semantic:output",
+      "severity": "medium",
+      "title": "Identical captions for distinct results across four event pairs",
+      "route": "caption",
+      "expected": "Each card's caption should distinguish the specific swim (round, time, or medal) so cards for the same swimmer/event are not identical",
+      "actual": "Four pairs of cards share word-for-word captions despite representing different times and/or medals: Simon Harrison 50m Free (gold 26.21 vs silver 26.23), Michael Gillespie 50m Fly (27.42 vs 27.24), Simon Harrison 100m Free (gold 55.96 vs bronze 57.97), Simon Harrison 50m Back (31.33 vs 31.49)",
+      "evidence": "AI judge (output, confidence high):\nCards 1 & 5 caption both read: 'Welsh Age Groups | Day 2, Simon Harrison! 50m Freestyle (LC) at ARENA Manchester International\\n#swimdata\\nAverage improvement across all swims: \u22120.7%' \u2014 one is gold, one silver, no distinction in caption text. Same pattern for cards 2&3, 4&8, 6&7.",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the output aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260610T203427Z-0be5",
+      "first_pending_at": "2026-06-10T20:40:41+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "f1922aebd957": {
+      "fingerprint": "f1922aebd957",
+      "category": "semantic:output",
+      "severity": "low",
+      "title": "Gold medal at national-level meet scored as medium confidence",
+      "route": "confidence",
+      "expected": "A gold medal win at a national-level meet is a major, unambiguous achievement and warrants high confidence",
+      "actual": "confidence: 'medium' on all gold-medal cards",
+      "evidence": "AI judge (output, confidence medium):\nCard 1 achievement: 'Simon Harrison wins gold medal (1st) in 50m Freestyle (LC) \u2014 26.21 at national-level meet (ARENA Manchester International)', confidence: 'medium'",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the output aspect described above"
+      ],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260610T203427Z-0be5",
+      "first_pending_at": "2026-06-10T20:40:41+00:00",
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "f9647b08c0e5": {
+      "fingerprint": "f9647b08c0e5",
+      "category": "council:blind_spot",
+      "severity": "high",
+      "title": "Confidence scoring is actively misleading \u2014 factually impossible cards receive high confidence ratings",
+      "route": "functional",
+      "expected": "The confidence signal should reflect data integrity; a card asserting an impossible outcome (same swimmer, same event, two gold medals) should score low or be flagged, not rated high confidence",
+      "actual": "Double-gold cards with impossible medal assignments are rated high confidence, causing volunteers who rely on 'high confidence = safe to post' to systematically publish errors",
+      "evidence": "Surfaced by the LLM Council peer-review (a blind spot the single judges missed):\nChairman blind-spot analysis: 'If the system rates factually impossible double-gold cards as high confidence, the confidence mechanism is not just unreliable \u2014 it is actively misleading'; identified during [9] post-mortem peer review",
+      "suspect": "",
+      "rationale": "",
+      "repro": [],
+      "screenshot": "",
+      "status": "pending",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": "20260610T203427Z-0be5",
+      "first_pending_at": "2026-06-10T20:40:41+00:00",
       "absent_streak": 0,
       "auto_closed_at": null
     }
@@ -5754,7 +6440,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "1623e36e552d": {
@@ -5780,7 +6466,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ee03ff2dd60f": {
@@ -5808,7 +6494,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "22cedc9ab58e": {
@@ -5836,7 +6522,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b01ec07d798f": {
@@ -5864,7 +6550,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "8c7e2f131136": {
@@ -5892,7 +6578,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "2e8206e8d413": {
@@ -5920,7 +6606,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "239ef8737bff": {
@@ -5948,7 +6634,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "8f631e60cb24": {
@@ -5976,7 +6662,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "803f7ead5bd4": {
@@ -6004,7 +6690,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d9e34eb08529": {
@@ -6032,7 +6718,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "de59899fef57": {
@@ -6060,7 +6746,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7473a4492b44": {
@@ -6088,7 +6774,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "644fc7499a4c": {
@@ -6116,7 +6802,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7a51dcd95351": {
@@ -6144,7 +6830,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "2f70e2b4c101": {
@@ -6172,7 +6858,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "275f6d4f3c15": {
@@ -6200,7 +6886,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "32d69a65464d": {
@@ -6228,7 +6914,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "9ffb1407aa9a": {
@@ -6256,7 +6942,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "3ade0339374f": {
@@ -6284,7 +6970,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7a7277e72a08": {
@@ -6312,7 +6998,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "eaf548e4779d": {
@@ -6340,7 +7026,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d58c7a1e26cc": {
@@ -6368,7 +7054,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ba01044e7a74": {
@@ -6396,7 +7082,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d608851b2781": {
@@ -6424,7 +7110,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d41c878a26ff": {
@@ -6452,7 +7138,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f29e70937168": {
@@ -6480,7 +7166,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "cca6366a7284": {
@@ -6508,7 +7194,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "24c7592e551f": {
@@ -6536,7 +7222,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "5f1dc5573bb4": {
@@ -6564,7 +7250,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "7ce7d896bdc1": {
@@ -6592,7 +7278,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "b9b1d1489eab": {
@@ -6620,7 +7306,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "2ed05fd31fdc": {
@@ -6648,7 +7334,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "dbf1ef9c7960": {
@@ -6676,7 +7362,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "c648d657b9f2": {
@@ -6704,7 +7390,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "88143d7dbdc3": {
@@ -6732,7 +7418,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "8cbd6ee668e7": {
@@ -6760,7 +7446,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "ca7e3aa815e1": {
@@ -6788,7 +7474,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "0e5a6362deea": {
@@ -6816,7 +7502,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "6948abc641ad": {
@@ -6844,7 +7530,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "78b7d2ae36ae": {
@@ -6872,7 +7558,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e17b439b1876": {
@@ -6900,28 +7586,28 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d5e8229ef41c": {
       "fingerprint": "d5e8229ef41c",
       "category": "semantic:user_brain (council:noise)",
       "severity": "medium",
-      "title": "'Create new content \u2192' and 'Start a content pack \u2192' CTAs have no confirmation they actually work",
+      "title": "'Open content builder \u2192' appears three times on the review page before any cards are approved \u2014 confusing call-to-action ordering",
       "route": "home page \u2014 primary actions",
-      "expected": "Primary CTAs lead to an upload or create screen where I can drop a results file",
-      "actual": "Both buttons are present but there is no evidence from the provided text that clicking them reaches an upload step \u2014 the flow outcome is not shown, so a first-time user cannot confirm the action does anything",
-      "evidence": "AI judge (user_brain, confidence medium):\n'Create new content \u2192' and 'Start a content pack \u2192' appear on home page but no subsequent screen or confirmation is described\n\n[council triage] demoted \u2014 Not a bug \u2014 tester did not click the CTAs; no confirmed failure, only a coverage gap.",
+      "expected": "The content builder CTA should become prominent only after the volunteer has approved cards, not before they have reviewed anything",
+      "actual": "'Open content builder \u2192' appears at the top, in the workflow summary, and again mid-page, while only 1 of 8 cards is approved and 7 are still IN QUEUE. Clicking it prematurely would take the volunteer into a builder with almost no content",
+      "evidence": "AI judge (user_brain, confidence high):\n'REVIEWED 1/8 \u00b7 12%' and 'APPROVED 1 / REJECTED 0' \u2014 yet 'Open content builder \u2192' is the most prominent repeated CTA on the page\n\n[council triage] demoted \u2014 CTA ordering is UX polish; does not prevent card review or approval",
       "suspect": "",
       "repro": [
-        "Reproduce the flow (result: live:judged-6-runs) and inspect the user_brain aspect described above"
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
       ],
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-30T19:25:31+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 6,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 8,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -6956,7 +7642,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "94cce88fa8c6": {
@@ -6984,7 +7670,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f780498f188c": {
@@ -7012,7 +7698,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "d9624ec031b8": {
@@ -7039,7 +7725,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "0010aae6b21e": {
@@ -7066,7 +7752,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f1d03a4691ef": {
@@ -7093,7 +7779,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "511b4b91e7f1": {
@@ -7122,7 +7808,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "34b79a72ffb7": {
@@ -7149,7 +7835,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "f2a8cc025083": {
@@ -7176,7 +7862,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "2409e04b1b7c": {
@@ -7203,7 +7889,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "cf8cbff2d486": {
@@ -7221,9 +7907,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-05-31T13:50:54+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 11,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 12,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -7259,7 +7945,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "35902274d0f3": {
@@ -7288,7 +7974,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "1b99ae947072": {
@@ -7317,7 +8003,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "565de4f13ed8": {
@@ -7346,7 +8032,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "b715d3fafaea": {
@@ -7375,7 +8061,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "89482f637688": {
@@ -7404,7 +8090,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "3dab958fe4dd": {
@@ -7462,7 +8148,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "5a31ed912673": {
@@ -7491,7 +8177,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "e47516eb477b": {
@@ -7520,7 +8206,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 3,
+      "absent_streak": 4,
       "auto_closed_at": null
     },
     "fa62e12448e1": {
@@ -7538,9 +8224,9 @@
       "screenshot": "",
       "status": "open",
       "first_seen": "2026-06-02T14:40:53+00:00",
-      "last_seen": "2026-06-03T04:28:48+00:00",
-      "seen_count": 3,
-      "last_run_id": "20260603T042239Z-0163",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 4,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
@@ -7576,7 +8262,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 2,
+      "absent_streak": 3,
       "auto_closed_at": null
     },
     "15afd4cb1ec9": {
@@ -7605,7 +8291,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 2,
+      "absent_streak": 3,
       "auto_closed_at": null
     },
     "16d2f5583b18": {
@@ -7634,7 +8320,7 @@
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 1,
+      "absent_streak": 2,
       "auto_closed_at": null
     },
     "94c7e7123a76": {
@@ -7657,13 +8343,13 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 2,
       "last_run_id": "20260603T042239Z-0163",
-      "present_last_run": true,
+      "present_last_run": false,
       "fix_pr": null,
       "fix_branch": null,
       "confirmations": 0,
       "first_pending_run_id": null,
       "first_pending_at": null,
-      "absent_streak": 0,
+      "absent_streak": 1,
       "auto_closed_at": null
     },
     "0b3b30c41274": {
@@ -7686,6 +8372,93 @@
       "last_seen": "2026-06-03T04:28:48+00:00",
       "seen_count": 1,
       "last_run_id": "20260603T042239Z-0163",
+      "present_last_run": false,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 1,
+      "auto_closed_at": null
+    },
+    "b09ae19b5d89": {
+      "fingerprint": "b09ae19b5d89",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "high",
+      "title": "No sign-up or onboarding path visible \u2014 home page goes straight to logged-in state",
+      "route": "home / auth",
+      "expected": "A first-time visitor sees a clear Sign Up button or onboarding flow explaining how to create an account and get started",
+      "actual": "The nav shows both 'SIGN OUT' and 'LOG IN' simultaneously, and the page renders as if already logged in (club name, pinned org, run counts). There is no visible Sign Up CTA, no 'create account' link, and no onboarding wizard for a brand-new user",
+      "evidence": "AI judge (user_brain, confidence high):\nNav bar lists: 'SWITCH ORG / SIGN OUT / LOG IN' \u2014 all at once. No register/sign-up option anywhere in the page text\n\n[council triage] demoted \u2014 Rendering quirk in already-authenticated session; does not break any workflow",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "d68040218512": {
+      "fingerprint": "d68040218512",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "medium",
+      "title": "Keyboard shortcut legend uses 'J' and 'K' for navigation but 'R' is labelled for both REJECT and appears next to 'REJECTED' filter \u2014 collisi",
+      "route": "review queue / keyboard shortcuts",
+      "expected": "Keyboard shortcut labels should be unambiguous and not reused across different UI contexts on the same screen",
+      "actual": "The shortcut bar shows 'J K MOVE \u00b7 A APPROVE \u00b7 R REJECT' and the filter tabs include a 'REJECTED' tab labelled 'J'. It is unclear whether 'J' moves down or selects the REJECTED filter",
+      "evidence": "AI judge (user_brain, confidence medium):\nShortcut legend: 'J K MOVE \u00b7 A APPROVE \u00b7 R REJECT \u00b7 ? HELP' \u2014 filter row shows 'REJECTED J' implying J is also bound to the REJECTED filter\n\n[council triage] demoted \u2014 Shortcut label ambiguity is minor UX noise; does not block volunteer workflow",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
+      "present_last_run": true,
+      "fix_pr": null,
+      "fix_branch": null,
+      "confirmations": 0,
+      "first_pending_run_id": null,
+      "first_pending_at": null,
+      "absent_streak": 0,
+      "auto_closed_at": null
+    },
+    "3c9160245233": {
+      "fingerprint": "3c9160245233",
+      "category": "semantic:user_brain (council:noise)",
+      "severity": "low",
+      "title": "'STORY 0' band in Recognition Summary with no explanation \u2014 volunteers may not know what 'STORY' means or why it is zero",
+      "route": "review queue / jargon",
+      "expected": "Band labels like ELITE, STRONG, STORY should be explained inline or on hover, and a zero count should say something like 'no story-worthy moments detected'",
+      "actual": "'STORY 0' appears with no tooltip, no definition, and no guidance. A non-technical volunteer will not know what a 'story band' is in this context",
+      "evidence": "AI judge (user_brain, confidence medium):\nRecognition Summary: 'ELITE 4 / STRONG 4 / STORY 0 / TOTAL ACHIEVEMENTS 8'\n\n[council triage] demoted \u2014 Unexplained band label is cosmetic; does not block any volunteer action",
+      "suspect": "",
+      "rationale": "",
+      "repro": [
+        "Reproduce the flow (result: live:judged-1-runs) and inspect the user_brain aspect described above"
+      ],
+      "screenshot": "",
+      "status": "open",
+      "first_seen": "2026-06-10T20:40:41+00:00",
+      "last_seen": "2026-06-10T20:40:41+00:00",
+      "seen_count": 1,
+      "last_run_id": "20260610T203427Z-0be5",
       "present_last_run": true,
       "fix_pr": null,
       "fix_branch": null,
