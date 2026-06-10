@@ -14,7 +14,7 @@ gated behind the `MEDIAHUB_GEN_V2` flag.
 > path is in. Per-stage state is in §13; build evidence in
 > [`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md)
 > and [`build_reports/GEN_QUALITY_BASELINE.md`](build_reports/GEN_QUALITY_BASELINE.md);
-> stage prompts in [`ROADMAP_ARCHIVE_2026-06.md`](ROADMAP_ARCHIVE_2026-06.md) Appendix A. The full
+> stage prompts in [`ROADMAP.md`](ROADMAP.md) Appendix A. The full
 > diagnosis, cost model, and rejected alternatives are in
 > [`research/mediahub-generative-ai-thesis.md`](research/mediahub-generative-ai-thesis.md);
 > the field study is in
@@ -215,7 +215,7 @@ should pick it — the SEQ-2 director's catalog entries), enforced by
 
 > Author each archetype against this convention **exactly** so the SEQ-1 wiring
 > can load every file uniformly. This is the contract copied from
-> [`ROADMAP_ARCHIVE_2026-06.md`](ROADMAP_ARCHIVE_2026-06.md) Appendix A → PAR-7; if the two ever diverge, the
+> [`ROADMAP.md`](ROADMAP.md) Appendix A → PAR-7; if the two ever diverge, the
 > roadmap is the source of truth.
 
 **Each archetype owns one new file** `src/mediahub/graphic_renderer/layouts/v2/<name>.html`
@@ -425,7 +425,7 @@ stays 100% (it is deterministic — any drop is a bug), and every card keeps its
 ## 13. Build status & sequencing
 
 Full prompts (implementation + verification) per stage are in
-[`ROADMAP_ARCHIVE_2026-06.md`](ROADMAP_ARCHIVE_2026-06.md) Appendix A. Status as of 2026-06-10:
+[`ROADMAP.md`](ROADMAP.md) Appendix A. Status as of 2026-06-10:
 
 **Parallel bucket — ✅ ALL SHIPPED:** PAR-1 caption quality pack (live: the
 approval seam feeds the few-shot store, the caption route injects it) · PAR-2
@@ -485,7 +485,7 @@ v2 is "done" when, with `MEDIAHUB_GEN_V2` on:
 
 - The plan, diagnosis, and cost model: [`research/mediahub-generative-ai-thesis.md`](research/mediahub-generative-ai-thesis.md) (§5 is the surgery).
 - The field study: [`research/generation-engine-competitor-evaluation.md`](research/generation-engine-competitor-evaluation.md).
-- Build order, owners, and per-stage prompts: [`ROADMAP_ARCHIVE_2026-06.md`](ROADMAP_ARCHIVE_2026-06.md) Appendix A.
+- Build order, owners, and per-stage prompts: [`ROADMAP.md`](ROADMAP.md) Appendix A.
 - The decision record: [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md).
 - The theming token plumbing this extends: [`THEMING.md`](THEMING.md).
 - How a card is built today: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`UPLOAD_TO_CARDS.md`](UPLOAD_TO_CARDS.md).
