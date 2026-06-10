@@ -152,6 +152,28 @@ def test_archetype_follows_convention(name):
         assert ph in _ALLOWED_PLACEHOLDERS, f"{name} uses unknown placeholder {ph}"
 
 
+@pytest.mark.parametrize("name", archetypes.list_archetypes())
+def test_archetype_has_authoring_notes(name):
+    # GENERATION.md §7: every archetype ships a one-paragraph <name>.notes.md
+    # describing the composition and when the director should pick it — the
+    # notes feed the SEQ-2 design-spec director's archetype catalog.
+    notes = archetypes.V2_DIR / f"{name}.notes.md"
+    assert notes.exists(), f"{name} is missing its .notes.md (director catalog entry)"
+    text = notes.read_text(encoding="utf-8").strip()
+    assert len(text) > 200, f"{name}.notes.md is too thin to brief the director"
+
+
+@pytest.mark.parametrize("name", archetypes.list_archetypes())
+def test_director_note_extracted_for_every_archetype(name):
+    # The director's catalog line is derived from the notes (PAR-7's purpose):
+    # bounded, plain-text, and substantive for every archetype in the library.
+    note = archetypes.director_note(name)
+    assert note, f"{name}: director_note extracted nothing from its notes"
+    assert len(note) <= archetypes._NOTE_MAX_CHARS + 2, f"{name}: note unbounded"
+    assert "**" not in note and "`" not in note, f"{name}: markdown leaked into the prompt line"
+    assert len(note) >= 60, f"{name}: note too thin to guide an archetype choice"
+
+
 # --------------------------------------------------------------------------- #
 # Generator integration: flag flips the layout to a v2 archetype
 # --------------------------------------------------------------------------- #
@@ -171,7 +193,10 @@ def test_generator_swaps_to_v2_when_flag_on(monkeypatch):
     assert len(chosen) >= 6
 
 
-def _brief_for_item(item, *, seed=0, recent=None):
+def _brief_for_item(item, *, seed=None, recent=None):
+    # seed=None mirrors the bulk-pack / fresh-regenerate call shape (no
+    # explicit seed → the floor derives one from the card id); pass an int
+    # (including 0) for the exact ?stable / ?variation_seed=N contract.
     return gen_brief(
         item,
         _eval(),
@@ -239,8 +264,9 @@ def test_pack_with_threaded_recents_avoids_seed_collisions(monkeypatch):
 
 
 def test_fresh_regenerate_rotates_without_a_provider(monkeypatch):
-    """The regenerate route's no-LLM floor: seed=0 plus the card's recent
-    signatures must walk the library, not return the same archetype forever."""
+    """The regenerate route's no-LLM floor: no explicit seed plus the card's
+    recent signatures must walk the library, not return the same archetype
+    forever."""
     monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
     item = {
         "id": "ci-1",

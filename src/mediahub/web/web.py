@@ -11454,6 +11454,30 @@ function copyWhyCard(btn, taId) {{
                 except Exception:
                     _mem_examples = []
 
+                # PAR-1 few-shot voice store: the most recent captions a human
+                # actually approved for this club (populated by the content-pack
+                # approval seam). Unlike semantic recall it needs no embedding
+                # backend and no corpus floor, so the approve → learn-the-voice
+                # loop works for every club from the first approval. Semantic
+                # hits lead (they are moment-matched), recents fill the rest;
+                # deduped, capped at 5 (the injection cap in ai_caption).
+                try:
+                    from mediahub.web.caption_examples import (
+                        load_examples as _load_caption_examples,
+                    )
+
+                    _approved_examples = (
+                        _load_caption_examples(run_profile_id) if run_profile_id else []
+                    )
+                except Exception:
+                    _approved_examples = []
+                _few_shot_examples: list[str] = []
+                for _ex in list(_mem_examples) + list(_approved_examples):
+                    _ex = (_ex or "").strip()
+                    if _ex and _ex not in _few_shot_examples:
+                        _few_shot_examples.append(_ex)
+                _few_shot_examples = _few_shot_examples[:5]
+
                 def _gen_one():
                     try:
                         return _gen_tone(
@@ -11463,7 +11487,7 @@ function copyWhyCard(btn, taId) {{
                             voice_profile=_run_voice_profile,
                             club_profile=club_profile_obj,
                             recent_captions=_recent_captions,
-                            few_shot_examples=_mem_examples,
+                            few_shot_examples=_few_shot_examples,
                         )
                     except _ClaudeUE:
                         # Terminal-shaped errors must propagate so the
@@ -22187,7 +22211,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         #   ?variation_seed=N  → force a specific integer seed
         seed_raw = _req.args.get("variation_seed")
         stable_mode = (_req.args.get("stable") or "").lower() in ("1", "true", "yes")
-        variation_seed = 0
+        # None = no explicit seed: the v2 floor derives a stable per-card seed
+        # from the card id, rotated past recents. An explicit integer —
+        # including 0 — is an exact, reproducible archetype pick.
+        variation_seed = None
         variation_profile = None
         ai_directed = False
 
@@ -22199,7 +22226,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             try:
                 variation_seed = int(seed_raw)
             except (TypeError, ValueError):
-                variation_seed = 0
+                variation_seed = None
         elif stable_mode:
             try:
                 from mediahub.creative_brief.generator import auto_variation_seed_for
@@ -22386,7 +22413,6 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     run_id=run_id,
                     media_assets=media_assets,
                     sponsor_name=sponsor_name,
-                    variation_seed=0,
                 )
                 visuals = res.get("visuals") or []
                 if visuals:

@@ -1,9 +1,14 @@
 # 1. Replace the enum-permutation generation engine with a design-spec director
 
-- **Status:** Accepted — planned. Implementation is staged behind the
-  `MEDIAHUB_GEN_V2` flag and not yet built (ROADMAP Appendix A, SEQ-0 → SEQ-4 all
-  ❌ NOT STARTED). The decision is recorded now so the build stages share one
-  reference.
+- **Status:** Accepted — **implemented**. The parallel bucket (PAR-1 → PAR-8)
+  and the full spine (SEQ-0 → SEQ-4) are shipped: the 12-archetype
+  `layouts/v2` library + deterministic picker is the **production default**
+  (`MEDIAHUB_GEN_V2=0` kill-switch), the design-spec director + candidate pool
+  + compliance-ranked shortlist are live, the old enum/menu-picker permutation
+  engine was removed at the SEQ-3 cutover via CLAUDE.md's gated-removal
+  process, and SEQ-4's data-driven video landed. Build evidence:
+  [`../build_reports/SEQ_SPINE_2026-06-10.md`](../build_reports/SEQ_SPINE_2026-06-10.md).
+  *(Status updated 2026-06-10.)*
 - **Date:** 2026-05-21
 - **Deciders:** MediaHub maintainer
 - **Context source:** [`../research/mediahub-generative-ai-thesis.md`](../research/mediahub-generative-ai-thesis.md)

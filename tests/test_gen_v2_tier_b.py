@@ -165,6 +165,25 @@ def test_batch_director_returns_none_on_garbage_and_no_provider():
         )
 
 
+def test_director_catalog_is_briefed_from_archetype_notes():
+    """PAR-7's purpose: each archetype's authored notes feed the director.
+
+    The system prompt's catalog lines must come from the ``<name>.notes.md``
+    when-to-pick passages — not collapse to the static fallback ("a distinct
+    layout.") for archetypes missing from the hardcoded guide dict.
+    """
+    names = list_archetypes()
+    prompt = ai_director._design_spec_system_prompt(names, list(TOKEN_ROLES))
+    # no archetype may fall through to the generic fallback line
+    assert "a distinct layout." not in prompt
+    # spot-check notes-derived briefings reach the prompt verbatim-ish
+    assert "head-to-head" in prompt  # duo_athlete_split's when-to-pick
+    assert "ceremonial" in prompt  # centered_medal_spotlight's when-to-pick
+    # and every archetype has its own catalog line
+    for name in names:
+        assert f"- {name}: " in prompt
+
+
 # ---------------------------------------------------------------------------
 # apply_design_spec — the single spec→brief mapping
 # ---------------------------------------------------------------------------

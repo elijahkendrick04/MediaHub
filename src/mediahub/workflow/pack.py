@@ -124,6 +124,15 @@ def build_content_pack(
                     )
                     if _cap:
                         _mem.capture(profile_id, ach, _cap, card_id=card_id, run_id=run_id)
+                        # PAR-1 approval loop: the plain few-shot voice store
+                        # works for EVERY club (no embedding backend, no corpus
+                        # floor) — the approved caption becomes a voice example
+                        # injected into future generation. Idempotent per
+                        # caption, best-effort like the semantic capture.
+                        if profile_id:
+                            from mediahub.web.ai_caption import record_approved_caption
+
+                            record_approved_caption(str(profile_id), _cap)
             except Exception:
                 pass
 

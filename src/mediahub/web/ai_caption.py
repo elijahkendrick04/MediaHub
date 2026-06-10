@@ -610,7 +610,10 @@ def generate_caption_candidates(
 ) -> list[str]:
     """Generate 4–6 caption candidates, dropping near-duplicates and AI-tells.
 
-    Returns up to ``n`` captions (clamped to 4–6) in generation order.
+    Returns up to ``n`` captions (clamped to 4–6), **ranked freshest-first**:
+    candidates are ordered by ascending worst-case trigram similarity to the
+    ``recent_captions`` and to each other (ties keep generation order), so the
+    caption least like anything the user has already seen leads the list.
     Each candidate is checked against the ban list and against already-seen
     captions (``recent_captions`` plus previously accepted candidates) using
     trigram Jaccard similarity. Raises ``ClaudeUnavailableError`` if the
@@ -646,7 +649,16 @@ def generate_caption_candidates(
         if len(pool) >= target:
             break
 
-    return pool
+    # Rank: the candidate least similar to everything already seen (the recent
+    # captions and its siblings) comes first — deterministic, explainable, and
+    # stable on generation order for ties.
+    def _staleness(idx_and_caption: tuple[int, str]) -> tuple[float, int]:
+        idx, caption = idx_and_caption
+        others = (recent_captions or []) + [c for j, c in enumerate(pool) if j != idx]
+        worst = max((_ngram_similarity(caption, o) for o in others), default=0.0)
+        return (worst, idx)
+
+    return [c for _, c in sorted(enumerate(pool), key=_staleness)]
 
 
 # ---------------------------------------------------------------------------

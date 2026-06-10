@@ -202,7 +202,7 @@ def create_visual_for_item(
     formats: Optional[list[str]] = None,
     media_assets: Optional[list[dict]] = None,
     sponsor_name: str = "",
-    variation_seed: int = 0,
+    variation_seed: Optional[int] = None,
     variation_profile=None,
     use_ai_director: bool = False,
     recent_signatures: Optional[list[str]] = None,

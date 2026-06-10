@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{ATHLETE_FULL_NAME}} — {{ACHIEVEMENT_LABEL}}</title>
+<style>{{BASE_CSS}}
+
+/* ===================================================================
+   duo_athlete_split  (v2 archetype, PAR-7)
+
+   A matchday "duel" poster: the canvas is bisected into two EQUAL
+   vertical halves by a hard accent seam down the centre line —
+     - the left half is the PHOTO bay (the athlete in the water), and
+     - the right half is a solid brand DATA bay (the scoreline), set
+       as the photo's typographic twin.
+   One full-width NAME BAND crosses both halves at the vertical
+   midpoint — the only element allowed to bridge the seam — so the
+   athlete's name literally ties the two personas together.
+
+   Structural signature: a 50/50 vertical bisection crossed by one
+   horizontal band (a "plus" of seam x band). No other archetype
+   bisects the canvas at the centre line: the sidebar rail is a narrow
+   off-centre column, the triptych has three bays, the ticker is
+   stacked full-width bands, and the diagonal hero splits horizontally
+   on an angle. Both bays anchor their content to opposite corners
+   (kicker top-left over the photo, ledger bottom-right on the brand
+   ground), which gives the card its diagonal tension without an
+   actual diagonal.
+
+   Holds at both ratios: the band is anchored at a fixed fraction of
+   the canvas height, the photo bay simply grows taller, and the data
+   bay's corner-anchored groups keep their padding. With no photo the
+   left bay falls back to painted swim-lane ropes and an accent ring
+   on the brand ground (the img, when present, covers them), so the
+   duel structure never looks broken.
+
+   Colours come ONLY from the resolved brand roles supplied by the
+   renderer as CSS custom properties; neutral rgba() is used solely
+   for depth (scrims / shadow / lane texture), never for brand colour.
+   The band and kicker use the accent ground with primary text — the
+   resolver's APCA-gated primary-on-accent pair.
+   =================================================================== */
+
+.duo {
+  --seam: 12px;       /* thickness of the centre seam                  */
+  --band-top: 42%;    /* where the crossing name band starts           */
+  --pad: 52px;        /* inset for bay content                         */
+
+  position: relative;
+  width: {{WIDTH}}px;
+  height: {{HEIGHT}}px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--mh-surface);
+  color: var(--mh-on-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.duo *, .duo *::before, .duo *::after { box-sizing: border-box; }
+
+/* ---- Left half: the photo bay ---- */
+.duo__bay--photo {
+  position: relative;
+  overflow: hidden;
+  /* no-photo fallback: swim-lane ropes + brand ground; a real photo
+     (object-fit: cover) fully covers this paint */
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.07) 0 3px,
+      rgba(0,0,0,0)          3px 86px),
+    linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.22) 100%),
+    var(--mh-primary);
+}
+.duo__ring {
+  position: absolute;
+  top: 16%; left: 50%;
+  width: 360px; height: 360px;
+  transform: translateX(-50%);
+  border: 6px solid var(--mh-accent);
+  border-radius: 50%;
+  opacity: 0.55;
+}
+.duo__media { position: absolute; inset: 0; }
+.duo__media img,
+.duo__media svg {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: var(--mh-photo-pos, center 28%);
+  display: block;
+}
+/* scrims keep the kicker + sponsor legible over a bright photo */
+.duo__scrim-top {
+  position: absolute; left: 0; right: 0; top: 0; height: 26%;
+  background: linear-gradient(180deg, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+}
+.duo__scrim-bot {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 22%;
+  background: linear-gradient(0deg, rgba(0,0,0,0.40) 0%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+}
+.duo__kicker {
+  position: absolute;
+  top: var(--pad); left: var(--pad);
+  max-width: calc(100% - 2 * var(--pad));
+  padding: 14px 22px;
+  background: var(--mh-accent);
+  color: var(--mh-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.duo__kicker:empty { display: none; }
+.duo__sponsor { position: absolute; bottom: var(--pad); left: var(--pad); }
+.duo__sponsor:empty { display: none; }
+
+/* ---- Right half: the data bay ---- */
+.duo__bay--data {
+  position: relative;
+  overflow: hidden;
+  background: var(--mh-primary);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  text-align: right;
+  padding: var(--pad);
+}
+.duo__id { display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
+.duo__logo { height: 62px; width: auto; }
+.duo__logo img,
+.duo__logo svg { height: 100%; width: auto; object-fit: contain; display: block; }
+.duo__logo:empty { display: none; }
+.duo__club {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 24px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.duo__meet {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 17px;
+  letter-spacing: 0.05em;
+  color: var(--mh-on-primary);
+  opacity: 0.78;
+  overflow-wrap: anywhere;
+}
+.duo__meet:empty { display: none; }
+
+/* the scoreline ledger, anchored to the bay's foot */
+.duo__ledger { display: flex; flex-direction: column; align-items: flex-end; }
+.duo__lab {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--mh-accent);
+  margin-bottom: 10px;
+}
+.duo__event {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 30px;
+  line-height: 1.12;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.duo__rule {
+  width: 96px; height: 1px;
+  background: var(--mh-outline);
+  margin: 26px 0;
+}
+.duo__result {
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  /* the bay is half the canvas, so scale the full-canvas autofit var */
+  font-size: calc(var(--mh-fit-result-px, 96px) * 0.72);
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  color: var(--mh-accent);
+}
+.duo__hero {
+  margin-top: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  color: var(--mh-on-primary);
+  overflow-wrap: anywhere;
+}
+.duo__hero::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 34px; height: 6px;
+  border-radius: 3px;
+  background: var(--mh-accent);
+}
+.duo__hero:empty { display: none; }
+
+/* ---- The centre seam (the duel line) ---- */
+.duo__seam {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: calc(50% - var(--seam) / 2);
+  width: var(--seam);
+  background: var(--mh-accent);
+  z-index: 3;
+}
+
+/* ---- The crossing name band — the only element bridging the seam ---- */
+.duo__band {
+  position: absolute;
+  left: 0; right: 0;
+  top: var(--band-top);
+  z-index: 4;
+  background: var(--mh-accent);
+  color: var(--mh-primary);
+  padding: 34px 64px 42px;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.30);
+}
+.duo__first {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.duo__surname {
+  font-family: 'Anton', 'Bebas Neue', Impact, sans-serif;
+  font-weight: 400;
+  font-size: var(--mh-fit-surname-px, 132px);
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  /* the autofit var sizes this to one line; wrapping is the safety net for a
+     name beyond the fit floor — the band grows downward without collision */
+  overflow-wrap: anywhere;
+}
+</style>
+</head>
+<body>
+<div class="duo">
+
+  <div class="duo__bay duo__bay--photo">
+    <div class="duo__ring"></div>
+    <div class="duo__media">{{ATHLETE_IMG_BLOCK}}</div>
+    <div class="duo__scrim-top"></div>
+    <div class="duo__scrim-bot"></div>
+    <div class="duo__kicker">{{ACHIEVEMENT_LABEL}}</div>
+    <div class="duo__sponsor">{{SPONSOR_BLOCK}}</div>
+  </div>
+
+  <div class="duo__bay duo__bay--data">
+    <div class="duo__id">
+      <div class="duo__logo">{{LOGO_BLOCK}}</div>
+      <div class="duo__club">{{CLUB_FULL}}</div>
+      <div class="duo__meet">{{MEET_NAME}}</div>
+    </div>
+    <div class="duo__ledger">
+      <div class="duo__lab">Event</div>
+      <div class="duo__event">{{EVENT_NAME}}</div>
+      <div class="duo__rule"></div>
+      <div class="duo__lab">Result</div>
+      <div class="duo__result">{{RESULT_VALUE}}</div>
+      <div class="duo__hero">{{HERO_STAT}}</div>
+    </div>
+  </div>
+
+  <div class="duo__seam"></div>
+
+  <div class="duo__band">
+    <div class="duo__first">{{ATHLETE_FIRST_NAME}}</div>
+    <div class="duo__surname">{{ATHLETE_SURNAME_DISPLAY}}</div>
+  </div>
+
+  {{ACCENT_DECORATION}}
+
+</div>
+</body>
+</html>

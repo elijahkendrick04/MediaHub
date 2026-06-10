@@ -29,6 +29,7 @@ size-cap config and any future scraping strategy are shared rather than
 re-implemented. This module adds no route, edits no web.py, and persists
 nothing.
 """
+
 from __future__ import annotations
 
 import html
@@ -75,6 +76,7 @@ _MAX_FONTS = 8
 # Fetch — delegated to link_handlers so we don't re-implement the fetcher.
 # This is the single network seam tests mock.
 # ---------------------------------------------------------------------------
+
 
 def _fetch_html(url: str) -> tuple[str, int]:
     """Fetch a page's raw HTML, reusing ``link_handlers``' shared fetcher.
@@ -138,9 +140,7 @@ def normalise_url(url: str) -> str:
     return u
 
 
-_ATTR_RE = re.compile(
-    r"""([\w:-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))"""
-)
+_ATTR_RE = re.compile(r"""([\w:-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))""")
 
 
 def _parse_attrs(tag: str) -> dict[str, str]:
@@ -165,18 +165,21 @@ def _find_tags(body: str, tag: str) -> list[dict[str, str]]:
 # Palette candidates (deterministic facts)
 # ---------------------------------------------------------------------------
 
+
 def _palette_candidates(body: str) -> list[dict]:
     """Every distinct chromatic #rrggbb on the page, annotated with
     brightness. Pure white/black/near-grey are dropped by the shared
     scanner (they are UI chrome, not brand identity)."""
     out: list[dict] = []
     for hex_value in _scan_hex_candidates(body, limit=_MAX_CANDIDATES):
-        out.append({
-            "hex": hex_value,
-            "brightness": _brightness(hex_value),
-            "confidence": _CONF_LOW,
-            "confirmed": False,
-        })
+        out.append(
+            {
+                "hex": hex_value,
+                "brightness": _brightness(hex_value),
+                "confidence": _CONF_LOW,
+                "confirmed": False,
+            }
+        )
     return out
 
 
@@ -184,6 +187,9 @@ def _palette_candidates(body: str) -> list[dict]:
 # Logos by inferred form (deterministic facts)
 # ---------------------------------------------------------------------------
 
+# Form names use the canonical DesignTokens lockup vocabulary
+# (brand/design_tokens.py: icon / full_horizontal / full_stacked / mono) so a
+# confirmed draft maps 1:1 onto resolve_design_tokens' ``logos`` records.
 _FORM_KEYWORDS = (
     ("mono", "mono"),
     ("favicon", "icon"),
@@ -192,22 +198,38 @@ _FORM_KEYWORDS = (
     ("badge", "icon"),
     ("emblem", "icon"),
     ("crest", "icon"),
-    ("horizontal", "horizontal"),
-    ("landscape", "horizontal"),
-    ("lockup", "horizontal"),
-    ("banner", "horizontal"),
-    ("wide", "horizontal"),
-    ("stacked", "stacked"),
-    ("vertical", "stacked"),
-    ("portrait", "stacked"),
+    ("horizontal", "full_horizontal"),
+    ("landscape", "full_horizontal"),
+    ("lockup", "full_horizontal"),
+    ("banner", "full_horizontal"),
+    ("wide", "full_horizontal"),
+    ("stacked", "full_stacked"),
+    ("vertical", "full_stacked"),
+    ("portrait", "full_stacked"),
 )
 
 _THEME_LIGHT_KEYWORDS = (
-    "white", "light", "reverse", "reversed", "knockout", "inverse",
-    "inverted", "on-black", "on_black", "onblack", "on-dark", "on_dark",
+    "white",
+    "light",
+    "reverse",
+    "reversed",
+    "knockout",
+    "inverse",
+    "inverted",
+    "on-black",
+    "on_black",
+    "onblack",
+    "on-dark",
+    "on_dark",
 )
 _THEME_DARK_KEYWORDS = (
-    "black", "dark", "on-white", "on_white", "onwhite", "on-light", "on_light",
+    "black",
+    "dark",
+    "on-white",
+    "on_white",
+    "onwhite",
+    "on-light",
+    "on_light",
 )
 
 
@@ -229,9 +251,9 @@ def _form_from_dims(attrs: dict) -> Optional[str]:
         return None
     ar = w / h
     if ar >= 1.8:
-        return "horizontal"
+        return "full_horizontal"
     if ar <= 0.7:
-        return "stacked"
+        return "full_stacked"
     return "icon"
 
 
@@ -244,8 +266,7 @@ def _theme_from_name(name: str) -> str:
     return "any"
 
 
-def _logo_record(*, url: str, form: str, theme: str, source: str,
-                 confidence: str) -> dict:
+def _logo_record(*, url: str, form: str, theme: str, source: str, confidence: str) -> dict:
     return {
         "url": url,
         "form": form,
@@ -276,33 +297,41 @@ def _logos(body: str, base_url: str) -> list[dict]:
         href = attrs.get("href", "")
         if not href or "icon" not in rel:
             continue
-        _add(_logo_record(
-            url=urljoin(base_url, href),
-            form="icon",
-            theme=_theme_from_name(href),
-            source="link-icon",
-            confidence=_CONF_HIGH,
-        ))
+        _add(
+            _logo_record(
+                url=urljoin(base_url, href),
+                form="icon",
+                theme=_theme_from_name(href),
+                source="link-icon",
+                confidence=_CONF_HIGH,
+            )
+        )
 
     # 2) In-page images tagged as a logo by src/alt/class/id.
     for attrs in _find_tags(body, "img"):
         src = attrs.get("src") or attrs.get("data-src", "")
         if not src:
             continue
-        haystack = " ".join((
-            src, attrs.get("alt", ""), attrs.get("class", ""),
-            attrs.get("id", ""),
-        )).lower()
+        haystack = " ".join(
+            (
+                src,
+                attrs.get("alt", ""),
+                attrs.get("class", ""),
+                attrs.get("id", ""),
+            )
+        ).lower()
         if "logo" not in haystack:
             continue
         form = _form_from_name(src) or _form_from_dims(attrs) or "unknown"
-        _add(_logo_record(
-            url=urljoin(base_url, src),
-            form=form,
-            theme=_theme_from_name(src),
-            source="img",
-            confidence=_CONF_MEDIUM,
-        ))
+        _add(
+            _logo_record(
+                url=urljoin(base_url, src),
+                form=form,
+                theme=_theme_from_name(src),
+                source="img",
+                confidence=_CONF_MEDIUM,
+            )
+        )
 
     # 3) Social-share images — may be a logo or a hero photo, so low
     #    confidence and form left unknown.
@@ -313,13 +342,15 @@ def _logos(body: str, base_url: str) -> list[dict]:
         content = attrs.get("content", "")
         if not content:
             continue
-        _add(_logo_record(
-            url=urljoin(base_url, content),
-            form="unknown",
-            theme="any",
-            source="og:image",
-            confidence=_CONF_LOW,
-        ))
+        _add(
+            _logo_record(
+                url=urljoin(base_url, content),
+                form="unknown",
+                theme="any",
+                source="og:image",
+                confidence=_CONF_LOW,
+            )
+        )
 
     return found[:_MAX_LOGOS]
 
@@ -329,14 +360,39 @@ def _logos(body: str, base_url: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _GENERIC_FONTS = {
-    "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui",
-    "ui-sans-serif", "ui-serif", "ui-monospace", "ui-rounded",
-    "-apple-system", "blinkmacsystemfont", "inherit", "initial", "unset",
-    "revert", "math", "emoji",
+    "serif",
+    "sans-serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+    "ui-sans-serif",
+    "ui-serif",
+    "ui-monospace",
+    "ui-rounded",
+    "-apple-system",
+    "blinkmacsystemfont",
+    "inherit",
+    "initial",
+    "unset",
+    "revert",
+    "math",
+    "emoji",
     # Classic web-safe fallbacks — almost never the distinctive brand font.
-    "arial", "helvetica", "helvetica neue", "segoe ui", "times",
-    "times new roman", "georgia", "courier", "courier new", "verdana",
-    "tahoma", "trebuchet ms", "sans", "serif",
+    "arial",
+    "helvetica",
+    "helvetica neue",
+    "segoe ui",
+    "times",
+    "times new roman",
+    "georgia",
+    "courier",
+    "courier new",
+    "verdana",
+    "tahoma",
+    "trebuchet ms",
+    "sans",
+    "serif",
 }
 
 _FONT_FAMILY_RE = re.compile(r"font-family\s*:\s*([^;}{<]+)", re.IGNORECASE)
@@ -397,13 +453,11 @@ _INTERPRET_SYSTEM = (
 )
 
 
-def _build_interpret_prompt(org_name: str, candidates: list[dict],
-                            fonts: list[str]) -> str:
+def _build_interpret_prompt(org_name: str, candidates: list[dict], fonts: list[str]) -> str:
     lines = [
         f"Organisation: {org_name or '(unknown)'}",
         "",
-        "Candidate colours scraped from the site (hex — brightness, where "
-        "0=black and 1=white):",
+        "Candidate colours scraped from the site (hex — brightness, where " "0=black and 1=white):",
     ]
     if candidates:
         for c in candidates:
@@ -416,13 +470,13 @@ def _build_interpret_prompt(org_name: str, candidates: list[dict],
         ("  " + ", ".join(fonts)) if fonts else "  (none found)",
         "",
         "Return a SINGLE JSON object with EXACTLY these keys:",
-        '  brand:      a hex from the list, or null — the main identity colour (usually the most prominent/saturated)',
-        '  accent:     a hex from the list, or null — a secondary highlight colour',
-        '  surface:    a hex from the list, or null — a dark colour usable as a panel behind text (low brightness)',
-        '  on_surface: a hex from the list, or null — a light colour for text on dark grounds (high brightness)',
-        '  title_font: a font from the list, or null — the display/heading face',
-        '  body_font:  a font from the list, or null — the readable body face',
-        '  reasoning:  short string (<=240 chars) on which signals informed the picks',
+        "  brand:      a hex from the list, or null — the main identity colour (usually the most prominent/saturated)",
+        "  accent:     a hex from the list, or null — a secondary highlight colour",
+        "  surface:    a hex from the list, or null — a dark colour usable as a panel behind text (low brightness)",
+        "  on_surface: a hex from the list, or null — a light colour for text on dark grounds (high brightness)",
+        "  title_font: a font from the list, or null — the display/heading face",
+        "  body_font:  a font from the list, or null — the readable body face",
+        "  reasoning:  short string (<=240 chars) on which signals informed the picks",
         "",
         "Every chosen value MUST appear verbatim in the lists above. If a "
         "role has no good candidate, use null rather than guessing.",
@@ -430,13 +484,19 @@ def _build_interpret_prompt(org_name: str, candidates: list[dict],
     return "\n".join(lines)
 
 
-def _validate_interpretation(raw: object, *, hex_universe: set[str],
-                             font_universe: dict[str, str]) -> dict:
+def _validate_interpretation(
+    raw: object, *, hex_universe: set[str], font_universe: dict[str, str]
+) -> dict:
     """Coerce the LLM response, dropping any colour/font it invented —
     the same anti-hallucination guard ``palette.resolve_palette`` uses."""
     picks = {
-        "brand": None, "accent": None, "surface": None, "on_surface": None,
-        "title_font": None, "body_font": None, "reasoning": "",
+        "brand": None,
+        "accent": None,
+        "surface": None,
+        "on_surface": None,
+        "title_font": None,
+        "body_font": None,
+        "reasoning": "",
     }
     if not isinstance(raw, dict):
         return picks
@@ -454,8 +514,7 @@ def _validate_interpretation(raw: object, *, hex_universe: set[str],
     return picks
 
 
-def _interpret_signals(*, org_name: str, candidates: list[dict],
-                       fonts: list[str]) -> dict:
+def _interpret_signals(*, org_name: str, candidates: list[dict], fonts: list[str]) -> dict:
     """Best-effort semantic mapping of extracted facts → token roles.
 
     Returns ``{"available": bool, "picks": {...}, "reasoning": str}``.
@@ -477,14 +536,19 @@ def _interpret_signals(*, org_name: str, candidates: list[dict],
     prompt = _build_interpret_prompt(org_name, candidates, fonts)
     try:
         raw = _llm.generate_json(
-            prompt, system=_INTERPRET_SYSTEM, max_tokens=600, fallback={},
+            prompt,
+            system=_INTERPRET_SYSTEM,
+            max_tokens=600,
+            fallback={},
         )
     except Exception as e:
         log.debug("bootstrap interpretation LLM call failed: %s", e)
         return {"available": False, "picks": empty, "reasoning": ""}
 
     picks = _validate_interpretation(
-        raw, hex_universe=hex_universe, font_universe=font_universe,
+        raw,
+        hex_universe=hex_universe,
+        font_universe=font_universe,
     )
     return {
         "available": True,
@@ -496,6 +560,7 @@ def _interpret_signals(*, org_name: str, candidates: list[dict],
 # ---------------------------------------------------------------------------
 # Assembly
 # ---------------------------------------------------------------------------
+
 
 def _org_name(body: str) -> str:
     m = re.search(r"<title\b[^>]*>(.*?)</title>", body, re.IGNORECASE | re.DOTALL)
@@ -543,8 +608,7 @@ def extract_brand_draft(url: str) -> dict:
     """
     source_url = normalise_url(url)
     notes: list[str] = [
-        "Draft only — every field is unconfirmed and must be reviewed by a "
-        "human before use.",
+        "Draft only — every field is unconfirmed and must be reviewed by a " "human before use.",
         "Automated brand extraction is unreliable for small clubs; treat "
         "low/medium-confidence values as starting points, not facts.",
     ]
@@ -557,9 +621,7 @@ def extract_brand_draft(url: str) -> dict:
     status = _fetch_status(body, code)
 
     if status != "ok":
-        notes.append(
-            f"Page could not be read ({status}); no signals extracted."
-        )
+        notes.append(f"Page could not be read ({status}); no signals extracted.")
         candidates: list[dict] = []
         logos: list[dict] = []
         fonts: list[str] = []
@@ -571,7 +633,9 @@ def extract_brand_draft(url: str) -> dict:
         fonts = _fonts_found(body)
 
     interp = _interpret_signals(
-        org_name=org_name, candidates=candidates, fonts=fonts,
+        org_name=org_name,
+        candidates=candidates,
+        fonts=fonts,
     )
     picks = interp["picks"]
     if not interp["available"] and (candidates or fonts):
@@ -593,10 +657,7 @@ def extract_brand_draft(url: str) -> dict:
             "reasoning": interp["reasoning"],
         },
         "tokens": {
-            "colours": {
-                role: _colour_role(role, picks.get(role))
-                for role in _COLOUR_ROLES
-            },
+            "colours": {role: _colour_role(role, picks.get(role)) for role in _COLOUR_ROLES},
             "palette_candidates": candidates,
             "logos": logos,
             "type": {

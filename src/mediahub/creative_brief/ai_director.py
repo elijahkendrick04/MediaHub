@@ -153,7 +153,10 @@ def _parse_strict_json_array(text: str) -> Optional[list]:
 
 # One-line "when to use" guidance per v2 archetype, injected into the prompt so
 # the model picks the composition that fits THIS moment rather than an arbitrary
-# seed. Keyed by the archetype name (file stem under layouts/v2/).
+# seed. Keyed by the archetype name (file stem under layouts/v2/). FALLBACK
+# only: the live catalog line comes from each archetype's authored
+# <name>.notes.md (see _archetype_catalog_line); this dict covers the rare
+# case of an archetype whose notes are missing/unreadable.
 _ARCHETYPE_GUIDE: dict[str, str] = {
     "split_diagonal_hero": "photo-led, dynamic; a strong action or portrait moment.",
     "big_number_dominant": "the time/score IS the story; works with no photo.",
@@ -164,10 +167,26 @@ _ARCHETYPE_GUIDE: dict[str, str] = {
 }
 
 
+def _archetype_catalog_line(name: str) -> str:
+    """The director's briefing line for one archetype.
+
+    Primary source is the archetype's authored ``<name>.notes.md`` (PAR-7 —
+    the catalog the notes exist to feed), surfaced via
+    ``archetypes.director_note``. The static ``_ARCHETYPE_GUIDE`` line is the
+    fallback when the notes are unavailable, so new archetypes brief the
+    director the moment they ship notes — no dict to keep in sync.
+    """
+    try:
+        from mediahub.graphic_renderer.archetypes import director_note
+
+        note = director_note(name)
+    except Exception:
+        note = ""
+    return note or _ARCHETYPE_GUIDE.get(name, "a distinct layout.")
+
+
 def _design_spec_system_prompt(archetypes: list[str], token_roles: list[str]) -> str:
-    catalog = "\n".join(
-        f"  - {a}: {_ARCHETYPE_GUIDE.get(a, 'a distinct layout.')}" for a in archetypes
-    )
+    catalog = "\n".join(f"  - {a}: {_archetype_catalog_line(a)}" for a in archetypes)
     return (
         "You are the art director for a sports club's social graphic. Choose the "
         "single best composition for ONE achievement and return STRICT JSON only "

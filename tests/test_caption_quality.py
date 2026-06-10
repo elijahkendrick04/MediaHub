@@ -194,6 +194,29 @@ class TestGenerateCaptionCandidates:
             )
         assert len(result) <= 6
 
+    def test_candidates_ranked_freshest_first(self):
+        # The candidate least similar to the recent captions (and its
+        # siblings) must lead the list; one sharing phrasing with a recent
+        # caption — below the dedupe threshold, so it survives — ranks last.
+        from mediahub.web.ai_caption import generate_caption_candidates
+        recent = "Eira Hughes stormed to a new personal best in the 200m freestyle tonight"
+        stale = "A new personal best in the 200m freestyle for our brilliant captain Eira"
+        fresh = [
+            "Gold standard swimming from our captain at county champs.",
+            "What a way to finish the season — superb racing throughout.",
+            "The squad celebrated loudly as the scoreboard confirmed it.",
+        ]
+        with mock.patch(
+            "mediahub.web.ai_caption.call_claude",
+            side_effect=[stale] + fresh,
+        ):
+            result = generate_caption_candidates(
+                _SAMPLE_ACH, n=4, brief_prose=_BRIEF, recent_captions=[recent]
+            )
+        assert set(result) == {stale, *fresh}
+        assert result[-1] == stale  # most-overlapping candidate ranks last
+        assert result[0] != stale
+
 
 # ---------------------------------------------------------------------------
 # 4. Few-shot injection in generate_caption_for_tone
@@ -340,6 +363,84 @@ class TestApprovalLoop:
         append_example("test-club-empty", "   ")
         loaded = load_examples("test-club-empty")
         assert loaded == []
+
+    def test_append_is_idempotent_per_caption(self, tmp_path, monkeypatch):
+        # The approval seam runs on every content-pack build, so re-approving
+        # the same card must not fill the store with copies of one caption.
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        from mediahub.web.caption_examples import append_example, load_examples
+        for _ in range(4):
+            append_example("test-club-idem", "Same approved caption.")
+        assert load_examples("test-club-idem") == ["Same approved caption."]
+
+
+# ---------------------------------------------------------------------------
+# 5b. Approval-seam wiring: build_content_pack feeds the few-shot store
+# ---------------------------------------------------------------------------
+
+class TestApprovalSeamWiring:
+    """An APPROVED card's final caption must land in the PAR-1 voice store.
+
+    This is the loop that makes few-shot injection live for every club: the
+    content-pack builder (the same seam Cap-2b semantic capture uses) appends
+    the human-approved caption — edits included — to ``caption_examples``,
+    and the live caption route reads it back as voice examples.
+    """
+
+    def _seed_run(self, runs_dir, run_id):
+        import json as _json
+        run = {
+            "recognition_report": {
+                "ranked_achievements": [
+                    {
+                        "rank": 1,
+                        "priority": 0.9,
+                        "achievement": {
+                            "swim_id": "swim-1",
+                            "swimmer_name": "Eira Hughes",
+                            "event": "200m Freestyle",
+                            "time": "2:08.41",
+                        },
+                    }
+                ]
+            }
+        }
+        (runs_dir / f"{run_id}.json").write_text(_json.dumps(run))
+
+    def test_approved_caption_lands_in_store(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        self._seed_run(runs_dir, "run-1")
+
+        from mediahub.workflow.pack import build_content_pack
+        from mediahub.workflow.status import CardStatus
+        from mediahub.workflow.store import WorkflowStore
+
+        ws = WorkflowStore(runs_dir)
+        ws.set_status("run-1", "swim-1", CardStatus.APPROVED)
+
+        approved_caption = "Eira flies to a 200 free PB — what a swim!"
+
+        def fake_apply_brand(card, kit, tone, kind, templates):
+            out = dict(card)
+            out["brand_captions"] = {"warm-club": {"headline": approved_caption}}
+            return out
+
+        with mock.patch(
+            "mediahub.brand.store.load_brand",
+            return_value=(object(), "warm-club", {}),
+        ), mock.patch(
+            "mediahub.brand.apply.apply_brand",
+            side_effect=fake_apply_brand,
+        ):
+            pack = build_content_pack("run-1", "seam-club", runs_dir=runs_dir)
+            # build twice: the seam must be idempotent per caption
+            build_content_pack("run-1", "seam-club", runs_dir=runs_dir)
+
+        assert len(pack) == 1
+        from mediahub.web.caption_examples import load_examples
+        assert load_examples("seam-club") == [approved_caption]
 
 
 # ---------------------------------------------------------------------------

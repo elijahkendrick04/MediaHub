@@ -317,3 +317,41 @@ class TestIncludeWhyInjectsExplanation:
         sys_prompt = captured.get("system", "")
         assert "Generated for: ranked" not in sys_prompt
         assert "Additional requirement" not in sys_prompt
+
+
+# ---------------------------------------------------------------------------
+# 4. PAR-1 approval loop: stored approved captions reach the live prompt
+# ---------------------------------------------------------------------------
+
+class TestApprovedVoiceReachesPrompt:
+    """End-to-end pin for the PAR-1 few-shot loop: a caption a human approved
+    (persisted in web/caption_examples under DATA_DIR) is injected into the
+    live caption endpoint's system prompt as a voice example."""
+
+    def test_stored_example_injected_as_voice_example(
+        self, caption_endpoint_client, monkeypatch,
+    ):
+        c = caption_endpoint_client
+        from mediahub.web.caption_examples import append_example
+
+        example = "Our captain was simply unstoppable in the relay last month!"
+        append_example("x", example)  # the fixture run's profile_id
+
+        captured: dict = {}
+        monkeypatch.setattr("mediahub.media_ai.llm.is_available", lambda: True)
+        monkeypatch.setattr(
+            "mediahub.web.ai_caption.call_claude",
+            lambda system, user, max_tokens=400, **_:
+                captured.update(system=system) or "a fresh caption",
+        )
+        monkeypatch.setattr(
+            "mediahub.web.web._build_card_explanation",
+            lambda ra: {"headline": "", "bullets": [], "source_lines": []},
+        )
+
+        resp = c.post("/api/runs/r1/swim/swim-1/caption?tone=ai&n_variants=1")
+        assert resp.status_code == 200
+        assert (resp.get_json() or {}).get("caption") == "a fresh caption"
+        sys_prompt = captured.get("system", "")
+        assert "Voice examples" in sys_prompt
+        assert example in sys_prompt

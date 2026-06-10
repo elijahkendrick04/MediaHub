@@ -50,8 +50,10 @@ def test_golden_width_limited_sizes():
     # Tall box -> width is the only binding constraint.
     assert af.fit_font_px("Cox", 1000, TALL, font_family="Inter", weight=700, max_px=3000) == 542
     assert af.fit_font_px(LONG_TOKEN, 1000, TALL, font_family="Inter", weight=700, max_px=3000) == 112
-    # Condensed display face (Anton) packs far more characters per px width.
-    assert af.fit_font_px("Cox", 1000, TALL, font_family="Anton", weight=700, max_px=3000) == 904
+    # Condensed display face (Anton) packs more characters per px width than
+    # the sans base — via the measured per-family scale (0.76), calibrated
+    # against the shipped anton.woff2 so the estimate errs wide, never narrow.
+    assert af.fit_font_px("Cox", 1000, TALL, font_family="Anton", weight=700, max_px=3000) == 714
 
 
 def test_golden_height_limited_single_line():
