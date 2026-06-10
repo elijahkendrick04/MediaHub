@@ -264,6 +264,48 @@ conditional on the one before (compounding execution risk).
 > per-horizon probability bands are flagged estimates, consistent with the diligence's
 > low-double-digit-% confidence on £1M+.
 
+### External research pass — June 2026 (confirms & sharpens)
+
+A fresh external market-and-scalability pass (June 2026) re-ran the diligence against
+current sources. It **changed no figure** — the ≈ £150k–£400k swimming-only ceiling, the
+dropped "£1M/month" goal, and the H1–H4 horizons above all stand — and **sharpened three
+points** (full evidence + sources:
+[`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md), *Evidence
+refresh — cycle 5*):
+
+- **White-space, verified and narrowed.** No swim-data incumbent — **SwimTopia,
+  TeamUnify / SportsEngine, Swimcloud, Hy-Tek / MeetMobile, Swim Club Manager, Swim
+  Manager** — ingests a result file and emits branded, ranked content; they stop at
+  PB / results display + *manual* sharing. **Gipper** ships swimming graphic *templates*
+  (meet-day, results, commitment) but **does not ingest HY3 / SDIF / result files** — a
+  volunteer still keys the numbers in. So the *result-file → ranked, branded content* path
+  is undefended **today** — a **time advantage, not a moat** (no patent; any incumbent
+  holding clean results + PBs could bolt it on). **Watch item: Gipper adding result-file
+  ingestion would close the head-start.**
+- **Platform publishing is gated by API policy** (sharpens Phase 4): Instagram needs a
+  Business / Creator account + a connected Facebook Page + Meta **App Review**
+  (~2–4 weeks/permission) + **Business Verification**; TikTok's *unaudited* Content-Posting
+  client can post only **private (SELF_ONLY), ≤5 users / 24h** until it passes an audit. So
+  ship **Bluesky + Mastodon first** (P4.1) and keep Instagram / TikTok behind human approval
+  and the audit timeline (P4.2) — "launch-day IG/TikTok auto-posting" is on the EXCLUDE list.
+- **Results-data acquisition is a ToS / CMA / GDPR question** — much of it is *minors'*
+  competition data. **Prefer the official Swim England approved-systems API over scraping**
+  (reinforces PC.6(a) and the [ADR-0003](adr/0003-pilot-safety-invariant-lock.md) isolation
+  lock).
+
+**The high-probability do / don't filter (only what the evidence supports):**
+
+- **✅ INCLUDE:** warm-first hand-sell from the Swansea / South-East-Wales swim network ·
+  manual-first (concierge) delivery · flat **annual** pricing set by revealed WTP (PC.4) ·
+  a referral engine (2 named intros per signed club) · the Swim England approved-systems
+  API application (PC.6(a)) · Stripe switched on (PC.2 ✅) · ship **PC.3** true
+  multi-tenancy (the #1 operator/Council-gated scaling fix) · **Bluesky + Mastodon** as the
+  first free publish targets (P4.1).
+- **🚫 EXCLUDE:** paid ads · viral-growth assumptions · VC fundraising · US expansion
+  before UK validation · multi-sport before ≥10 paying clubs · reliance on NGB
+  *promotional* endorsement ([ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)) ·
+  launch-day Instagram / TikTok auto-posting · ToS-breaching scraping of results data.
+
 ---
 
 ---
@@ -814,6 +856,7 @@ The free/open posting targets — build these first.
 
 ### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌ **NOT STARTED**
 Least-privilege per integration; human connects each account (no auto-connect).
+**Platform API policy gates auto-posting (verified June 2026 — [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) cycle 5):** Instagram content-publishing needs a Business/Creator account + a connected Facebook Page + Meta **App Review** (~2–4 weeks/permission) + **Business Verification**; TikTok's *unaudited* Content-Posting client can post only **private (SELF_ONLY), ≤5 users/24h** until it passes an audit. This is *why* **P4.1 (Bluesky + Mastodon) ships first**, and these stay behind human approval and the audit timeline.
 
 ### P4.3 — X adapter (budget pay-per-use) · ❌ **NOT STARTED**
 X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
