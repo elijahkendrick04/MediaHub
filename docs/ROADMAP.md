@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `ea36bf142` · Merge pull request #306 from elijahkendrick04/bot/roadmap-autoupdate
+**Last updated:** 2026-06-10 · `13639bf75` · Merge pull request #307 from elijahkendrick04/claude/cool-lovelace-g3494x
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 | 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
 | 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
@@ -40,7 +41,6 @@ in any commit message to move an item:
 | 2026-06-10 | `e64f604cd` | fix(gen-v2): explicit seed 0 must be an exact archetype pick, not 'no seed' |
 | 2026-06-10 | `968d37d2d` | style: ruff-format touched files (pinned hook v0.8.4) |
 | 2026-06-10 | `97ed87e94` | refactor(gen-v2)!: SEQ-3 cutover — remove the dead enum-permutation variation engine |
-| 2026-06-10 | `db6b1fbc1` | test(renderer): regression pins for the font-loading and Anton-fit defects |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
