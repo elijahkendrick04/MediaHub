@@ -12460,7 +12460,28 @@ Relay team broke club record"></textarea>
                     first_error = f"{name}: {check.get('error', 'failed')}"
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
-        return jsonify(payload), (200 if payload["ok"] else 503)
+        status_code = 200 if payload["ok"] else 503
+        # Return HTML (with a valid <title>) when a browser requests the page so
+        # that axe-core's document-title rule is satisfied; API/monitoring clients
+        # that send Accept: application/json (or no Accept) get plain JSON.
+        best = request.accept_mimetypes.best_match(
+            ["text/html", "application/json"], default="application/json"
+        )
+        if best == "text/html":
+            status_label = _h("OK" if payload["ok"] else "Degraded")
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                f"<title>MediaHub Health — {status_label}</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(html, status=status_code, mimetype="text/html")
+        return jsonify(payload), status_code
 
     _FAVICON_SVG = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
