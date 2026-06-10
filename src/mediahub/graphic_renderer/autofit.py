@@ -85,12 +85,24 @@ _MONO_EM = 0.600
 
 # Per-class multipliers applied on top of the sans base table. The "mono" class
 # is handled separately in _char_em (fixed advance) and so has no entry here.
-#   condensed  — Anton / Bebas / Oswald are far narrower than Helvetica.
+#   condensed  — Bebas / Oswald are far narrower than Helvetica.
 #   serif      — Lora / Georgia run a touch wider than the sans base.
 _PROFILE_SCALE: dict[str, float] = {
     "sans": 1.0,
     "condensed": 0.60,
     "serif": 1.03,
+}
+
+# Measured per-family overrides on top of the class scale. Anton — the shipped
+# v2 headline face — is a HEAVY display condensed: its all-caps advance widths
+# run ~10–25% wider than the generic 0.60 condensed estimate (measured against
+# layouts/fonts/anton.woff2: realistic caps surnames/events span 0.66–0.75 of
+# the unscaled sans table). 0.76 covers the measured worst case with margin, so
+# the estimate errs slightly *wide* — a fitted hero line can shrink a touch more
+# than strictly needed but can never overflow its box, which is the module's
+# contract. Keys are normalised first-family names.
+_FAMILY_SCALE: dict[str, float] = {
+    "anton": 0.76,
 }
 
 # Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
@@ -112,11 +124,18 @@ _SERIF_FAMILIES = frozenset({
 })
 
 
+def _first_family(font_family: str) -> str:
+    """Normalised first family of a CSS-style stack ("'Anton', sans" -> "anton")."""
+    if not font_family:
+        return ""
+    return font_family.split(",", 1)[0].strip().strip("'\"").lower()
+
+
 def _classify_family(font_family: str) -> str:
     """Map a CSS-style family name (or stack) to a width profile class."""
-    if not font_family:
+    first = _first_family(font_family)
+    if not first:
         return "sans"
-    first = font_family.split(",", 1)[0].strip().strip("'\"").lower()
     if first in _MONO_FAMILIES:
         return "mono"
     if first in _CONDENSED_FAMILIES:
@@ -124,6 +143,19 @@ def _classify_family(font_family: str) -> str:
     if first in _SERIF_FAMILIES:
         return "serif"
     return "sans"
+
+
+def _table_scale(font_family: str) -> float:
+    """Effective sans-table multiplier for a (non-mono) family stack.
+
+    A measured per-family override beats the generic class scale, so faces
+    whose real metrics are known (Anton) fit honestly instead of optimistically.
+    """
+    first = _first_family(font_family)
+    override = _FAMILY_SCALE.get(first)
+    if override is not None:
+        return override
+    return _PROFILE_SCALE.get(_classify_family(font_family), 1.0)
 
 
 # Weight-name -> numeric weight (CSS scale). Bolder faces advance slightly wider.
@@ -145,12 +177,11 @@ def _weight_factor(weight: int | str) -> float:
     return 1.0 + (numeric - 400) / 100.0 * 0.012
 
 
-def _char_em(ch: str, profile: str) -> float:
-    """Advance width of one character in em units, for a profile class."""
+def _char_em(ch: str, profile: str, scale: float) -> float:
+    """Advance width of one character in em units."""
     if profile == "mono":
         return _MONO_EM
-    base = _SANS_EM.get(ch, _DEFAULT_EM)
-    return base * _PROFILE_SCALE[profile]
+    return _SANS_EM.get(ch, _DEFAULT_EM) * scale
 
 
 # --------------------------------------------------------------------------- #
@@ -164,8 +195,9 @@ def em_width(text: str, *, font_family: str = "Inter", weight: int | str = 400) 
     if not text:
         return 0.0
     profile = _classify_family(font_family)
+    scale = _table_scale(font_family)
     factor = _weight_factor(weight)
-    return sum(_char_em(ch, profile) for ch in text) * factor
+    return sum(_char_em(ch, profile, scale) for ch in text) * factor
 
 
 @lru_cache(maxsize=256)
