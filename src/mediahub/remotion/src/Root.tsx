@@ -35,6 +35,8 @@ const defaultCard = {
   accentStyle: "",
   mood: "",
   photoTreatment: "",
+  archetype: "",
+  heroStat: "",
 };
 
 export const RemotionRoot: React.FC = () => {

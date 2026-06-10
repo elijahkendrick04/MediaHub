@@ -62,6 +62,18 @@ def _grain_enabled() -> bool:
     return _flag("MEDIAHUB_RENDER_GRAIN", "1")
 
 
+def _gen_bg_enabled() -> bool:
+    """Tier C generative backgrounds (SEQ-4): opt-IN, default OFF.
+
+    ``MEDIAHUB_GEN_BG=1`` switches the Imagen background fetch on — it is a
+    billed API call, so it must never spend without the operator's say-so.
+    The legacy ``MEDIAHUB_DISABLE_AI_BG=1`` kill switch still wins.
+    """
+    if os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") == "1":
+        return False
+    return _flag("MEDIAHUB_GEN_BG", "0")
+
+
 def _dpr_render() -> int:
     """Device-pixel-ratio used at screenshot time. Defaults to 2."""
     try:
@@ -1243,17 +1255,19 @@ def _common_replacements(
         has_photo=has_photo,
     )
 
-    # Optional AI-generated brand-aware background. Activated only when
-    # REPLICATE_API_TOKEN is set; otherwise the water-pattern + noise
-    # overlay is used as before. Cached aggressively by content hash.
+    # Optional generative background (Tier C, SEQ-4): an Imagen-built
+    # brand-aware backdrop composited UNDER the deterministic text layer.
+    # Behind its own opt-in flag, MEDIAHUB_GEN_BG, **default OFF** — it is a
+    # billed API call, so it never spends without the operator switching it
+    # on (roadmap P0 cost discipline). The legacy MEDIAHUB_DISABLE_AI_BG=1
+    # kill switch still force-disables it. When off/unavailable the
+    # procedural water-pattern + noise backdrop renders as before.
     # v2 archetypes have no {{AI_BG_URI}} slot, so the caller skips the
     # fetch for them — a paid API call whose output would be discarded.
     ai_bg_uri = None
     if not skip_ai_bg:
         try:
-            import os as _os
-
-            if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
+            if _gen_bg_enabled():
                 from mediahub.visual.ai_background import (
                     is_available as _ai_bg_ok,
                     background_data_uri_for,

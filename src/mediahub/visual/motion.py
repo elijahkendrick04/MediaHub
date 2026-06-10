@@ -247,6 +247,12 @@ def _card_to_props(
     # is optional — empty strings tell the TSX composition to fall
     # back to its variationSeed-driven defaults.
     b = brief if isinstance(brief, dict) else {}
+    # Gen v2 (SEQ-4): forward the still graphic's archetype + measured
+    # emphasis line so the motion render of a card visually matches its
+    # still. ``layout_template`` carries a v2 archetype name when the v2
+    # engine produced the brief (a v1 family name otherwise — the TSX
+    # treats unknown names as "no archetype treatment").
+    brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
     return {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
@@ -263,6 +269,8 @@ def _card_to_props(
         "accentStyle": str(b.get("accent_style") or ""),
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
+        "archetype": str(b.get("layout_template") or ""),
+        "heroStat": str(brief_layers.get("hero_stat") or ""),
     }
 
 
@@ -420,16 +428,37 @@ def render_story_card(
     return out_path if out_path.exists() else cached
 
 
+# Data-driven reel allocation (SEQ-4): the reel's length follows the number
+# of ranked moments instead of a fixed 15s — a one-medal weekend is a tight
+# 7s, a five-PB weekend a 23s recap. Mirrors MeetReel.tsx's scene layout
+# (cover + N card scenes + outro beat).
+REEL_COVER_SEC = 2.0
+REEL_PER_CARD_SEC = 4.0
+REEL_OUTRO_SEC = 1.0
+
+
+def reel_duration_for(n_cards: int) -> float:
+    """Total reel seconds for ``n_cards`` ranked moments.
+
+    Deterministic structure maths (cover + per-card beats + outro), capped to
+    the same 1..5 card range the route and the TSX composition enforce. Three
+    cards land on the historic 15s default, so existing three-card reels keep
+    their cached duration.
+    """
+    n = max(1, min(int(n_cards or 1), 5))
+    return REEL_COVER_SEC + REEL_PER_CARD_SEC * n + REEL_OUTRO_SEC
+
+
 def render_meet_reel(
     top_cards: list[dict],
     brand_kit: Any,
     out_path: Path,
     *,
     meet_name: str = "",
-    duration_sec: float = 15.0,
+    duration_sec: Optional[float] = None,
     briefs: Optional[list[Optional[dict]]] = None,
 ) -> Path:
-    """Render a multi-card reel (default 15s) from the top cards for a meet.
+    """Render a multi-card reel from the top cards for a meet.
 
     Inputs:
       top_cards   list of card dicts (typically the top 3 from the content
@@ -439,7 +468,10 @@ def render_meet_reel(
                   copied here from the motion cache.
       meet_name   meet headline used on the reel cover. Defaults to the
                   first card's ``meet_name`` if blank.
-      duration_sec total reel duration; default 15s.
+      duration_sec explicit total reel duration. Default ``None`` =
+                  data-driven: ``reel_duration_for(len(top_cards))``, so the
+                  reel's structure follows the number of ranked moments
+                  (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
     """
     _dispatch_engine()
     out_path = Path(out_path)
@@ -482,6 +514,9 @@ def render_meet_reel(
                 meet_name = cp["meetName"]
                 break
 
+    if duration_sec is None:
+        duration_sec = reel_duration_for(len(cards_props))
+
     cache_key = _content_hash(
         {
             "cards": cards_props,
@@ -514,6 +549,7 @@ def render_meet_reel(
 __all__ = [
     "render_story_card",
     "render_meet_reel",
+    "reel_duration_for",
     "node_available",
     "remotion_installed",
     "REMOTION_DIR",

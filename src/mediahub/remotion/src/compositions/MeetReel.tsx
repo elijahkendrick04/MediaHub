@@ -30,6 +30,10 @@ const cardSchema = z.object({
   accentStyle: z.string().default(""),
   mood: z.string().default(""),
   photoTreatment: z.string().default(""),
+  // Gen v2 (SEQ-4): forwarded so each reel beat matches its still graphic
+  // (zod strips undeclared keys, so these must be declared here too).
+  archetype: z.string().default(""),
+  heroStat: z.string().default(""),
 });
 
 const brandSchema = z.object({
