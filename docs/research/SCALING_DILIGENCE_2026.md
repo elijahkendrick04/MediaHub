@@ -244,3 +244,69 @@ figure changed; the £150k–£400k swimming-only ceiling and Routes A/B/C stand
 **[adr/0012](../adr/0012-ngb-distribution-channel-reality-check.md)** (which concluded "lean on
 direct + word-of-mouth"); it is an elaboration of that recorded decision, not a new strategic
 choice, so no new ADR is minted this cycle.
+
+---
+
+## Evidence refresh — 2026-06-10 (external market-and-scalability research pass, cycle 5)
+
+**Why:** cycles 1–4 were internal strategy-engine refreshes. This cycle runs a **fresh
+external market-and-scalability pass** against the live web to test whether the diligence
+still holds and to sharpen the two thinnest spots: (a) the *white-space* claim that no swim
+incumbent auto-generates content from result files, and (b) the under-specified
+**platform-API and results-data legal** constraints on the "auto-posting" endgame. Outcome:
+the pass **confirms and sharpens** the report — **nothing was overturned, no revenue figure
+changed**, and the £150k–£400k swimming-only ceiling + Routes A/B/C stand. This cycle is the
+source cited by the ROADMAP's *Phase C → "External research pass — June 2026 (confirms &
+sharpens)"* subsection and its P4.2 note.
+
+**Findings (external, dated; ESTIMATE flagged where a benchmark is an external base rate
+applied to MediaHub's unproven case):**
+
+- **White-space re-verified, and tightened.** No swim-data incumbent ingests a result file
+  and emits branded, ranked content: **SwimTopia, TeamUnify / SportsEngine, Swimcloud,
+  Hy-Tek / MeetMobile, Swim Club Manager, Swim Manager** stop at PB/results display +
+  *manual* sharing. **Gipper** *does* offer **swimming graphic templates** (meet-day,
+  results, commitment) for social — but it is a **design tool that does NOT ingest
+  HY3 / SDIF / result files** (result-file import is Hy-Tek / Team Manager / Swimcloud
+  territory). So MediaHub's *result-file → ranked, branded content* path is undefended
+  **today** — a **time advantage, not a moat**. **Watch item: Gipper adding result-file
+  ingestion** would close the head-start. *[Sources: gipper.com/sports-templates/swimming-meet-day-graphic-template;
+  hytek.active.com Import Meet Results; support.swimcloud.com "Creating a Hy-Tek Result
+  File"; accessed 2026-06-10.]*
+- **Instagram auto-posting is gated by a multi-step Meta approval.** Publishing to accounts
+  you don't own requires an Instagram **Business/Creator** account + a connected **Facebook
+  Page** + a Meta app with **`instagram_business_content_publish`** + **App Review**
+  (per-permission, Meta-documented **~2–4 weeks** each, with a screencast) + **Business
+  Verification** + **Advanced Access**; ~25 test users before review. Plan ~6–8 weeks of
+  go-to-market lead time. *[Source: developers.facebook.com/docs/instagram-platform/app-review/
+  and overview; accessed 2026-06-10.]*
+- **TikTok auto-posting is restricted until an audit.** An **unaudited** Content-Posting
+  API client can only post **private (SELF_ONLY)** and is capped at **≤5 users / 24h**;
+  lifting that requires passing TikTok's **audit** (developer-reported ~1–4 weeks, longer on
+  rejection — ESTIMATE). *[Source: developers.tiktok.com Content Posting API guidelines /
+  get-started; accessed 2026-06-10.]*
+  → **Implication (a + b):** validates the roadmap's sequencing of **Bluesky (AT Protocol) +
+  Mastodon as the first free publish targets (P4.1)** — open APIs, no review gauntlet —
+  **before** Instagram / TikTok (P4.2), all behind human approval. "Launch-day IG/TikTok
+  auto-posting" is correctly on the EXCLUDE list.
+- **Results-data acquisition carries ToS / CMA / GDPR risk; the official API is the clean
+  path.** Scraping competition results risks source-platform **ToS** breaches and, in the
+  UK, **CMA** competition scrutiny; the data is largely **minors'** competition data, so
+  **GDPR** applies. The evidenced, low-risk route is the **Swim England approved-systems
+  API** (cycle 3) rather than scraping — reinforcing the ADR-0012 "apply for data-API
+  access" first move and the ADR-0003 minors'-data isolation lock.
+
+**Confirmed (unchanged) anchors:** swimming-only ceiling ≈ **£150k–£400k ARR**; ~1,300 UK&I +
+~2,740 USA Swimming affiliated clubs; warm close ~30–50% vs cold ~2–5%; referrals 20–50% of
+SaaS customers; annual prepay cuts churn ~30–40%; SMB/volunteer churn 3–7%/mo; candidate Club
+price **£49–£99/mo billed annually, UNVALIDATED until ≥5 clubs pay annually** (PC.4); Swim
+England approved-systems API (1 Oct 2025; partners Swim Club Manager + Swim Manager; commercial
+orgs invited to apply) REAL vs promotional NGB endorsement SPECULATIVE (ADR-0012).
+
+**Implication for the plan:** none of the strategy changes — the pass is a **confirmation +
+sharpening**. The >95% standard attaches only to the *decisions* (commercialise first; PC.3
+multi-tenancy as the #1 blocking scaling fix, operator/Council-gated; warm + referral over
+cold; official API over scraping; free open publish targets before the gated platforms), never
+to any revenue outcome. No new ADR is minted: this elaborates the decisions already recorded in
+[adr/0011](../adr/0011-commercial-reconcile-revenue-reality.md) and
+[adr/0012](../adr/0012-ngb-distribution-channel-reality-check.md).

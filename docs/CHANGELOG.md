@@ -2394,3 +2394,8 @@ PNG saved to `/tmp/v82_verification.png` (968 KB).
 
 ---
 
+## Docs — 2026-06-10 — Roadmap: June 2026 external research pass (cycle 5)
+
+Folded the June 2026 external market-and-scalability research pass into the long-form `docs/ROADMAP.md` (PR #310 structure) as an "External research pass — June 2026 (confirms & sharpens)" subsection in the commercial reality check — the sharpened white-space finding (named swim incumbents; Gipper ships templates but ingests no result files; watch-Gipper), the platform-publishing API-policy and results-data ToS/CMA/GDPR risks, and the INCLUDE/EXCLUDE do-/don't filter — plus a platform-API note on P4.2; logged as Evidence-refresh cycle 5 in `docs/research/SCALING_DILIGENCE_2026.md`. It **confirms and sharpens** the internal diligence — no revenue figure changed, the £150k–£400k swimming-only ceiling and H1–H4 horizons stand, and PC.3 remains the #1 operator/Council-gated scaling fix.
+
+---
