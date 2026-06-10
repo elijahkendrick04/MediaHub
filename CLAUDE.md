@@ -120,7 +120,7 @@ Removing or replacing existing routes and data structures is allowed when an upd
 2. **No dangling links.** Confirm no `url_for()`, template link, or JS call still points at a removed route.
 3. **Callers migrated.** Confirm every caller from the breakage map now uses the replacement.
 4. **Imports resolve.** Import the app and affected modules — no `ImportError` / `NameError` / `AttributeError`.
-5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~253 passed / ~34 skipped, with no *new* failures.
+5. **Full test suite.** Run `python -m pytest tests/ -q` — expect ~3,500+ passed (see *Running Tests* for the current count), with no *new* failures.
 6. **No test cheating.** Confirm no test was deleted, skipped, or weakened just to go green.
 7. **Route works.** Exercise each affected route end-to-end (request → expected response/status).
 8. **Templates render.** Confirm affected pages render with no undefined-variable / missing-field errors.
@@ -230,12 +230,15 @@ A key committed to the repo is a leak even if later removed.
 All test files pass. Run the full suite with no ignores:
 
 ```bash
-# Full suite (current expectation: ~253 passed, ~34 skipped).
+# Full suite (current expectation: ~3,500+ passed; skips vary by environment —
+# 1 in the dev sandbox, more where corpus ZIPs / sample PDFs / optional deps
+# are absent). Last refreshed 2026-06-09: 3,576 passed, 1 skipped.
 python -m pytest tests/ -q
 ```
 
-Skips are all legitimate data-only gaps (missing corpus ZIPs, missing sample PDFs,
-optional `reportlab` dependency) — no test file is structurally broken.
+Skips are all legitimate data/dependency gaps (missing corpus ZIPs, missing
+sample PDFs, optional `reportlab`, opt-in slow render-diffs) — no test file is
+structurally broken.
 
 Previously-fixed files (now part of the passing suite):
 - `tests/test_pb_discovery.py` — all mock.patch targets updated to canonical `mediahub.*` paths; real ledger pollution cleared

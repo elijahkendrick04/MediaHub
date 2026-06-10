@@ -52,12 +52,12 @@ constraint and the reason accuracy (JTBD #3) is never traded for polish.
 ## 3. The pipeline, before and after
 
 ```
-TODAY (flag off):
+LEGACY (kill-switch MEDIAHUB_GEN_V2=0):
   card data ─▶ creative_brief.generator (random/seed enum tuple)
                  └─ ai_director: LLM PICKS a tuple from fixed enums
             ─▶ graphic_renderer.render (repaint one DOM) ─▶ 1 PNG
 
-v2 (MEDIAHUB_GEN_V2 on):
+v2 (the default; Tier A live, Tier B pending SEQ-2):
   card data ─▶ DesignTokens contract (roles, lockups, type, voice)   [Layer 1]
             ─▶ ai_director: LLM EMITS a DesignSpec (schema-constrained) [Layer 3]
                  (archetype + colour roles + hero stat + hook + crop + mood)
@@ -74,22 +74,28 @@ the SEQ-3 cutover, after the replacement is proven).
 
 ## 4. The `MEDIAHUB_GEN_V2` flag
 
-A single environment feature flag gates every behaviour change.
+A single environment flag gates the engine. **v2 Tier A is the production
+default**; the flag is now a kill-switch, not an opt-in.
 
-- **Name:** `MEDIAHUB_GEN_V2` — env-read, **default off**.
-- **Off (production today):** the existing enum-permutation engine runs
-  unchanged. New v2 files (archetypes, design-spec schema, metrics) sit inert.
-- **On:** the create-graphic route uses the DesignTokens contract, the
-  `layouts/v2` archetypes, the design-spec director, and the pool/rank/compliance
-  shortlist.
-- **Provider unavailable while on:** the system falls back to the **deterministic
-  archetype-picker floor** (seed-rotated over the v2 archetypes) — a real, legible
-  card, never a fabricated or broken one. This honours the project's "honest
-  error, never a fake fallback" rule.
-- **Cutover (SEQ-3):** once v2 wins the A/B in review and the suite is green, the
-  flag default flips to on and the dead enum/menu-picker code is removed via
-  CLAUDE.md's gated-removal process. A second flag, `MEDIAHUB_GEN_BG` (default
-  off), independently gates optional generative backgrounds (SEQ-4, Tier C).
+- **Name:** `MEDIAHUB_GEN_V2` — env-read. **Unset (or any non-kill value) = v2
+  ON.** Set `0` / `false` / `off` / `no` to fall back to the legacy engine
+  (the deployment-wide kill-switch; see `graphic_renderer/archetypes.is_enabled`).
+- **Kill-switch engaged:** the old enum-permutation engine runs byte-identical
+  to its pre-v2 behaviour. The v2 files sit inert.
+- **Default (v2 on, Tier A):** rendering uses the `--mh-*` brand-role tokens,
+  the `layouts/v2` archetype library with the deterministic seeded picker, the
+  autofit hero sizing, and the saliency photo position. The design-spec
+  director and the pool/rank/compliance shortlist are **not yet wired** —
+  they land with SEQ-2.
+- **Provider unavailable:** Tier A is already the **deterministic
+  archetype-picker floor** (seed-rotated over the v2 archetypes) — a real,
+  legible card, never a fabricated or broken one. This honours the project's
+  "honest error, never a fake fallback" rule and remains the floor under the
+  SEQ-2 director.
+- **Cutover (SEQ-3):** once the SEQ-2 director wins the A/B in review and the
+  suite is green, the dead enum/menu-picker code is removed via CLAUDE.md's
+  gated-removal process. A second flag, `MEDIAHUB_GEN_BG` (default off),
+  independently gates optional generative backgrounds (SEQ-4, Tier C).
 
 Read the flag in the route and in `resolve_design_tokens(profile_id)`; everything
 downstream branches on it. Seed the director and **cache the spec** (not just the
@@ -188,11 +194,14 @@ the v2 archetypes. This is both the no-AI path and the fallback floor when no
 provider is configured. With the flag on, a 10-card pack should use **≥6 distinct
 archetypes** (today: ~1–2).
 
-**Starting catalog (12 to begin, growing):** `split_diagonal_hero`,
+**Catalog (all 12 live, growing):** `split_diagonal_hero`,
 `full_bleed_photo_lower_third`, `editorial_numbers_grid`,
 `centered_medal_spotlight`, `magazine_cover`, `ticker_strip`,
 `stat_stack_sidebar`, `triptych_progression`, `quote_led_recap`,
 `big_number_dominant`, `duo_athlete_split`, `minimal_type_poster`.
+Every archetype ships a `<name>.notes.md` (composition + when the director
+should pick it — the SEQ-2 director's catalog entries), enforced by
+`tests/test_gen_v2_tier_a.py::test_archetype_has_authoring_notes`.
 
 ## 7. The `layouts/v2` slot convention (authoritative)
 
@@ -202,7 +211,7 @@ archetypes** (today: ~1–2).
 > roadmap is the source of truth.
 
 **Each archetype owns one new file** `src/mediahub/graphic_renderer/layouts/v2/<name>.html`
-(plus an optional `<name>.notes.md`). Files are disjoint, so archetypes can be
+(plus its `<name>.notes.md`). Files are disjoint, so archetypes can be
 authored independently and never conflict.
 
 **Slot convention (author against this exactly):** use `{{PLACEHOLDER}}` string
@@ -256,7 +265,7 @@ render time. **No hex literals in colour positions.**
   placeholder/variable matches this convention.
 
 **Self-check before opening a PAR-7 PR:** exactly one new
-`layouts/v2/<name>.html` (+ optional notes); only CSS-variable colours (grep for
+`layouts/v2/<name>.html` (+ its notes); only CSS-variable colours (grep for
 `#` hex in colour positions → none); every placeholder on the allow-list above;
 `{{BASE_CSS}}` present; structurally distinct from the existing families; no other
 file changed.
@@ -331,16 +340,24 @@ human ever sees them — target ≥99% compliance pass-rate on shipped candidate
 
 `web/ai_caption.py` is already the one strong generative surface (LLM-only,
 Gemini-primary / Claude-failover, honest-error, voice profile, brand-DNA
-injection, recent-caption dedupe). v2 extends it inside the same architecture:
+injection, recent-caption dedupe). v2 extends it inside the same architecture
+(all five shipped with PAR-1):
 
-- **Few-shot injection** of 3–5 of the club's own past captions (the strongest
-  single lever — few-shot beats adjective tone).
-- **Generate-many-then-dedupe** — 4–6 candidates, embedding/n-gram de-dup against
-  recent, to kill repetition.
-- **Per-platform variants** — feed / story / X length + tone from one source.
-- **Approval-loop store** — edited + approved captions feed back into the
-  per-club few-shot set (and the `voice` token block).
-- **AI-tell ban-list** — "delve," "elevate," reflexive exclamation marks.
+- **Few-shot injection** of up to 5 of the club's own past captions (the
+  strongest single lever — few-shot beats adjective tone). The live caption
+  route merges two sources: Cap-2b semantic recall (moment-matched, needs an
+  embedding backend) and the plain `web/caption_examples.py` store of recently
+  approved captions, which works for every club from the first approval.
+- **Generate-many-then-dedupe** — `generate_caption_candidates`: 4–6
+  candidates, trigram de-dup against recent + each other, returned ranked
+  freshest-first.
+- **Per-platform variants** — `generate_platform_variants`: feed / story / X /
+  LinkedIn length + tone from one approved source caption.
+- **Approval-loop store** — the content-pack approval seam
+  (`workflow/pack.py`) appends each approved card's final caption (edits
+  included) to the club's few-shot store, alongside Cap-2b semantic capture.
+- **AI-tell ban-list** — "delve," "elevate," "in the world of," reflexive
+  exclamation marks.
 
 ## 11. Video — inherits the fix, then gains data-driven structure
 
@@ -399,13 +416,19 @@ stays 100% (it is deterministic — any drop is a bug), and every card keeps its
 
 ## 13. Build status & sequencing
 
-All items are **❌ NOT STARTED** as of writing. Full prompts (implementation +
-verification) per stage are in [`ROADMAP.md`](ROADMAP.md) Appendix A.
+Full prompts (implementation + verification) per stage are in
+[`ROADMAP.md`](ROADMAP.md) Appendix A. Status as of 2026-06-09:
 
-**Parallel bucket (additive/inert, any order, PR independently):** PAR-1 caption
-quality pack · PAR-2 auto-fit · PAR-3 saliency crop · PAR-4 design-spec schema ·
-PAR-5 variant metrics · PAR-6 brand bootstrap · PAR-7 archetype templates (×N) ·
-**PAR-8 docs/ADR (this document).**
+**Parallel bucket — ✅ ALL SHIPPED:** PAR-1 caption quality pack (live: the
+approval seam feeds the few-shot store, the caption route injects it) · PAR-2
+auto-fit · PAR-3 saliency crop · PAR-4 design-spec schema · PAR-5 variant
+metrics · PAR-6 brand bootstrap · PAR-7 archetype templates (all 12 live, each
+with director notes) · PAR-8 docs/ADR (this document).
+
+**Spine:** SEQ-0 + SEQ-1 (Tier A) ✅ shipped — v2 is the production default
+with `MEDIAHUB_GEN_V2=0` as the kill-switch. SEQ-2 (design-spec director +
+pool/rank/compliance shortlist), SEQ-3 (cutover + gated removal of the
+enum/menu-picker engine) and SEQ-4 (video scene structure) are ❌ not started.
 
 **Sequential spine (in order, flag-gated):**
 

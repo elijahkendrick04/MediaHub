@@ -380,10 +380,15 @@ generalises into the cross-source prioritiser.
 The asset-quality stream: replace the enum-permutation variation mechanism with an
 archetype library + design-spec director, keeping the deterministic engine. Decided
 in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
-build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Tier A (SEQ-1) shipped** (PR
-#259): the 6-archetype library + deterministic picker + autofit/saliency/role
-tokens, behind `MEDIAHUB_GEN_V2`. **Tier B (SEQ-2)** is the active next step — the
-LLM design-spec director, generate-pool, rank, and brand-compliance check.
+build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Parallel bucket (PAR-1 →
+PAR-8) all shipped** — captions live end-to-end (approval seam → few-shot store →
+route injection), autofit, saliency, design-spec contract, variant metrics,
+brand bootstrap, the complete 12-archetype catalog (each with director notes),
+and docs/ADR. **Tier A (SEQ-1) shipped** (PR #259, grown since): the archetype
+library + deterministic picker + autofit/saliency/role tokens, now the
+**production default** (`MEDIAHUB_GEN_V2=0` kill-switch). **Tier B (SEQ-2)** is
+the active next step — the LLM design-spec director, generate-pool, rank, and
+brand-compliance check.
 
 ### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
 Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
@@ -1083,7 +1088,7 @@ top. The archetype must read *structurally distinct* from `individual_hero` /
 `magazine_cover`, `ticker_strip`, `stat_stack_sidebar`, `triptych_progression`,
 `quote_led_recap`, `big_number_dominant`, `duo_athlete_split`, `minimal_type_poster`.
 
-**Progress (PAR-7 catalog, auto-run):** 11 of 12 archetypes live — `quote_led_recap` added 2026-06-09 (an editorial pull-quote recap: light surface ground + left accent quote-bar + oversized hanging quote glyph + ragged left column + inline accent-underlined result + em-dash attribution rule; purely typographic, strong no-photo pick). Representative seeds-0..9 pack archetype-diversity stays saturated at **1.00**; library grows 10 → **11**; new archetype nearest-neighbour dHash 0.32 sits above the pre-existing library distinctiveness floor (0.309) so the floor is unchanged (genuine new structure, not a reskin). Remaining: `duo_athlete_split`. See `docs/build_reports/GEN_QUALITY_BASELINE.md`.
+**Progress (PAR-7 catalog):** ✅ **12 of 12 archetypes live — catalog complete** (`duo_athlete_split` added 2026-06-09: a matchday duel poster — the canvas bisected into two equal vertical halves by a hard accent seam, photo bay vs brand data bay, crossed by the one full-width name band that bridges the seam). Representative seeds-0..9 pack archetype-diversity saturated at **1.00**; new archetype nearest-neighbour dHash **0.355** sits above the contemporaneously re-measured pre-existing library floor (**0.285**) so the floor is unchanged (genuine new structure, not a reskin). Every archetype now ships a `.notes.md` director catalog entry (test-enforced). The verification pass also fixed two renderer-wide typography defects (self-hosted fonts never loaded — `set_content` blocked `file://` woff2 fetches; Anton autofit under-measurement clipping long surnames) — see `docs/build_reports/GEN_QUALITY_BASELINE.md`.
 
 **Implementation prompt (template — fill in `<NAME>`):**
 > [Preamble.] Author ONE new graphic archetype `graphic_renderer/layouts/v2/<NAME>.html`
