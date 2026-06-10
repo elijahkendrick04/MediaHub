@@ -62,6 +62,18 @@ def _grain_enabled() -> bool:
     return _flag("MEDIAHUB_RENDER_GRAIN", "1")
 
 
+def _gen_bg_enabled() -> bool:
+    """Tier C generative backgrounds (SEQ-4): opt-IN, default OFF.
+
+    ``MEDIAHUB_GEN_BG=1`` switches the Imagen background fetch on — it is a
+    billed API call, so it must never spend without the operator's say-so.
+    The legacy ``MEDIAHUB_DISABLE_AI_BG=1`` kill switch still wins.
+    """
+    if os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") == "1":
+        return False
+    return _flag("MEDIAHUB_GEN_BG", "0")
+
+
 def _dpr_render() -> int:
     """Device-pixel-ratio used at screenshot time. Defaults to 2."""
     try:
@@ -1243,17 +1255,19 @@ def _common_replacements(
         has_photo=has_photo,
     )
 
-    # Optional AI-generated brand-aware background. Activated only when
-    # REPLICATE_API_TOKEN is set; otherwise the water-pattern + noise
-    # overlay is used as before. Cached aggressively by content hash.
+    # Optional generative background (Tier C, SEQ-4): an Imagen-built
+    # brand-aware backdrop composited UNDER the deterministic text layer.
+    # Behind its own opt-in flag, MEDIAHUB_GEN_BG, **default OFF** — it is a
+    # billed API call, so it never spends without the operator switching it
+    # on (roadmap P0 cost discipline). The legacy MEDIAHUB_DISABLE_AI_BG=1
+    # kill switch still force-disables it. When off/unavailable the
+    # procedural water-pattern + noise backdrop renders as before.
     # v2 archetypes have no {{AI_BG_URI}} slot, so the caller skips the
     # fetch for them — a paid API call whose output would be discarded.
     ai_bg_uri = None
     if not skip_ai_bg:
         try:
-            import os as _os
-
-            if _os.environ.get("MEDIAHUB_DISABLE_AI_BG", "0") != "1":
+            if _gen_bg_enabled():
                 from mediahub.visual.ai_background import (
                     is_available as _ai_bg_ok,
                     background_data_uri_for,
@@ -2352,6 +2366,79 @@ def _v2_hero_stat(brief) -> str:
     return (layers.get("hero_stat") or layers.get("context") or "").strip()
 
 
+# The compositional slots a DesignSpec colour-role assignment may repaint,
+# mapped to the renderer var each one drives. The headline slot is handled
+# separately (it must stay an on-colour of the final ground).
+_ASSIGN_SLOT_TO_VAR: dict[str, str] = {
+    "ground": "--mh-primary",
+    "surface": "--mh-surface",
+    "accent": "--mh-accent",
+}
+
+
+def _apply_role_assignment(root_vars: dict[str, str], assignment: dict) -> dict[str, str]:
+    """Apply the director's colour-role assignment — only if it stays legible.
+
+    ``assignment`` maps compositional slots (ground/surface/headline/accent)
+    to token *role names* (Tier B §5.4); each role resolves to the hex the
+    Tier A baseline already computed, so no colour is ever invented. The
+    reassigned set ships ONLY when the full APCA compliance gate passes;
+    otherwise the brand-safe baseline returns unchanged (legibility beats art
+    direction, deterministically).
+    """
+    from mediahub.quality.compliance import check_roles
+
+    role_hex = {
+        role: root_vars.get("--mh-" + role.replace("_", "-"))
+        for role in ("primary", "secondary", "surface", "accent", "on_primary", "on_surface")
+    }
+    cand = dict(root_vars)
+    changed = False
+    for slot, var in _ASSIGN_SLOT_TO_VAR.items():
+        hex_value = role_hex.get(str(assignment.get(slot) or ""))
+        if isinstance(hex_value, str) and hex_value.startswith("#") and cand.get(var) != hex_value:
+            cand[var] = hex_value
+            changed = True
+    head = role_hex.get(str(assignment.get("headline") or ""))
+    new_on_primary = (
+        head if isinstance(head, str) and head.startswith("#") else _on_color(cand["--mh-primary"])
+    )
+    if cand.get("--mh-on-primary") != new_on_primary:
+        changed = True
+    if not changed:
+        return root_vars
+    cand["--mh-on-primary"] = new_on_primary
+    cand["--mh-on-surface"] = _on_color(cand["--mh-surface"])
+    cand["--mh-outline"] = (
+        "rgba(255,255,255,0.20)" if cand["--mh-on-primary"] == "#FFFFFF" else "rgba(0,0,0,0.20)"
+    )
+    return cand if check_roles(cand).passes else root_vars
+
+
+def resolved_role_vars_for_brief(brief, brand_kit=None) -> dict[str, str]:
+    """The exact ``--mh-*`` set a v2 render of ``brief`` paints.
+
+    Single source of truth shared by the archetype fill and the Tier B
+    candidate-pool compliance scoring: Tier A brand-role baseline → the
+    director's APCA-gated colour-role assignment → the medal tint (the metal
+    IS the information, so it wins the accent — behind the same gate).
+    """
+    root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
+    assignment = getattr(brief, "colour_role_assignment", None) or {}
+    if isinstance(assignment, dict) and assignment:
+        root_vars = _apply_role_assignment(root_vars, assignment)
+    tier = _detect_medal_tier(brief)
+    if tier and tier in _MEDAL_ACCENTS:
+        from mediahub.quality.compliance import is_legible
+
+        ground = root_vars["--mh-primary"]
+        for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
+            if is_legible(metal, ground) and is_legible(ground, metal):
+                root_vars = {**root_vars, "--mh-accent": metal}
+                break
+    return root_vars
+
+
 def _fill_v2_archetype(
     brief, width, height, base_repl, *, athlete_path=None, brand_kit=None
 ) -> dict:
@@ -2375,23 +2462,10 @@ def _fill_v2_archetype(
     # paints a stray band across the composition. Suppress it for v2.
     repl["ACCENT_DECORATION"] = ""
 
-    root_vars = _mh_role_vars(dict(brief.palette or {}), brand_kit)
-    # Medal tier: for gold/silver/bronze the accent colour IS the information
-    # (same rule the v1 engine applies via ``_MEDAL_ACCENTS``), so tint
-    # ``--mh-accent`` with the metal — but only when it clears the same APCA
-    # gate as every other resolved accent (kicker text on the ground AND a
-    # chip ground behind primary text). A light club ground gets the deep
-    # metal; if neither variant reads, the brand accent stays (legibility
-    # beats the tint, honestly).
-    tier = _detect_medal_tier(brief)
-    if tier and tier in _MEDAL_ACCENTS:
-        from mediahub.quality.compliance import is_legible
-
-        ground = root_vars["--mh-primary"]
-        for metal in (_MEDAL_ACCENTS[tier]["accent"], _MEDAL_ACCENTS[tier]["accent_deep"]):
-            if is_legible(metal, ground) and is_legible(ground, metal):
-                root_vars["--mh-accent"] = metal
-                break
+    # Tier A baseline → director's APCA-gated colour-role assignment → medal
+    # tint (the metal IS the information, gated the same way). One resolver,
+    # shared with the Tier B pool's compliance scoring.
+    root_vars = resolved_role_vars_for_brief(brief, brand_kit)
     # Size the hero slots SINGLE-LINE: the v2 layouts render name/result with
     # `white-space: nowrap`, so a long or multi-word surname ("Van Dyk") must
     # shrink rather than overflow. The per-layout defaults handle the short case.
