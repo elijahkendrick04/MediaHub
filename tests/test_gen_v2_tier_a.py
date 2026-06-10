@@ -182,7 +182,10 @@ def test_generator_swaps_to_v2_when_flag_on(monkeypatch):
     assert len(chosen) >= 6
 
 
-def _brief_for_item(item, *, seed=0, recent=None):
+def _brief_for_item(item, *, seed=None, recent=None):
+    # seed=None mirrors the bulk-pack / fresh-regenerate call shape (no
+    # explicit seed → the floor derives one from the card id); pass an int
+    # (including 0) for the exact ?stable / ?variation_seed=N contract.
     return gen_brief(
         item,
         _eval(),
@@ -250,8 +253,9 @@ def test_pack_with_threaded_recents_avoids_seed_collisions(monkeypatch):
 
 
 def test_fresh_regenerate_rotates_without_a_provider(monkeypatch):
-    """The regenerate route's no-LLM floor: seed=0 plus the card's recent
-    signatures must walk the library, not return the same archetype forever."""
+    """The regenerate route's no-LLM floor: no explicit seed plus the card's
+    recent signatures must walk the library, not return the same archetype
+    forever."""
     monkeypatch.setenv("MEDIAHUB_GEN_V2", "1")
     item = {
         "id": "ci-1",

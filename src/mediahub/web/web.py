@@ -22147,7 +22147,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         #   ?variation_seed=N  → force a specific integer seed
         seed_raw = _req.args.get("variation_seed")
         stable_mode = (_req.args.get("stable") or "").lower() in ("1", "true", "yes")
-        variation_seed = 0
+        # None = no explicit seed: the v2 floor derives a stable per-card seed
+        # from the card id, rotated past recents. An explicit integer —
+        # including 0 — is an exact, reproducible archetype pick.
+        variation_seed = None
         variation_profile = None
         ai_directed = False
 
@@ -22159,7 +22162,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             try:
                 variation_seed = int(seed_raw)
             except (TypeError, ValueError):
-                variation_seed = 0
+                variation_seed = None
         elif stable_mode:
             try:
                 from mediahub.creative_brief.generator import auto_variation_seed_for
@@ -22353,7 +22356,6 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     run_id=run_id,
                     media_assets=media_assets,
                     sponsor_name=sponsor_name,
-                    variation_seed=0,
                 )
                 visuals = res.get("visuals") or []
                 if visuals:

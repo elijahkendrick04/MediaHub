@@ -207,7 +207,7 @@ def generate(
     meet_name: str = "",
     venue_name: str = "",
     sponsor: Optional[dict] = None,
-    variation_seed: int = 0,
+    variation_seed: Optional[int] = None,
     variation_profile: Optional[VariationProfile] = None,
     use_ai_director: bool = False,
     recent_signatures: Optional[list[str]] = None,
@@ -218,10 +218,14 @@ def generate(
     LLM is available; falls back to deterministic defaults otherwise.
 
     ``variation_seed`` controls deterministic perturbation of the layout,
-    palette role mapping, image treatment, and headline phrasing. ``0``
-    keeps the default behaviour. ``1`` keeps the same family but inverts
-    colour roles. ``2`` swaps to a different layout family. ``3`` forces a
-    text-led / no-photo treatment.
+    palette role mapping, image treatment, and headline phrasing. ``None``
+    (not supplied — the bulk-pack / fresh-regenerate shape) lets the v2
+    archetype floor derive a stable per-card seed from the card id, rotated
+    past the card's recent archetypes. An **explicit** integer — including
+    ``0`` — is an exact, reproducible pick (the ``?stable`` /
+    ``?variation_seed=N`` contract). For the legacy axes: ``0`` keeps the
+    default look, ``1`` inverts colour roles, ``2`` swaps layout family,
+    ``3`` forces a text-led / no-photo treatment.
 
     ``variation_profile`` (optional, preferred): a fully-specified
     ``VariationProfile`` that overrides seed-based logic. When provided
@@ -470,7 +474,7 @@ def generate(
             else 0,
         )
     else:
-        palette = _apply_palette_seed(base_primary, base_secondary, base_accent, variation_seed)
+        palette = _apply_palette_seed(base_primary, base_secondary, base_accent, variation_seed or 0)
 
     # Brand / sponsor instructions
     brand_instr = (
@@ -574,7 +578,7 @@ def generate(
         # Legacy seed-only path — derive the new axes deterministically
         # from the seed so even legacy callers get *some* variety.
         bg_style, accent_style, type_pair, composition, photo_treatment, decoration_strength = (
-            _legacy_axes_from_seed(variation_seed)
+            _legacy_axes_from_seed(variation_seed or 0)
         )
         mood = ""
         ai_directed = False
@@ -701,9 +705,9 @@ def generate(
                 if _spec.hero_stat in hero_stat_options:
                     layers["hero_stat"] = hero_stat_options[_spec.hero_stat]
             elif _names:
-                if variation_seed:
-                    # Explicit seed (incl. ?stable / re-render): exact pick, so
-                    # the same seed always reproduces the same archetype.
+                if variation_seed is not None:
+                    # Explicit seed (incl. 0, ?stable / re-render): exact pick,
+                    # so the same seed always reproduces the same archetype.
                     _arch = _v2_archetypes.pick_archetype(variation_seed)
                 else:
                     # No seed supplied (bulk pack render / fresh regenerate):
