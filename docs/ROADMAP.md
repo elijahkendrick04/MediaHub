@@ -168,7 +168,7 @@ you write by hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `3f233319b` · Merge pull request #304 from elijahkendrick04/claude/cool-lovelace-g3494x
+**Last updated:** 2026-06-10 · `7f5297b18` · Merge pull request #300 from elijahkendrick04/claude/zen-cori-w0g15m
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -176,18 +176,18 @@ you write by hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
 | 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
 | 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
+| 2026-06-10 | `c1e540f32` | style: apply pre-commit hygiene to PR-touched files (ruff-format 0.8.4, EOF fixer) |
 | 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
 | 2026-06-10 | `4a8623c1f` | docs(build): SEQ-4 verification evidence + suite table in the spine report |
 | 2026-06-10 | `52470c085` | feat(gen-v2): SEQ-4 — data-driven reel scene structure + archetype-matched motion + opt-in gen backg |
+| 2026-06-10 | `e64f604cd` | fix(gen-v2): explicit seed 0 must be an exact archetype pick, not 'no seed' |
 | 2026-06-10 | `968d37d2d` | style: ruff-format touched files (pinned hook v0.8.4) |
 | 2026-06-10 | `97ed87e94` | refactor(gen-v2)!: SEQ-3 cutover — remove the dead enum-permutation variation engine |
-| 2026-06-10 | `6dcc6ba2d` | feat(gen-v2): SEQ-2 — Tier B candidate pool, batch director, compliance-ranked shortlist |
-| 2026-06-10 | `f8ba3c901` | feat(gen-v2): SEQ-0 — DesignTokens contract + deterministic lockup selection |
-| 2026-06-09 | `d12cfeb05` | fix(gen-v2): SEQ-1 review — repair the deterministic floor, medal tier, hero stat |
-| 2026-06-09 | `4be9d9fdc` | docs(p2.4): flip P2.4 to DONE + AUTOBUILD_LOG cycle entry |
+| 2026-06-10 | `db6b1fbc1` | test(renderer): regression pins for the font-loading and Anton-fit defects |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
