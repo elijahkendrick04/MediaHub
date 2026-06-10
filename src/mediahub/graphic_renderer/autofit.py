@@ -35,6 +35,7 @@ choose a font size that will not overflow. When in doubt it errs slightly *wide*
 (via the unlisted-glyph default), so it prefers a smaller, safe size over an
 overflowing one.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -54,22 +55,101 @@ __all__ = [
 # These are *advance* widths (pen movement), which is what governs how wide a
 # run of text is — not the ink bounding box.
 _AFM_1000: dict[str, int] = {
-    " ": 278, "!": 278, '"': 355, "#": 556, "$": 556, "%": 889, "&": 667,
-    "'": 222, "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333,
-    ".": 278, "/": 278,
-    "0": 556, "1": 556, "2": 556, "3": 556, "4": 556,
-    "5": 556, "6": 556, "7": 556, "8": 556, "9": 556,
-    ":": 278, ";": 278, "<": 584, "=": 584, ">": 584, "?": 556, "@": 1015,
-    "A": 667, "B": 667, "C": 722, "D": 722, "E": 667, "F": 611, "G": 778,
-    "H": 722, "I": 278, "J": 500, "K": 667, "L": 556, "M": 833, "N": 722,
-    "O": 778, "P": 667, "Q": 778, "R": 722, "S": 667, "T": 611, "U": 722,
-    "V": 667, "W": 944, "X": 667, "Y": 667, "Z": 611,
-    "[": 278, "\\": 278, "]": 278, "^": 469, "_": 556, "`": 333,
-    "a": 556, "b": 556, "c": 500, "d": 556, "e": 556, "f": 278, "g": 556,
-    "h": 556, "i": 222, "j": 222, "k": 500, "l": 222, "m": 833, "n": 556,
-    "o": 556, "p": 556, "q": 556, "r": 333, "s": 500, "t": 278, "u": 556,
-    "v": 500, "w": 722, "x": 500, "y": 500, "z": 500,
-    "{": 334, "|": 260, "}": 334, "~": 584,
+    " ": 278,
+    "!": 278,
+    '"': 355,
+    "#": 556,
+    "$": 556,
+    "%": 889,
+    "&": 667,
+    "'": 222,
+    "(": 333,
+    ")": 333,
+    "*": 389,
+    "+": 584,
+    ",": 278,
+    "-": 333,
+    ".": 278,
+    "/": 278,
+    "0": 556,
+    "1": 556,
+    "2": 556,
+    "3": 556,
+    "4": 556,
+    "5": 556,
+    "6": 556,
+    "7": 556,
+    "8": 556,
+    "9": 556,
+    ":": 278,
+    ";": 278,
+    "<": 584,
+    "=": 584,
+    ">": 584,
+    "?": 556,
+    "@": 1015,
+    "A": 667,
+    "B": 667,
+    "C": 722,
+    "D": 722,
+    "E": 667,
+    "F": 611,
+    "G": 778,
+    "H": 722,
+    "I": 278,
+    "J": 500,
+    "K": 667,
+    "L": 556,
+    "M": 833,
+    "N": 722,
+    "O": 778,
+    "P": 667,
+    "Q": 778,
+    "R": 722,
+    "S": 667,
+    "T": 611,
+    "U": 722,
+    "V": 667,
+    "W": 944,
+    "X": 667,
+    "Y": 667,
+    "Z": 611,
+    "[": 278,
+    "\\": 278,
+    "]": 278,
+    "^": 469,
+    "_": 556,
+    "`": 333,
+    "a": 556,
+    "b": 556,
+    "c": 500,
+    "d": 556,
+    "e": 556,
+    "f": 278,
+    "g": 556,
+    "h": 556,
+    "i": 222,
+    "j": 222,
+    "k": 500,
+    "l": 222,
+    "m": 833,
+    "n": 556,
+    "o": 556,
+    "p": 556,
+    "q": 556,
+    "r": 333,
+    "s": 500,
+    "t": 278,
+    "u": 556,
+    "v": 500,
+    "w": 722,
+    "x": 500,
+    "y": 500,
+    "z": 500,
+    "{": 334,
+    "|": 260,
+    "}": 334,
+    "~": 584,
 }
 
 # Base profile in em units (fraction of font size).
@@ -107,21 +187,58 @@ _FAMILY_SCALE: dict[str, float] = {
 
 # Family-name -> profile class. Names are normalised (lowercased, de-quoted, the
 # first family in a CSS stack). Anything unrecognised falls back to "sans".
-_CONDENSED_FAMILIES = frozenset({
-    "anton", "bebas neue", "bebas", "oswald", "impact", "teko",
-    "archivo narrow", "barlow condensed", "roboto condensed", "saira condensed",
-    "fjalla one", "staatliches", "big shoulders", "boldonse",
-})
-_MONO_FAMILIES = frozenset({
-    "monospace", "jetbrains mono", "ibm plex mono", "roboto mono", "space mono",
-    "dm mono", "geist mono", "red hat mono", "courier", "courier new",
-    "consolas", "menlo", "silkscreen",
-})
-_SERIF_FAMILIES = frozenset({
-    "serif", "lora", "georgia", "times", "times new roman", "playfair display",
-    "merriweather", "crimson pro", "crimson", "libre baskerville",
-    "instrument serif", "ibm plex serif", "gloock",
-})
+_CONDENSED_FAMILIES = frozenset(
+    {
+        "anton",
+        "bebas neue",
+        "bebas",
+        "oswald",
+        "impact",
+        "teko",
+        "archivo narrow",
+        "barlow condensed",
+        "roboto condensed",
+        "saira condensed",
+        "fjalla one",
+        "staatliches",
+        "big shoulders",
+        "boldonse",
+    }
+)
+_MONO_FAMILIES = frozenset(
+    {
+        "monospace",
+        "jetbrains mono",
+        "ibm plex mono",
+        "roboto mono",
+        "space mono",
+        "dm mono",
+        "geist mono",
+        "red hat mono",
+        "courier",
+        "courier new",
+        "consolas",
+        "menlo",
+        "silkscreen",
+    }
+)
+_SERIF_FAMILIES = frozenset(
+    {
+        "serif",
+        "lora",
+        "georgia",
+        "times",
+        "times new roman",
+        "playfair display",
+        "merriweather",
+        "crimson pro",
+        "crimson",
+        "libre baskerville",
+        "instrument serif",
+        "ibm plex serif",
+        "gloock",
+    }
+)
 
 
 def _first_family(font_family: str) -> str:
@@ -160,10 +277,23 @@ def _table_scale(font_family: str) -> float:
 
 # Weight-name -> numeric weight (CSS scale). Bolder faces advance slightly wider.
 _WEIGHT_NAMES: dict[str, int] = {
-    "thin": 100, "hairline": 100, "extralight": 200, "ultralight": 200,
-    "light": 300, "book": 400, "normal": 400, "regular": 400,
-    "medium": 500, "semibold": 600, "demibold": 600, "demi": 600,
-    "bold": 700, "extrabold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
+    "thin": 100,
+    "hairline": 100,
+    "extralight": 200,
+    "ultralight": 200,
+    "light": 300,
+    "book": 400,
+    "normal": 400,
+    "regular": 400,
+    "medium": 500,
+    "semibold": 600,
+    "demibold": 600,
+    "demi": 600,
+    "bold": 700,
+    "extrabold": 800,
+    "ultrabold": 800,
+    "black": 900,
+    "heavy": 900,
 }
 
 
@@ -254,6 +384,7 @@ def wrap_text(
     will exceed the box — :func:`fit_font_px` resolves that by shrinking the
     size. Returns ``[]`` for empty / whitespace-only input.
     """
+
     def measure(line: str) -> float:
         return measure_line_px(
             line, font_px, font_family=font_family, weight=weight, font_path=font_path
@@ -322,8 +453,7 @@ def fit_font_px(
         if len(lines) * size * line_height > box_h + 1e-6:
             return False
         widest = max(
-            measure_line_px(ln, size, font_family=font_family, weight=weight)
-            for ln in lines
+            measure_line_px(ln, size, font_family=font_family, weight=weight) for ln in lines
         )
         return widest <= box_w + 1e-6
 
@@ -361,9 +491,14 @@ def fit_text(
     :func:`wrap_text` with the result, sharing the same measurement.
     """
     size = fit_font_px(
-        text, box_w, box_h,
-        font_family=font_family, weight=weight,
-        min_px=min_px, max_px=max_px, line_height=line_height,
+        text,
+        box_w,
+        box_h,
+        font_family=font_family,
+        weight=weight,
+        min_px=min_px,
+        max_px=max_px,
+        line_height=line_height,
     )
     lines = wrap_text(text, box_w, size, font_family=font_family, weight=weight)
     return size, lines

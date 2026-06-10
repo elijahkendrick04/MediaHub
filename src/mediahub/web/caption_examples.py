@@ -8,6 +8,7 @@ Public API:
   load_examples(profile_id) -> list[str]   # up to 5 most-recent examples
   append_example(profile_id, caption)      # add an approved caption; capped at 50
 """
+
 from __future__ import annotations
 
 import json
@@ -33,9 +34,7 @@ def _examples_dir() -> Path:
 
 def _validate_profile_id(profile_id: str) -> None:
     if not isinstance(profile_id, str) or not _PROFILE_ID_RE.match(profile_id):
-        raise ValueError(
-            f"Invalid profile_id {profile_id!r} — must match [a-zA-Z0-9_-]{{1,80}}"
-        )
+        raise ValueError(f"Invalid profile_id {profile_id!r} — must match [a-zA-Z0-9_-]{{1,80}}")
 
 
 def load_examples(profile_id: str) -> list[str]:
@@ -71,8 +70,11 @@ def append_example(profile_id: str, caption: str) -> None:
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            existing = [str(e) for e in data if isinstance(e, str) and e.strip()] \
-                if isinstance(data, list) else []
+            existing = (
+                [str(e) for e in data if isinstance(e, str) and e.strip()]
+                if isinstance(data, list)
+                else []
+            )
         except Exception:
             existing = []
     if caption in existing:

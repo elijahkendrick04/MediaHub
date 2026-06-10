@@ -547,4 +547,3 @@ class TestGenerateAICaptionNoProvider:
         assert result["fallback"] is True
         assert result["caption"] == ""
         assert "error" in result
-

@@ -474,7 +474,9 @@ def generate(
             else 0,
         )
     else:
-        palette = _apply_palette_seed(base_primary, base_secondary, base_accent, variation_seed or 0)
+        palette = _apply_palette_seed(
+            base_primary, base_secondary, base_accent, variation_seed or 0
+        )
 
     # Brand / sponsor instructions
     brand_instr = (
