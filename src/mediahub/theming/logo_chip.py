@@ -45,7 +45,9 @@ from .contrast import apca
 
 __all__ = [
     "LogoChipDecision",
+    "LogoLockupChoice",
     "decide_logo_chip",
+    "select_logo_lockup",
     "DE_MIN",
     "APCA_MIN",
     "DEFAULT_CHIP_COLOR",
@@ -186,4 +188,87 @@ def decide_logo_chip(
         gate_de_passed=de_ok,
         gate_apca_passed=apca_ok,
         reasoning=reasoning,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lockup selection (Gen Engine v2, SEQ-0)
+# ---------------------------------------------------------------------------
+#
+# The DesignTokens contract (brand.design_tokens) types every lockup the club
+# actually has by ``form`` (icon / full_horizontal / full_stacked / mono) and
+# ``theme`` (the mark's own light/dark appearance). Given a background, this
+# helper picks the lockup that reads best — the same ΔE2000 + APCA gates as
+# the chip decision, applied across the candidate set. Pure data, no I/O.
+
+
+@dataclass
+class LogoLockupChoice:
+    """The selected lockup + how it should sit on the background."""
+
+    lockup: dict                 # the chosen lockup entry (as supplied)
+    mode: Literal["chip", "bare"]
+    chip_color: str              # only meaningful when mode == "chip"
+    decision: LogoChipDecision   # full gate metrics for the audit panel
+    reasoning: str               # one sentence
+
+
+def select_logo_lockup(
+    lockups: list[dict],
+    background_hex: str,
+    *,
+    prefer_form: str = "",
+    chip_color: str = DEFAULT_CHIP_COLOR,
+) -> LogoLockupChoice | None:
+    """Pick the lockup that reads best on ``background_hex``.
+
+    Selection is deterministic:
+
+    1. When ``prefer_form`` matches at least one candidate (the design-spec
+       director's ``logo_lockup`` field, with ``mono_light``/``mono_dark``
+       collapsing to form ``mono``), only those candidates are considered.
+    2. Each candidate with a known ``dominant_hex`` is gated via
+       :func:`decide_logo_chip`; bare-mode candidates beat chip-mode ones,
+       and among bare candidates the highest ``|Lc|`` wins.
+    3. Candidates with no known dominant colour can never prove they read,
+       so they rank below every gated candidate and render on a chip
+       (safe-by-default). Ties keep the caller's list order.
+
+    Returns ``None`` only when ``lockups`` is empty.
+    """
+    if not lockups:
+        return None
+
+    want_form = (prefer_form or "").strip().lower()
+    if want_form in ("mono_light", "mono_dark"):
+        want_form = "mono"
+    pool = [lk for lk in lockups if isinstance(lk, dict)]
+    if want_form:
+        preferred = [lk for lk in pool if str(lk.get("form", "")).lower() == want_form]
+        if preferred:
+            pool = preferred
+    if not pool:
+        return None
+
+    scored: list[tuple[int, float, int, dict, LogoChipDecision]] = []
+    for idx, lk in enumerate(pool):
+        decision = decide_logo_chip(
+            str(lk.get("dominant_hex") or ""),
+            background_hex,
+            chip_color=chip_color,
+        )
+        bare = 1 if decision.mode == "bare" else 0
+        scored.append((bare, decision.apca_abs, -idx, lk, decision))
+
+    scored.sort(reverse=True)
+    _bare, _lc, _order, lockup, decision = scored[0]
+    return LogoLockupChoice(
+        lockup=lockup,
+        mode=decision.mode,
+        chip_color=decision.chip_color,
+        decision=decision,
+        reasoning=(
+            f"{decision.mode}: form={lockup.get('form', 'icon')} "
+            f"theme={lockup.get('theme', 'unknown')} — {decision.reasoning}"
+        ),
     )
