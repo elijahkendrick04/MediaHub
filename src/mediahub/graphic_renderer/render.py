@@ -2113,35 +2113,50 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
 
     width, height = size
     dpr = _dpr_render()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox", "--font-render-hinting=none"])
-        ctx = browser.new_context(
-            viewport={"width": width, "height": height},
-            device_scale_factor=dpr,
-        )
-        page = ctx.new_page()
-        page.set_content(html, wait_until="networkidle", timeout=30_000)
-        # Wait for ALL @font-face downloads to settle. Playwright exposes
-        # `evaluate` with a Promise return — the inner JS resolves once
-        # `document.fonts.ready` does. Falls back to a timed pause if the
-        # page doesn't expose document.fonts at all.
-        try:
-            page.evaluate(
-                "() => (document.fonts && document.fonts.ready) "
-                "? document.fonts.ready.then(() => true) : true"
+    # The page MUST be navigated as a real file:// document, not injected via
+    # set_content(): set_content leaves the document on an about:blank origin,
+    # and Chromium refuses to fetch file:// subresources from there — so every
+    # self-hosted @font-face (url(file://...woff2), rewritten from _shared.css)
+    # silently failed and text fell back to generic sans. Writing the HTML next
+    # to the output and goto()-ing it puts the document on the file scheme,
+    # which is allowed to load file fonts.
+    page_path = output_path.with_suffix(output_path.suffix + ".render.html")
+    page_path.write_text(html, encoding="utf-8")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--no-sandbox", "--font-render-hinting=none"])
+            ctx = browser.new_context(
+                viewport={"width": width, "height": height},
+                device_scale_factor=dpr,
             )
-        except Exception:
+            page = ctx.new_page()
+            page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
+            # Wait for ALL @font-face downloads to settle. Playwright exposes
+            # `evaluate` with a Promise return — the inner JS resolves once
+            # `document.fonts.ready` does. Falls back to a timed pause if the
+            # page doesn't expose document.fonts at all.
             try:
-                page.wait_for_timeout(400)
+                page.evaluate(
+                    "() => (document.fonts && document.fonts.ready) "
+                    "? document.fonts.ready.then(() => true) : true"
+                )
             except Exception:
-                pass
-        png = page.screenshot(
-            full_page=False,
-            type="png",
-            omit_background=False,
-            clip={"x": 0, "y": 0, "width": width, "height": height},
-        )
-        browser.close()
+                try:
+                    page.wait_for_timeout(400)
+                except Exception:
+                    pass
+            png = page.screenshot(
+                full_page=False,
+                type="png",
+                omit_background=False,
+                clip={"x": 0, "y": 0, "width": width, "height": height},
+            )
+            browser.close()
+    finally:
+        try:
+            page_path.unlink()
+        except OSError:
+            pass
 
     # If we rendered at DPR>1, the screenshot will be width*dpr by height*dpr;
     # downsample with high-quality Lanczos so the final PNG matches the target
