@@ -168,7 +168,7 @@ you write by hand in a commit message:
 > Example commit trailer: `roadmap: P1.1 done`.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `d5665869f` · Merge pull request #301 from elijahkendrick04/claude/cool-lovelace-g3494x
+**Last updated:** 2026-06-10 · `8e0a811f9` · Merge pull request #302 from elijahkendrick04/claude/cool-lovelace-g3494x
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -176,6 +176,7 @@ you write by hand in a commit message:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
 | 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
 | 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
 | 2026-06-10 | `4a8623c1f` | docs(build): SEQ-4 verification evidence + suite table in the spine report |
@@ -187,7 +188,6 @@ you write by hand in a commit message:
 | 2026-06-09 | `d12cfeb05` | fix(gen-v2): SEQ-1 review — repair the deterministic floor, medal tier, hero stat |
 | 2026-06-09 | `4be9d9fdc` | docs(p2.4): flip P2.4 to DONE + AUTOBUILD_LOG cycle entry |
 | 2026-06-09 | `8bab7e337` | style: apply ruff-format 0.8.4 to autonomy section in web.py |
-| 2026-06-09 | `9a9d62a63` | feat(p2.4): per-type autonomy controls in workspace |
 <!-- /ROADMAP:ACTIVITY -->
 
 ---
