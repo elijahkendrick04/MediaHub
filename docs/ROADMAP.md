@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `dda0d8e8c` · Merge pull request #309 from elijahkendrick04/autotest/fix-cea6db4058b3
+**Last updated:** 2026-06-10 · `0d7bd81ca` · Merge pull request #311 from elijahkendrick04/claude/friendly-mayer-3tbeyn
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-10 | `dcf746829` | docs(roadmap): fold June 2026 external research pass into the long-form roadmap |
 | 2026-06-10 | `5e758bced` | docs: regenerate ENV_INVENTORY for MEDIAHUB_FFMPEG + MEDIAHUB_TTS_PROVIDER |
 | 2026-06-10 | `cc255f513` | docs(roadmap): fold the archive back in — one in-depth document |
 | 2026-06-10 | `e3b227c51` | feat(p0): complete Phase 0 — free reel engine, paid-dep guards, provider slots, AGPL isolation |
@@ -39,8 +40,6 @@ in any commit message to move an item:
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
 | 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
 | 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
-| 2026-06-10 | `c1e540f32` | style: apply pre-commit hygiene to PR-touched files (ruff-format 0.8.4, EOF fixer) |
-| 2026-06-10 | `3a03b9889` | docs(build): final suite result — 3628 passed, 1 skipped after the full spine |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
