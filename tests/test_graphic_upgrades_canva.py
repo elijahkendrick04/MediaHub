@@ -145,3 +145,46 @@ def test_new_families_registered_for_selection():
     fams = {p["family"] for p in PATTERNS}
     assert {"action_photo_hero", "stat_line"} <= fams
     assert "stat_line" in _TEXT_LED_FAMILIES
+
+
+# --- reel cover: long titles auto-fit DOWN, short covers keep their size ----
+
+
+def test_reel_cover_short_surname_keeps_historic_mega_size():
+    from mediahub.graphic_renderer.render import _fill_reel_cover
+
+    brief = _Brief()
+    brief.text_layers = dict(brief.text_layers)
+    # "ELLIS" measures well inside the cover-mega box at the design size —
+    # no shrink. (Wider names like "CARTER" measured over the box even at
+    # the old fixed size; those now shrink slightly instead of clipping.)
+    brief.text_layers.update({"athlete_surname": "Ellis", "athlete_full_name": "Mo Ellis"})
+    repl = _fill_reel_cover(brief, 1080, 1920, _repl(brief))
+    assert repl["MEGA_FONT_SIZE"] == str(int(1920 * 0.16))
+
+
+def test_reel_cover_long_meet_title_shrinks_to_fit():
+    """A meet-level cover (the P0.1 ffmpeg reel path) puts the meet name in
+    the mega slot; long words must shrink instead of clipping off-canvas."""
+    from mediahub.graphic_renderer.render import _fill_reel_cover
+
+    brief = _Brief()
+    brief.text_layers = dict(brief.text_layers)
+    brief.text_layers.update(
+        {
+            "athlete_full_name": "Welsh Winter Nationals 2026",
+            "athlete_surname": "",
+            "athlete_first_name": "",
+            "event_name": "",
+            "result_value": "",
+        }
+    )
+    repl = _fill_reel_cover(brief, 1080, 1920, _repl(brief))
+    fitted = int(repl["MEGA_FONT_SIZE"])
+    assert fitted < int(1920 * 0.16)
+    # And the fitted size really holds the longest word within the box.
+    widest = max(
+        autofit.measure_line_px(w, fitted, font_family="Anton", weight=900)
+        for w in "WELSH WINTER NATIONALS 2026".split()
+    )
+    assert widest <= 1080 * 0.88 + 1e-6

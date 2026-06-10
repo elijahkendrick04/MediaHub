@@ -1,14 +1,25 @@
 # Dependency Licensing & Hidden-Fee Register
 
-> **In plain words.** A core promise of MediaHub is **no hidden fees and a truly
-> free way to self-host.** That promise is easy to break by accident — some
-> popular building blocks are free for a hobbyist but charge a company, or are
-> "open source" in a way that legally forces you to publish your own code, or quietly
-> route every AI call through a paid API. This page is the safety register: which
-> outside tools are safe to adopt now, which need care, which need a licence check
-> first, and which to avoid — plus where MediaHub's *current* dependencies hide a
-> cost and what the free replacement is. New here? See
-> [`../GLOSSARY.md`](../GLOSSARY.md).
+> **In plain words.** MediaHub must keep the **operator's hosting cost and
+> licensing liability low** — no building block may force a hidden fee or a
+> legal obligation into the critical path. (This register originally guarded a
+> "truly-free self-host" promise; that promise was retired in favour of
+> **hosted-only SaaS** —
+> [`adr/0011`](adr/0011-commercial-reconcile-revenue-reality.md) — but the
+> de-risk still matters, now for the *hosted* deployment's margins.) The traps
+> are easy to fall into by accident: some popular building blocks are free for
+> a hobbyist but charge a company, or are "open source" in a way that legally
+> forces you to publish your own code, or quietly route every AI call through
+> a paid API. This page is the safety register: which outside tools are safe
+> to adopt now, which need care, which need a licence check first, and which
+> to avoid — plus where MediaHub's *current* dependencies hide a cost and what
+> the free replacement is. New here? See [`../GLOSSARY.md`](../GLOSSARY.md).
+>
+> **Enforcement (Phase 0, shipped 2026-06-10):** these rules are pinned by
+> three guard suites — `tests/test_paid_deps_optional.py` (every paid path
+> off/flagged by default, P0.3), `tests/test_local_provider_slots.py` (every
+> AI surface admits a local provider, P0.4), and `tests/test_agpl_isolation.py`
+> (no AGPL code in-process, P0.5).
 
 Evidence base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md)
 Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
@@ -86,8 +97,8 @@ live bill.
 
 | Current dependency | Hidden-fee flag | Status today | Free substitute (roadmap) |
 |---|---|---|---|
-| **Remotion** (reels, `remotion/` + `visual/motion.py`) | ⚠️ **Company License** for for-profit >3 people ($25/seat/mo Creators; $0.01/render, $100/mo min Automators; $500/mo min Enterprise). v5.0 mandates telemetry `licenseKey` for the render tier. | Shipped engine — **top cost liability** | **Satori + FFmpeg** fallback behind a flag (Phase 0/5); keep Remotion optional for those who license it. |
-| **`edge-tts`** (voiceover, `visual/voiceover.py`) | ⚠️ Free but depends on an undocumented **Microsoft Edge cloud endpoint** — not a stable contract. Already operator-gated (`MEDIAHUB_VOICEOVER=1`) and honest-errors when absent. | Optional, off by default | **Piper** (MIT, local, CPU) (Phase 5). |
+| **Remotion** (reels, `remotion/` + `visual/motion.py`) | ⚠️ **Company License** for for-profit >3 people ($25/seat/mo Creators; $0.01/render, $100/mo min Automators; $500/mo min Enterprise). v5.0 mandates telemetry `licenseKey` for the render tier. | **Optional behind a flag** — ✅ substituted (P0.1, 2026-06-10): `MEDIAHUB_REEL_ENGINE=ffmpeg` renders story cards + reels from the card's own still graphics via FFmpeg (`visual/reel_ffmpeg.py`), no Node/Remotion needed. Remotion stays the default for those who license it. | **Shipped**: still-graphic + FFmpeg engine. Satori remains the P5.4 *fast-path* (performance, not licensing). |
+| **`edge-tts`** (voiceover, `visual/voiceover.py`) | ⚠️ Free but depends on an undocumented **Microsoft Edge cloud endpoint** — not a stable contract. Operator-gated (`MEDIAHUB_VOICEOVER=1`), honest-errors when absent, and provider-slotted (`MEDIAHUB_TTS_PROVIDER`, P0.4) so the interface admits a local backend. | Optional, off by default | **Piper** (MIT, local, CPU) — slot registered; implementation lands with P5.2. |
 | **Buffer** (publishing, `publishing/buffer.py`) | ⚠️ **Paid** scheduling SaaS; an external account + token (`BUFFER_ACCESS_TOKEN`). | Shipped publishing path | **Direct platform APIs**; prioritise genuinely-free **Bluesky (AT Protocol)** + **Mastodon**; budget for X's pay-per-use (Phase 4). |
 | **`replicate`** (cutout, `media_ai/providers`) | ⚠️ **Paid** per-call cutout API. | **Optional** — default is already in-process **rembg** (`MEDIAHUB_CUTOUT_PROVIDER=server`) | **Already substituted**: rembg (MIT, local) is the default; Replicate/PhotoRoom are opt-in. ✅ |
 | **Hosted Anthropic / Gemini keys** (`media_ai.llm`, `ai_core.llm`) | ⚠️ Hosted LLM **API keys** (Gemini free tier today; Anthropic paid). | Shipped; Gemini-first, Anthropic failover | **Ollama** local provider behind the same `ai_core.llm` interface for a zero-key path (Phase 5). |
@@ -103,8 +114,21 @@ Notes:
 
 ## 3. AGPL handling rule (restated)
 
-Do **not** fork or embed AGPL code (Postiz, MinIO, MediaCMS) into this repo.
-Reference them only as **external services across a network boundary**, and say so
-explicitly wherever they appear. AGPL implications depend on whether you
+Do **not** fork or embed AGPL code (SearXNG, Postiz, MinIO, MediaCMS) into this
+repo. Reference them only as **external services across a network boundary**, and
+say so explicitly wherever they appear. AGPL implications depend on whether you
 distribute/network-serve modified code; consult counsel before forking. Prefer the
 "separate service called over its API" pattern, and cloud S3 over MinIO.
+
+**The shipped example — SearXNG.** The one AGPL service actually deployed today
+is SearXNG (web research, Capability 3): the Dockerfile installs it **stock and
+unmodified into an isolated virtualenv** (`$SEARXNG_VENV`), it runs as its own
+process only when `MEDIAHUB_RUN_SEARXNG=1`, and MediaHub talks to it exclusively
+over HTTP (`web_research/searxng_client.py`, `MEDIAHUB_SEARCH_ENDPOINT`). Its
+code is never imported into MediaHub's process.
+
+**Enforced (P0.5, 2026-06-10):** `tests/test_agpl_isolation.py` fails the build
+if (a) any known-AGPL module is imported in-process anywhere under
+`src/mediahub`, (b) an AGPL distribution appears in `requirements.txt` /
+`pyproject.toml`, or (c) the Dockerfile installs SearXNG outside its isolated
+virtualenv.

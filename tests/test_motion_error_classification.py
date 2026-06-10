@@ -147,3 +147,23 @@ class TestMotionErrorClassification:
         assert "Some weird thing" in body.get("detail", "")
         # And the user_message is generic but actionable.
         assert "Create graphic" in body.get("user_message", "")
+
+    def test_engine_unavailable_is_infra_missing_with_honest_copy(self, gated_app):
+        """ReelEngineUnavailable (P0.1 engine seam) is operator config, not a
+        crash: 503 + the engine's own message shown verbatim."""
+        from mediahub.visual.reel_engine import ReelEngineUnavailable
+
+        c, app, tmp_path = gated_app
+        run_id = _seed_minimal_run(tmp_path)
+        with patch("mediahub.visual.motion.render_story_card") as render:
+            render.side_effect = ReelEngineUnavailable(
+                "The 'ffmpeg' reel engine needs an FFmpeg binary: install the "
+                "imageio-ffmpeg package (bundled static build), put ffmpeg on "
+                "PATH, or point MEDIAHUB_FFMPEG at a binary."
+            )
+            resp = c.post(f"/api/runs/{run_id}/card/alpha/motion")
+
+        assert resp.status_code == 503
+        body = resp.get_json() or {}
+        assert body.get("kind") == "infra_missing"
+        assert "MEDIAHUB_FFMPEG" in body.get("user_message", "")

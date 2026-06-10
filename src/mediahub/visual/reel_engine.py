@@ -7,16 +7,21 @@ byte-identical to the pre-seam code when the variable is unset.
 Currently registered engines
 -----------------------------
 remotion  Production-ready Node/Remotion render pipeline (default).
-satori    Future Satori+FFmpeg path; raises :exc:`ReelEngineUnavailable`
-          until it ships.  Never emits a fake/placeholder asset —
-          CLAUDE.md requires an honest error instead.
+ffmpeg    Free fallback (roadmap P0.1): the card's own still graphic
+          (Playwright/Chromium via ``graphic_renderer``) animated and
+          stitched by FFmpeg.  No Remotion Company License, no Node
+          required.  Implementation: :mod:`mediahub.visual.reel_ffmpeg`.
+satori    Future Satori fast-path (roadmap P5.4); raises
+          :exc:`ReelEngineUnavailable` until it ships.  Never emits a
+          fake/placeholder asset — CLAUDE.md requires an honest error
+          instead.
 """
 
 from __future__ import annotations
 
 import os
 
-_VALID_ENGINES: frozenset[str] = frozenset({"remotion", "satori"})
+_VALID_ENGINES: frozenset[str] = frozenset({"remotion", "ffmpeg", "satori"})
 _DEFAULT_ENGINE: str = "remotion"
 
 
@@ -48,7 +53,8 @@ def select_reel_engine() -> str:
             f"MEDIAHUB_REEL_ENGINE={raw!r} is not a recognised engine. "
             f"Valid choices: {sorted(_VALID_ENGINES)}. "
             "Unset the variable or set it to 'remotion' to use the "
-            "production Remotion renderer."
+            "production Remotion renderer, or 'ffmpeg' for the free "
+            "still-graphic + FFmpeg fallback."
         )
     return raw
 
@@ -65,6 +71,9 @@ def reel_engine_status() -> dict:
                        value verbatim so the operator can see the bad input.
     remotion_available ``True`` when both ``node`` is on PATH and Remotion's
                        ``node_modules`` are present alongside the render script.
+    ffmpeg_available   ``True`` when the free fallback can run: an FFmpeg
+                       binary is resolvable and Playwright (the still
+                       renderer) is importable.
     satori_available   Always ``False`` until the Satori engine ships.
     available_engines  List of engine names that would succeed right now.
     """
@@ -80,16 +89,25 @@ def reel_engine_status() -> dict:
     node_ok = shutil.which("node") is not None
     remotion_dir = _Path(__file__).resolve().parents[1] / "remotion"
     remotion_ok = node_ok and (remotion_dir / "node_modules" / "remotion").exists()
-    satori_ok = False  # not yet implemented
+    try:
+        from mediahub.visual.reel_ffmpeg import available as _ffmpeg_available
+
+        ffmpeg_ok = _ffmpeg_available()
+    except Exception:
+        ffmpeg_ok = False
+    satori_ok = False  # not yet implemented (P5.4)
 
     available: list[str] = []
     if remotion_ok:
         available.append("remotion")
+    if ffmpeg_ok:
+        available.append("ffmpeg")
 
     return {
         "configured": configured,
         "active": active,
         "remotion_available": remotion_ok,
+        "ffmpeg_available": ffmpeg_ok,
         "satori_available": satori_ok,
         "available_engines": available,
     }

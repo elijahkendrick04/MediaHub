@@ -65,6 +65,10 @@ render = [
   # in the Dockerfile keeps the path stable).
   "playwright>=1.56,<1.58",
   "weasyprint>=60",
+  # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): a static FFmpeg
+  # binary with no system install. The wheel is BSD-2; the bundled binary is
+  # a stock FFmpeg build invoked strictly as a subprocess.
+  "imageio-ffmpeg>=0.4.9",
 ]
 dev = [
   "pytest>=7.4",

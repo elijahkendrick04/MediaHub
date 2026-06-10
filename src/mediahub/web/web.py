@@ -12693,14 +12693,20 @@ Relay team broke club record"></textarea>
             "available": node_modules.exists(),
             "dir": str(remotion_dir),
         }
-        # Reel-engine selection seam (P0.1).  Purely informational —
-        # does not affect the ok flag since remotion is the default.
+        # Reel-engine selection seam (P0.1).
         try:
             from mediahub.visual.reel_engine import reel_engine_status
 
             deps["reel_engine"] = reel_engine_status()
         except Exception as _re_err:
             deps["reel_engine"] = {"error": str(_re_err)[:200]}
+        # TTS provider slot (P0.4) — informational; voiceover is opt-in.
+        try:
+            from mediahub.visual.voiceover import tts_provider_status
+
+            deps["tts_provider"] = tts_provider_status()
+        except Exception as _tts_err:
+            deps["tts_provider"] = {"error": str(_tts_err)[:200]}
         try:
             from mediahub.publishing.kill_switch import kill_switch_status
 
@@ -12718,11 +12724,14 @@ Relay team broke club record"></textarea>
                 deps["per_type_autonomy"] = {"note": "no active org"}
         except Exception as _pt_err:
             deps["per_type_autonomy"] = {"error": str(_pt_err)[:200]}
-        ok = (
-            deps["playwright"].get("chromium")
-            and deps["node"].get("available")
-            and deps["remotion"].get("available")
-        )
+        # Motion is healthy when the *active* reel engine can render:
+        # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
+        # makes both optional.
+        _motion_ok = deps["node"].get("available") and deps["remotion"].get("available")
+        _re_status = deps.get("reel_engine") or {}
+        if _re_status.get("active") == "ffmpeg":
+            _motion_ok = bool(_re_status.get("ffmpeg_available"))
+        ok = deps["playwright"].get("chromium") and _motion_ok
         return jsonify({"ok": bool(ok), "deps": deps})
 
     # ---- /status -------------------------------------------------------
@@ -22909,6 +22918,21 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """
         detail = str(e)
         low = detail.lower()
+        # Engine selection/availability errors (P0.1 seam) are operator
+        # configuration, not transient failures — surface the engine's own
+        # honest message verbatim.
+        try:
+            from mediahub.visual.reel_engine import ReelEngineUnavailable as _REU
+
+            if isinstance(e, _REU):
+                return {
+                    "error": "render_failed",
+                    "kind": "infra_missing",
+                    "detail": detail,
+                    "user_message": detail,
+                }
+        except Exception:
+            pass
         if (
             "cannot find module" in low
             or "remotion not installed" in low

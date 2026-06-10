@@ -1939,6 +1939,24 @@ def _fill_reel_cover(brief, width: int, height: int, repl: dict[str, str]) -> di
         sub_bits = [b for b in [event, result] if b]
         sub_text = " · ".join(sub_bits) if sub_bits else ""
         mega = surname or full_name or first
+        # Long titles (multi-word meet names, double-barrelled surnames)
+        # overflow the .cover-mega box at the fixed 0.16*height size.
+        # Auto-fit DOWN only — short covers keep their exact historic size.
+        if mega:
+            from mediahub.graphic_renderer.autofit import fit_font_px
+
+            default_px = int(height * 0.16)
+            fitted = fit_font_px(
+                mega,
+                box_w=width * 0.88,  # .cover-mega: left 6% / right 6%
+                box_h=height * 0.52,  # top 22% .. sub at bottom 26%
+                font_family="Anton",
+                weight=900,
+                min_px=int(height * 0.05),
+                max_px=default_px,
+                line_height=0.86,
+            )
+            repl["MEGA_FONT_SIZE"] = str(min(default_px, fitted))
         repl["TEXT_LED_COVER_BLOCK"] = (
             f'<div class="cover-mega">{html_escape(mega)}</div>'
             + (f'<div class="cover-sub">{html_escape(sub_text)}</div>' if sub_text else "")
