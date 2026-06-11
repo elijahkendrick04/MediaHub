@@ -70,6 +70,23 @@ These come with the roadmap rebuild. Full detail lives in the new docs under
   (fixtures, results, news, rival clubs), and **direct** input (onboarding answers,
   goals, blackout dates).
 - **Kill switch** — one control that instantly stops all automatic posting.
+- **Workspace** — one club's private room inside the shared MediaHub website. A
+  club's profile, runs, photos and plans all live in its workspace, and other
+  clubs can't see in. (Technically it's the same thing as an organisation
+  profile — the workspace word stresses the privacy wall.)
+- **Membership** — the note that says "this signed-in person belongs to that
+  workspace" (as an **owner**, who can manage members, or a **member**, who can
+  work inside it). Stored in `memberships.jsonl`, managed in
+  `src/mediahub/web/tenancy.py`. ([`docs/adr/0014-org-workspace-multitenancy-schema.md`](docs/adr/0014-org-workspace-multitenancy-schema.md))
+- **Bound / unbound workspace** — a workspace with at least one active member is
+  **bound**: only its members (and the operator) can enter. One with no members
+  yet is **unbound** (open) and behaves like the old single-club MediaHub — handy
+  for pilots the founder still runs by hand.
+- **Revealed willingness-to-pay (WTP)** — finding the right price by quoting real
+  annual prices to real clubs and recording what they actually paid — instead of
+  guessing. The public price stays "TBC" until 5 clubs have paid. The notebook
+  for this lives in `src/mediahub/commercial/` and shows up on the operator-only
+  `/operator/commercial` page.
 
 ## Folder names that look odd (and what they really mean)
 

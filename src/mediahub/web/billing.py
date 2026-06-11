@@ -198,6 +198,73 @@ def create_checkout_session(
     return url
 
 
+def create_quote_checkout_session(
+    *,
+    quote_id: str,
+    club_name: str,
+    amount_pence: int,
+    currency: str,
+    customer_email: str,
+    success_url: str,
+    cancel_url: str,
+) -> str:
+    """Create a Checkout Session at an operator-quoted ANNUAL price (PC.4).
+
+    Price discovery quotes a *real, varying* annual figure per club before any
+    public list price exists, so this uses ad-hoc ``price_data`` (annual
+    recurring) rather than a configured Price ID. ``mediahub_quote_id`` rides
+    the session + subscription metadata; the signed webhook uses it — together
+    with the Stripe-reported amount — to record verified revealed-WTP evidence
+    against the quote ledger. The buyer lands on the Club plan like any other
+    checkout (``plan`` metadata is honoured by the existing webhook path).
+    """
+    stripe = _stripe()
+    try:
+        amount = int(amount_pence)
+    except (TypeError, ValueError):
+        raise BillingError("quote amount must be an integer number of pence")
+    if amount <= 0:
+        raise BillingError("quote amount must be positive")
+    if not (quote_id or "").strip():
+        raise BillingError("missing quote id")
+    metadata = {
+        "plan": PLAN_CLUB,
+        "mediahub_email": customer_email or "",
+        "mediahub_quote_id": quote_id,
+    }
+    kwargs: dict = {
+        "mode": "subscription",
+        "line_items": [
+            {
+                "price_data": {
+                    "currency": (currency or "gbp").lower(),
+                    "unit_amount": amount,
+                    "recurring": {"interval": "year"},
+                    "product_data": {
+                        "name": f"MediaHub Club — {club_name} (annual)",
+                    },
+                },
+                "quantity": 1,
+            }
+        ],
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "client_reference_id": customer_email or quote_id,
+        "subscription_data": {"metadata": metadata},
+        "metadata": metadata,
+    }
+    if customer_email:
+        kwargs["customer_email"] = customer_email
+    try:
+        sess = stripe.checkout.Session.create(**kwargs)
+    except Exception as exc:
+        raise BillingError(f"could not start quote checkout: {exc}") from exc
+    url = getattr(sess, "url", None) or (sess.get("url") if isinstance(sess, dict) else None)
+    if not url:
+        raise BillingError("Stripe did not return a checkout URL")
+    return url
+
+
 def create_customer_portal_session(*, customer_id: str, return_url: str) -> str:
     """Create a Stripe Customer Portal session and return its URL."""
     stripe = _stripe()
@@ -221,13 +288,20 @@ class SubscriptionUpdate:
     """Normalised result of a billing webhook the web layer can act on.
 
     Exactly one identity field (``email`` or ``customer_id``) is enough to
-    find the user; ``plan`` is the plan the account should now hold.
+    find the user; ``plan`` is the plan the account should now hold. When the
+    checkout originated from a PC.4 price-discovery quote, ``quote_id`` plus
+    the Stripe-reported ``amount_total_pence``/``currency``/``event_id`` let
+    the web layer record verified revealed-WTP evidence (idempotently).
     """
 
     plan: str
     email: str = ""
     customer_id: str = ""
     event_type: str = ""
+    quote_id: str = ""
+    amount_total_pence: Optional[int] = None
+    currency: str = ""
+    event_id: str = ""
 
 
 def verify_and_parse_webhook(
@@ -300,11 +374,20 @@ def _interpret_event(event) -> Optional[SubscriptionUpdate]:
 
     if etype == "checkout.session.completed":
         plan = _meta_get(metadata, "plan") or _plan_from_subscription_items(field("line_items"))
+        amount_total = field("amount_total", None)
+        try:
+            amount_total = int(amount_total) if amount_total is not None else None
+        except (TypeError, ValueError):
+            amount_total = None
         return SubscriptionUpdate(
             plan=plan or PLAN_CLUB,
             email=str(email or ""),
             customer_id=str(customer_id or ""),
             event_type=etype,
+            quote_id=str(_meta_get(metadata, "mediahub_quote_id") or ""),
+            amount_total_pence=amount_total,
+            currency=str(field("currency", "") or "").lower(),
+            event_id=str(_get(event, "id", "") or ""),
         )
 
     if etype in ("customer.subscription.created", "customer.subscription.updated"):

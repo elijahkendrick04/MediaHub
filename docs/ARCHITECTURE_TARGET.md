@@ -68,7 +68,7 @@ connect**, not to spawn a parallel structure.
 | **Asset: cutout** | `media_ai.providers` (**rembg server default**, Replicate/PhotoRoom optional) | Already free-by-default; keep flag. |
 | **Publishing layer** | `publishing.buffer` (+ `posting_log`) | Add direct platform adapters (Bluesky/Mastodon free first), drop the Buffer dependency (Phase 4). |
 | **Orchestration backbone** | `workflow.store` (lightweight, per-run) | Promote to a durable per-content-type workflow engine with a human-approval signal (Temporal) (Phase 2). |
-| **Multi-tenancy** | `web` org-gate + `_can_access_run` invariant (`tests/test_run_route_isolation_invariant.py`) | Generalise org → workspace; reference Postiz/Mixpost schemas (over a network boundary, never embedded — both AGPL/open-core). |
+| **Multi-tenancy** | `web/tenancy.py` per-org membership binding (ADR-0014) + `web` org-gate + `_can_access_run` invariant (`tests/test_run_route_isolation_invariant.py`, `tests/test_workspace_membership_invariant.py`) | ✅ Shipped (PC.3): accounts bind to workspaces via `memberships.jsonl`; bound orgs are members-only at every pinning/editing surface; unbound orgs keep standalone behaviour. (Postiz/Mixpost stayed reference-only — nothing embedded.) |
 | **LLM / AI surfaces** | `media_ai.llm` + `ai_core.llm` (Gemini→Anthropic failover) | Add an Ollama local provider as the zero-cost default (Phase 5). |
 | **Local-AI substitution** | — (new layer) | Ollama (LLM), Piper (TTS), whisper.cpp (ASR), rembg/MODNet (cutout — partly done), Satori (graphics). |
 
