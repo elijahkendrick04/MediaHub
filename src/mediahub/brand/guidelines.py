@@ -499,8 +499,13 @@ def _build_prompt(text: str) -> str:
         "  audience: short string describing who the content is for\n"
         "  key_messages: array of up to 6 short strings — recurring "
         "themes or pillar messages the brand always tries to land\n"
-        "  palette_mentions: array of hex colours (#rrggbb) mentioned "
-        "in the guidelines, lower-case\n"
+        "  palette_mentions: array of the brand's defined colours as "
+        "lower-case #rrggbb hex, most important first. Brand documents "
+        "rarely give bare hex — convert any RGB, CMYK or Pantone values "
+        "the document specifies into hex, and include a named colour "
+        '(e.g. "navy blue") only when the document clearly defines it '
+        "as a brand colour (use its standard hex). Never include "
+        "colours that merely appear in imagery or examples\n"
     )
 
 

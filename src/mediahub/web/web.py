@@ -212,7 +212,9 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     user += (
         "\n\nWrite ONE short sentence (max 25 words) putting this time in "
         "context FOR THIS SWIMMER'S LEVEL. Use research_web if you need "
-        "to verify whether the swimmer is recognisably elite."
+        "to verify whether the swimmer is recognisably elite. If neither "
+        "the details above nor fetched evidence support a concrete "
+        "statement, reply with exactly NO_CONTEXT."
     )
 
     system = (
@@ -221,8 +223,12 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         "no lists, no markdown, no preamble. Reason only from the swim "
         "details I give you and any web evidence you fetch via "
         "research_web. Never invent PBs, ages, clubs, rankings, or "
-        "biographical facts. If you cite a research result, mention the "
-        "domain in parentheses, e.g. '(swimmingresults.org)'."
+        "biographical facts, and never estimate how rare or competitive "
+        "a result is — you have no field data. An unsupported judgement "
+        "is worse than none: reply NO_CONTEXT when you cannot ground the "
+        "sentence in given details or fetched evidence. If you cite a "
+        "research result, mention the domain in parentheses, e.g. "
+        "'(swimmingresults.org)'."
     )
 
     research_tool = [
@@ -295,6 +301,10 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         ("i need", "i'd need", "please provide", "can you provide", "could you", "i don't have")
     ):
         out = ""
+    # Honest-silence sentinel: the model judged it had nothing grounded to
+    # say. An absent context line is better than a speculative one.
+    if "NO_CONTEXT" in out.upper():
+        out = ""
     _perf_context_cache[cache_key] = out
     return out
 
@@ -364,16 +374,23 @@ def _llm_build_explanation(
         + factors_prose
         + (f"\n\nThis swim ranked #{int(rank)} overall." if isinstance(rank, int) else "")
         + "\n\nPlease emit one `submit_explanation` call with a "
-        "15-25 word headline plus 3-5 short bullets covering the "
-        "reasons. Use ONLY the facts above — never invent ranker "
-        "factors that aren't listed."
+        "headline of at most 14 words plus 2-4 bullets of at most "
+        "12 words each. Every bullet must restate one listed factor or "
+        "stated fact — if there are only two real reasons, write two "
+        "bullets. Never pad."
     )
 
     system = (
-        "You are MediaHub's content-rationale writer. Your job is to "
-        "tell the user, in plain English, why a specific swim got "
-        "selected as a content card. Be specific, grounded, no fluff. "
-        "Never invent achievements or factors. Always emit exactly one "
+        "You are MediaHub's content-rationale writer. Tell the user, in "
+        "plain English, why a specific swim was selected as a content "
+        "card. Hard rules: every claim must come from the facts and "
+        "factors provided — if it isn't in the input, it doesn't exist. "
+        "You have NO data about how rare, difficult, or competitive a "
+        "result is, so never comment on rarity, field strength, or how "
+        "common a time/medal is at this kind of meet. A gold medal or a "
+        "personal best is self-evidently good — state it plainly, don't "
+        "dress it up. Short beats thorough; never say the same thing "
+        "twice in different words. Always emit exactly one "
         "`submit_explanation` tool call."
     )
     tool = [
@@ -1740,18 +1757,25 @@ _WF_STATUS_LABEL = {
 
 
 def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
-    """Render the per-card Approve / Reject / Re-queue action strip.
+    """Render the per-card Approve / Re-queue action strip.
 
     Round-8: shared between /pack/<id>/grouped (where the audit found
     no approval primitive at all) and any other page that wants the
     same workflow control surface. The "Status" strap shows the
     current state and is updated optimistically by the global
     `[data-mh-wf]` click handler in _layout.
+
+    Approve-only flow: a card is either in the queue or approved — there
+    is no reject. Skipping a card simply leaves it in the queue. The
+    approve button reads as an action still to take (outline) until the
+    card is actually approved, then flips to a filled confirmation; the
+    old always-green fill made every card look already approved.
     """
     status_key = (wf_status or "queue").lower()
     label = _WF_STATUS_LABEL.get(
         status_key, status_key.replace("_", " ").capitalize() or "In queue"
     )
+    is_approved = status_key == "approved"
 
     # Visually de-emphasise the action that matches the current state
     # so the user sees "I'm already in this state".
@@ -1762,22 +1786,21 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
             else ""
         )
 
+    approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
+    approve_label = "Approved ✓" if is_approved else "Approve"
+    approve_pressed = ' aria-pressed="true"' if is_approved else ""
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
         f'<span data-mh-wf-label>{_h(label)}</span></span>'
-        f'<button class="btn" type="button" style="font-size:12px;padding:4px 10px;background:var(--good);color:var(--lane-ink);border:0"'
+        f'<button class="{approve_cls}" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("approved")}'
-        f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">Approve</button>'
-        f'<button class="btn danger" type="button" style="font-size:12px;padding:4px 10px"'
-        f' data-mh-wf="rejected" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("rejected")}'
-        f' title="Reject this card so it\'s kept out of the content builder.">Reject</button>'
+        f"{approve_pressed}"
+        f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f'{_disabled_attrs("queue")}'
-        f' title="Send back to the queue — neither approved nor rejected.">Re-queue</button>'
+        f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
     )
 
 
@@ -1821,6 +1844,26 @@ def _delete_run(run_id: str) -> bool:
             shutil.rmtree(side_dir, ignore_errors=True)
         except Exception:  # noqa: BLE001
             log.warning("could not remove run sidecar dir for %s", run_id)
+    # Workflow approvals live in their own sidecar file, not the dir above.
+    try:
+        (RUNS_DIR / f"{run_id}__workflow.json").unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+    # Derivative ("turn into") packs generated from this run.
+    try:
+        import shutil  # noqa: PLC0415
+
+        shutil.rmtree(DATA_DIR / "turn_into_packs" / run_id, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        pass
+    # The in-memory progress entry. Without this, deleted meets kept
+    # surfacing in pickers and status pages until a process restart —
+    # the "it didn't actually delete it from memory" complaint.
+    try:
+        with _active_lock:
+            _active_runs.pop(run_id, None)
+    except Exception:  # noqa: BLE001
+        pass
     conn = _db()
     conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
     conn.commit()
@@ -2566,6 +2609,42 @@ function _attrEsc(jsExpr) {
   return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
 }
 
+// Upload a photo for ONE card: file dialog → POST to the card's /photo
+// endpoint (which links it to the athlete in the media library) → attach
+// the new asset to this graphic by re-rendering with it selected.
+function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.style.display = 'none';
+  inp.onchange = function() {
+    if (!inp.files || !inp.files.length) return;
+    var fd = new FormData();
+    fd.append('photo', inp.files[0]);
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+    fetch(photoUrl, {method: 'POST', body: fd})
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        btn.disabled = false; btn.textContent = orig;
+        if (!j.ok || !j.asset) {
+          if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + (j.error || 'unknown'), 'error', 4000);
+          return;
+        }
+        if (window.MH && MH.toast) MH.toast('Photo saved to your library — rendering with it now', 'success', 2500);
+        createGraphic(btn, createUrl, cardId, fmt, j.asset.id, false);
+      })
+      .catch(function(e) {
+        btn.disabled = false; btn.textContent = orig;
+        if (window.MH && MH.toast) MH.toast('Photo upload failed: ' + e, 'error', 4000);
+      });
+  };
+  document.body.appendChild(inp);
+  inp.click();
+  setTimeout(function(){ try { document.body.removeChild(inp); } catch(e) {} }, 60000);
+}
+
 function _renderVisualPanel(panel, data, cardId, createUrl) {
   var visuals = data.visuals || [];
   if (!visuals.length) {
@@ -2587,26 +2666,36 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
     var active = (f === cur);
     return '<button class="vfmt-tab" data-fmt="' + f + '" onclick=' + _attrEsc('createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ', ' + JSON.stringify(chosen) + ', ' + (noP ? 'true' : 'false') + ')') + ' style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;background:' + (active ? 'rgba(212,255,58,0.15)' : 'transparent') + ';color:' + (active ? 'var(--lane)' : 'var(--ink-dim)') + ';font-family:inherit;margin-right:4px">' + formatLabels[f] + '</button>';
   }).join('');
-  // Per-graphic photo picker — the user decides which uploaded photo lands here.
+  // Per-graphic photo picker — the user decides which photo lands on THIS
+  // graphic. Library photos remembered for this card's athlete (linked at
+  // an earlier upload, possibly a previous meet) are flagged ★ and sorted
+  // first by the server. The "+ Add photo of <name>" button uploads a new
+  // photo, links it to the athlete in the media library, and attaches it
+  // to this graphic in one step.
   var photos = data.available_photos || [];
-  var pickerHtml = '';
-  if (photos.length) {
-    function _pchip(label, active, oc) {
-      return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'rgba(212,255,58,0.12)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
-    }
-    var autoOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", false)';
-    var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
-    var thumbs = photos.map(function(ph) {
-      var on = (ph.id === chosen);
-      var oc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ', false)';
-      return '<button type="button" title="' + (ph.label || '') + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : 'var(--border)') + ';background:var(--bg);margin:0 4px 4px 0;line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
-    }).join('');
-    pickerHtml =
-      '<div style="margin-bottom:8px">' +
-        '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
-        _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs +
-      '</div>';
+  var athlete = data.card_athlete || '';
+  var photoUrl = createUrl.replace(/\/create-graphic$/, '/photo');
+  function _pchip(label, active, oc) {
+    return '<button type="button" onclick=' + _attrEsc(oc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px solid ' + (active ? 'var(--lane)' : 'var(--border)') + ';background:' + (active ? 'rgba(212,255,58,0.12)' : 'transparent') + ';color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">' + label + '</button>';
   }
+  var autoOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", false)';
+  var noneOc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', "", true)';
+  var thumbs = photos.map(function(ph) {
+    var on = (ph.id === chosen);
+    var oc = 'createGraphic(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ', ' + JSON.stringify(ph.id) + ', false)';
+    var ttl = (ph.suggested ? 'Remembered for ' + (ph.label || 'this athlete') + ' — click to use' : (ph.label || ''));
+    var star = ph.suggested ? '<span style="position:absolute;top:-5px;right:-5px;font-size:11px;line-height:1;pointer-events:none">&#x2B50;</span>' : '';
+    return '<span style="position:relative;display:inline-block;margin:0 4px 4px 0">' +
+      '<button type="button" title="' + ttl + '" onclick=' + _attrEsc(oc) + ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid ' + (on ? 'var(--lane)' : (ph.suggested ? 'var(--medal)' : 'var(--border)')) + ';background:var(--bg);line-height:0"><img src="' + ph.url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>' + star + '</span>';
+  }).join('');
+  var firstName = athlete ? athlete.split(' ')[0] : '';
+  var upOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
+  var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
+  var pickerHtml =
+    '<div style="margin-bottom:8px">' +
+      '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
+      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn +
+    '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
       '<div style="flex:0 0 220px;max-width:240px">' +
@@ -2638,7 +2727,7 @@ function generateMotion(btn, motionUrl, cardId) {
   btn.textContent = 'Rendering motion\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
+    'Rendering motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
   fetch(motionUrl, {method:'POST'})
     .then(function(r) {
       if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
@@ -2679,7 +2768,9 @@ function generateMotion(btn, motionUrl, cardId) {
     });
 }
 
-// Meet-reel generation: top-3 cards stitched into a 15-second reel.
+// Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
+// far past what front-line proxies tolerate on a held connection \u2014 so the
+// button kicks off a background job and polls until the MP4 is ready.
 function generateReel(btn, reelUrl) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
@@ -2689,40 +2780,52 @@ function generateReel(btn, reelUrl) {
   btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
-  fetch(reelUrl, {method:'POST'})
-    .then(function(r) {
-      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
-        return r.blob().then(function(b) { return {ok:true, blob:b}; });
-      }
-      return r.json().then(function(j){ return {ok:false, body:j}; });
-    })
+    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+  var fail = function(msg) {
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  };
+  var success = function(videoUrl) {
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML =
+      '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+        '<div style="flex:0 0 240px;max-width:260px">' +
+          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '</div>' +
+        '<div style="flex:1;min-width:240px">' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
+          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  };
+  fetch(reelUrl + '-job', {method:'POST'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
         return;
       }
-      var url = URL.createObjectURL(res.blob);
-      panel.innerHTML =
-        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 240px;max-width:260px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:240px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 80) { fail('timed out waiting for the render \u2014 try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_url) { success(j.video_url); return; }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
     })
-    .catch(function(err) {
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    });
+    .catch(function(err) { fail('Network error: ' + err); });
 }
 
 function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
@@ -3064,20 +3167,36 @@ def _render_turn_into_card(run_id: str) -> str:
             '</div>'
         )
 
+    _ti_chips = "".join(
+        f'<span style="display:inline-block;padding:3px 10px;margin:0 6px 6px 0;'
+        f"border:1px solid var(--border);border-radius:999px;font-size:11.5px;"
+        f'color:var(--ink-dim)">{label}</span>'
+        for label in (
+            "Meet recap",
+            "Swimmer spotlights",
+            "X / LinkedIn thread",
+            "Parent newsletter",
+            "Sponsor thank-you",
+            "Coach quote (draft)",
+            "Next-meet preview",
+        )
+    )
     return f"""
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div style="flex:1;min-width:240px">
-      <h2 style="margin-bottom:6px">Derivative content pack</h2>
-      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
-        Turn this meet into a full pack of 7 derivative artefacts &mdash;
-        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
-        sponsor thank-you, coach quote, and next-meet preview.
+      <h2 style="margin-bottom:6px">Turn this meet into more</h2>
+      <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
+        One click re-uses everything this meet already produced &mdash; the
+        results, the approved cards, your brand voice &mdash; and drafts a
+        full set of follow-on content. Everything lands on one page where
+        you can edit each caption before using it:
       </p>
+      <div>{_ti_chips}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
-        &#x2726; Generate derivative pack
+        &#x2726; Generate the pack
       </button>
     </div>
   </div>
@@ -3093,10 +3212,12 @@ function turnMeetIntoPack() {{
   btn.disabled = true;
   btn.textContent = 'Generating…';
   status.style.display = '';
-  status.textContent = 'Building artefacts — starting…';
+  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
+    '<span id="ti-status-text">Drafting all seven artefacts with live AI&hellip;</span>';
+  var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
     secs++;
-    status.textContent = 'Building artefacts with live AI — ' + secs + 's elapsed…';
+    if (statusText) statusText.textContent = 'Drafting all seven artefacts with live AI — ' + secs + 's. Usually under a minute.';
   }}, 1000);
   function _fail(msg) {{
     clearInterval(ticker);
@@ -4169,6 +4290,13 @@ p:last-child { margin-bottom: 0; }
 .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); box-shadow: none; }
 .btn.medal { background: var(--medal); color: var(--medal-ink); }
 .btn.medal:hover { background: var(--medal-h); box-shadow: var(--shadow-medal); }
+/* Per-card approve control: outline = still to do, filled = done. The fill
+   only ever appears once the card IS approved, so an untouched card can't
+   read as already approved. */
+.btn.mh-wf-approve { border-color: rgba(61,220,151,0.45); color: var(--good); }
+.btn.mh-wf-approve:hover { border-color: var(--good); background: rgba(61,220,151,0.08); box-shadow: none; }
+.btn.mh-wf-approve.is-on { background: var(--good); color: var(--lane-ink); border-color: var(--good); cursor: default; }
+.btn.mh-wf-approve.is-on:hover { background: var(--good); transform: none; box-shadow: none; }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
@@ -4423,6 +4551,10 @@ pre code { background: none; padding: 0; color: inherit; }
 
 /* === Animations === */
 @keyframes mh-spin { to { transform: rotate(360deg); } }
+/* Alias used by inline loading indicators rendered from JS strings — must
+   stay global so spinners rotate on every page, not just ones that happen
+   to embed a scoped copy. */
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes mh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes mh-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes mh-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
@@ -4891,16 +5023,17 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 .mh-hero-trust > * { display: inline-flex; align-items: center; gap: 6px; }
 .mh-hero-trust svg { width: 13px; height: 13px; }
 
-/* Section heading — left-aligned editorial, like a newspaper section header */
+/* Section heading — centred: titles sit on the page's centre line so the
+   page reads tidy on wide screens (body content below stays left-aligned). */
 .mh-section-eyebrow {
-  display: flex; align-items: center; justify-content: flex-start;
+  display: flex; align-items: center; justify-content: center;
   gap: 14px;
   font-family: var(--font-mono);
   font-size: 11px; font-weight: 500;
   text-transform: uppercase; letter-spacing: 0.22em;
   color: var(--lane);
   margin: var(--sp-9) 0 var(--sp-3);
-  text-align: left;
+  text-align: center;
 }
 .mh-section-eyebrow::before {
   content: '';
@@ -4914,8 +5047,8 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: -0.01em;
-  text-align: left;
-  margin: 0 0 var(--sp-7);
+  text-align: center;
+  margin: 0 auto var(--sp-7);
   max-width: 22ch;
   line-height: 0.95;
   color: var(--ink);
@@ -5009,9 +5142,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 
 /* === Hero (rebuilt home page) — sport-editorial cover === */
 /* HERO — broadsheet masthead. No gradient text, no glass, no purple.
-   Type carries the weight. Lane-yellow earns its keep on the CTA only. */
+   Type carries the weight. Lane-yellow earns its keep on the CTA only.
+   Centred: page titles sit on the page's centre line all the way down
+   (headline, lede, actions, meta) so wide screens never read lopsided. */
 .mh-hero {
   position: relative;
+  text-align: center;
   padding: var(--sp-9) var(--sp-7) var(--sp-8);
   margin-bottom: var(--sp-8);
   border-radius: 0;
@@ -5086,7 +5222,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: -0.015em;
   text-transform: uppercase;
   line-height: 0.88;
-  margin: 0 0 var(--sp-6);
+  margin: 0 auto var(--sp-6);
   max-width: 14ch;
   color: var(--ink);
   text-wrap: balance;
@@ -5112,18 +5248,21 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   display: inline;
   -webkit-text-fill-color: var(--medal);
 }
+/* Lede reads in the body face: the headline's display-caps + serif-italic
+   pairing is the one editorial move per hero — a serif lede on top of it
+   made four typographic voices compete in the first screenful. */
 .mh-hero p.lede {
-  font-family: var(--font-serif);
-  font-variation-settings: 'opsz' 72;
-  font-size: clamp(17px, 1.6vw, 22px);
+  font-family: var(--font-body);
+  font-size: clamp(16px, 1.5vw, 20px);
   color: var(--ink-dim);
-  margin: 0 0 var(--sp-7);
+  margin: 0 auto var(--sp-7);
   max-width: 52ch;
-  line-height: 1.45;
+  line-height: 1.55;
   font-weight: 400;
 }
 .mh-hero-actions {
   display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center;
+  justify-content: center;
   margin-top: var(--sp-6);
 }
 
@@ -5174,6 +5313,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   text-transform: uppercase;
   color: var(--ink-muted);
   display: flex; gap: var(--sp-5); flex-wrap: wrap;
+  justify-content: center;
 }
 .mh-hero-meta .dot { color: var(--ink-faint); }
 .mh-hero-meta b { color: var(--lane); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -6508,6 +6648,27 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
         stats["status"] = "LIVE"
         if meet:
             stats["event"] = meet
+    elif fd.get("source") == "athlete_spotlight":
+        # Spotlight composite: the graphic must carry the SWIMMER and the
+        # REAL results (event + time per approved moment), not the caption's
+        # first sentence. spotlight_build stamps the parsed result lines on
+        # form_data exactly for this.
+        swimmer = _display_clean(fd.get("swimmer_name") or "")
+        hook = "SPOTLIGHT"
+        head_src = _short_hook(swimmer or "Spotlight")
+        line2_default = "SPOTLIGHT"
+        kicker = meet or "Athlete spotlight"
+        result_lines = [
+            l.strip() for l in str(fd.get("results_lines") or "").splitlines() if l.strip()
+        ]
+        bullets = (result_lines or parts)[:4]
+        if swimmer:
+            stats["athlete"] = swimmer
+        if meet:
+            stats["event"] = meet
+        _n_appr = fd.get("n_approved")
+        if _n_appr:
+            stats["moments"] = f"{_n_appr} approved"
     else:  # free_text / other
         hook = "HIGHLIGHT"
         head_src = _short_hook(parts[0]) if parts else "Highlight"
@@ -7446,7 +7607,16 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       if (labelEl) labelEl.textContent = labelMap[status] || status;
     });
     document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
-      if (b.getAttribute('data-mh-wf') === status) {
+      var on = b.getAttribute('data-mh-wf') === status;
+      if (b.classList.contains('mh-wf-approve')) {
+        // Approve flips between outline ("Approve") and filled
+        // ("Approved ✓") — the fill is the confirmation, never the default.
+        b.classList.toggle('is-on', on);
+        b.classList.toggle('secondary', !on);
+        b.textContent = on ? 'Approved ✓' : 'Approve';
+        if (on) b.setAttribute('aria-pressed', 'true');
+        else b.removeAttribute('aria-pressed');
+      } else if (on) {
         b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
       } else {
         b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
@@ -8146,30 +8316,6 @@ def create_app() -> Flask:
             "</section>"
         )
 
-        # --- Trust strip — "what we read / what we make" pipeline glance.
-        # Communicates the inputs and outputs without leaning on logos we
-        # don't yet own. Numbers come from the seeded run counts.
-        trust_html = (
-            '<div class="mh-trust-strip">'
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="HY3, SD3, Sportsystems PDF — parsed deterministically, never guessed." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
-            '<div><span class="label">We read</span><span class="value">Hytek .hy3, .zip, PDF</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Your site and socials feed brand voice, palette, and tone." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>'
-            '<div><span class="label">We crawl</span><span class="value">Club site &amp; socials</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="A deterministic ranker scores content-worthiness with confidence." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 9 8.5 12 2"/></svg>'
-            '<div><span class="label">We rank</span><span class="value">PBs, medals, first-times</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Captions via Gemini; graphics + reels rendered server-side." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>'
-            '<div><span class="label">We render</span><span class="value">Captions, graphics, reels</span></div>'
-            "</div>"
-            "</div>"
-        )
-
         # --- Four-step explainer — sport newsroom workflow ---
         # Each step now carries an SVG icon and a "time-to" footnote so the
         # block reads as a real product walkthrough, not a paragraph wall.
@@ -8242,7 +8388,7 @@ def create_app() -> Flask:
             "</div>"
             '<div class="mh-sample reel">'
             '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-sample-title">Aquatica <em>highlights</em></div>'
+            '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
             '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
             '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
@@ -8348,13 +8494,7 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html
-            + trust_html
-            + sample_html
-            + steps_html
-            + audience_html
-            + promise_html
-            + final_cta_html,
+            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
             active="home",
         )
 
@@ -9049,7 +9189,7 @@ def create_app() -> Flask:
 <div class="mh-next-strip" aria-label="What happens next">
   <div class="cell"><span class="num">2</span><span class="text"><b>Configure</b><br>Pick your club from the parsed list, upload your logo, choose tone, and drop in photos.</span></div>
   <div class="cell"><span class="num">3</span><span class="text"><b>Pipeline runs</b><br>The engine spots PBs, medals, first-times and comebacks. About 30 to 60 seconds.</span></div>
-  <div class="cell"><span class="num">4</span><span class="text"><b>Review &amp; approve</b><br>Approve, edit, or reject each card. Nothing leaves the deployment without you.</span></div>
+  <div class="cell"><span class="num">4</span><span class="text"><b>Review &amp; approve</b><br>Approve and edit the cards you want to post. Nothing leaves the deployment without you.</span></div>
 </div>
 
 <script>
@@ -9302,25 +9442,26 @@ def create_app() -> Flask:
             # logo on your organisation profile" here and the run never
             # received it.
             _uploaded_logo_label = ""
-            if not logo_url:
-                for _lg in getattr(active_prof, "brand_logos", None) or []:
-                    if str(_lg.get("mime", "")).startswith("image/"):
-                        _uploaded_logo_label = (
-                            _lg.get("label") or _lg.get("original_filename") or "uploaded logo"
-                        )
-                        break
-            if logo_url:
+            for _lg in getattr(active_prof, "brand_logos", None) or []:
+                if str(_lg.get("mime", "")).startswith("image/"):
+                    _uploaded_logo_label = (
+                        _lg.get("label") or _lg.get("original_filename") or "uploaded logo"
+                    )
+                    break
+            # Uploads win the display too \u2014 they're an explicit brand
+            # decision, and the run seeding below follows the same order.
+            if _uploaded_logo_label:
+                prof_logo_html = (
+                    f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
+                    f'Logo: <code style="font-size:11px">{_h(_uploaded_logo_label[:80])}</code> '
+                    f"&mdash; flows through to every graphic.</p>"
+                )
+            elif logo_url:
                 _logo_disp = logo_url[:80] + ("\u2026" if len(logo_url) > 80 else "")
                 prof_logo_html = (
                     f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
                     f'Logo: <code style="font-size:11px">'
                     f"{_h(_logo_disp)}</code></p>"
-                )
-            elif _uploaded_logo_label:
-                prof_logo_html = (
-                    f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
-                    f'Logo: <code style="font-size:11px">{_h(_uploaded_logo_label[:80])}</code> '
-                    f"&mdash; flows through to every graphic.</p>"
                 )
             else:
                 prof_logo_html = (
@@ -9335,7 +9476,7 @@ def create_app() -> Flask:
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
   <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
-  <p class="lede">{_h(meet_name) or 'Meet uploaded.'} &mdash; {len(clubs)} club{'s' if len(clubs) != 1 else ''} detected. Pick yours, tune the palette for this one-off, and drop in any photos you want graphics to prefer.</p>
+  <p class="lede">{_h(meet_name) or 'Meet uploaded.'} &mdash; {len(clubs)} club{'s' if len(clubs) != 1 else ''} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
 </section>
 
 <nav class="mh-stepper" aria-label="Upload progress">
@@ -9373,14 +9514,14 @@ def create_app() -> Flask:
         <div style="flex:1;min-width:120px"><label for="run-config-secondary">Secondary</label><input id="run-config-secondary" type="color" name="secondary_colour" value="{_h(prof_secondary)}" /></div>
         <div style="flex:1;min-width:120px"><label for="run-config-accent">Accent</label><input id="run-config-accent" type="color" name="accent_colour" value="{_h(prof_accent)}" /></div>
       </div>
-    </fieldset>
-
-    <fieldset class="mh-fieldset">
-      <legend>Photos (optional)</legend>
-      <p class="mh-fieldset-lede">Athlete portraits, action shots, venue images. The selector will show thumbnails the moment you pick.</p>
-      <input id="run-config-photos" type="file" name="club_photos" multiple accept="image/*" />
-      <div id="mh-photo-grid" class="mh-photo-grid" aria-live="polite"></div>
-      <p class="dim" style="margin-top:8px;font-size:var(--fs-sm)">Uploaded photos will be preferred for graphic generation in this run and saved to your media library.</p>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap"
+           data-org-primary="{_h(prof_primary)}" data-org-secondary="{_h(prof_secondary)}" data-org-accent="{_h(prof_accent)}" id="mh-palette-tools">
+        <button type="button" class="btn secondary" style="font-size:12px;padding:7px 12px"
+                onclick="mhCyclePalette()" title="Rotate primary &rarr; secondary &rarr; accent">&#8635; Swap colour order</button>
+        <button type="button" class="btn ghost" style="font-size:12px;padding:7px 10px"
+                onclick="mhResetPalette()" title="Restore the organisation's official palette">Reset to organisation colours</button>
+        <span class="muted" style="font-size:11.5px">Reordering here is a one-off for this meet &mdash; your organisation&rsquo;s official palette is untouched.</span>
+      </div>
     </fieldset>
 
     <div style="margin-top:var(--sp-5)"><button class="btn large" type="submit">Run pipeline \u2192</button></div>
@@ -9435,32 +9576,24 @@ def create_app() -> Flask:
   }});
   paint();
 
-  // Photo thumbnails \u2014 when the user picks images, render previews.
-  var photos = document.getElementById('run-config-photos');
-  var grid   = document.getElementById('mh-photo-grid');
-  function renderPhotos() {{
-    if (!photos || !grid) return;
-    grid.innerHTML = '';
-    var files = photos.files || [];
-    for (var i = 0; i < files.length; i++) {{
-      (function(file){{
-        var item = document.createElement('div');
-        item.className = 'mh-photo-grid-item';
-        var img = document.createElement('img');
-        img.alt = '';
-        var rdr = new FileReader();
-        rdr.onload = function(e) {{ img.src = e.target.result; }};
-        rdr.readAsDataURL(file);
-        var nameEl = document.createElement('span');
-        nameEl.className = 'name';
-        nameEl.textContent = file.name;
-        item.appendChild(img);
-        item.appendChild(nameEl);
-        grid.appendChild(item);
-      }})(files[i]);
-    }}
-  }}
-  if (photos) photos.addEventListener('change', renderPhotos);
+  // Colour-order tools — same idea as "Cycle colours" on organisation
+  // setup, but scoped to this one run. Reset restores the official
+  // organisation palette the pickers were seeded from.
+  window.mhCyclePalette = function() {{
+    if (!pri || !sec || !acc) return;
+    var p = pri.value, s = sec.value, a = acc.value;
+    pri.value = s; sec.value = a; acc.value = p;
+    paint();
+  }};
+  window.mhResetPalette = function() {{
+    var tools = document.getElementById('mh-palette-tools');
+    if (!tools) return;
+    if (pri && tools.dataset.orgPrimary)   pri.value = tools.dataset.orgPrimary;
+    if (sec && tools.dataset.orgSecondary) sec.value = tools.dataset.orgSecondary;
+    if (acc && tools.dataset.orgAccent)    acc.value = tools.dataset.orgAccent;
+    paint();
+  }};
+
 }})();
 </script>
 """
@@ -9669,8 +9802,40 @@ def create_app() -> Flask:
                 profile_logo_bytes = None
                 profile_logo_name = None
                 if active_prof_for_run is not None:
+                    # Logos the user uploaded at /organisation/setup ALWAYS
+                    # beat the one auto-discovered from the club website.
+                    # An uploaded file is an explicit brand decision; the
+                    # scraped brand_logo_url is only a best guess (and has
+                    # picked up university-site logos before).
+                    try:
+                        from mediahub.brand.logos import (
+                            resolve_logo_path as _resolve_logo_path,
+                        )
+
+                        for _lg in getattr(active_prof_for_run, "brand_logos", None) or []:
+                            if not str(_lg.get("mime", "")).startswith("image/"):
+                                continue
+                            _lp = _resolve_logo_path(
+                                active_prof_for_run.profile_id,
+                                _lg.get("logo_id", ""),
+                            )
+                            if not _lp:
+                                continue
+                            _lb = _lp.read_bytes()
+                            if _lb and len(_lb) < 5_000_000:
+                                profile_logo_bytes = _lb
+                                profile_logo_name = _lp.name
+                                break
+                    except Exception:
+                        profile_logo_bytes = None
+                    # Fall back to the website-discovered logo URL only when
+                    # nothing was uploaded.
                     url = (getattr(active_prof_for_run, "brand_logo_url", "") or "").strip()
-                    if url and (url.startswith("http://") or url.startswith("https://")):
+                    if (
+                        profile_logo_bytes is None
+                        and url
+                        and (url.startswith("http://") or url.startswith("https://"))
+                    ):
                         try:
                             import requests as _rq
 
@@ -9689,33 +9854,6 @@ def create_app() -> Flask:
                                 profile_logo_name = tail
                         except Exception:
                             profile_logo_bytes = None
-                    # Fall back to a logo the user uploaded at
-                    # /organisation/setup. Those live on ``brand_logos``
-                    # as local files (the session-gated serve route can't
-                    # be fetched from this server-side context), so read
-                    # the first image variant straight off disk.
-                    if profile_logo_bytes is None:
-                        try:
-                            from mediahub.brand.logos import (
-                                resolve_logo_path as _resolve_logo_path,
-                            )
-
-                            for _lg in getattr(active_prof_for_run, "brand_logos", None) or []:
-                                if not str(_lg.get("mime", "")).startswith("image/"):
-                                    continue
-                                _lp = _resolve_logo_path(
-                                    active_prof_for_run.profile_id,
-                                    _lg.get("logo_id", ""),
-                                )
-                                if not _lp:
-                                    continue
-                                _lb = _lp.read_bytes()
-                                if _lb and len(_lb) < 5_000_000:
-                                    profile_logo_bytes = _lb
-                                    profile_logo_name = _lp.name
-                                    break
-                        except Exception:
-                            profile_logo_bytes = None
                 _bk_process(
                     new_run_id,
                     logo_bytes=profile_logo_bytes,
@@ -9729,75 +9867,11 @@ def create_app() -> Flask:
             except Exception:
                 pass
 
-            # V8.2 issue 6: per-run photo library. Save each uploaded photo
-            # to runs_v4/<run_id>/media/ + a metadata sidecar, and persist
-            # to the V8 media library with profile_id = the synthetic
-            # "_run_<new_run_id>" id used by the renderer.
-            try:
-                photo_files = request.files.getlist("club_photos")
-            except Exception:
-                photo_files = []
-            saved_photos: list[dict] = []
-            if photo_files:
-                from datetime import datetime
-                import mimetypes as _mt
-
-                media_dir = RUNS_DIR / new_run_id / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                run_profile_id = re.sub(
-                    r"[^a-z0-9_-]",
-                    "-",
-                    (club_filter or ("_run_" + new_run_id)).lower(),
-                ).strip("-") or ("_run_" + new_run_id)
-                for pf in photo_files:
-                    if not pf or not pf.filename:
-                        continue
-                    try:
-                        body_bytes = pf.read()
-                        if not body_bytes:
-                            continue
-                        suffix = Path(pf.filename).suffix.lower() or ".jpg"
-                        safe_stem = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(pf.filename).stem)
-                        dest = media_dir / f"{uuid.uuid4().hex[:8]}_{safe_stem}{suffix}"
-                        dest.write_bytes(body_bytes)
-                        meta_entry = {
-                            "filename": pf.filename,
-                            "path": str(dest),
-                            "mime": _mt.guess_type(pf.filename)[0] or "",
-                            "uploaded_at": datetime.utcnow().isoformat() + "Z",
-                            "size": len(body_bytes),
-                        }
-                        saved_photos.append(meta_entry)
-                        # Persist to V8 media library too, keyed by the run-scoped profile_id.
-                        try:
-                            from mediahub.media_library.store import get_store as _ml_get
-                            from mediahub.media_library.models import MediaAsset as _MA
-
-                            ml = _ml_get()
-                            asset = _MA(
-                                id="",
-                                filename=pf.filename,
-                                path=str(dest),
-                                type="athlete_action",
-                                profile_id=run_profile_id,
-                                description_raw="User-uploaded photo (configure step)",
-                                permission_status="approved_by_club",
-                                approval_status="approved",
-                                uploaded_at=meta_entry["uploaded_at"],
-                            )
-                            ml.save(asset)
-                        except Exception:
-                            pass
-                    except Exception:
-                        continue
-                # Write a sidecar so the run dir is self-describing.
-                try:
-                    (media_dir / "manifest.json").write_text(
-                        json.dumps({"photos": saved_photos}, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    pass
+            # Photos are no longer collected at the configure step — each
+            # card's graphic has its own "Add photo of <athlete>" control
+            # (api_card_photo_upload) that stores the photo in the org's
+            # media library linked to the athlete, so it can be suggested
+            # again at the next meet.
             return redirect(url_for("run_status", run_id=new_run_id))
 
         # Pre-select the club whose name best fuzzy-matches the active org, so
@@ -10230,9 +10304,10 @@ def create_app() -> Flask:
             _wf_states = ws.load(run_id)
 
         # Workflow filter from query param. Triage states only — a malformed
-        # or retired (`posted`) ``?wf=`` value falls back to "show all".
+        # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
+        # "show all". Reject was removed from the review flow entirely.
         _wf_filter = (request.args.get("wf", "") or "").strip().lower()
-        if _wf_filter not in ("", "queue", "approved", "rejected"):
+        if _wf_filter not in ("", "queue", "approved"):
             _wf_filter = ""
 
         # --- Recognition summary band
@@ -10611,13 +10686,11 @@ def create_app() -> Flask:
                 "": len(ranked_achs) or _wf_n_total,
                 "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
                 "approved": _wf_n_approved,
-                "rejected": _wf_n_rejected,
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
-                ("rejected", "Rejected"),
             ]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
@@ -10650,13 +10723,13 @@ def create_app() -> Flask:
   <div style="flex:1;min-width:240px">
     <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
-      Approve or reject each achievement below. Approved cards flow into the
+      Approve the achievements you want to post — anything you skip simply
+      stays in the queue. Approved cards flow into the
       <strong>Content builder</strong>, where you pick a caption, create graphics
       and video, then schedule to Buffer or download. Nothing is created until
       you&rsquo;ve approved it.
     </p>
   </div>
-  <a class="btn" href="{_pack_url}" style="align-self:flex-start">Open content builder &rarr;</a>
 </div>
 <div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}">
   <span class="mh-progress-strip-label">Reviewed</span>
@@ -10671,7 +10744,6 @@ def create_app() -> Flask:
       <div class="stat-block">
         <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_wf_n_queue or len(ranked_achs)}</div></div>
         <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_wf_n_approved}</div></div>
-        <div class="stat bad"><div class="l">Rejected</div><div class="v" id="mh-wf-n-rejected">{_wf_n_rejected}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -10685,7 +10757,7 @@ def create_app() -> Flask:
       {_wf_filter_buttons}
     </nav>
     <span class="mh-kbd-hint" aria-hidden="true">
-      <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>?</kbd> help
+      <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>?</kbd> help
     </span>
   </div>
 </div>"""
@@ -10949,7 +11021,6 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn" href="{_pack_url}">Open content builder &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
     <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
@@ -11170,7 +11241,6 @@ function copyWhyCard(btn, taId) {{
       <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
       <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
       <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>R</kbd></span><span class="desc">Reject the focused card</span>
       <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
       <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
       <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
@@ -11231,7 +11301,6 @@ function copyWhyCard(btn, taId) {{
       case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
       case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
       case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'r': case 'R': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('rejected'); }} break;
       case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
       case '?': e.preventDefault(); toggleHelp(); break;
       case 'Escape': toggleHelp(false); break;
@@ -11927,8 +11996,13 @@ function copyWhyCard(btn, taId) {{
             _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
             _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
             n_dec = len(sa.get("pb_decisions") or [])
+            # All V7.3 confirmed flavours + the legacy status count as
+            # confirmed here, matching aggregate_run_audit's summary set.
             n_conf = sum(
-                1 for d in (sa.get("pb_decisions") or []) if d.get("status") == "CONFIRMED_PB"
+                1
+                for d in (sa.get("pb_decisions") or [])
+                if d.get("status")
+                in ("CONFIRMED_OFFICIAL_PB", "CONFIRMED_PB_IMPROVEMENT", "CONFIRMED_PB")
             )
             rows += (
                 f'<tr>'
@@ -12704,7 +12778,8 @@ Relay team broke club record"></textarea>
         wants_html = (
             request.accept_mimetypes.best_match(
                 ["text/html", "application/json"], default="application/json"
-            ) == "text/html"
+            )
+            == "text/html"
             or request.headers.get("Sec-Fetch-Dest", "") == "document"
         )
         if wants_html:
@@ -12719,8 +12794,9 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=200, mimetype="text/html",
-                            headers={"Vary": "Accept, Sec-Fetch-Dest"})
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
         resp = jsonify(payload)
         resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
         return resp
@@ -14279,12 +14355,43 @@ Relay team broke club record"></textarea>
         plan = load_latest_plan(pid)
         inputs = load_planner_inputs(pid)
         sports = [(p.sport, p.display_name) for p in list_sport_profiles()]
-        current_sport = (plan or {}).get("sport") or "swimming"
 
-        sport_opts = "".join(
-            f'<option value="{_h(slug)}"{" selected" if slug == current_sport else ""}>{_h(name)}</option>'
-            for slug, name in sports
-        )
+        # The sport comes from the ORGANISATION, not a per-page dropdown.
+        # org_type was chosen at setup; map it onto an available sport
+        # profile. Only when the org type doesn't imply a sport (a
+        # university society could run anything) do we fall back to a
+        # visible selector.
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        _prof = _active_profile()
+        _avail = {slug for slug, _ in sports}
+        org_sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
+        if org_sport not in _avail:
+            org_sport = None
+        current_sport = org_sport or (plan or {}).get("sport") or "swimming"
+
+        if org_sport:
+            _sport_display = dict(sports).get(org_sport, org_sport.title())
+            sport_control_html = (
+                f'<input type="hidden" id="mh-plan-sport" value="{_h(org_sport)}"/>'
+                f'<span style="font-weight:600">Planning for {_h(_sport_display)}</span>'
+                f'<span class="dim" style="font-size:12px">set by your '
+                f'<a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a></span>'
+            )
+        else:
+            _sport_opts = "".join(
+                f'<option value="{_h(slug)}"{" selected" if slug == current_sport else ""}>{_h(name)}</option>'
+                for slug, name in sports
+            )
+            sport_control_html = (
+                '<label for="mh-plan-sport" style="font-weight:600">Sport</label>'
+                f'<select id="mh-plan-sport" style="min-width:160px">{_sport_opts}</select>'
+                '<span class="dim" style="font-size:12px">your organisation type doesn&rsquo;t '
+                "pin a sport, so pick one here</span>"
+            )
 
         src_chip = {
             "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">OWN</span>',
@@ -14371,16 +14478,23 @@ Relay team broke club record"></textarea>
 
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Strategy</span>
+  <span class="mh-hero-eyebrow">Plan</span>
   <h1>What should we<br><em class="editorial">post next?</em></h1>
-  <p class="lede">A ranked plan fused from three sources — your results and drafts (<strong>own</strong>),
-  discovered context and the calendar (<strong>external</strong>), and what you tell us below (<strong>direct</strong>).
-  The planner recommends; you decide. Nothing publishes from here.</p>
+  <p class="lede">This page suggests your next posts, in order, and shows its working.
+  Hit <strong>Generate plan</strong> and you get a ranked to-post list built from your
+  recent results, the calendar, and anything you tell it below. Each item explains
+  why it ranks where it does, and the ones marked <strong>Ready to create</strong>
+  jump straight into the matching tool. Nothing publishes from here.</p>
 </section>
 
-<div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-  <label for="mh-plan-sport" style="font-weight:600">Sport profile</label>
-  <select id="mh-plan-sport" style="min-width:160px">{sport_opts}</select>
+<div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
+  <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
+  <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool with that idea.</span></div>
+</div>
+
+<div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
+  {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
@@ -15286,31 +15400,24 @@ function mhPlanGenerate(btn) {{
         )
         return _layout("Create", body, active="create")
 
-    @app.route("/spotlight/<run_id>/<path:swimmer_key>/build", methods=["POST"])
-    def spotlight_build(run_id, swimmer_key):
-        """Take the achievements the user has *approved* on the spotlight
-        page and turn them into a single composite post draft saved as a
-        stub pack. Lets the user pick which moments go into the post by
-        approving the relevant pills first."""
-        try:
-            from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
-            from mediahub.club_platform.stub_pack_store import save_pack
-        except ImportError:
-            return _recovery_page(
-                "Spotlight unavailable",
-                "The club_platform module isn't loaded on this deployment, so "
-                "spotlight posts can't be built. Other parts of MediaHub still "
-                "work; ask your operator to enable the club_platform extra.",
-                eyebrow="Athlete spotlight",
-                primary_cta=("Back to Create", url_for("make_page")),
-                secondary_cta=("System status", url_for("status_page")),
-                code=501,
-            )
+    def _compose_spotlight_caption(run_id: str, swimmer_key: str, tone: str = ""):
+        """Compose the single spotlight caption from APPROVED achievements.
+
+        Shared by the initial build and the tone rewrite on the saved
+        draft. Returns ``(result, None)`` with
+        ``{caption, swimmer_name, meet_name, n_approved}`` on success, or
+        ``(None, (response, status))`` carrying a rendered error page.
+        Pure AI composition — no template stitching; an unavailable
+        provider is an honest error page, never a fake caption.
+        """
+        from mediahub.club_platform.athlete_spotlight import build_spotlight_pack
+
         run_data = _load_run(run_id)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             run_data = None
         if not run_data:
-            return _recovery_page(
+            # _recovery_page already returns a (body, status) tuple.
+            return None, _recovery_page(
                 "Run not found",
                 "This run isn't on disk. It may have been deleted from /privacy, "
                 "or the URL might be from a different deployment.",
@@ -15322,14 +15429,14 @@ function mhPlanGenerate(btn) {{
             pack = build_spotlight_pack(run_data, swimmer_key)
         except Exception as e:
             log.warning(
-                "spotlight_build: build_spotlight_pack failed for %s/%s: %s",
+                "spotlight: build_spotlight_pack failed for %s/%s: %s",
                 run_id,
                 swimmer_key,
                 e,
             )
             pack = None
         if not pack:
-            return _recovery_page(
+            return None, _recovery_page(
                 "Swimmer not found",
                 f'No achievements were recorded for "{swimmer_key}" in this meet. '
                 "Pick another swimmer, or open the meet review to see who's in "
@@ -15360,56 +15467,62 @@ function mhPlanGenerate(btn) {{
                 approved.append(ra)
 
         if not approved:
-            # Fall through gracefully with a clear message — don't run the LLM
-            # on an empty selection.
             body = (
-                '<h1>Build spotlight post</h1>'
+                "<h1>Build spotlight post</h1>"
                 '<div class="card"><p class="muted">No achievements approved yet. '
-                'Click the pill on the achievements below to approve the ones '
-                'you want to include, then come back here.</p>'
+                "Click <strong>Approve</strong> on the achievements you want in "
+                "the post, then come back here.</p>"
                 f'<p><a class="btn secondary" href="{url_for("spotlight_view", run_id=run_id, swimmer_key=swimmer_key)}">&larr; Back to spotlight</a></p></div>'
             )
-            return _layout("Build spotlight post", body, active="create"), 400
+            return None, (_layout("Build spotlight post", body, active="create"), 400)
 
-        # Hand the approved achievements to Claude so the model decides
-        # how to weave them into one post. No hand-coded templating —
-        # Claude gets the list of facts + brand context and writes the
-        # composite draft. Falls back gracefully when Claude isn't
-        # configured (single-shot generate with the same prompt).
         swimmer_name = pack["swimmer_name"]
         meet_name = pack["meet_name"]
-        fact_list = []
-        for ra in approved[:8]:
-            a = ra.get("achievement", {})
-            fact = {
-                k: v
-                for k, v in {
-                    "event": a.get("event"),
-                    "time": a.get("time"),
-                    "place": a.get("place"),
-                    "headline": a.get("headline"),
-                    "type": a.get("type"),
-                    "is_pb": a.get("pb"),
-                }.items()
-                if v not in (None, "", [], {})
-            }
-            fact_list.append(fact)
-
         # English brief — no JSON envelope. Each approved moment is a
         # natural-language line the model can weave into prose.
         moment_lines: list[str] = []
-        for f in fact_list:
-            hl = (f.get("headline") or "").strip()
-            ev = (f.get("event") or "").strip()
-            tm = (f.get("time") or "").strip()
-            pl = f.get("place")
-            pb = "PB" if f.get("is_pb") else ""
+        for ra in approved[:8]:
+            a = ra.get("achievement", {})
+            hl = (a.get("headline") or "").strip()
+            ev = (a.get("event") or "").strip()
+            tm = (a.get("time") or "").strip()
+            pl = a.get("place")
+            pb = "PB" if a.get("pb") else ""
             bits = [b for b in [ev, tm, (f"{pl}" if pl else ""), pb] if b]
             line = "; ".join(bits)
             if hl:
                 line = f"{hl} ({line})" if line else hl
             if line:
                 moment_lines.append(line)
+
+        # Compact result lines for the spotlight GRAPHIC (event + time + PB
+        # flag) — real parsed data, kept separate from the prose brief so
+        # the renderer never has to re-mine the caption for facts.
+        result_lines: list[str] = []
+        for ra in approved[:4]:
+            a = ra.get("achievement", {})
+            ev = (a.get("event") or "").strip()
+            tm = (a.get("time") or "").strip()
+            pl = a.get("place")
+            if not (ev or tm):
+                continue
+            bits = " ".join(b for b in [ev, "—" if ev and tm else "", tm] if b)
+            if pl in (1, 2, 3, "1", "2", "3"):
+                bits += f" · {['🥇','🥈','🥉'][int(pl) - 1]}"
+            if a.get("pb"):
+                bits += " · PB"
+            result_lines.append(bits)
+
+        tone_line = ""
+        if tone:
+            from mediahub.brand.tone import TONE_META, tone_from_str
+
+            meta = TONE_META.get(tone_from_str(tone)) or {}
+            if meta:
+                tone_line = (
+                    f"\n\nTone: {meta.get('label', tone)} — {meta.get('description', '')} "
+                    f"Example of the register: {meta.get('example', '')}"
+                )
         brief = (
             f"{swimmer_name} just had their day at {meet_name}. The reviewer "
             f"has hand-approved these moments for the spotlight post:\n"
@@ -15417,29 +15530,17 @@ function mhPlanGenerate(btn) {{
             + "\n\nWrite ONE single Instagram-ready caption: a hooky "
             "opener, a tight body weaving the approved moments together, "
             "and a closing line. Use the swimmer's first name. Don't "
-            "invent facts. ~700 characters max. Output the caption only."
+            "invent facts. ~700 characters max. Output the caption only." + tone_line
         )
-        # Spotlight composite — pure AI, no template stitch. If the AI is
-        # unavailable, render a clear "AI unavailable" page rather than
-        # pretending to compose a post out of bullet points.
         from mediahub.ai_core import (
             ask,
             ProviderNotConfigured,
             ProviderError,
         )
 
-        # Ground the spotlight caption in the active organisation's
-        # full brand context: mandatory rules from uploaded guidelines,
-        # identity (org type, country, sponsor), captured DNA (voice
-        # summary, keywords, phrases to use, phrases to avoid), and the
-        # learned voice profile (sentence length, emoji rate, preferred
-        # swimmer address, openers/closers).
-        #
-        # We delegate to brand.context.brand_context_for_llm — the same
-        # canonical helper that single-card captions use via
-        # web.ai_caption._brand_dna_prose — so the spotlight composite
-        # speaks in the exact voice the rest of the product already
-        # generates in.
+        # Ground the caption in the org's full brand context — the same
+        # canonical helper single-card captions use — so the spotlight
+        # composite speaks in the voice the rest of the product does.
         tool_system = (
             "You are MediaHub's spotlight-post writer. Output only the "
             "caption text, no preamble or markdown."
@@ -15455,14 +15556,7 @@ function mhPlanGenerate(btn) {{
         except Exception:
             pass
         try:
-            composed_caption = (
-                ask(
-                    spotlight_system,
-                    brief,
-                    max_tokens=600,
-                )
-                or ""
-            ).strip()
+            composed_caption = (ask(spotlight_system, brief, max_tokens=600) or "").strip()
         except ProviderNotConfigured as e:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
@@ -15472,7 +15566,7 @@ function mhPlanGenerate(btn) {{
                 "this deployment.</p>"
                 "</div>"
             )
-            return _layout("Build spotlight post", err_html, active="create"), 503
+            return None, (_layout("Build spotlight post", err_html, active="create"), 503)
         except ProviderError as e:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
@@ -15483,7 +15577,7 @@ function mhPlanGenerate(btn) {{
                 "clear within seconds).</p>"
                 "</div>"
             )
-            return _layout("Build spotlight post", err_html, active="create"), 502
+            return None, (_layout("Build spotlight post", err_html, active="create"), 502)
         if not composed_caption:
             err_html = (
                 '<div class="card" style="border-color:rgba(255,107,107,0.40)">'
@@ -15492,31 +15586,116 @@ function mhPlanGenerate(btn) {{
                 "Try regenerating.</p>"
                 "</div>"
             )
-            return _layout("Build spotlight post", err_html, active="create"), 502
+            return None, (_layout("Build spotlight post", err_html, active="create"), 502)
+        return (
+            {
+                "caption": composed_caption,
+                "swimmer_name": swimmer_name,
+                "meet_name": meet_name,
+                "n_approved": len(approved),
+                "results_lines": "\n".join(result_lines),
+            },
+            None,
+        )
+
+    @app.route("/spotlight/<run_id>/<path:swimmer_key>/build", methods=["POST"])
+    def spotlight_build(run_id, swimmer_key):
+        """Take the achievements the user has *approved* on the spotlight
+        page and turn them into a single composite post draft saved as a
+        stub pack. Lets the user pick which moments go into the post by
+        approving them first. Accepts an optional ``tone`` field (warm-club /
+        hype / data-led) — empty means the organisation's brand voice."""
+        try:
+            from mediahub.club_platform.stub_pack_store import save_pack
+        except ImportError:
+            return _recovery_page(
+                "Spotlight unavailable",
+                "The club_platform module isn't loaded on this deployment, so "
+                "spotlight posts can't be built. Other parts of MediaHub still "
+                "work; ask your operator to enable the club_platform extra.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Back to Create", url_for("make_page")),
+                secondary_cta=("System status", url_for("status_page")),
+                code=501,
+            )
+        tone = (request.form.get("tone") or "").strip()
+        if tone not in ("", "warm-club", "hype", "data-led"):
+            tone = ""
+        result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
+        if err is not None:
+            return err
 
         card = {
             "platform": "Instagram",
-            "caption": composed_caption,
+            "caption": result["caption"],
             "hashtags": ["#spotlight", "#swimming"],
             "confidence": 0.9,
-            "notes": f"Composed from {len(approved)} approved achievement(s) for {swimmer_name}.",
+            "notes": (
+                f"Composed from {result['n_approved']} approved achievement(s) "
+                f"for {result['swimmer_name']}."
+            ),
             "status": "queue",
         }
         saved = save_pack(
             "free_text",  # reuses the stub-pack list; tagged in form_data
             {
-                "free_text": f"Spotlight — {swimmer_name}",
+                "free_text": f"Spotlight — {result['swimmer_name']}",
                 "source": "athlete_spotlight",
-                "swimmer_name": swimmer_name,
-                "meet_name": meet_name,
+                "swimmer_name": result["swimmer_name"],
+                "meet_name": result["meet_name"],
                 "run_id": run_id,
                 "swimmer_key": swimmer_key,
-                "n_approved": len(approved),
+                "n_approved": result["n_approved"],
+                "tone": tone,
+                "results_lines": result["results_lines"],
             },
             [card],
             profile_id=_active_profile_id(),
         )
         return redirect(url_for("stub_pack_view", pack_id=saved["pack_id"]))
+
+    @app.route("/drafts/<pack_id>/spotlight-tone", methods=["POST"])
+    def spotlight_pack_retone(pack_id):
+        """Rewrite a saved spotlight post in a different tone.
+
+        Mirrors the meet-recap caption tone tabs: same approved moments,
+        same brand grounding, different register. Updates the pack's
+        caption in place (no new draft id).
+        """
+        from mediahub.club_platform.stub_pack_store import load_pack, update_pack
+
+        rec = load_pack(pack_id)
+        if not _can_access_pack(rec, _active_profile_id()):
+            rec = None
+        if not rec:
+            return redirect(url_for("stub_packs_list"))
+        fd = rec.get("form_data") or {}
+        if fd.get("source") != "athlete_spotlight":
+            return redirect(url_for("stub_pack_view", pack_id=pack_id))
+        run_id = str(fd.get("run_id") or "")
+        swimmer_key = str(fd.get("swimmer_key") or "")
+        tone = (request.form.get("tone") or "").strip()
+        if tone not in ("", "warm-club", "hype", "data-led"):
+            tone = ""
+        result, err = _compose_spotlight_caption(run_id, swimmer_key, tone=tone)
+        if err is not None:
+            return err
+        cards = list(rec.get("cards") or [])
+        if cards:
+            cards[0] = {**cards[0], "caption": result["caption"]}
+        else:
+            cards = [
+                {
+                    "platform": "Instagram",
+                    "caption": result["caption"],
+                    "hashtags": ["#spotlight", "#swimming"],
+                    "confidence": 0.9,
+                    "notes": f"Composed for {result['swimmer_name']}.",
+                    "status": "queue",
+                }
+            ]
+        update_pack(pack_id, cards=cards, form_data_updates={"tone": tone})
+        return redirect(url_for("stub_pack_view", pack_id=pack_id))
 
     # ---- /spotlight &mdash; Athlete Spotlight landing ------------------------
     @app.route("/spotlight")
@@ -15572,6 +15751,26 @@ function mhPlanGenerate(btn) {{
         except Exception as e:
             log.warning("spotlight: runs DB unreachable: %s", e)
             db_failed = True
+
+        # Self-heal stale rows: a run whose JSON is gone was deleted (or
+        # half-deleted by an older version) — it must not appear in the
+        # picker, and the orphaned DB row gets pruned so it stays gone.
+        _stale_ids = [
+            r["id"]
+            for r in recent_runs
+            if not (RUNS_DIR / f"{r['id']}.json").exists()
+            and not (RUNS_DIR / str(r["id"]) / "run.json").exists()
+        ]
+        if _stale_ids:
+            try:
+                conn = _db()
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(i,) for i in _stale_ids])
+                conn.commit()
+                conn.close()
+            except Exception as e:  # noqa: BLE001
+                log.warning("spotlight: stale-run prune failed: %s", e)
+            _stale_set = set(_stale_ids)
+            recent_runs = [r for r in recent_runs if r["id"] not in _stale_set]
 
         run_id_param = request.args.get("run_id", "")
 
@@ -15731,12 +15930,6 @@ function mhPlanGenerate(btn) {{
         _back_url = url_for("spotlight_landing") + f"?run_id={run_id}"
         _review_url = url_for("review", run_id=run_id)
         _pack_url = url_for("content_pack", run_id=run_id)
-        _wf_api_base = url_for("api_workflow_set", run_id=run_id, card_id="CARD_ID").replace(
-            "CARD_ID", ""
-        )
-        import json as _json
-
-        _wf_api_base_js = _json.dumps(_wf_api_base)
 
         # Load workflow state for this run so spotlight cards reflect current status.
         wf_states = {}
@@ -15747,17 +15940,11 @@ function mhPlanGenerate(btn) {{
         except Exception:
             wf_states = {}
 
-        # Render achievements with full workflow controls.
-        WF_PILL_STYLES = {
-            "queue": ("rgba(255,255,255,0.06)", "var(--ink-muted)"),
-            "approved": ("rgba(34,197,94,0.15)", "#22C55E"),
-            "rejected": ("rgba(244,63,94,0.15)", "#F43F5E"),
-            "posted": ("rgba(212,255,58,0.15)", "var(--accent)"),
-            "edited": ("rgba(245,158,11,0.15)", "var(--warn)"),
-        }
-
-        rows_html = ""
-        for ra in pack["ranked_achievements"]:
+        # Render achievements with the same approve strip the meet recap
+        # uses (_render_wf_actions): outline "Approve" until approved,
+        # filled "Approved ✓" after, Re-queue to undo. Approved rows are
+        # grouped at the top, mirroring the content builder.
+        def _sp_row_html(ra: dict) -> str:
             a = ra.get("achievement", {})
             band = ra.get("quality_band", "nice")
             prio = ra.get("priority", 0.0)
@@ -15776,16 +15963,12 @@ function mhPlanGenerate(btn) {{
             card_id_raw = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
             card_id_safe = _h(card_id_raw)
 
-            # Workflow status
             wf = wf_states.get(card_id_raw)
             wf_status = wf.status.value if wf else "queue"
-            s_bg, s_fg = WF_PILL_STYLES.get(wf_status, WF_PILL_STYLES["queue"])
 
-            # Caption text for copy
             cap_text = headline
             if angle:
                 cap_text = f"{headline}\\n\\n{angle}"
-            cap_text_safe = cap_text.replace('"', "&quot;")
 
             # "Create graphic" — only for achievements with a real swim_id,
             # which api_create_graphic can resolve in the run's recognition
@@ -15808,21 +15991,19 @@ function mhPlanGenerate(btn) {{
                     f'border-radius:8px"></div>'
                 )
 
-            rows_html += f"""
-<div class="sp-row" data-card="{card_id_safe}" style="padding:14px 0;border-bottom:1px solid var(--border);display:flex;gap:14px;align-items:flex-start">
+            return f"""
+<div class="sp-row ach-row" data-card="{card_id_safe}" data-status="{_h(wf_status)}" style="padding:14px 0;border-bottom:1px solid var(--border);display:flex;gap:14px;align-items:flex-start">
   <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px">#{rank}</div>
   <div style="flex:1">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
       <span class="tag {band_cls}" style="font-size:10px">{band.upper()}</span>
       <span class="tag info" style="font-size:10px">{atype}</span>
       <span class="muted" style="font-size:11px">{prio:.2f}</span>
-      <button class="sp-pill wf-pill" data-run="{_h(run_id)}" data-card="{card_id_safe}" data-status="{wf_status}"
-        style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:{s_bg};color:{s_fg};font-family:inherit"
-        title="Click: queue &harr; approved. Right-click: reject.">{wf_status}</button>
     </div>
     <div style="font-size:14px;font-weight:600;color:var(--ink)">{event}</div>
     <div style="font-size:13px;color:var(--ink-dim);margin-top:2px">{headline}</div>
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      {_render_wf_actions(run_id, card_id_raw, wf_status)}
       <button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick="copySpotlightCaption(this, '{card_id_safe}')">Copy caption</button>
       {sp_graphic_btn}
       <span id="sp-cap-{card_id_safe}" style="display:none">{cap_text}</span>
@@ -15831,10 +16012,45 @@ function mhPlanGenerate(btn) {{
   </div>
 </div>"""
 
+        def _sp_status(ra: dict) -> str:
+            a = ra.get("achievement", {})
+            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            wf = wf_states.get(cid)
+            return wf.status.value if wf else "queue"
+
+        _approved_ras = [
+            ra for ra in pack["ranked_achievements"] if _sp_status(ra) in ("approved", "posted")
+        ]
+        _other_ras = [
+            ra for ra in pack["ranked_achievements"] if _sp_status(ra) not in ("approved", "posted")
+        ]
+        approved_rows = "".join(_sp_row_html(ra) for ra in _approved_ras)
+        other_rows = "".join(_sp_row_html(ra) for ra in _other_ras)
+        approved_section = (
+            f'<div class="card"><h2>Going into the post '
+            f'<span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(_approved_ras)} approved</span></h2>'
+            f"{approved_rows}</div>"
+            if _approved_ras
+            else ""
+        )
+
+        from mediahub.brand.tone import TONE_META as _SP_TONE_META
+
+        _sp_tone_opts = '<option value="">Brand voice (default)</option>' + "".join(
+            f'<option value="{_h(t.value)}">{_h(m["label"])}</option>'
+            for t, m in _SP_TONE_META.items()
+        )
+
         body = f"""
-<p class="dim"><a href="{_back_url}">&larr; Back to swimmer list</a> &middot; <a href="{_review_url}">Full meet review</a></p>
-<h1>Spotlight: {_h(pack["swimmer_name"])}</h1>
-<p class="dim">{_h(pack["meet_name"])}</p>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Athlete spotlight</span>
+  <h1>{_h(pack["swimmer_name"])}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(pack["meet_name"])}</span><span class="sep">/</span>
+    <a href="{_back_url}" style="color:var(--ink-muted);text-decoration:none">&larr; Swimmer list</a><span class="sep">/</span>
+    <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">Full meet review</a>
+  </div>
+</section>
 
 <div class="card">
   <div class="stat-block">
@@ -15844,57 +16060,24 @@ function mhPlanGenerate(btn) {{
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
-    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline">
+    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
+          data-loader-text="Composing the spotlight post">
+      <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
     </form>
+    <a class="btn secondary" href="{_pack_url}" style="font-size:13px">Open content builder &rarr;</a>
     <span class="muted" style="font-size:12px">Approve the achievements below to choose which go into the post.</span>
   </div>
 </div>
 
+{approved_section}
+
 <div class="card">
-  <h2>Achievements</h2>
-  {rows_html or '<p class="muted">No achievements.</p>'}
+  <h2>{"More achievements" if _approved_ras else "Achievements"}</h2>
+  {other_rows or '<p class="muted">Everything is approved — build the post above.</p>' if _approved_ras else (other_rows or '<p class="muted">No achievements.</p>')}
 </div>
 
 <script>
-const SP_WF_API_BASE = {_wf_api_base_js};
-const SP_WF_CYCLE = ['queue','approved'];
-const SP_WF_COLOURS = {{
-  queue:    ['rgba(255,255,255,0.06)','var(--ink-muted)'],
-  approved: ['rgba(34,197,94,0.15)','#22C55E'],
-  rejected: ['rgba(244,63,94,0.15)','#F43F5E'],
-  edited:   ['rgba(245,158,11,0.15)','var(--warn)'],
-}};
-function _spApply(btn, next) {{
-  var cur = btn.dataset.status || 'queue';
-  var cardId = btn.dataset.card;
-  btn.textContent = next;
-  btn.dataset.status = next;
-  var cols = SP_WF_COLOURS[next] || SP_WF_COLOURS.queue;
-  btn.style.background = cols[0];
-  btn.style.color = cols[1];
-  var url = SP_WF_API_BASE + encodeURIComponent(cardId);
-  fetch(url, {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{action:'set_status',status:next}})}})
-    .then(r=>r.json())
-    .then(j=>{{ if(!j.ok){{btn.textContent=cur;btn.dataset.status=cur;}} }})
-    .catch(()=>{{btn.textContent=cur;btn.dataset.status=cur;}});
-}}
-document.addEventListener('click', function(e) {{
-  var btn = e.target.closest('.sp-pill');
-  if (!btn) return;
-  var cur = btn.dataset.status || 'queue';
-  var idx = SP_WF_CYCLE.indexOf(cur);
-  var next = idx === -1 ? 'approved' : SP_WF_CYCLE[(idx + 1) % SP_WF_CYCLE.length];
-  _spApply(btn, next);
-}});
-document.addEventListener('contextmenu', function(e) {{
-  var btn = e.target.closest('.sp-pill');
-  if (!btn) return;
-  e.preventDefault();
-  var cur = btn.dataset.status || 'queue';
-  _spApply(btn, cur === 'rejected' ? 'queue' : 'rejected');
-}});
 function copySpotlightCaption(btn, cardIdSafe) {{
   var span = document.getElementById('sp-cap-' + cardIdSafe);
   if (!span) {{ btn.textContent = 'Error'; return; }}
@@ -15936,7 +16119,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         "Event Preview": (
             "Event preview",
             "preview it",
-            "Tell us the event, athletes to watch, and angles. We draft preview captions for Instagram, Stories, and Twitter — ready to edit and post.",
+            "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
         ),
         "Sponsor Post": (
             "Sponsor post",
@@ -16096,6 +16279,45 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     form_data["attached_photo_path"] = resolved_assets[0]["path"]
                     form_data["attached_photo_filename"] = resolved_assets[0]["filename"]
                 form_data["profile_id"] = active_pid_for_pack
+
+            # Event-preview enrichment: read the event's website, the
+            # uploaded meet pack, and the entries source so the AI can work
+            # out what the event IS and pick ones-to-watch from REAL
+            # entries. All best-effort — a dead link or unreadable file
+            # just means that source contributes nothing.
+            if stub_cls_name == "WeekendPreviewStub":
+                try:
+                    from mediahub.brand.guidelines import extract_text as _doc_text
+                    from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
+
+                    _site_url = (form_data.get("event_website_url") or "").strip()
+                    if _site_url:
+                        _site_text = _sfetch(_site_url, max_chars=8000)
+                        if _site_text:
+                            form_data["event_site_text"] = _site_text
+                    _entries_url = (form_data.get("entries_url") or "").strip()
+                    if _entries_url:
+                        _etext = _sfetch(_entries_url, max_chars=20000)
+                        if _etext:
+                            form_data["entries_text"] = _etext
+                    for _field, _key, _cap in (
+                        ("event_pack", "event_pack_text", 8000),
+                        ("entries_file", "entries_text", 20000),
+                    ):
+                        _up = request.files.get(_field)
+                        if _up and getattr(_up, "filename", ""):
+                            try:
+                                _res = _doc_text(_up.filename, _up.read() or b"")
+                            except Exception:
+                                app.logger.exception("event preview: %s extraction failed", _field)
+                                continue
+                            if _res.get("status") == "ok" and (_res.get("text") or "").strip():
+                                form_data[_key] = _res["text"][:_cap]
+                    _pv_prof = _active_profile()
+                    if _pv_prof is not None:
+                        form_data["club_name"] = _pv_prof.display_name
+                except Exception:
+                    app.logger.exception("event preview enrichment failed")
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -16822,13 +17044,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _graphic_api_base = url_for(
             "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
         ).rsplit("/", 2)[0]
+        # Per-card Schedule (plan-gated; free tier sees the upgrade nudge).
+        # Spotlight packs schedule against their source run; pure drafts
+        # (event preview, sponsor, free text) use a synthetic stub run id —
+        # the schedule API only needs the caption + Buffer channels.
+        _pack_cards = rec.get("cards") or []
+        _pack_fd = rec.get("form_data") or {}
+        _sched_run_id = str(_pack_fd.get("run_id") or f"_stub_{pack_id}")
+        _extra_actions = [
+            _schedule_button_html(_sched_run_id, f"stub:{pack_id}:{_i}", f"stub-card-{_i}")
+            for _i in range(len(_pack_cards))
+        ]
         cards_html = render_cards_html(
-            {"cards": rec.get("cards") or []},
+            {"cards": _pack_cards},
             back_url,
             rec.get("title") or "Draft pack",
             pack_id=pack_id,
             status_api_base=_status_api_base,
             graphic_api_base=_graphic_api_base,
+            extra_card_actions=_extra_actions,
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
@@ -16860,6 +17094,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
+        # Every saved pack page carries the schedule modal — the per-card
+        # Schedule buttons above need it.
+        spotlight_modal_html = _schedule_modal_html() + _schedule_modal_js()
+        # Athlete-spotlight drafts additionally get the meet-recap caption
+        # tone rewrite (same approved moments, different register).
+        spotlight_tools_html = ""
+        _fd = _pack_fd
+        if _fd.get("source") == "athlete_spotlight":
+            from mediahub.brand.tone import TONE_META as _TM
+
+            _retone_url = url_for("spotlight_pack_retone", pack_id=pack_id)
+            _cur_tone = str(_fd.get("tone") or "")
+            _tone_btns = ""
+            for _t, _m in [(None, {"label": "Brand voice"})] + list(_TM.items()):
+                _val = _t.value if _t is not None else ""
+                _on = _val == _cur_tone
+                _tone_btns += (
+                    f'<form method="post" action="{_retone_url}" style="display:inline" '
+                    f'data-loader-text="Rewriting in {_h(_m["label"])}">'
+                    f'<input type="hidden" name="tone" value="{_h(_val)}"/>'
+                    f'<button type="submit" class="btn{"" if _on else " secondary"}" '
+                    f'style="font-size:11px;padding:4px 12px"{" disabled" if _on else ""}>'
+                    f"{_h(_m['label'])}</button></form> "
+                )
+            spotlight_tools_html = (
+                '<div class="card" style="margin-bottom:14px">'
+                '<div style="font-size:13px;font-weight:700;margin-bottom:4px">Caption tone</div>'
+                '<div style="font-size:12px;color:var(--ink-dim);margin-bottom:10px">'
+                "Rewrite the post in a different register — same approved moments, "
+                "same brand grounding.</div>"
+                f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">{_tone_btns}</div>'
+                "</div>"
+            )
         # Show any media-library assets the draft was created with so the
         # user can see which photos are attached without re-opening the
         # source form. Profile-scoped: only assets that still belong to
@@ -16877,7 +17144,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             footer,
             1,
         )
-        body = header + attached_html + cards_html + _VISUAL_PANEL_JS + _DRAFT_REGEN_JS
+        body = (
+            header
+            + spotlight_tools_html
+            + attached_html
+            + cards_html
+            + spotlight_modal_html
+            + _VISUAL_PANEL_JS
+            + _DRAFT_REGEN_JS
+        )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
     def _render_pack_attached_media(rec: dict) -> str:
@@ -20371,6 +20646,68 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             for v, l in _ORG_TYPES
         )
 
+        # ---- Manual-mode prefills (issue: setup needs an explicit
+        # "build it myself" path with dropdowns for everything) ----------
+        from mediahub.brand.tone import TONE_META
+
+        _manual_pal = dict(prof.brand_palette_manual) if prof and prof.brand_palette_manual else {}
+        _hex_ok = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+        def _safe_hex(v: str, fallback: str) -> str:
+            v = (v or "").strip()
+            return v if _hex_ok.fullmatch(v) else fallback
+
+        _m_primary = _safe_hex(
+            _manual_pal.get("primary") or (prof.brand_primary if prof else ""), "#A30D2D"
+        )
+        _m_secondary = _safe_hex(
+            _manual_pal.get("secondary") or (prof.brand_secondary if prof else ""), "#1A1A1A"
+        )
+        _m_accent = _safe_hex(_manual_pal.get("accent") or "", "#D4FF3A")
+        _m_fourth = _safe_hex(_manual_pal.get("fourth") or "", "#F4D58D")
+        _m_use_fourth_checked = " checked" if (prof and prof.brand_palette_use_fourth) else ""
+        _m_tone = (prof.tone or prof.caption_tone) if prof else "warm-club"
+        _tone_opts = "".join(
+            f'<option value="{_h(t.value)}"{" selected" if t.value == _m_tone else ""}>'
+            f"{_h(m['label'])} &mdash; {_h(m['description'])}</option>"
+            for t, m in TONE_META.items()
+        )
+        _m_platforms = set(prof.platforms or []) if prof else set()
+        _platform_checks = "".join(
+            f'<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+            f'color:var(--ink-dim);margin:0">'
+            f'<input type="checkbox" name="platforms" value="{_h(key)}"'
+            f'{" checked" if key in _m_platforms else ""}/> {_h(label)}</label>'
+            for key, label, _ph in _PLATFORMS
+        )
+        _m_tone_notes = (prof.tone_notes or "") if prof else ""
+        _countries_datalist = "".join(f'<option value="{_h(c)}"></option>' for c in COUNTRIES)
+        manual_url = url_for("organisation_setup_manual")
+
+        # Bottom CTA of the AI form. Once the brand preview exists the
+        # primary action down here matches the preview's "Looks right —
+        # start creating" (it used to still say "Build my brand", which
+        # re-ran capture and read as a broken button); re-analyse stays
+        # available as the secondary action.
+        if prof and prof.is_ready():
+            _bottom_cta_html = (
+                '<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">'
+                f'<a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">'
+                "Looks right &mdash; start creating &rarr;</a>"
+                '<button type="submit" class="btn secondary">Re-analyse my brand &rarr;</button>'
+                '<span class="muted" style="font-size:12px">'
+                "Re-analysing takes 10&ndash;30 seconds and refreshes voice, palette and logos."
+                "</span></div>"
+            )
+        else:
+            _bottom_cta_html = (
+                '<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">'
+                '<button type="submit" class="btn">Build my brand &rarr;</button>'
+                '<span class="muted" style="font-size:12px">'
+                "Takes 10&ndash;30 seconds. MediaHub analyses each link to learn your tone and style."
+                "</span></div>"
+            )
+
         capture_url = url_for("organisation_setup_capture")
         body = f"""
 <div style="max-width:840px;margin:0 auto">
@@ -20390,6 +20727,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {llm_banner_html}
 {preview_html}
 
+<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap" role="tablist" aria-label="How do you want to set up?">
+  <button type="button" class="btn" id="mh-mode-btn-ai" role="tab" aria-selected="true"
+          onclick="mhSetupMode('ai')">AI build &mdash; read my links</button>
+  <button type="button" class="btn secondary" id="mh-mode-btn-manual" role="tab" aria-selected="false"
+          onclick="mhSetupMode('manual')">Manual build &mdash; I&rsquo;ll pick everything</button>
+</div>
+
+<div id="mh-setup-ai-panel">
 <form method="POST" action="{capture_url}" enctype="multipart/form-data"
       data-loader-text="Teaching the AI about your organisation"
       data-loader-sub="Reading links, learning scraping strategies, interpreting guidelines, describing logos. This takes 10&ndash;30 seconds.">
@@ -20518,14 +20863,122 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_logos_grid_html}
 </div>
 
-<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px">
-  <button type="submit" class="btn">Build my brand &rarr;</button>
+{_bottom_cta_html}
+</form>
+</div>
+
+<div id="mh-setup-manual-panel" style="display:none">
+<form method="POST" action="{manual_url}" enctype="multipart/form-data">
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Identity</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
+    <div>
+      <label class="req" for="ms-display-name">Organisation name</label>
+      <input id="ms-display-name" type="text" name="display_name" required value="{_h(display_name)}"
+             placeholder="e.g. City Aquatics Swimming Club"/>
+    </div>
+    <div>
+      <label>Type</label>
+      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+    </div>
+    <div>
+      <label for="ms-country">Country</label>
+      <input id="ms-country" type="text" name="country" value="{_h(country)}"
+             list="mh-countries-list" placeholder="Start typing your country&hellip;"
+             autocomplete="off" style="{_input_style}"/>
+    </div>
+    <div>
+      <label>Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input type="text" name="governing_body" value="{_h(governing_body)}"
+             placeholder="e.g. Swim England, UKA, BUCS" style="{_input_style}"/>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Voice &amp; platforms</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
+    <div>
+      <label>Caption tone</label>
+      <select name="caption_tone" style="{_input_style}">{_tone_opts}</select>
+    </div>
+    <div>
+      <label>Platforms you post to</label>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
+    </div>
+  </div>
+  <div style="margin-top:14px">
+    <label>How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
+    <textarea name="tone_notes" rows="3"
+              placeholder="e.g. Friendly and proud, first names only, never use exclamation marks, always thank the officials."
+              style="{_input_style};resize:vertical">{_h(_m_tone_notes)}</textarea>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Brand colours</h2>
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
+    Exactly what you pick here is what every graphic, card, and reel uses.
+    Nothing is inferred in manual mode.
+  </p>
+  <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Primary
+      <input type="color" name="manual_primary" value="{_h(_m_primary)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Secondary
+      <input type="color" name="manual_secondary" value="{_h(_m_secondary)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Accent
+      <input type="color" name="manual_accent" value="{_h(_m_accent)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-dim);margin:0 0 10px 0">
+      <input type="checkbox" name="manual_use_fourth" value="1"{_m_use_fourth_checked}
+             onchange="var f=document.getElementById('ms-fourth-wrap'); if (f) f.style.display = this.checked ? 'flex' : 'none';"/>
+      Add a fourth brand colour
+    </label>
+    <label id="ms-fourth-wrap" style="display:{'flex' if _m_use_fourth_checked else 'none'};flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Fourth
+      <input type="color" name="manual_fourth" value="{_h(_m_fourth)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">
+    Logos
+    <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional, multiple)</span>
+  </h2>
+  <input type="file" name="brand_logos" multiple
+         accept="image/*,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.svg,.eps,.ai,.pdf"/>
+</div>
+
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">
+  <button type="submit" class="btn">Create my organisation &rarr;</button>
   <span class="muted" style="font-size:12px">
-    Takes 10&ndash;30 seconds. MediaHub analyses each link to learn your tone and style.
+    Instant &mdash; no AI reading involved. You can switch to AI build later to enrich the voice.
   </span>
 </div>
 </form>
 </div>
+<datalist id="mh-countries-list">{_countries_datalist}</datalist>
+</div>
+
+<script>
+function mhSetupMode(mode) {{
+  var isAi = mode === 'ai';
+  var ai = document.getElementById('mh-setup-ai-panel');
+  var man = document.getElementById('mh-setup-manual-panel');
+  var bAi = document.getElementById('mh-mode-btn-ai');
+  var bMan = document.getElementById('mh-mode-btn-manual');
+  if (ai) ai.style.display = isAi ? '' : 'none';
+  if (man) man.style.display = isAi ? 'none' : '';
+  if (bAi) {{ bAi.className = isAi ? 'btn' : 'btn secondary'; bAi.setAttribute('aria-selected', String(isAi)); }}
+  if (bMan) {{ bMan.className = isAi ? 'btn secondary' : 'btn'; bMan.setAttribute('aria-selected', String(!isAi)); }}
+}}
+</script>
 
 <style>
 .mh-combobox {{ position: relative; }}
@@ -21055,11 +21508,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 colour_usage=link_colour_usage,
             )
             if sources:
+                # The AI always CONSIDERS a fourth colour and decides
+                # itself whether one genuinely exists (the prompt defaults
+                # the slot to empty). The user's tickbox on the preview
+                # remains a manual override via /organisation/setup/palette.
                 resolved = _palette.resolve_palette(
                     org_name=prof.display_name,
                     voice_summary=prof.brand_voice_summary or "",
                     sources=sources,
-                    allow_fourth=bool(prof.brand_palette_use_fourth),
+                    allow_fourth=True,
                 )
                 # Preserve any existing primary/secondary/accent that the
                 # resolver didn't fill (e.g. when the user hadn't uploaded
@@ -21069,6 +21526,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     for k in _palette.ALL_SLOTS:
                         if resolved.get(k):
                             merged[k] = resolved[k]
+                    # Mirror the AI's fourth-colour decision, unless the
+                    # user pinned a fourth manually. "No fourth" must also
+                    # CLEAR a stale fourth from an earlier capture — that
+                    # carry-over is exactly how every org ended up with a
+                    # fourth colour whether it had one or not.
+                    if not (prof.brand_palette_manual or {}).get(_palette.FOURTH_SLOT):
+                        if resolved.get(_palette.FOURTH_SLOT):
+                            prof.brand_palette_use_fourth = True
+                        else:
+                            merged.pop(_palette.FOURTH_SLOT, None)
+                            prof.brand_palette_use_fourth = False
                     prof.brand_palette_extracted = merged
                     prof.brand_palette_reasoning = resolved.get("reasoning", "")
             prof.brand_palette_sources = sources
@@ -21099,6 +21567,138 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         save_profile(prof)
         if _setup_is_new_profile:
             # PC.3: setup-created workspaces bind to their signed-in creator.
+            _bind_creator_if_signed_in(prof.profile_id)
+        _pin_active_profile(prof.profile_id)
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/organisation/setup/manual", methods=["POST"])
+    def organisation_setup_manual():
+        """Create or update an organisation profile with NO AI capture.
+
+        Manual mode: the user picks everything the system needs from
+        dropdowns and pickers — type, country, tone, platforms, brand
+        colours, logos. Nothing is inferred and nothing is invented:
+        the chosen colours land on ``brand_palette_manual`` (the
+        user-override slot that wins over any AI pick) and the profile
+        is usable immediately.
+        """
+        display_name = (request.form.get("display_name") or "").strip()
+        if not display_name:
+            return redirect(url_for("organisation_setup"))
+
+        # Same slug / reuse / collision rules as the AI capture path.
+        existing = _active_profile()
+        if existing and existing.display_name.strip().lower() == display_name.lower():
+            profile_id = existing.profile_id
+        else:
+            raw = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
+            profile_id = raw[:48] or "default"
+            slug_match = load_profile(profile_id)
+            if slug_match is not None and (
+                slug_match.display_name.strip().lower() != display_name.lower()
+                or not _session_can_use_profile(profile_id)
+            ):
+                profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        _is_new_profile = load_profile(profile_id) is None
+        prof = load_profile(profile_id) or ClubProfile(
+            profile_id=profile_id,
+            display_name=display_name,
+        )
+        prof.display_name = display_name
+        prof.org_type = (request.form.get("org_type") or "other").strip()
+        raw_country = (request.form.get("country") or "").strip()
+        if raw_country:
+            from mediahub.web._countries import COUNTRIES
+
+            canon = next(
+                (c for c in COUNTRIES if c.casefold() == raw_country.casefold()),
+                None,
+            )
+            prof.country = canon or raw_country
+        else:
+            prof.country = ""
+        prof.governing_body = (request.form.get("governing_body") or "").strip()
+
+        tone = (request.form.get("caption_tone") or "warm-club").strip()
+        if tone not in ("warm-club", "hype", "data-led"):
+            tone = "warm-club"
+        prof.tone = tone
+        prof.caption_tone = tone
+
+        platforms = [
+            p
+            for p in request.form.getlist("platforms")
+            if p in ("instagram", "facebook", "twitter", "tiktok", "linkedin")
+        ]
+        prof.platforms = platforms
+
+        notes = (request.form.get("tone_notes") or "").strip()
+        if notes:
+            prof.tone_notes = notes
+
+        # Colours: validate as #rrggbb; invalid entries are dropped, never
+        # guessed. Manual picks land on brand_palette_manual (per-slot
+        # winner over any AI pick) + the legacy two mirror fields.
+        hex_re = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+        def _col(name: str) -> str:
+            v = (request.form.get(name) or "").strip()
+            return v if hex_re.fullmatch(v) else ""
+
+        manual_pal = dict(prof.brand_palette_manual or {})
+        for slot, field_name in (
+            ("primary", "manual_primary"),
+            ("secondary", "manual_secondary"),
+            ("accent", "manual_accent"),
+        ):
+            v = _col(field_name)
+            if v:
+                manual_pal[slot] = v
+        use_fourth = bool(request.form.get("manual_use_fourth"))
+        fourth = _col("manual_fourth") if use_fourth else ""
+        if fourth:
+            manual_pal["fourth"] = fourth
+        elif not use_fourth:
+            manual_pal.pop("fourth", None)
+        prof.brand_palette_manual = manual_pal
+        prof.brand_palette_use_fourth = use_fourth
+        if manual_pal.get("primary"):
+            prof.brand_primary = manual_pal["primary"]
+        if manual_pal.get("secondary"):
+            prof.brand_secondary = manual_pal["secondary"]
+
+        # Logos: same ingest as the AI path (storage + optional vision
+        # description); skipping AI here would just mean unlabelled logos.
+        logo_uploads = request.files.getlist("brand_logos")
+        if logo_uploads:
+            from mediahub.brand import logos as _logos_mod
+
+            current_logos = list(prof.brand_logos or [])
+            for upload in logo_uploads:
+                if not upload or not upload.filename:
+                    continue
+                try:
+                    raw_bytes = upload.read() or b""
+                except Exception:
+                    continue
+                if not raw_bytes:
+                    continue
+                try:
+                    meta = _logos_mod.store_logo(
+                        profile_id=prof.profile_id,
+                        filename=upload.filename,
+                        file_bytes=raw_bytes,
+                        existing_logos=current_logos,
+                    )
+                except Exception as e:
+                    log.info("manual setup: logo rejected/failed: %s", e)
+                    continue
+                current_logos.append(meta)
+            prof.brand_logos = current_logos
+
+        save_profile(prof)
+        if _is_new_profile:
             _bind_creator_if_signed_in(prof.profile_id)
         _pin_active_profile(prof.profile_id)
         return redirect(url_for("organisation_setup"))
@@ -22701,7 +23301,7 @@ function tiRegenerate() {{
 {win_html}
 {_section_html("Internal notes / nice mentions", grouped.get("internal_notes", []), icon="&#x1F4DD;")}
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
-{_section_html("Rejected / not recommended", grouped.get("rejected", []), icon="&#x2715;")}
+{_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
 {_schedule_modal_html()}
 
@@ -22732,36 +23332,51 @@ function generateReelGrouped(btn, reelUrl) {{
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
-  fetch(reelUrl, {{method:'POST'}})
-    .then(function(r) {{
-      var ct = r.headers.get('content-type') || '';
-      if (r.ok && ct.indexOf('video') !== -1) {{ return r.blob().then(function(b){{ return {{ok:true, blob:b}}; }}); }}
-      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
-    }})
+  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+  var fail = function(msg) {{
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  }};
+  var success = function(videoUrl) {{
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML =
+      '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+        '<div style="flex:0 0 220px;max-width:240px">' +
+          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '</div>' +
+        '<div style="flex:1;min-width:200px">' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+        '</div>' +
+      '</div>';
+  }};
+  fetch(reelUrl + '-job', {{method:'POST'}})
+    .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
     .then(function(res) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {{
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {{
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
         return;
       }}
-      var url = URL.createObjectURL(res.blob);
-      panel.innerHTML =
-        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 220px;max-width:240px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-            '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-          '</div>' +
-        '</div>';
+      var tries = 0;
+      var poll = function() {{
+        tries++;
+        if (tries > 80) {{ fail('timed out waiting for the render \u2014 try again'); return; }}
+        fetch(res.body.poll_url)
+          .then(function(r){{ return r.json(); }})
+          .then(function(j) {{
+            if (j.status === 'done' && j.video_url) {{ success(j.video_url); return; }}
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {{
+              fail(j.user_message || j.error || 'render failed'); return;
+            }}
+            setTimeout(poll, 3000);
+          }})
+          .catch(function() {{ setTimeout(poll, 3000); }});
+      }};
+      setTimeout(poll, 3000);
     }})
-    .catch(function(err) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
+    .catch(function(err) {{ fail('Network error: ' + err); }});
 }}
 
 // Phase 1.4 — sort the cards within one pack section by a data
@@ -22956,6 +23571,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
             _file_url = url_for("api_media_library_file", asset_id=ad.get("id", ""))
+            _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
             rows_html += f"""
 <tr>
   <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
@@ -22964,6 +23580,12 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td>{ad.get('linked_venue') or ad.get('linked_event') or ''}</td>
   <td>{ad.get('permission_status','')}</td>
   <td><code>{ad.get('id','')[:12]}</code></td>
+  <td>
+    <form method="post" action="{_delete_url}" style="display:inline"
+          onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
+      <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
+    </form>
+  </td>
 </tr>"""
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
@@ -23000,13 +23622,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <div class="card">
   <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
   <table style="width:100%">
-    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th></tr></thead>
+    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
     <tbody>{rows_html or (
-        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+        '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
         'Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. '
         'Uploads above still work; if this persists, ask your operator to check the data volume.'
         '</td></tr>' if store_failed else
-        '<tr><td colspan="6" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+        '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
     )}</tbody>
   </table>
 </div>
@@ -23104,6 +23726,137 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return send_file(a.path)
         except Exception:
             return "", 404
+
+    @app.route("/api/media-library/<asset_id>/delete", methods=["POST"])
+    def api_media_library_delete(asset_id: str):
+        """Delete a media asset — the record AND its file(s) on disk.
+
+        Wrong photo uploaded? This is the way out. POST (not DELETE verb)
+        so a plain HTML form on the library page can call it; AJAX callers
+        get JSON back.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+
+        store = _v8_get_media_store()
+        a = store.get(asset_id)
+        if not a:
+            return jsonify({"error": "not_found"}), 404
+        if not _session_can_access_profile(a.profile_id):
+            return jsonify({"error": "forbidden"}), 403
+        for _p in (a.path, getattr(a, "cutout_path", None)):
+            if not _p:
+                continue
+            try:
+                Path(_p).unlink(missing_ok=True)
+            except Exception:
+                pass
+        store.delete(asset_id)
+        wants_json = (
+            _req.headers.get("Accept", "").find("application/json") != -1
+            or _req.headers.get("X-Requested-With") == "XMLHttpRequest"
+        )
+        if wants_json:
+            return jsonify({"ok": True, "deleted": asset_id})
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/runs/<run_id>/cards/<card_id>/photo", methods=["POST"])
+    def api_card_photo_upload(run_id: str, card_id: str):
+        """Upload a photo for ONE card's graphic and remember who's in it.
+
+        The photo is stored in the organisation's media library linked to
+        this card's athlete by name, so at the next meet the picker
+        suggests it for that swimmer instead of asking for a re-upload.
+        Returns the new asset so the UI can attach it to the graphic
+        immediately.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        from flask import request as _req
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+
+        # Resolve the card so the upload is linked to a real athlete.
+        rr = run_data.get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        target = None
+        for ra in ranked:
+            _a = ra.get("achievement") or {}
+            if _a.get("swim_id") == card_id or ra.get("id") == card_id:
+                target = ra
+                break
+        if target is None:
+            for c in run_data.get("cards") or []:
+                if c.get("swim_id") == card_id or c.get("id") == card_id:
+                    target = {"achievement": c}
+                    break
+        if target is None:
+            return jsonify({"error": "card_not_found"}), 404
+        athlete = str((target.get("achievement") or {}).get("swimmer_name") or "").strip()
+
+        f = _req.files.get("photo")
+        if not f or not f.filename:
+            return jsonify({"error": "no_file"}), 400
+        if not (f.mimetype or "").startswith("image/"):
+            return jsonify({"error": "not_an_image"}), 400
+
+        # Photos live under the ORGANISATION's library (not a per-run
+        # synthetic id) so the athlete↔photo memory carries across meets.
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(f.filename).suffix.lower() or ".jpg"
+        dest = upload_dir / f"asset_{uuid.uuid4().hex[:12]}{ext}"
+        f.save(str(dest))
+
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
+        asset = MediaAsset(
+            id="",
+            filename=Path(f.filename).name,
+            path=str(dest),
+            type="athlete_action",
+            description_raw=(
+                f"Photo of {athlete} — uploaded on the card for {meet_name}".strip(" —")
+            ),
+            profile_id=profile_id,
+            linked_athlete_names=[athlete] if athlete else [],
+            linked_meet_ids=[run_id],
+            permission_status="user_owned",
+            approval_status="approved",
+        )
+        asset = store.save(asset)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "url": url_for("api_media_library_file", asset_id=asset.id),
+                    "label": athlete or "uploaded photo",
+                    "suggested": True,
+                },
+            }
+        )
 
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():
@@ -23363,8 +24116,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             ]
 
         # The photos the user can pick from for this card (their org's library
-        # images), surfaced in the panel as a per-graphic picker.
-        _photo_types = {"athlete_action", "athlete_headshot", "team_photo", "venue_photo", "other"}
+        # images), surfaced in the panel as a per-graphic picker. Photos the
+        # library remembers as being OF this card's athlete (linked when
+        # they were uploaded on an earlier card/meet) are flagged and
+        # sorted first, so next meet the right face is one click away.
+        _photo_types = {
+            "athlete_action",
+            "athlete_headshot",
+            "athlete_photo",
+            "team_photo",
+            "venue_photo",
+            "action",
+            "podium",
+            "other",
+        }
+        _card_athlete = str(ach.get("swimmer_name") or "").strip()
+        _card_athlete_lc = _card_athlete.lower()
         available_photos = []
         for _ad in media_assets:
             _d = _ad if isinstance(_ad, dict) else {}
@@ -23373,13 +24140,25 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 _label = (_names[0] if _names else "") or str(_d.get("type") or "").replace(
                     "_", " "
                 )
+                _suggested = bool(
+                    _card_athlete_lc
+                    and any(
+                        _card_athlete_lc == str(n).strip().lower()
+                        or _card_athlete_lc in str(n).strip().lower()
+                        or str(n).strip().lower() in _card_athlete_lc
+                        for n in _names
+                        if str(n).strip()
+                    )
+                )
                 available_photos.append(
                     {
                         "id": _d["id"],
                         "url": url_for("api_media_library_file", asset_id=_d["id"]),
                         "label": _label,
+                        "suggested": _suggested,
                     }
                 )
+        available_photos.sort(key=lambda p: (not p["suggested"], p["label"]))
 
         # Gen v2 Tier B: ``?candidates=N`` (or JSON ``{"candidates": N}``)
         # renders a ranked candidate POOL — N design-spec-directed
@@ -23440,6 +24219,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "available_photos": available_photos,
                     "chosen_asset_id": chosen_asset_id,
                     "no_photo": force_no_photo,
+                    "card_athlete": _card_athlete,
                     # Legacy single-visual fields ← the top-ranked candidate.
                     "visuals": top.get("visuals") or [],
                     "brief": top_brief,
@@ -23540,6 +24320,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 "available_photos": available_photos,
                 "chosen_asset_id": chosen_asset_id,
                 "no_photo": force_no_photo,
+                "card_athlete": _card_athlete,
                 **res,
             }
         )
@@ -24339,20 +25120,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             str(mp4), mimetype="video/mp4", as_attachment=False, download_name=f"{card_id}.mp4"
         )
 
-    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
-    def api_run_reel(run_id: str):
-        """Render (or serve cached) a multi-card MP4 reel for the meet.
+    def _assemble_reel_inputs(run_id: str):
+        """Shared validation + payload assembly for the reel routes.
 
-        Uses the top 3 ranked achievements by default; caller can override
-        the count with ?n=<int> up to a hard cap of 5.
+        Returns ``(inputs_dict, None)`` on success or ``(None, (response,
+        status))`` so the sync route and the async job route stay
+        behaviourally identical.
         """
-        from flask import send_file
-
-        try:
-            from mediahub.visual import motion as _motion
-        except Exception as e:
-            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
-
         run_data = _load_run(run_id)
         if run_data is None:
             run_dir = RUNS_DIR / run_id
@@ -24361,11 +25135,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 try:
                     run_data = json.loads(run_json.read_text())
                 except Exception as e:
-                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+                    return None, (jsonify({"error": f"run_load_failed: {e}"}), 500)
             else:
-                return jsonify({"error": "run_not_found"}), 404
+                return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
+            return None, (jsonify({"error": "run_not_found"}), 404)
 
         try:
             n = int(request.args.get("n", "3"))
@@ -24386,7 +25160,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # Fall back to the cards array if no recognition report.
             top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
         if not top:
-            return jsonify({"error": "no_cards_for_reel"}), 404
+            return None, (jsonify({"error": "no_cards_for_reel"}), 404)
 
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
         cards: list[dict] = []
@@ -24422,14 +25196,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             cid = c.get("id") or c.get("swim_id") or ""
             brief_list.append(_latest_brief_for_card(run_id, cid) if cid else None)
 
+        return (
+            {
+                "n": n,
+                "cards": cards,
+                "brand_kit": brand_kit,
+                "out_path": out_path,
+                "meet_name": meet_name,
+                "briefs": brief_list,
+            },
+            None,
+        )
+
+    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
+    def api_run_reel(run_id: str):
+        """Render (or serve cached) a multi-card MP4 reel for the meet.
+
+        Uses the top 3 ranked achievements by default; caller can override
+        the count with ?n=<int> up to a hard cap of 5.
+        """
+        from flask import send_file
+
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
         try:
             with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
                 mp4 = _motion.render_meet_reel(
-                    cards,
-                    brand_kit,
-                    out_path,
-                    meet_name=meet_name,
-                    briefs=brief_list,
+                    inputs["cards"],
+                    inputs["brand_kit"],
+                    inputs["out_path"],
+                    meet_name=inputs["meet_name"],
+                    briefs=inputs["briefs"],
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -24454,6 +25258,138 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             ), 500
         return send_file(
             str(mp4),
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=f"meet_reel_{run_id}.mp4",
+        )
+
+    @app.route("/api/runs/<run_id>/reel-job", methods=["POST"])
+    def api_run_reel_job(run_id: str):
+        """Kick off a background reel render; returns ``{job_id, poll_url}``.
+
+        The synchronous /reel route holds the HTTP connection for the whole
+        30–90s first render, which front-line proxies are happy to kill —
+        from the user's side the button simply "does nothing". Same cure as
+        the V10 graphic-variants job: render in a daemon thread, poll for
+        the outcome, then stream the finished MP4 from the file route.
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
+        # url_for needs the request context — resolve before the thread.
+        file_url = url_for("api_run_reel_file", run_id=run_id, n=inputs["n"])
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "reel",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                    mp4 = _motion.render_meet_reel(
+                        inputs["cards"],
+                        inputs["brand_kit"],
+                        inputs["out_path"],
+                        meet_name=inputs["meet_name"],
+                        briefs=inputs["briefs"],
+                    )
+                if not Path(mp4).exists():
+                    raise RuntimeError("mp4 missing after render")
+                job["status"] = "done"
+                job["video_url"] = file_url
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/reel-jobs/<job_id>", methods=["GET"])
+    def api_reel_job_status(job_id: str):
+        """Progress + outcome for a background reel job (same gating as variants)."""
+        job = _variant_job_load(job_id)
+        if job is None or job.get("kind") != "reel":
+            return jsonify({"error": "job_not_found"}), 404
+        if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
+            return jsonify({"error": "job_not_found"}), 404
+        status = job.get("status", "running")
+        error = job.get("error") or None
+        if status == "running" and (
+            time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S
+        ):
+            status = "error"
+            error = "job_lost: the render worker restarted mid-job — try again"
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": status,
+                "video_url": job.get("video_url") or "",
+                "error": error,
+                "user_message": job.get("user_message") or "",
+            }
+        )
+
+    @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
+    def api_run_reel_file(run_id: str):
+        """Serve an already-rendered reel MP4 — never triggers a render."""
+        from flask import send_file
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+        path = RUNS_DIR / run_id / "motion" / f"reel_{n}.mp4"
+        if not path.exists():
+            return jsonify({"error": "reel_not_rendered"}), 404
+        return send_file(
+            str(path),
             mimetype="video/mp4",
             as_attachment=False,
             download_name=f"meet_reel_{run_id}.mp4",

@@ -203,41 +203,109 @@ class WeekendPreviewStub(_StubContentType):
         return """
 <div class="card">
   <h2>Tell us about the event</h2>
-  <p class="dim" style="font-size:13px">We'll generate platform-ready preview captions you can edit and post.</p>
-  <form method="POST" data-loader-text="Drafting preview captions" data-loader-sub="Calling the content engine…" style="margin-top:16px">
+  <p class="dim" style="font-size:13px">All you need is the event name. Add the event's
+  website or its meet pack and the AI reads them to work out exactly what the event is —
+  dates, venue, level, format — before it writes a word.</p>
+  <form method="POST" enctype="multipart/form-data" data-loader-text="Reading the event"
+        data-loader-sub="Fetching links, reading the pack, picking the ones to watch…" style="margin-top:16px">
     <div style="margin-bottom:14px">
       <label>Event name</label>
       <input type="text" name="meet_name" placeholder="e.g. County Championships" required/>
     </div>
     <div style="margin-bottom:14px">
-      <label>Date and venue</label>
-      <input type="text" name="date_venue" placeholder="e.g. 15–16 Feb, Coventry"/>
+      <label>Event website link <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input type="url" name="event_website_url" placeholder="https://…"/>
     </div>
     <div style="margin-bottom:14px">
-      <label>Athletes to watch (one per line)</label>
-      <textarea name="athletes" rows="4" placeholder="Sam Jones — 200 Free&#10;Alex Smith — 100 Back"></textarea>
+      <label>Meet pack / event pack <span class="muted" style="font-size:11px">(optional — PDF, Word, text)</span></label>
+      <input type="file" name="event_pack" accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.html,.htm"/>
     </div>
+
+    <div style="margin-bottom:14px;padding:14px;background:rgba(34,211,238,0.04);border:1px solid var(--border);border-radius:8px">
+      <div style="font-weight:700;margin-bottom:4px">Ones to watch</div>
+      <p class="dim" style="font-size:12px;margin:0 0 10px 0">Who should the preview spotlight?</p>
+      <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+        <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400;margin:0">
+          <input type="radio" name="watch_mode" value="ai" checked onchange="mhPvWatchMode()"/> The AI finds them from the entries
+        </label>
+        <label style="display:inline-flex;gap:6px;align-items:center;font-weight:400;margin:0">
+          <input type="radio" name="watch_mode" value="manual" onchange="mhPvWatchMode()"/> I&rsquo;ll type them myself
+        </label>
+      </div>
+      <div id="pv-watch-ai">
+        <label>Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
+        <input type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
+        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — PDF, Word, CSV, text)</span></label>
+        <input type="file" name="entries_file" accept=".pdf,.docx,.txt,.csv,.md,.html,.htm"/>
+        <p class="muted" style="font-size:11px;margin:8px 0 0 0">The AI reads the entries and picks your club&rsquo;s
+        ones to watch — name, events, and a factual one-line reason each. It only ever names athletes
+        who actually appear in the entries.</p>
+      </div>
+      <div id="pv-watch-manual" style="display:none">
+        <label>Athletes to watch (one per line)</label>
+        <textarea name="athletes" rows="4" placeholder="Sam Jones — 200 Free&#10;Alex Smith — 100 Back"></textarea>
+      </div>
+    </div>
+
     <div style="margin-bottom:14px">
-      <label>Key angles or story hooks (optional)</label>
+      <label>Key angles or story hooks <span class="muted" style="font-size:11px">(optional)</span></label>
       <textarea name="angles" rows="3" placeholder="First open meet of the season, three swimmers chasing qualifying times"></textarea>
     </div>
     <button type="submit" class="btn">Generate preview cards →</button>
   </form>
-</div>"""
+</div>
+<script>
+function mhPvWatchMode() {
+  var ai = document.querySelector('input[name="watch_mode"][value="ai"]');
+  var aiPanel = document.getElementById('pv-watch-ai');
+  var manPanel = document.getElementById('pv-watch-manual');
+  var isAi = !!(ai && ai.checked);
+  if (aiPanel) aiPanel.style.display = isAi ? '' : 'none';
+  if (manPanel) manPanel.style.display = isAi ? 'none' : '';
+}
+</script>"""
 
     def generate_brief(self, form_data: dict) -> str:
         meet = form_data.get("meet_name", "the upcoming event").strip()
-        date_venue = form_data.get("date_venue", "").strip()
         athletes = _split_lines(form_data.get("athletes", ""))
-        angles = form_data.get("angles", "").strip()
+        angles = (form_data.get("angles") or "").strip()
+        # Enriched by the route before generation: extracted text from the
+        # event website, the uploaded meet pack, and the entries source.
+        site_text = (form_data.get("event_site_text") or "").strip()
+        pack_text = (form_data.get("event_pack_text") or "").strip()
+        entries_text = (form_data.get("entries_text") or "").strip()
+        watch_mode = (form_data.get("watch_mode") or "manual").strip()
+        club = (form_data.get("club_name") or "").strip()
+
         parts = [f"Event preview brief — {meet}"]
-        if date_venue:
-            parts.append(f"Held at {date_venue}.")
-        if athletes:
-            parts.append("Athletes to watch: " + "; ".join(athletes) + ".")
+        if site_text:
+            parts.append(
+                "What the event's website says (extracted page text, may be "
+                "messy):\n" + site_text[:4000]
+            )
+        if pack_text:
+            parts.append("From the uploaded event pack (extracted text):\n" + pack_text[:4000])
+        if watch_mode == "ai" and entries_text:
+            who = f" for {club}" if club else " for our club"
+            parts.append(
+                "Accepted entries (extracted text):\n"
+                + entries_text[:6000]
+                + "\n\nFrom these entries, pick the strongest ones to watch"
+                + who
+                + " — name, event(s), and a one-line factual reason each. "
+                "Name ONLY athletes who actually appear in the entries text."
+            )
+        elif athletes:
+            parts.append("Athletes to watch (provided by the user): " + "; ".join(athletes) + ".")
         if angles:
             parts.append(f"Story angles: {angles}")
-        return "\n".join(parts)
+        parts.append(
+            "First, work out what this event actually IS from the material "
+            "above — dates, venue, level, format — and ground the preview in "
+            "that understanding. If the sources don't state something, leave "
+            "it out; never guess."
+        )
+        return "\n\n".join(parts)
 
     def generate_cards(self, form_data: dict) -> dict:
         return _generate_cards_via_llm(
@@ -493,6 +561,7 @@ def render_cards_html(
     pack_id: Optional[str] = None,
     status_api_base: Optional[str] = None,
     graphic_api_base: Optional[str] = None,
+    extra_card_actions: Optional[list[str]] = None,
 ) -> str:
     cards = (cards_payload or {}).get("cards") or []
     if not cards:
@@ -579,8 +648,12 @@ def render_cards_html(
                 f'border-radius:8px"></div>'
             )
 
+        extra_action = ""
+        if extra_card_actions and idx < len(extra_card_actions):
+            extra_action = extra_card_actions[idx] or ""
+
         cards_html += f"""
-<div class="mh-content-card" data-interactive data-card-status="{_h(status)}">
+<div class="mh-content-card" id="stub-card-{idx}" data-interactive data-card-status="{_h(status)}">
   <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
@@ -594,6 +667,7 @@ def render_cards_html(
       }} else {{ window.MH && MH.toast("Clipboard not available", "error"); }}
     }})(this)'>Copy caption</button>
     {graphic_button}
+    {extra_action}
   </div>
   {visual_panel}
 </div>"""
@@ -603,7 +677,9 @@ def render_cards_html(
         pill_js = """
 <script>
 (function(){
-  var NEXT = {queue:'approved', approved:'rejected', rejected:'queue'};
+  // Approve-only flow: the pill toggles queue <-> approved. Skipping a
+  // card just leaves it queued; there is no reject state to manage.
+  var NEXT = {queue:'approved', approved:'queue', rejected:'queue'};
   var STYLE = {
     queue:    ['rgba(255,174,59,0.18)','#ffae3b'],
     approved: ['rgba(74,222,128,0.18)','#4ade80'],
