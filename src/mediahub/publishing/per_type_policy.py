@@ -24,10 +24,11 @@ from mediahub.club_platform.content_types import ContentType
 from mediahub.club_platform.post_types import canonical_slug
 from mediahub.sport_profiles.autonomy import AutonomyLevel
 
-# Canonical AutonomyLevel for per-type policy is sport_profiles.autonomy.AutonomyLevel
-# (draft_only / approval_required / fully_autonomous — the *publishing* policy axis).
-# The autonomy.tools.AutonomyLevel (OFF/SUGGEST/DRAFT/PREPARE) describes the *runner's
-# pre-approval reach* and is a separate axis; do not conflate the two.
+# Canonical AutonomyLevel = sport_profiles.autonomy.AutonomyLevel (draft_only /
+# approval_required / fully_autonomous — the *publishing* policy axis). The
+# runner's pre-approval reach is the separate autonomy.tools.RunnerReach axis
+# (OFF/SUGGEST/DRAFT/PREPARE) — reconciled by name per roadmap P2.3 so the two
+# can never be conflated again.
 
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 _LOCK = threading.Lock()

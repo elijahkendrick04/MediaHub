@@ -25,6 +25,7 @@ drives the tick and dispatch.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import uuid
@@ -32,6 +33,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 try:  # stdlib on 3.9+; tasks default to UTC if a zone is unavailable
     from zoneinfo import ZoneInfo
@@ -95,8 +98,10 @@ def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
+    except Exception as e:
+        # Without the pragma the default (much shorter) timeout applies and
+        # racing claims are likelier to error — keep going, but say so.
+        log.warning("scheduler: could not set busy_timeout on %s: %s", db_path or DB_PATH, e)
     return conn
 
 

@@ -22,8 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 _LOCK = threading.Lock()
 _MAX_FIELD = 2000  # cap any single recorded value so the log can't balloon
@@ -40,7 +38,10 @@ def _safe_org(org_id: str) -> str:
 
 
 def _audit_dir() -> Path:
-    d = DATA_DIR / "autonomy_audit"
+    # Resolved per call (not frozen at import) so the ledger always follows
+    # the live DATA_DIR — the audit trail must land where the data lives.
+    base = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    d = base / "autonomy_audit"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -52,6 +53,28 @@ def _truncate(value):
     except Exception:
         s = str(value)
     return s if len(s) <= _MAX_FIELD else s[:_MAX_FIELD] + "…"
+
+
+def _safe_args(args: Optional[dict]):
+    """Args exactly when their JSON form fits the cap; a marker dict otherwise.
+
+    Truncating the *serialised* JSON and re-parsing it (the previous approach)
+    raised on any oversized payload — which would have crashed the very
+    operation being audited — and could write an unparseable line. Here the
+    audit line is always valid JSON and assembling it can never raise.
+    """
+    if not args:
+        return {}
+    try:
+        s = json.dumps(args, default=str)
+    except Exception:
+        return {"_unserialisable": str(args)[:_MAX_FIELD]}
+    if len(s) <= _MAX_FIELD:
+        try:
+            return json.loads(s)  # normalised copy (default=str applied)
+        except Exception:  # pragma: no cover - dumps output always parses
+            return {"_unserialisable": s[:_MAX_FIELD]}
+    return {"_truncated": s[:_MAX_FIELD] + "…"}
 
 
 class AuditLog:
@@ -86,7 +109,7 @@ class AuditLog:
             "session_id": session_id,
             "kind": kind,
             "tool": tool,
-            "args": json.loads(_truncate(args or {})) if args else {},
+            "args": _safe_args(args),
             "result": _truncate(result),
         }
         if level is not None:

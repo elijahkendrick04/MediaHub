@@ -209,7 +209,7 @@ The future data model should handle: organisations / clubs / societies / teams; 
 
 ## External integrations
 
-- Human approval must remain required before any external publishing — never auto-publish or auto-post
+- Human approval before external publishing is the **default, always** — nothing auto-publishes out of the box. The ONLY exception is the Phase-2 autonomy model (`docs/AUTONOMY_MODEL.md`): a workspace may explicitly opt a single post type into `fully_autonomous`, and even then a post ships only when the full publish gate passes (`publishing/publish_gate.py`: kill switch, per-type policy, provenance, confidence threshold, brand safety, safeguarding — minors' content never auto-publishes — and rate caps), with every decision in the immutable per-org audit ledger. Never widen this exception, never default any type above `approval_required`, and never weaken a guardrail without explicit user sign-off.
 - Use least privilege for every integration; never connect external accounts without explicit approval
 - Keep credentials out of source control — `.env` only
 
@@ -311,4 +311,7 @@ repeatable content automation engine. Before building anything, ask:
 The intelligence layer is the moat:
 - Ingest → detect → rank → brand → generate → approve → export
 - Every step should be explainable and auditable
-- Human approval before external publishing — always
+- Human approval before external publishing — always the default; the sole
+  exception is a per-type, per-workspace `fully_autonomous` opt-in behind the
+  full publish gate + kill switch + audit trail (see "External integrations"
+  and `docs/AUTONOMY_MODEL.md`)

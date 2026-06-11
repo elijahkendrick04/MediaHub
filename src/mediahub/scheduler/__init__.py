@@ -107,7 +107,14 @@ def tick(db_path=None, *, in_thread: bool = True) -> int:
             continue
         if not slot:
             continue
-        run_id = sched.claim_run(task.id, slot, WORKER_ID, db_path=db_path)
+        try:
+            run_id = sched.claim_run(task.id, slot, WORKER_ID, db_path=db_path)
+        except Exception as e:
+            # A claim hiccup (e.g. transient DB lock) must not abort the tick
+            # for every remaining task — skip this one; the slot stays
+            # claimable on the next tick within the catch-up window.
+            log.warning("scheduler claim failed for task %s: %s", task.id, e)
+            continue
         if run_id is None:
             continue  # another worker, or an earlier run of this slot, already owns it
         fired += 1

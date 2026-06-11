@@ -24,7 +24,12 @@ the setting), [`SPORT_PROFILES.md`](SPORT_PROFILES.md) (where it's stored),
 
 ## 1. The three levels (`AutonomyLevel`)
 
-Implemented (inert) as `mediahub.sport_profiles.autonomy.AutonomyLevel`:
+Implemented (live) as `mediahub.sport_profiles.autonomy.AutonomyLevel` — the
+canonical publishing-policy enum, stored per org/type by
+`publishing.per_type_policy` (P2.4) and enforced by the publish gate (§4).
+The *runner's* pre-approval reach is the separate
+`autonomy.tools.RunnerReach` axis (OFF/SUGGEST/DRAFT/PREPARE) — renamed in
+P2.3 so the two axes can never be conflated:
 
 | Level | What happens | Human approval? | Can auto-publish? |
 |---|---|---|---|
@@ -89,13 +94,19 @@ Mandatory human checkpoints that **always** remain, regardless of level:
 A `fully_autonomous` post must clear **all** of these before it publishes. They are
 the autonomous-publish extension of MediaHub's existing trust/safety primitives.
 
-| Guardrail | What it checks | Built on (today) |
+All five are **shipped (P2.3)** as one chokepoint —
+`publishing.publish_gate.evaluate_publish_gate` — which evaluates every
+guardrail (no short-circuit) and returns an explainable per-check verdict:
+
+| Guardrail | What it checks | Shipped as |
 |---|---|---|
-| **Data-provenance / trust** | Every fact traces to a verified source above a trust threshold; unverified claims block auto-publish. | `context_engine.trust` (domain trust scoring), `pb_discovery` trust ledger, `recognition.schema.SafeToPost`. |
-| **Brand-safety / profanity** | Caption + overlay text pass profanity/brand-safety and on-brand checks; HTML-escaped (`_h()`). | Caption pipeline; XSS escaping already in `web`. |
-| **Rate limiting** | Per-workspace, per-platform posting caps; no flooding. | New (Phase 2). |
-| **Global kill switch** | One control halts all autonomous publishing immediately, workspace-wide. | New (Phase 2). |
-| **Immutable audit trail** | Append-only record of every autonomous decision (inputs, confidence, guardrail results, output) — explainable & auditable. | Extends the run audit trail + `publishing.posting_log`. |
+| **Data-provenance / trust** | The card's deterministic safe-to-post verdict must be affirmatively safe (`safe`/`post`); `needs_review`/`hold`/missing/unknown all fail closed. | `publish_gate._check_provenance` over `recognition.schema.SafeToPost` + the run trust report's vocabulary. |
+| **Confidence gate** | Deterministic confidence ≥ the per-type threshold (default 0.85, floor 0.5; operator-tunable in Settings → Autonomy). | `publish_gate.threshold_for` + the threshold store beside the P2.4 policy. |
+| **Brand-safety** | Caption non-empty, no AI-tell ban-list phrases, none of the org's `brand_phrases_to_avoid`, within platform length. (Prose guideline rules stay with generation prompts + human review — a regex can't honestly enforce prose.) | `publish_gate._check_brand_safety` over the PAR-1 ban-list + `ClubProfile`. |
+| **Safeguarding** | A card known to concern a minor (age < 18 in its facts) never auto-publishes — always a human decision (ADR-0003). | `publish_gate._check_safeguarding`. |
+| **Rate limiting** | Per-workspace posting caps over the posting log (`MEDIAHUB_AUTONOMOUS_HOURLY_CAP`, default 4; `MEDIAHUB_AUTONOMOUS_DAILY_CAP`, default 12). | `publish_gate._check_rate_limit` over `publishing.posting_log`. |
+| **Global kill switch** | `MEDIAHUB_PUBLISH_KILL_SWITCH` halts all autonomous publishing instantly — checked first on every evaluation AND re-asserted inside the Buffer call, so an engagement mid-cycle still halts. | `publishing.kill_switch` (P2.4) wired through the gate. |
+| **Immutable audit trail** | Every evaluation (allowed AND blocked), every auto-approval and every publish attempt is appended to the per-org ledger; posting attempts also land in `publishing.posting_log`. | `workflow.autonomy.AuditLog` (`publish_gate` / `auto_approve` / `auto_publish` entries). |
 
 These satisfy MediaHub's standing rule that *every step should be explainable and
 auditable*, and the safeguarding posture locked in
@@ -103,16 +114,23 @@ auditable*, and the safeguarding posture locked in
 (minors' competition data). A `fully_autonomous` type that handles minors' personal
 data should be treated as the highest-scrutiny case.
 
-## 5. Reference implementation (roadmap Phase 2)
+## 5. Reference implementation (shipped — in-process, not Temporal)
 
-The orchestration that physically enforces this is **Temporal** (MIT, truly free
-to self-host — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)): each content
-type is a workflow with an **optional human-approval signal**. Gated types pause on
-the signal; autonomous types skip the wait. This is the
-langchain-social-media-agent "Agent Inbox" + Temporal-signal pattern from the
-research (§B.1, §D.3). Today's `workflow.store` is the lightweight precursor; the
-backbone is Phase 2 work in [`ROADMAP.md`](ROADMAP.md) (P2.*). Nothing here is
-wired in yet — `AutonomyLevel` ships as inert scaffolding.
+Temporal was evaluated and **rejected by the Council** in favour of the
+in-process substrate (no new infra): the `scheduler/` exactly-once SQLite
+runner + `workflow/` stores (P2.1). The approval signal itself ships as
+**`workflow.approval.apply_approval_signal`** (P2.2): gated types pause on
+the signal (cards stay QUEUE/EDITED until the human approves on the review
+page); a `fully_autonomous` type's cards run the full publish gate against
+the **exact caption that would ship** — passing cards auto-APPROVE and, when
+the org has chosen autonomous channels (Settings → Autonomy; requires its own
+Buffer token), publish through the same Buffer path a human click uses.
+Failing cards stay queued for the human with the blockers recorded —
+autonomy degrades to approval, never the other way round. Trigger it on
+demand (`POST /api/autonomy/sweep`) or on a cadence (the `approval_signal`
+scheduler task type). Machine-approved captions deliberately do **not** feed
+the voice-learning store. End-to-end pinned by
+`tests/test_autonomous_publishing.py`.
 
 ## 6. What is NOT in scope
 

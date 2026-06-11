@@ -23,6 +23,7 @@ Public API:
 All public functions are exception-safe — DB issues yield a safe default
 (0 / [] / a default dict) rather than raising.
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,16 +41,25 @@ log = logging.getLogger(__name__)
 # Storage paths — same convention as web.py / media_library/store.py
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
-DB_PATH = DATA_DIR / "data.db"
+
+def _db_path() -> Path:
+    """The shared data.db, resolved from the LIVE environment on every call.
+
+    Previously frozen at import time — which silently pinned the log to
+    whichever DATA_DIR happened to be set when the module first loaded
+    (wrong under tests, env reconfiguration, or any pre-env import). The
+    posting log must always land beside the data it describes.
+    """
+    base = Path(os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    return base / "data.db"
 
 
 # ---------------------------------------------------------------------------
 # Retention sweep thresholds (overridable from tests via monkeypatch)
 # ---------------------------------------------------------------------------
 
-_PRUNE_THRESHOLD = 5000   # row count that trips the sweep
-_PRUNE_TARGET = 4500      # row count we trim down to
+_PRUNE_THRESHOLD = 5000  # row count that trips the sweep
+_PRUNE_TARGET = 4500  # row count we trim down to
 
 
 # ---------------------------------------------------------------------------
@@ -112,21 +122,23 @@ _ROW_FIELDS = (
 # Connection helper
 # ---------------------------------------------------------------------------
 
+
 def _connect() -> sqlite3.Connection:
-    """Open a connection to DB_PATH with WAL journaling enabled.
+    """Open a connection to the live data.db with WAL journaling enabled.
 
     Caller is responsible for closing. Raises sqlite3.Error on failure so
     the public API can catch and degrade gracefully.
     """
+    db_path = _db_path()
     # Best-effort parent dir creation so the very first call doesn't
     # error if DATA_DIR has just been pointed at a fresh tmpdir.
     try:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         # If even the mkdir fails, sqlite3.connect below will raise
         # and the public wrapper will swallow it. No need to be louder.
         pass
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -139,6 +151,7 @@ def _connect() -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 # Schema bootstrap
 # ---------------------------------------------------------------------------
+
 
 def _ensure_schema() -> None:
     """Create the posting_attempts table + indexes if missing.
@@ -168,6 +181,7 @@ _ensure_schema()
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def record_attempt(
     *,
@@ -361,6 +375,7 @@ def attempts_summary_for_run(profile_id: str, run_id: str) -> dict:
 # Internals
 # ---------------------------------------------------------------------------
 
+
 def _maybe_prune(conn: sqlite3.Connection) -> None:
     """Trim the oldest rows when row count crosses ``_PRUNE_THRESHOLD``.
 
@@ -393,8 +408,6 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 
 __all__ = [
-    "DATA_DIR",
-    "DB_PATH",
     "record_attempt",
     "recent_attempts",
     "attempts_summary_for_run",

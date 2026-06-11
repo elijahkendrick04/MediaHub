@@ -38,7 +38,7 @@ from mediahub.workflow.status import CardStatus
 log = logging.getLogger(__name__)
 
 
-class AutonomyLevel(IntEnum):
+class RunnerReach(IntEnum):
     """How far the runner may go without a human. The human gate is fixed at
     publish for EVERY level — higher levels never shorten the approval step."""
 
@@ -50,10 +50,10 @@ class AutonomyLevel(IntEnum):
 
 # Plain-English labels for non-technical committee members (the Outsider).
 LEVEL_LABELS = {
-    AutonomyLevel.OFF: "Off",
-    AutonomyLevel.SUGGEST: "Show me ideas",
-    AutonomyLevel.DRAFT: "Write it for me",
-    AutonomyLevel.PREPARE: "Get it ready to review",
+    RunnerReach.OFF: "Off",
+    RunnerReach.SUGGEST: "Show me ideas",
+    RunnerReach.DRAFT: "Write it for me",
+    RunnerReach.PREPARE: "Get it ready to review",
 }
 
 # The runner may only ever move a card to a PRE-APPROVAL status. APPROVED /
@@ -105,14 +105,14 @@ class Tool:
     name: str
     description: str
     input_schema: dict
-    min_level: AutonomyLevel
+    min_level: RunnerReach
     fn: Callable[["ToolContext", dict], str]
 
 
 REGISTRY: dict[str, Tool] = {}
 
 
-def _register(name: str, description: str, input_schema: dict, min_level: AutonomyLevel):
+def _register(name: str, description: str, input_schema: dict, min_level: RunnerReach):
     def deco(fn: Callable[["ToolContext", dict], str]):
         REGISTRY[name] = Tool(name, description, input_schema, min_level, fn)
         return fn
@@ -120,22 +120,22 @@ def _register(name: str, description: str, input_schema: dict, min_level: Autono
     return deco
 
 
-def tools_for_level(level: AutonomyLevel) -> list[dict]:
+def tools_for_level(level: RunnerReach) -> list[dict]:
     """Anthropic-shaped schemas for exactly the tools allowed at ``level`` — the
     model is never even shown a tool above its level."""
     return [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in REGISTRY.values()
-        if t.min_level != AutonomyLevel.OFF and t.min_level <= level
+        if t.min_level != RunnerReach.OFF and t.min_level <= level
     ]
 
 
-def dispatch(ctx: ToolContext, level: AutonomyLevel, name: str, args: dict) -> str:
+def dispatch(ctx: ToolContext, level: RunnerReach, name: str, args: dict) -> str:
     """The single execution chokepoint. Only a registered tool permitted at the
     session's level is ever called; everything else is blocked + audited."""
     args = args if isinstance(args, dict) else {}
     tool = REGISTRY.get(name)
-    if tool is None or tool.min_level == AutonomyLevel.OFF:
+    if tool is None or tool.min_level == RunnerReach.OFF:
         ctx.audit.record(
             ctx.org_id, ctx.session_id, "blocked", tool=str(name), args=args, result="unknown tool"
         )
@@ -239,7 +239,7 @@ _CARD_SCHEMA = {
     "List this organisation's recent meet runs (id, meet, number of achievements). "
     "Start here to find a run to work on.",
     {"type": "object", "properties": {}},
-    AutonomyLevel.SUGGEST,
+    RunnerReach.SUGGEST,
 )
 def _list_recent_runs(ctx: ToolContext, args: dict) -> str:
     runs = ctx.env.list_runs(ctx.org_id) or []
@@ -260,7 +260,7 @@ def _list_recent_runs(ctx: ToolContext, args: dict) -> str:
     "Summarise one run: meet context and how many achievements were detected by "
     "quality band, plus how many cards are queued / approved / posted.",
     _RUN_ID_SCHEMA,
-    AutonomyLevel.SUGGEST,
+    RunnerReach.SUGGEST,
 )
 def _get_run_summary(ctx: ToolContext, args: dict) -> str:
     run_id, data = _load_owned_run(ctx, args)
@@ -290,7 +290,7 @@ def _get_run_summary(ctx: ToolContext, args: dict) -> str:
     "swimmer/event, the headline, quality band, confidence, and current review "
     "status. These are already ranked and detected; you cannot change that.",
     _RUN_ID_SCHEMA,
-    AutonomyLevel.SUGGEST,
+    RunnerReach.SUGGEST,
 )
 def _list_cards(ctx: ToolContext, args: dict) -> str:
     run_id, data = _load_owned_run(ctx, args)
@@ -316,7 +316,7 @@ def _list_cards(ctx: ToolContext, args: dict) -> str:
     "Get the full detail of one card: swimmer, event, the facts behind the "
     "achievement, the evidence, the confidence, and any current caption draft.",
     _CARD_SCHEMA,
-    AutonomyLevel.SUGGEST,
+    RunnerReach.SUGGEST,
 )
 def _get_card_detail(ctx: ToolContext, args: dict) -> str:
     run_id, data = _load_owned_run(ctx, args)
@@ -361,7 +361,7 @@ def _get_card_detail(ctx: ToolContext, args: dict) -> str:
         },
         "required": ["run_id", "card_id"],
     },
-    AutonomyLevel.DRAFT,
+    RunnerReach.DRAFT,
 )
 def _draft_caption(ctx: ToolContext, args: dict) -> str:
     run_id, data = _load_owned_run(ctx, args)
@@ -404,7 +404,7 @@ def _draft_caption(ctx: ToolContext, args: dict) -> str:
         },
         "required": ["run_id", "card_ids"],
     },
-    AutonomyLevel.PREPARE,
+    RunnerReach.PREPARE,
 )
 def _queue_for_approval(ctx: ToolContext, args: dict) -> str:
     run_id, data = _load_owned_run(ctx, args)
@@ -424,6 +424,9 @@ def _queue_for_approval(ctx: ToolContext, args: dict) -> str:
         if current not in _RUNNER_ALLOWED_STATUSES:
             skipped += 1
             continue
+        # The reviewer-facing NOTE is the flag; the status is deliberately
+        # re-written unchanged (QUEUE stays QUEUE, EDITED stays EDITED) so
+        # flagging can never move a card anywhere new.
         _safe_set_status(ctx.env.workflow, run_id, cid, current, note)
         flagged += 1
     return (
@@ -435,7 +438,7 @@ def _queue_for_approval(ctx: ToolContext, args: dict) -> str:
 
 
 __all__ = [
-    "AutonomyLevel",
+    "RunnerReach",
     "LEVEL_LABELS",
     "AutonomyEnv",
     "ToolContext",
