@@ -38,7 +38,6 @@ Several modules used `Path(__file__).parent.parent / "data"` to find the
 `data/` dir, which only works when files sat at the workspace root. We patched
 `interpreter.ontology_loader`, `interpreter.patterns`, and
 `voice.learned.store` to also check the V9 path; the rest still uses cwd.
-Audit is in `docs/AUDIT_REPORTS.md`.
 
 ## Single SQLite file for media library
 
