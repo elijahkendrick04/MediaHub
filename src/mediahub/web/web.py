@@ -12602,6 +12602,26 @@ Relay team broke club record"></textarea>
         started = _time.monotonic()
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
+        # Return HTML (with a valid <title>) when a browser requests the page so
+        # that axe-core's document-title rule (WCAG 2.4.2) is satisfied; API/
+        # monitoring clients that send Accept: application/json (or no Accept)
+        # get plain JSON — the existing probe contract is unchanged.
+        best = request.accept_mimetypes.best_match(
+            ["text/html", "application/json"], default="application/json"
+        )
+        if best == "text/html":
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — OK</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(html, status=200, mimetype="text/html")
         return jsonify(payload)
 
     @app.route("/healthz/ping")

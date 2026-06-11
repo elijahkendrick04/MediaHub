@@ -42,6 +42,10 @@ dependencies = [
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
   "PyYAML>=6.0",
+  # Capability 2 (semantic memory): sqlite-vec stores vectors in a vec0 virtual
+  # table for exact brute-force KNN recall (mediahub.memory.store). Pure-C,
+  # dependency-free SQLite extension; MIT/Apache-2.0 dual.
+  "sqlite-vec>=0.1.9,<0.2",
   # Phase C commercial layer (web/auth.py + web/billing.py). bcrypt hashes
   # account passwords; stripe is the official SDK for Checkout / Customer
   # Portal / webhook verification. Both optional at runtime — no STRIPE_* env
