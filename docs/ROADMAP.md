@@ -43,12 +43,32 @@ in any commit message to move an item:
 
 ## To do
 
-Ordered by priority: **Phase C (commercialise) outranks everything**; P3/P4/P5
-are gated behind Phase C's exit criteria (see Standing context).
+Ordered by priority: **Phase C (commercialise) outranks everything**; **Phase W**
+(deepen the swimming wedge) is an ungated, selectable backlog picked from only in
+support of the sell; P3/P4/P5 are gated behind Phase C's exit criteria (see
+Standing context).
 
 <!-- ROADMAP:TODO -->
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
+- **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account · ❌ **NOT STARTED**
+- **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) · ❌ **NOT STARTED**
+- **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
+- **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") · ❌ **NOT STARTED**
+- **W.1** · Phase W (selectable) — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) · ❌ **NOT STARTED**
+- **W.2** · Phase W (selectable) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
+- **W.3** · Phase W (selectable) — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs · ❌ **NOT STARTED**
+- **W.4** · Phase W (selectable) — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets · ❌ **NOT STARTED**
+- **W.5** · Phase W (selectable) — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format · ❌ **NOT STARTED**
+- **W.6** · Phase W (selectable) — Data-driven meet previews from entry/psych-sheet files (replaces the form-based stub) · ❌ **NOT STARTED**
+- **W.7** · Phase W (selectable) — Live meet mode: watch a club-controlled live-results URL, queue cards mid-gala for approval · ❌ **NOT STARTED**
+- **W.8** · Phase W (selectable) — Season wraps / monthly recap packs from accumulated run history · ❌ **NOT STARTED**
+- **W.9** · Phase W (selectable) — Magic-link mobile approvals (signed expiring review links; no login) · ❌ **NOT STARTED**
+- **W.10** · Phase W (selectable) — OCR fallback for scanned/photographed result PDFs with per-row uncertainty flags · ❌ **NOT STARTED**
+- **W.11** · Phase W (selectable) — Result-grounded alt-text on every exported/published card · ❌ **NOT STARTED**
+- **W.12** · Phase W (selectable) — Print exports: per-swimmer PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
+- **W.13** · Phase W (selectable) — Bilingual captions (Welsh first) per-workspace language setting · ❌ **NOT STARTED**
+- **W.14** · Phase W (selectable) — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -57,6 +77,8 @@ are gated behind Phase C's exit criteria (see Standing context).
 - **P4.2** · Phase 4 (gated) — Instagram Graph / Facebook / TikTok / YouTube adapters, least-privilege, human-connected · ❌ **NOT STARTED**
 - **P4.3** · Phase 4 (gated) — X adapter as a paid, optional target (pay-per-use API) · ❌ **NOT STARTED**
 - **P4.4** · Phase 4 (gated) — Demote Buffer to optional; remove it from the critical path · ❌ **NOT STARTED**
+- **P4.5** · Phase 4 (gated) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe, Resend-seamed) · ❌ **NOT STARTED**
+- **P4.6** · Phase 4 (gated) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
 - **P5.1** · Phase 5 (gated) — Ollama local LLM provider behind the existing `ai_core.llm` interface · ❌ **NOT STARTED**
 - **P5.2** · Phase 5 (gated) — Piper local TTS replaces edge-tts · ❌ **NOT STARTED**
 - **P5.3** · Phase 5 (gated) — whisper.cpp / faster-whisper local ASR for reel captions · ❌ **NOT STARTED**
@@ -121,6 +143,8 @@ linked ADRs and research docs:
 [DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md) · [THEMING](THEMING.md) ·
 [GENERATION](GENERATION.md) · research base in
 [research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md) ·
+June 2026 ideas backlog (feeds Phase W + PC.7–PC.10 + P4.5/P4.6) in
+[research/PRODUCT_IDEAS_2026-06.md](research/PRODUCT_IDEAS_2026-06.md) ·
 new-starter path: [START_HERE](../START_HERE.md) + [GLOSSARY](../GLOSSARY.md).
 
 The long-form plan follows — same document, full depth.
@@ -163,6 +187,14 @@ The plan now has **six stages, Phase 0 to Phase 5**:
 > the expansions (Phases 3–5) wait until clubs can sign up and pay on their own. The
 > reasoning sits under **"A commercial reality check"** below and is recorded in
 > **[adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md)**.
+
+> **Beside the stages sits a pick-list (added 2026-06-11): Phase W — make the
+> swimming product deeper.** Fourteen researched extras — things like club
+> records, photo-consent tracking, live updates during a gala, printable
+> certificates, Welsh captions. It has no fixed order and no gate; we pull an
+> item from it whenever it helps win or keep a club. The research behind all of
+> it (22 ideas; the other eight became Phase C and Phase 4 items) lives in
+> [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).
 
 Each task carries a little badge so you can see how it's going:
 ✅ done · 🔵 in progress · ⚠️ stuck · ❌ not started yet.
@@ -887,6 +919,72 @@ code: the funnel below is the founder's motion, unchanged. The sub-track:
   - **Confidence split (the >95% discipline):** the *design* — warm + referral over cold broadcast — is **>95%-confidence-correct** on the cited base rates; the *outcome* (10 paying clubs in N months at price X) is **unproven and IS the validation** (it also closes the PC.4 willingness-to-pay gap). Do not conflate the two. Sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) (Evidence refresh cycle 4).
 - **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
 
+### PC.7 — Instant try-before-signup demo · ❌ **NOT STARTED**
+**The sales motion's sharpest tool.** PC.6's warm-first hand-sell needs a shareable
+magic moment, and the June 2026 competitive pass verified nobody can copy this demo —
+no competitor ingests a results file at all (Gipper/Box Out templates are hand-typed;
+the swim incumbents stop at data display). *(Ideas research #1 —
+[`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md); all
+PC.7–PC.10, W.\* and P4.5/P4.6 items below cite their idea number in that doc.)*
+**Build:** a public `/try` route + a sandboxed, unbound demo org (the
+`web/tenancy.py` zero-member model already behaves anonymously) that accepts one
+results file — or one click on a bundled `samples/` meet — and runs the normal
+pipeline with two restrictions: `pb_discovery` web-verification is skipped for
+anonymous runs (no third-party calls on unauthenticated traffic) and output is the
+top ≤3 cards with captions + the "why this card" explainer, watermarked via an
+overlay layer in `graphic_renderer/render.py`. Per-IP and global daily caps (reuse
+the publish-gate rate-cap pattern); demo runs live under the demo org only and a
+scheduled sweep deletes them; signup CTA carries the run so a converting club keeps
+its preview. **Exit:** a stranger reaches 3 branded, explained, watermarked cards
+from their own file in under 5 minutes without an account; demo traffic is capped,
+isolated from real orgs, and self-cleaning.
+
+### PC.8 — Sponsor manager + sponsor exposure reports · ❌ **NOT STARTED**
+**Makes the subscription revenue-positive for the club — direct PC.4 leverage.** A
+club that can show its sponsor "you appeared on 14 posts this month" can fund
+MediaHub from sponsor money; TeamSnap ONE added sponsor placement as a 2026
+headline, Gipper sells sponsor graphics, and the renderer already demos a Sponsor
+Variant (`PILOT_PLAYBOOK.md` Day 1). *(Idea #3.)* **Build:** a sponsor registry on
+`web/club_profile.py` (name, logo as a media-library asset, tier, active window); a
+deterministic rotation rule in the creative-brief path deciding which card carries
+which sponsor slot (seeded like `auto_variation_seed_for`, so stills and motion
+agree); the existing `sponsor_activation` content type for dedicated posts; a
+monthly per-sponsor exposure report — cards featuring the sponsor, approved/posted
+counts from `workflow` + `publishing/posting_log.py`, reach added later by W.14
+phase 2 — rendered branded (existing renderer) and downloadable from the workspace
+(emailed via P4.5 once that ships). **Exit:** a club configures ≥1 sponsor, sees
+the logo rotate across approved cards, and downloads a monthly per-sponsor
+exposure report it can forward.
+
+### PC.9 — In-product referral engine · ❌ **NOT STARTED**
+**Runs PC.6's compounding mechanism (2 named intros per signed club) inside the
+product instead of operator ledgers.** *(Idea #4.)* **Build:** referral codes per
+org; signup accepts a code and records the lead in `commercial/pipeline.py` with
+source=referral; the reward (a free month as a Stripe coupon via `web/billing.py`)
+auto-grants when the referred club's first annual payment lands amount-verified in
+`commercial/wtp.py` (the idempotent webhook hook already exists); the
+referral-debt readout on `/operator/commercial` switches from manual entries to
+live code-tracked state. **Exit:** a signed club has a shareable code; a paid
+referral auto-grants the reward and updates the funnel ledger with zero operator
+typing.
+
+### PC.10 — Public club achievements page + website embed · ❌ **NOT STARTED**
+**A zero-gating distribution surface and a standing referral advert.** Per-club
+hosted page of *approved* cards plus an iframe/script embed and per-club RSS/JSON
+feed for club websites — first-party Flask, no platform review anywhere; SwimTopia
+sells website embeds, and a free public celebration wall answers the swim-parent
+resentment of paywalled results (the Meet Mobile backlash). *(Idea #2.)*
+**Build:** public read-only routes keyed by an unguessable per-org token (opt-in,
+default off; switching off revokes the token); pages read `workflow.CardStatus`
+APPROVED only and serve the already-rendered PNGs with W.11 alt text; cache
+headers; a "powered by MediaHub" badge linking the signup funnel. **Safeguarding:**
+the page must honour W.2 consent flags once they exist — until then it ships with
+an initials-only display toggle and per-card include/exclude, defaulting
+conservative. **Exit:** a club can switch on a public wall and embed it in its
+website; only approved (and consent-clean) cards ever appear; switching it off
+404s the token; ADR-0003 isolation holds (the token scopes one org, nothing
+cross-tenant).
+
 **Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
 `DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the
 shipped cross-tenant isolation invariant (ADR-0003) as the multi-tenancy seed; Postiz /
@@ -919,6 +1017,237 @@ revenue in mind. Each carries the report's confidence band. **All figures are es
 
 **Highest-leverage combination:** governing-body **data-API access + incumbent integration (Route C)** (PC.6) for *distribution* +
 US-schools repositioning (Route B) for *revenue*.
+
+---
+
+## Phase W — Deepen the swimming wedge · W · ❌ **NOT STARTED (selectable backlog, added 2026-06-11)**
+
+**Goal.** Make the swim wedge easier to sell, safer to run, and richer in content
+moments — without waiting for, or blocking, the P3/P4/P5 gates. Every item is
+deterministic-engine or workflow work on existing seams; none adds a mandatory paid
+dependency; AI-judgement surfaces ride `media_ai.llm`/`ai_core.llm` with honest
+errors, per the standing rules.
+
+**Provenance.** The June 2026 ideas research pass —
+[`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md) (22
+researched candidates with competitive, data-ecosystem and platform-feasibility
+sourcing). The sell-side four became **PC.7–PC.10**; the distribution slice became
+**P4.5/P4.6** plus build detail folded into **P4.1/P4.2/P4.4**; the remaining
+fourteen live here. Each item cites its idea number in that doc.
+
+**Gating position (read carefully).** Phase W sits **outside** the Phase C exit
+gates — these are wedge-sellability items in exactly the class PC.6's dependency
+note already permits ("capability work … *to the bar needed to make the swim wedge
+sellable*, but **not ahead of billing**"). The discipline: pick an item **only when
+it unblocks a sale, a pilot, the NGB application, or a known churn risk** — never
+as polish for its own sake, and never as a reason to defer the selling motion. No
+fixed phase exit; every item carries its own. Recommended first picks: **W.1 → W.2**
+(the consent story committees ask about), **W.4** (cheap, parent-delighting), and
+**W.10** (demo-day ingestion robustness).
+
+### W.1 — Athlete registry + milestone detectors · ❌ **NOT STARTED**
+**The data spine for W.2/W.3/W.8 — and per-athlete celebration at scale, which the
+competitive pass verified nobody automates.** Today there is no athlete identity
+across runs: names are per-run strings (`media_library` linking included), so
+milestones, records, consent and season totals have nothing durable to hang on, and
+the KNOWN_ISSUES twins/siblings cross-match has no fix surface. *(Idea #9.)*
+**Build:** a workspace-scoped athlete table in `data.db` (canonical name +
+variants, optional ASA number, birth year, active flag), back-filled from
+`runs_v4` snapshots; a review-time "same swimmer?" merge UI whose decisions
+persist; deterministic milestone detectors joining
+`recognition_swim/achievements/` — first-ever event, Nth race (25/50/100), first
+gala, PB-in-every-event, comeback (extending the existing `ReturnToFormDetector`
+seam). **No LLM anywhere in identity or milestone logic.** Multi-tenant: rows are
+org-scoped under the ADR-0003/ADR-0014 invariants. **Exit:** the same swimmer is
+one entity across ≥2 runs; a 50th-race card generates with a provenance trail;
+merge decisions persist and are auditable.
+
+### W.2 — Consent & safeguarding manager · ❌ **NOT STARTED** *(depends on W.1)*
+**The committee objection-killer and the strongest §4 evidence for the Swim England
+application.** Swim England's own Social Media Good Club Guide expects photo-consent
+handling; the competitive pass found **no content tool encodes minors' rules**; the
+code today has only `media_assets.safe_for_minors` — no consent ledger. *(Idea #16.)*
+**Build:** a per-athlete consent registry on the W.1 spine — photo OK / name OK /
+initials-only / do-not-feature; CSV import from the club's existing records; default
+**most-restrictive when unknown**. Enforced twice, deterministically: at generation
+(initials-only rendering; photo suppression in `media_library/selector.py` scoring)
+and as a new publish-gate check beside the existing safeguarding rule in
+`publishing/publish_gate.py`. Review UI shows "blocked: no consent on file"; a
+welfare-officer export lists consent state; every consent change is audited.
+**Exit:** a card for a no-consent athlete cannot render a name/photo and cannot
+pass the gate; the review page explains why; pinned by tests alongside the
+ADR-0003 invariant suites.
+
+### W.3 — Club records engine + "NEW CLUB RECORD" cards · ❌ **NOT STARTED**
+**The highest-emotion moment a club posts, and no detector exists for it**
+([`DETECTOR_INVENTORY.md`](DETECTOR_INVENTORY.md)); admin incumbents *display*
+records but never generate content from them. *(Idea #10.)* **Build:** a
+per-workspace records store (event × course × age-group × gender) seeded by CSV
+import of the club's records sheet — a strong onboarding hook — and updated from
+ingested meets **on approval only**; a deterministic `ClubRecordDetector` in
+`recognition_swim/achievements/club_record.py` ranked **above** PB; "approaching
+the record" as a planner signal; a records-wall block on the PC.10 public page.
+**Exit:** importing a records sheet then uploading a record-breaking meet yields a
+ranked NEW CLUB RECORD card carrying old mark, new mark and provenance; the table
+updates only when the card is approved.
+
+### W.4 — Season-current qualifying-time packs · ❌ **NOT STARTED**
+**"Qualified for Counties!" is a parent-shareable trigger plain PB detection
+misses — and the detector already exists** (V5 `QualifyingTimeDetector`;
+`ClubProfile.important_standards` is already a field). What's missing is **data**:
+county/regional/national QTs are published as public seasonal PDFs; times are
+facts (low licensing risk, cite the source PDF); third-party aggregators prove
+demand. *(Idea #11.)* **Build:** versioned curated datasets under
+`data/standards/<season>/` with per-table provenance (source PDF URL + curation
+date) and a documented seasonal refresh runbook; club picks its county/region in
+settings; wire the detector + a dedicated card archetype; later add USA Swimming
+motivational times (official free PDFs, fixed 4-year cycle) for US expansion.
+**Exit:** a club selects its standards and a qualifying swim yields a "qualified"
+card naming the standard and its source.
+
+### W.5 — LENEX (.lef/.lxf) ingestion · ❌ **NOT STARTED**
+**The highest-value UK ingestion add** (June 2026 data-ecosystem pass): LENEX 3.0
+is the openly licensed XML interchange format ("free of charge and without
+restriction"), it is what SportSystems exports, and Swim England's results
+uploader accepts exactly Hy-Tek + LENEX — so HY3 + LENEX covers the licensed-meet
+pipeline upstream of the NGB, and unlocks European clubs later. *(Idea #13.)*
+**Build:** `interpreter/lenex_parser.py` for the results + entries elements per
+the Lenex 3.0 spec; `.lxf` (zipped `.lef`) through the existing bomb-safe unzip
+(`interpreter/_zip_safety.py`); register in `interpreter/ingest.py` format
+detection; normalise to the same canonical shape as HY3/SDIF; fixtures = the four
+official spec example files. Deterministic throughout. **Exit:** a SportSystems
+`.lxf` export runs the full pipeline with output parity to the HY3 path on the
+same meet.
+
+### W.6 — Data-driven meet previews from entry files · ❌ **NOT STARTED**
+**Doubles content per meet (before + after) from files clubs already hold.** The
+`event_preview` type exists but is form-based — a human types everything; the
+P1.3 planner already wants upcoming-event signals. *(Idea #12.)* **Build:**
+entry-shaped ingestion — Hy-Tek entry files, LENEX `entries` (free with W.5), PDF
+psych sheets through the existing extractor with needs-review flagging — mapped to
+a preview pack (who's entered, events, sessions, squad-size stat) that feeds
+`club_platform` event_preview generation instead of the form, plus a planner
+signal for the meet date. Ambiguous rows flagged, never guessed. **Exit:**
+uploading an entry file yields an approvable "good luck this weekend" pack with
+zero typing.
+
+### W.7 — Live meet mode (watch a results URL mid-gala) · ❌ **NOT STARTED**
+**Clubs are told to post PBs on event day; nobody can without a volunteer glued to
+a laptop — and it is the most theatrical hand-sell demo available.** Ingestion
+today is single-shot. The ToS-clean path is verified: Hy-Tek "Real-Time Results"
+static HTML on the **host club's own site** (with consent) and
+results.swimming.org meet pages; **Meet Mobile and rankings scraping stay
+prohibited** (the PC.6/ADR-0012 posture is unchanged). *(Idea #14.)* **Build:** a
+watch = stored URL + polite poll interval as a `scheduler/` task type
+(`results_fetch` tier-A fetch; the robots-respecting crawl exists); diff per poll
+with per-swim dedupe keys so a swim cards exactly once; new results → recognition
+→ cards **queued for approval** through the autonomy queue (which structurally
+cannot publish); ntfy push ("3 new PBs in session 2") via `notify/channels.py`
+click-URL straight into review (pairs with W.9); watches auto-expire at meet end.
+**Exit:** a watched live meet produces incremental queued cards within one poll
+interval, with zero duplicates and zero auto-publishing, and the watch stops
+itself.
+
+### W.8 — Season wraps / monthly recap packs · ❌ **NOT STARTED**
+**Retention work that lands exactly when annual renewal (PC.4's model) comes due**
+— accumulated history becomes switching cost, Wrapped-style. The v7.3
+weekend-in-numbers pattern exists per-run; this generalises it across the season.
+*(Idea #15.)* **Build:** deterministic aggregation across a workspace's history
+(`runs_v4` snapshots + `data.db`): total PBs, medals, records (W.3), debuts and
+milestones (W.1), biggest improver, busiest swimmer; a recap pack type + reel
+sequence on the existing still/motion engines; the scheduler drafts it monthly
+through the autonomy queue for approval; a configurable season-end wrap. **Exit:**
+one click (or the monthly draft) yields an approvable "month in numbers" pack
+consistent with stored history.
+
+### W.9 — Magic-link mobile approvals · ❌ **NOT STARTED**
+**The approval bottleneck is the head coach's Sunday evening, not the software** —
+and a volunteer-shaped approval loop is unclaimed by competitors (enterprise tools
+or generic design suites only). Also closes the KNOWN_ISSUES unsigned-run-id
+defence-in-depth gap. *(Idea #17.)* **Build:** HMAC-signed, expiring, run-scoped
+tokens (`itsdangerous`, keyed off `MEDIAHUB_SECRET_KEY`) minted when a pack is
+ready; delivered by ntfy/webhook (click-URL support already in
+`notify/channels.py`; email joins via P4.5); a mobile-first lite review surface —
+approve / edit caption / reject only — driving the same `workflow.CardStatus`
+transitions with full audit (who approved, via which token); tokens revocable per
+run; org-bound, no account needed. **Exit:** an approver on a phone clears a pack
+end-to-end from the link; expiry/revocation enforced; audit parity with logged-in
+approval.
+
+### W.10 — OCR fallback for scanned PDFs · ❌ **NOT STARTED**
+**A failed first upload during a hand-sell demo is a lost club.** KNOWN_ISSUES:
+low-DPI scans parse to gibberish; the interpreter already marks image uploads
+"needs OCR" but no OCR exists — and committee secretaries *will* upload phone
+photos of printouts. *(Idea #18.)* **Build:** an OCR step (Tesseract in the Docker
+image, or the RapidOCR wheel) behind the interpreter's existing low-confidence
+path for image-only PDFs and photos; per-row confidence carried through to the
+existing flag-for-review surface — uncertain rows are flagged, never silently
+guessed; `interpreting`-phase logs record OCR engagement. Deterministic.
+**Exit:** a phone photo of a printed results sheet produces parsed rows with
+uncertainty flags instead of gibberish or a dead end.
+
+### W.11 — Result-grounded alt-text on every export · ❌ **NOT STARTED**
+**KNOWN_ISSUES: exports carry no alt text.** Cards are data-dense graphics, so the
+alt text must restate the result ("Maya Patel, 50m freestyle, 31.24 — a 0.8s PB at
+the Swansea Spring Open"), under ~125 chars, human-reviewable — which the approval
+gate already provides. *(Idea #19.)* **Build:** extend the caption-generation
+contract with an `alt_text` field produced in the **same** `media_ai.llm` call
+(zero added latency/cost; honest-error when no provider — no heuristic fallback);
+thread through the pack ZIP, the newsletter HTML, the PC.10 page/embed (`alt=`
+attributes) and every publish payload; editable in review beside the caption.
+**Exit:** every exported or published card carries result-grounded alt text the
+approver saw.
+
+### W.12 — PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
+**Parents currently DIY this with generic certificate templates — the competitive
+pass surfaced printable certificates as the existing "solution" to per-child
+celebration.** A branded certificate carrying the verified time is the artifact
+families print and frame; zero platform dependency. *(Idea #20.)* **Build:** A4
+print layouts in `graphic_renderer/layouts/` (Playwright prints PDF natively;
+`reportlab` stays optional); a per-swimmer certificate batch export on the pack
+(ZIP of PDFs) + an A4/A3 weekend-recap poster for the leisure-centre noticeboard;
+BrandKit tokens reused so print matches cards; W.2 consent honoured in batch
+exports. **Exit:** one click exports print-ready branded certificates for every
+approved achievement in a run.
+
+### W.13 — Bilingual captions (Welsh first) · ❌ **NOT STARTED**
+**The first ten clubs are being hand-sold in Swansea / South-East Wales (PC.6) —
+bilingual posting is locally resonant and no US competitor will ever bother.**
+Marginal cost ≈ 0 on the existing Gemini call (tone-preserving in-pipeline
+translation; dedicated MT APIs only matter at scale). *(Idea #21.)* **Build:** a
+per-workspace language setting on `ClubProfile` (en / cy / bilingual); caption
+prompt extension producing both variants with swim terminology correct; review UI
+shows and edits both; publish-gate platform-length checks account for the doubled
+text; the same seam serves any future locale. Honest-error when no provider — no
+machine-translation heuristics. **Exit:** a bilingual club approves Cymraeg +
+English captions in one pass and the gate's length checks hold.
+
+### W.14 — Engagement feedback loop · ❌ **NOT STARTED** *(phase 2 needs P4.2)*
+**The compounding intelligence-layer moat: every approval teaches the next plan —
+template tools cannot replicate it.** *(Idea #22.)* **Build, phase 1 (no external
+APIs):** record per-club which tone variant / archetype is approved, edited or
+rejected at the existing approval seam; feed the caption few-shot store and
+`memory/`; surface "this club prefers…" in the planner's explainable reasons;
+`observability/` counters. **Phase 2 (after P4.2 connectors):** a scheduled
+per-post metrics pull — IG `views`/`reach`/`saved`/`shares` under the
+**post-Apr-2025 metric names** (`impressions` is deprecated; Page-insights
+deprecations continue through 2026) — into a per-club format ranking ("carousels
+earn saves here; reels earn reach"), feeding plan ranking **deterministically**
+(the LLM never ranks). **Exit (phase 1):** the planner's reasons cite the club's
+own approval history. **Exit (phase 2):** per-post metrics inform format choice
+with provenance.
+
+**Building blocks.** Existing seams only: `recognition_swim/achievements/` + the
+detector bus, `interpreter/` + `_zip_safety`, `results_fetch/` + `scheduler/` +
+`notify/`, `workflow/` + the P2.3 publish gate, `graphic_renderer/`,
+`media_ai.llm`/`ai_core.llm`, `memory/`, `observability/`. New paid dependencies:
+none (Tesseract/RapidOCR are open-source; everything else is already in-tree).
+
+**Dependencies.** Independent of the P3/P4/P5 gates. W.2 and W.8 lean on W.1; W.6
+is cheaper after W.5; W.12 and PC.10 should honour W.2 once it exists; W.14
+phase 2 waits for P4.2. Feeds **PC.4/PC.6** (sellability, the NGB application's
+safeguarding evidence) and **P3** (W.5/W.10 broaden ingestion patterns the
+multi-sport spokes will reuse).
 
 ---
 
@@ -964,19 +1293,88 @@ prioritising the genuinely-free targets.
 genuinely-free one** (Bluesky and/or Mastodon), with Buffer demoted to optional.
 
 ### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌ **NOT STARTED**
-The free/open posting targets — build these first.
+The free/open posting targets — build these first. **Build detail (June 2026
+feasibility pass; ideas research #7):** `publishing/bluesky.py` (AT Protocol;
+app-password or OAuth — **no app review or business verification exists at
+all**) and `publishing/mastodon.py` (per-instance REST; apps register
+programmatically), both beside `buffer.py`, both gated by the P2.3 publish gate
+and writing `publishing/posting_log.py`; per-workspace account binding in
+Settings; image + W.11 alt-text first, video where the instance allows. Each
+adapter is days, not weeks — they also rehearse the connector pattern (connect →
+gate → post → log → audit) before the Meta review lands, and they make the
+autonomy story demonstrable end-to-end on a zero-risk network.
 
 ### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌ **NOT STARTED**
 Least-privilege per integration; human connects each account (no auto-connect).
 **Platform API policy gates auto-posting (verified June 2026 — [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) cycle 5):** Instagram content-publishing needs a Business/Creator account + a connected Facebook Page + Meta **App Review** (~2–4 weeks/permission) + **Business Verification**; TikTok's *unaudited* Content-Posting client can post only **private (SELF_ONLY), ≤5 users/24h** until it passes an audit. This is *why* **P4.1 (Bluesky + Mastodon) ships first**, and these stay behind human approval and the audit timeline.
+**Start the paperwork before the code (June 2026 pass; ideas research #8):** the
+Meta Business Verification + App Review (`instagram_content_publish`,
+`pages_manage_posts`, Threads scopes) costs $0 but burns **weeks of calendar
+time** — the application can begin while this item stays unbuilt, so the clock
+runs in parallel with Phase C instead of after it. What the code side needs when
+it opens: a Pillow **JPEG export** path in `graphic_renderer` (the IG API is
+JPEG-only), publicly URL-reachable media (already true), a "Connect Instagram"
+flow, and `publishing/meta.py` behind an operator flag + the publish gate. Current
+IG limits are workable: **100 API-published posts/24h per account, including
+Reels, Stories and carousels** — and carousels (one card per swimmer per meet) are
+the engagement/saves format in the 2025 35M-post benchmarks, so the adapter
+should group packs as carousels by default. One Meta review covers Facebook Pages
++ Instagram (+ Threads scoped separately); **TikTok and YouTube stay deferred
+until clubs demand them** (TikTok unaudited = private-only; YouTube's default
+10k-unit quota ≈ 6 uploads/day across *all* tenants until audited).
 
 ### P4.3 — X adapter (budget pay-per-use) · ❌ **NOT STARTED**
 X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
 
 ### P4.4 — Demote Buffer to optional · ❌ **NOT STARTED**
 Keep the Buffer path for those who want it; remove it from the critical path.
+**Urgency re-graded (June 2026 research):** Buffer's classic developer API has
+been **closed to new developers since 2019**, remaining third-party integrations
+were **cut off on 1 Mar 2025**, and the 2026 beta API **lacks third-party OAuth**
+— so the current connector (`publishing/buffer.py`, classic
+`/1/updates/create.json`) runs on borrowed time and cannot onboard new clubs'
+accounts under Buffer's new regime. "Demote Buffer" is therefore **resilience
+work, not preference**: P4.1/P4.5/P4.6 are the replacement paths; keep the Buffer
+path only while the legacy token still functions, and surface an honest error
+the day it stops.
 
-**Building blocks.** **Bluesky / Mastodon** (free/open) first; direct platform APIs.
+### P4.5 — Email digest delivery (the newsletter actually sends) · ❌ **NOT STARTED**
+**The v7.3 grouped newsletter already builds (`/api/runs/<run_id>/newsletter`,
+`content_pack/builder.py`) — nothing can send it.** Email needs no platform
+review, clubs already run parent lists, and Gipper sells newsletters as a paid
+tier; costs are trivial (Resend: free to 3k emails/mo, ~$20/mo for 50k ≈ 50 clubs
+× 200 members weekly). *(Ideas research #5.)* **Build:** `publishing/email.py`
+behind a provider seam (Resend first; honest-error unkeyed, per the P0.3/P0.4
+doctrine — no silent paid dependency); a per-workspace member list (CSV import
+with consent capture, one-click unsubscribe route + suppression list — GDPR:
+unsubscribes honoured before any send); a weekly `scheduler/` job assembling
+approved-card digests; the PC.8 sponsor slot and W.11 alt text in the template;
+W.9 approval links ride the same channel. **Pull-forward candidate during
+Phase C** at the maintainer's discretion — it is review-free and directly
+sell-supporting; it sits in P4 for thematic fit, not because it needs the gate's
+platform machinery. **Exit:** a club imports members and receives a weekly
+digest of approved content; unsubscribes stick; unkeyed deployments honest-error.
+
+### P4.6 — Telegram channel publishing (+ WhatsApp share stopgap) · ❌ **NOT STARTED**
+**The best effort-to-value publish target found in the June 2026 feasibility
+pass:** the Telegram Bot API is free with generous broadcast limits, needs no
+review, and sends **PNG and MP4 natively** — note reels currently have **no
+scheduled outlet anywhere** (the Buffer path takes a single image URL). WhatsApp
+has **no official Channels API** and the Business Platform bills per template
+message with verification friction, so the legitimate WhatsApp answer today is a
+share affordance, not an API. *(Ideas research #6.)* **Build:**
+`publishing/telegram.py` (per-workspace bot token + channel binding;
+`sendPhoto`/`sendVideo` with caption + W.11 alt text) behind the publish gate +
+posting log; a review-UI "share to WhatsApp" button (copy caption, download
+media, open `wa.me`) as the stopgap for WhatsApp-centric UK clubs. Like P4.5, a
+**pull-forward candidate during Phase C** — zero platform risk, and it proves
+the full gate→post loop (including for autonomy demos) on a real channel.
+**Exit:** an approved card *and* a reel both land in a connected Telegram channel
+through the gate with full audit; the WhatsApp button works on mobile.
+
+**Building blocks.** **Bluesky / Mastodon** (free/open) first; the **Telegram Bot
+API** and a **Resend-seamed email channel** join the genuinely-free tier
+(P4.5/P4.6); direct platform APIs.
 **Postiz** adapters as a *reference implementation only* (**AGPL** — call over its
 API or read the patterns; never embed — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
 
@@ -1067,21 +1465,32 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    instrumented on `/operator/commercial`. What's left of Phase C is the founder's
    selling motion: set `STRIPE_*`, pre-bind pilots, quote real prices, submit the Swim
    England application, win the first 10 annual clubs.)
-2. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
+2. **Phase W — the wedge-depth backlog (selectable, ungated; added 2026-06-11).**
+   Fourteen researched items (athlete registry, consent manager, club records,
+   qualifying times, LENEX, meet previews, live meet mode, season wraps,
+   magic-link approvals, OCR, alt-text, certificates, Welsh captions, engagement
+   telemetry) absorbed from
+   [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md); the
+   sell-side four became **PC.7–PC.10** and the distribution slice **P4.5/P4.6**.
+   Pick an item **only when it unblocks a sale, a pilot, the NGB application, or
+   a churn risk** — never ahead of the selling motion. Recommended first picks:
+   W.1→W.2 (consent), W.4 (qualifying times), W.10 (demo-day OCR robustness),
+   PC.7 (the instant demo). *Exit:* per item.
+3. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
    director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
    the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar
    is cleared. **Per the standing rule: stop polishing and sell.** Anything further on
    graphics (the 12th archetype, the floor's no-photo bias, the logo-chip polish) is
    strictly behind Phase C sell-side work.
-3. **P0 — ✅ done (2026-06-10).** The whole de-risk phase closed in one pass:
+4. **P0 — ✅ done (2026-06-10).** The whole de-risk phase closed in one pass:
    the P0.1 free reel engine (still-graphics + FFmpeg behind
    `MEDIAHUB_REEL_ENGINE=ffmpeg` — a zero-license deployment renders reels),
    plus the three Phase-0 guard suites making paid-dep optionality (P0.3),
    local provider slots (P0.4) and AGPL isolation (P0.5) continuously enforced.
-4. **P1.3 — Cross-source planner. ✅ done (2026-06-10)** — with P1.2's
+5. **P1.3 — Cross-source planner. ✅ done (2026-06-10)** — with P1.2's
    slug-canonical taxonomy and P1.5's local brand-DNA flow, closing Phase 1.
    *Exit met:* a ranked, explainable plan for ≥2 profiles at `/plan`.
-5. **P2 — ✅ done (2026-06-11).** The approval signal (P2.2), the single
+6. **P2 — ✅ done (2026-06-11).** The approval signal (P2.2), the single
    publish gate with all guardrails (P2.3) and the enum reconciliation shipped
    on the in-process substrate. *Exit met:* `fully_autonomous` publishes only
    when every guardrail + the confidence gate pass; kill switch halts
@@ -1089,13 +1498,16 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
 
 **Deferred behind the commercial gate AND "≥10 clubs paying annually":**
 
-6. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real data
+7. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real data
    spoke. (`results_fetch/` already does sport-agnostic *ingestion*; this adds the
    per-sport *detector*.) *Gated:* no new sport until ≥10 clubs pay annually. *Exit:* one
    non-swimming sport produces content end-to-end.
-7. **P4 — Free direct publishing.** Bluesky + Mastodon adapters; demote Buffer. *Exit:*
-   publish to ≥2 platforms incl. one free.
-8. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with no
+8. **P4 — Free direct publishing.** Bluesky + Mastodon adapters (P4.1), email
+   digests (P4.5) and Telegram channels (P4.6) as the review-free tier; start the
+   Meta verification paperwork early (P4.2 note); demote the now-deprecated Buffer
+   path (P4.4 — its classic API shut to new developers in 2019; integrations cut
+   off 2025-03-01). *Exit:* publish to ≥2 platforms incl. one free.
+9. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with no
    cloud keys.
 
 Run a **pilot** in parallel (one real club, the themed product) to surface UX holes the
