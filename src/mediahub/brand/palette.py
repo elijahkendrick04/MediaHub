@@ -310,7 +310,13 @@ def _build_llm_prompt(
     ]
     if allow_fourth:
         lines.append(
-            '  fourth:    string "#rrggbb" OR "" — only set if the org clearly has a 4th brand colour; otherwise empty'
+            '  fourth:    string "#rrggbb" OR "" — DEFAULT IS "". Most '
+            "organisations have two or three brand colours; a genuine "
+            "fourth is the exception, not the rule. Set it ONLY when the "
+            "evidence is unambiguous — the brand-guidelines document "
+            "names a fourth colour, or the same extra colour recurs "
+            "across logo + heavy site usage. NEVER fill the slot just "
+            "because it exists; a wrong fourth colour is worse than none."
         )
     lines += [
         "  reasoning: short string (<=240 chars) explaining which sources informed each pick",
@@ -322,6 +328,7 @@ def _build_llm_prompt(
         "  - Colours mentioned EXPLICITLY in the brand-guidelines document and the logo dominant colours are deliberate; prefer picks corroborated there.",
         "  - If the same colour shows high usage AND appears in the guidelines/logo, it is almost certainly the primary.",
         "  - Pure white (#ffffff) and pure black (#000000) only belong in the chosen palette if the brand explicitly uses them as a key colour.",
+        "  - The fourth slot defaults to empty: leave it \"\" unless the evidence for a real fourth brand colour is unambiguous. When in doubt, omit it.",
         "  - Every chosen colour MUST come from the colours above. Do not invent new hex values.",
         "  - All hex values lower-case #rrggbb.",
         "No prose, no fences, no commentary — only the JSON object.",

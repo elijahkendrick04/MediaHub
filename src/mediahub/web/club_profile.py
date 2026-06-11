@@ -336,17 +336,20 @@ class ClubProfile:
         return tone_from_str(self.tone or self.caption_tone or "warm-club")
 
     def is_ready(self) -> bool:
-        """True when the AI has enough context to generate on-brand content.
+        """True when there is enough context to generate on-brand content.
 
         Requires a real organisation name plus at least one of:
         - a captured brand voice summary (from website / socials),
+        - an AI-extracted or manually confirmed palette (manual-mode
+          setup picks colours by hand — that's as strong a brand signal
+          as an AI extraction),
         - an analysed voice_profile,
         - pasted voice_examples (>=3),
         - a non-default tone_notes block.
 
         This is what the routing gate consults before unlocking content
         production. The point is to stop the user from generating
-        anonymous, generic content before the AI knows who they are.
+        anonymous, generic content before the system knows who they are.
         """
         name_ok = bool((self.display_name or "").strip())
         if not name_ok:
@@ -354,6 +357,7 @@ class ClubProfile:
         brand_ok = bool(
             (self.brand_voice_summary or "").strip()
             or self.brand_palette_extracted
+            or self.brand_palette_manual
             or self.brand_keywords
         )
         voice_ok = bool(self.voice_profile) or len(self.voice_examples or []) >= 3

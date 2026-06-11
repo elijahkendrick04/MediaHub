@@ -20404,6 +20404,70 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             for v, l in _ORG_TYPES
         )
 
+        # ---- Manual-mode prefills (issue: setup needs an explicit
+        # "build it myself" path with dropdowns for everything) ----------
+        from mediahub.brand.tone import TONE_META
+
+        _manual_pal = dict(prof.brand_palette_manual) if prof and prof.brand_palette_manual else {}
+        _hex_ok = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+        def _safe_hex(v: str, fallback: str) -> str:
+            v = (v or "").strip()
+            return v if _hex_ok.fullmatch(v) else fallback
+
+        _m_primary = _safe_hex(
+            _manual_pal.get("primary") or (prof.brand_primary if prof else ""), "#A30D2D"
+        )
+        _m_secondary = _safe_hex(
+            _manual_pal.get("secondary") or (prof.brand_secondary if prof else ""), "#1A1A1A"
+        )
+        _m_accent = _safe_hex(_manual_pal.get("accent") or "", "#D4FF3A")
+        _m_fourth = _safe_hex(_manual_pal.get("fourth") or "", "#F4D58D")
+        _m_use_fourth_checked = (
+            " checked" if (prof and prof.brand_palette_use_fourth) else ""
+        )
+        _m_tone = (prof.tone or prof.caption_tone) if prof else "warm-club"
+        _tone_opts = "".join(
+            f'<option value="{_h(t.value)}"{" selected" if t.value == _m_tone else ""}>'
+            f"{_h(m['label'])} &mdash; {_h(m['description'])}</option>"
+            for t, m in TONE_META.items()
+        )
+        _m_platforms = set(prof.platforms or []) if prof else set()
+        _platform_checks = "".join(
+            f'<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+            f'color:var(--ink-dim);margin:0">'
+            f'<input type="checkbox" name="platforms" value="{_h(key)}"'
+            f'{" checked" if key in _m_platforms else ""}/> {_h(label)}</label>'
+            for key, label, _ph in _PLATFORMS
+        )
+        _m_tone_notes = (prof.tone_notes or "") if prof else ""
+        _countries_datalist = "".join(f'<option value="{_h(c)}"></option>' for c in COUNTRIES)
+        manual_url = url_for("organisation_setup_manual")
+
+        # Bottom CTA of the AI form. Once the brand preview exists the
+        # primary action down here matches the preview's "Looks right —
+        # start creating" (it used to still say "Build my brand", which
+        # re-ran capture and read as a broken button); re-analyse stays
+        # available as the secondary action.
+        if prof and prof.is_ready():
+            _bottom_cta_html = (
+                '<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">'
+                f'<a class="btn" href="{url_for("make_page")}" data-mh-cascade="finalise">'
+                "Looks right &mdash; start creating &rarr;</a>"
+                '<button type="submit" class="btn secondary">Re-analyse my brand &rarr;</button>'
+                '<span class="muted" style="font-size:12px">'
+                "Re-analysing takes 10&ndash;30 seconds and refreshes voice, palette and logos."
+                "</span></div>"
+            )
+        else:
+            _bottom_cta_html = (
+                '<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">'
+                '<button type="submit" class="btn">Build my brand &rarr;</button>'
+                '<span class="muted" style="font-size:12px">'
+                "Takes 10&ndash;30 seconds. MediaHub analyses each link to learn your tone and style."
+                "</span></div>"
+            )
+
         capture_url = url_for("organisation_setup_capture")
         body = f"""
 <div style="max-width:840px;margin:0 auto">
@@ -20423,6 +20487,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {llm_banner_html}
 {preview_html}
 
+<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap" role="tablist" aria-label="How do you want to set up?">
+  <button type="button" class="btn" id="mh-mode-btn-ai" role="tab" aria-selected="true"
+          onclick="mhSetupMode('ai')">AI build &mdash; read my links</button>
+  <button type="button" class="btn secondary" id="mh-mode-btn-manual" role="tab" aria-selected="false"
+          onclick="mhSetupMode('manual')">Manual build &mdash; I&rsquo;ll pick everything</button>
+</div>
+
+<div id="mh-setup-ai-panel">
 <form method="POST" action="{capture_url}" enctype="multipart/form-data"
       data-loader-text="Teaching the AI about your organisation"
       data-loader-sub="Reading links, learning scraping strategies, interpreting guidelines, describing logos. This takes 10&ndash;30 seconds.">
@@ -20551,14 +20623,122 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_logos_grid_html}
 </div>
 
-<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px">
-  <button type="submit" class="btn">Build my brand &rarr;</button>
+{_bottom_cta_html}
+</form>
+</div>
+
+<div id="mh-setup-manual-panel" style="display:none">
+<form method="POST" action="{manual_url}" enctype="multipart/form-data">
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Identity</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
+    <div>
+      <label class="req" for="ms-display-name">Organisation name</label>
+      <input id="ms-display-name" type="text" name="display_name" required value="{_h(display_name)}"
+             placeholder="e.g. City Aquatics Swimming Club"/>
+    </div>
+    <div>
+      <label>Type</label>
+      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+    </div>
+    <div>
+      <label for="ms-country">Country</label>
+      <input id="ms-country" type="text" name="country" value="{_h(country)}"
+             list="mh-countries-list" placeholder="Start typing your country&hellip;"
+             autocomplete="off" style="{_input_style}"/>
+    </div>
+    <div>
+      <label>Governing body <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input type="text" name="governing_body" value="{_h(governing_body)}"
+             placeholder="e.g. Swim England, UKA, BUCS" style="{_input_style}"/>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Voice &amp; platforms</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 18px">
+    <div>
+      <label>Caption tone</label>
+      <select name="caption_tone" style="{_input_style}">{_tone_opts}</select>
+    </div>
+    <div>
+      <label>Platforms you post to</label>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">{_platform_checks}</div>
+    </div>
+  </div>
+  <div style="margin-top:14px">
+    <label>How do you sound? <span class="muted" style="font-size:11px">(optional)</span></label>
+    <textarea name="tone_notes" rows="3"
+              placeholder="e.g. Friendly and proud, first names only, never use exclamation marks, always thank the officials."
+              style="{_input_style};resize:vertical">{_h(_m_tone_notes)}</textarea>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">Brand colours</h2>
+  <p class="dim" style="font-size:13px;line-height:1.5;margin:0 0 14px 0">
+    Exactly what you pick here is what every graphic, card, and reel uses.
+    Nothing is inferred in manual mode.
+  </p>
+  <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Primary
+      <input type="color" name="manual_primary" value="{_h(_m_primary)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Secondary
+      <input type="color" name="manual_secondary" value="{_h(_m_secondary)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Accent
+      <input type="color" name="manual_accent" value="{_h(_m_accent)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-dim);margin:0 0 10px 0">
+      <input type="checkbox" name="manual_use_fourth" value="1"{_m_use_fourth_checked}
+             onchange="var f=document.getElementById('ms-fourth-wrap'); if (f) f.style.display = this.checked ? 'flex' : 'none';"/>
+      Add a fourth brand colour
+    </label>
+    <label id="ms-fourth-wrap" style="display:{'flex' if _m_use_fourth_checked else 'none'};flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Fourth
+      <input type="color" name="manual_fourth" value="{_h(_m_fourth)}"
+             style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
+    </label>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0;font-size:18px">
+    Logos
+    <span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">(optional, multiple)</span>
+  </h2>
+  <input type="file" name="brand_logos" multiple
+         accept="image/*,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.svg,.eps,.ai,.pdf"/>
+</div>
+
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">
+  <button type="submit" class="btn">Create my organisation &rarr;</button>
   <span class="muted" style="font-size:12px">
-    Takes 10&ndash;30 seconds. MediaHub analyses each link to learn your tone and style.
+    Instant &mdash; no AI reading involved. You can switch to AI build later to enrich the voice.
   </span>
 </div>
 </form>
 </div>
+<datalist id="mh-countries-list">{_countries_datalist}</datalist>
+</div>
+
+<script>
+function mhSetupMode(mode) {{
+  var isAi = mode === 'ai';
+  var ai = document.getElementById('mh-setup-ai-panel');
+  var man = document.getElementById('mh-setup-manual-panel');
+  var bAi = document.getElementById('mh-mode-btn-ai');
+  var bMan = document.getElementById('mh-mode-btn-manual');
+  if (ai) ai.style.display = isAi ? '' : 'none';
+  if (man) man.style.display = isAi ? 'none' : '';
+  if (bAi) {{ bAi.className = isAi ? 'btn' : 'btn secondary'; bAi.setAttribute('aria-selected', String(isAi)); }}
+  if (bMan) {{ bMan.className = isAi ? 'btn secondary' : 'btn'; bMan.setAttribute('aria-selected', String(!isAi)); }}
+}}
+</script>
 
 <style>
 .mh-combobox {{ position: relative; }}
@@ -21088,11 +21268,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 colour_usage=link_colour_usage,
             )
             if sources:
+                # The AI always CONSIDERS a fourth colour and decides
+                # itself whether one genuinely exists (the prompt defaults
+                # the slot to empty). The user's tickbox on the preview
+                # remains a manual override via /organisation/setup/palette.
                 resolved = _palette.resolve_palette(
                     org_name=prof.display_name,
                     voice_summary=prof.brand_voice_summary or "",
                     sources=sources,
-                    allow_fourth=bool(prof.brand_palette_use_fourth),
+                    allow_fourth=True,
                 )
                 # Preserve any existing primary/secondary/accent that the
                 # resolver didn't fill (e.g. when the user hadn't uploaded
@@ -21102,6 +21286,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     for k in _palette.ALL_SLOTS:
                         if resolved.get(k):
                             merged[k] = resolved[k]
+                    # Mirror the AI's fourth-colour decision, unless the
+                    # user pinned a fourth manually. "No fourth" must also
+                    # CLEAR a stale fourth from an earlier capture — that
+                    # carry-over is exactly how every org ended up with a
+                    # fourth colour whether it had one or not.
+                    if not (prof.brand_palette_manual or {}).get(_palette.FOURTH_SLOT):
+                        if resolved.get(_palette.FOURTH_SLOT):
+                            prof.brand_palette_use_fourth = True
+                        else:
+                            merged.pop(_palette.FOURTH_SLOT, None)
+                            prof.brand_palette_use_fourth = False
                     prof.brand_palette_extracted = merged
                     prof.brand_palette_reasoning = resolved.get("reasoning", "")
             prof.brand_palette_sources = sources
@@ -21132,6 +21327,138 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         save_profile(prof)
         if _setup_is_new_profile:
             # PC.3: setup-created workspaces bind to their signed-in creator.
+            _bind_creator_if_signed_in(prof.profile_id)
+        _pin_active_profile(prof.profile_id)
+        return redirect(url_for("organisation_setup"))
+
+    @app.route("/organisation/setup/manual", methods=["POST"])
+    def organisation_setup_manual():
+        """Create or update an organisation profile with NO AI capture.
+
+        Manual mode: the user picks everything the system needs from
+        dropdowns and pickers — type, country, tone, platforms, brand
+        colours, logos. Nothing is inferred and nothing is invented:
+        the chosen colours land on ``brand_palette_manual`` (the
+        user-override slot that wins over any AI pick) and the profile
+        is usable immediately.
+        """
+        display_name = (request.form.get("display_name") or "").strip()
+        if not display_name:
+            return redirect(url_for("organisation_setup"))
+
+        # Same slug / reuse / collision rules as the AI capture path.
+        existing = _active_profile()
+        if existing and existing.display_name.strip().lower() == display_name.lower():
+            profile_id = existing.profile_id
+        else:
+            raw = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")
+            profile_id = raw[:48] or "default"
+            slug_match = load_profile(profile_id)
+            if slug_match is not None and (
+                slug_match.display_name.strip().lower() != display_name.lower()
+                or not _session_can_use_profile(profile_id)
+            ):
+                profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        _is_new_profile = load_profile(profile_id) is None
+        prof = load_profile(profile_id) or ClubProfile(
+            profile_id=profile_id,
+            display_name=display_name,
+        )
+        prof.display_name = display_name
+        prof.org_type = (request.form.get("org_type") or "other").strip()
+        raw_country = (request.form.get("country") or "").strip()
+        if raw_country:
+            from mediahub.web._countries import COUNTRIES
+
+            canon = next(
+                (c for c in COUNTRIES if c.casefold() == raw_country.casefold()),
+                None,
+            )
+            prof.country = canon or raw_country
+        else:
+            prof.country = ""
+        prof.governing_body = (request.form.get("governing_body") or "").strip()
+
+        tone = (request.form.get("caption_tone") or "warm-club").strip()
+        if tone not in ("warm-club", "hype", "data-led"):
+            tone = "warm-club"
+        prof.tone = tone
+        prof.caption_tone = tone
+
+        platforms = [
+            p
+            for p in request.form.getlist("platforms")
+            if p in ("instagram", "facebook", "twitter", "tiktok", "linkedin")
+        ]
+        prof.platforms = platforms
+
+        notes = (request.form.get("tone_notes") or "").strip()
+        if notes:
+            prof.tone_notes = notes
+
+        # Colours: validate as #rrggbb; invalid entries are dropped, never
+        # guessed. Manual picks land on brand_palette_manual (per-slot
+        # winner over any AI pick) + the legacy two mirror fields.
+        hex_re = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+        def _col(name: str) -> str:
+            v = (request.form.get(name) or "").strip()
+            return v if hex_re.fullmatch(v) else ""
+
+        manual_pal = dict(prof.brand_palette_manual or {})
+        for slot, field_name in (
+            ("primary", "manual_primary"),
+            ("secondary", "manual_secondary"),
+            ("accent", "manual_accent"),
+        ):
+            v = _col(field_name)
+            if v:
+                manual_pal[slot] = v
+        use_fourth = bool(request.form.get("manual_use_fourth"))
+        fourth = _col("manual_fourth") if use_fourth else ""
+        if fourth:
+            manual_pal["fourth"] = fourth
+        elif not use_fourth:
+            manual_pal.pop("fourth", None)
+        prof.brand_palette_manual = manual_pal
+        prof.brand_palette_use_fourth = use_fourth
+        if manual_pal.get("primary"):
+            prof.brand_primary = manual_pal["primary"]
+        if manual_pal.get("secondary"):
+            prof.brand_secondary = manual_pal["secondary"]
+
+        # Logos: same ingest as the AI path (storage + optional vision
+        # description); skipping AI here would just mean unlabelled logos.
+        logo_uploads = request.files.getlist("brand_logos")
+        if logo_uploads:
+            from mediahub.brand import logos as _logos_mod
+
+            current_logos = list(prof.brand_logos or [])
+            for upload in logo_uploads:
+                if not upload or not upload.filename:
+                    continue
+                try:
+                    raw_bytes = upload.read() or b""
+                except Exception:
+                    continue
+                if not raw_bytes:
+                    continue
+                try:
+                    meta = _logos_mod.store_logo(
+                        profile_id=prof.profile_id,
+                        filename=upload.filename,
+                        file_bytes=raw_bytes,
+                        existing_logos=current_logos,
+                    )
+                except Exception as e:
+                    log.info("manual setup: logo rejected/failed: %s", e)
+                    continue
+                current_logos.append(meta)
+            prof.brand_logos = current_logos
+
+        save_profile(prof)
+        if _is_new_profile:
             _bind_creator_if_signed_in(prof.profile_id)
         _pin_active_profile(prof.profile_id)
         return redirect(url_for("organisation_setup"))
