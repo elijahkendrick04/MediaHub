@@ -15406,16 +15406,14 @@ function mhPlanGenerate(btn) {{
         if not _can_access_run(run_id, run_data, _active_profile_id()):
             run_data = None
         if not run_data:
-            return None, (
-                _recovery_page(
-                    "Run not found",
-                    "This run isn't on disk. It may have been deleted from /privacy, "
-                    "or the URL might be from a different deployment.",
-                    eyebrow="Athlete spotlight",
-                    primary_cta=("Open activity", url_for("activity_page")),
-                    secondary_cta=("Back to home", url_for("home")),
-                ),
-                404,
+            # _recovery_page already returns a (body, status) tuple.
+            return None, _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, "
+                "or the URL might be from a different deployment.",
+                eyebrow="Athlete spotlight",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
             )
         try:
             pack = build_spotlight_pack(run_data, swimmer_key)
@@ -15428,20 +15426,17 @@ function mhPlanGenerate(btn) {{
             )
             pack = None
         if not pack:
-            return None, (
-                _recovery_page(
-                    "Swimmer not found",
-                    f'No achievements were recorded for "{swimmer_key}" in this meet. '
-                    "Pick another swimmer, or open the meet review to see who's in "
-                    "the recognition report.",
-                    eyebrow="Athlete spotlight",
-                    primary_cta=(
-                        "Choose another swimmer",
-                        url_for("spotlight_landing") + f"?run_id={run_id}",
-                    ),
-                    secondary_cta=("Open review", url_for("review", run_id=run_id)),
+            return None, _recovery_page(
+                "Swimmer not found",
+                f'No achievements were recorded for "{swimmer_key}" in this meet. '
+                "Pick another swimmer, or open the meet review to see who's in "
+                "the recognition report.",
+                eyebrow="Athlete spotlight",
+                primary_cta=(
+                    "Choose another swimmer",
+                    url_for("spotlight_landing") + f"?run_id={run_id}",
                 ),
-                404,
+                secondary_cta=("Open review", url_for("review", run_id=run_id)),
             )
 
         wf_states = {}
