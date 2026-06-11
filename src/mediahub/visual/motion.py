@@ -69,9 +69,7 @@ def motion_format_size(format_name: str) -> tuple[int, int]:
     """
     key = (format_name or DEFAULT_MOTION_FORMAT).strip().lower()
     if key not in MOTION_FORMATS:
-        raise ValueError(
-            f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}"
-        )
+        raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
     return MOTION_FORMATS[key]
 
 
@@ -463,7 +461,9 @@ def _card_manifest_axes(card_props: dict) -> dict:
         "motion_intent": card_props.get("motionIntent") or "",
         "mood": card_props.get("mood") or "",
         "variation_seed": card_props.get("variationSeed") or 0,
-        "colour_source": "still-parity-roles" if card_props.get("roleGround") else "seed-permutation",
+        "colour_source": "still-parity-roles"
+        if card_props.get("roleGround")
+        else "seed-permutation",
         "has_photo": bool(card_props.get("photoSrc")),
         "photo_focus": card_props.get("photoPos") or "",
         "hero_stat": card_props.get("heroStat") or "",

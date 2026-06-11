@@ -25516,7 +25516,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             str(path),
             mimetype="video/mp4",
             as_attachment=False,
-            download_name=f"meet_reel_{run_id}_{fmt}.mp4" if fmt != "story" else f"meet_reel_{run_id}.mp4",
+            download_name=f"meet_reel_{run_id}_{fmt}.mp4"
+            if fmt != "story"
+            else f"meet_reel_{run_id}.mp4",
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])
