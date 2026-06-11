@@ -43,6 +43,8 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | What counts as a **"special moment"** | `src/mediahub/recognition_swim/` |
 | The club **colours, logo, fonts** | `src/mediahub/brand/` and `src/mediahub/theming/` |
 | The **website** and its buttons | `src/mediahub/web/` |
+| Who can **sign in to which club** (workspaces) | `src/mediahub/web/tenancy.py` |
+| The founder's **selling notebook** (quotes, leads) | `src/mediahub/commercial/` |
 
 ## If you're joining the team
 

@@ -371,13 +371,15 @@ Three facts shape the work ahead.
 - **Direct-to-platform** publishing (only Buffer today).
 - The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
   rembg present).
-- **The rest of the commercial layer** — signup + billing themselves now ship (see
-  above), but **true multi-tenancy** (org → workspace in one shared instance; **PC.3**,
-  blocking), **validated pricing** (**PC.4**) and a **go-to-market motion** (**PC.6**) are
-  still missing, and because billing is unconfigured there are **zero paying customers**.
-  This "build/sell imbalance" is the binding constraint per the 2026 scaling diligence;
-  closing it is **Phase C**, the top priority (see below) — now **half-closed on the build
-  side, fully open on the sell side**.
+- **The rest of the commercial layer** — ~~true multi-tenancy missing~~ → **shipped
+  2026-06-11 (PC.3,** [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md)**)**:
+  org → workspace membership binding in one shared instance, with PC.4's revealed-WTP
+  instrumentation and PC.6's funnel tooling landing alongside it on
+  `/operator/commercial`. The **build side of Phase C is now fully closed**; what stays
+  open is the sell side — billing keys unset, prices unvalidated (**PC.4** gate), no
+  clubs sold (**PC.6** gate) — so there are still **zero paying customers**. The
+  "build/sell imbalance" of the 2026 scaling diligence is now entirely a *selling*
+  imbalance; see Phase C below.
 
 **Shipped (✅ 2026-06-10):** the Generative Content Engine v2 — the full
 Appendix A **Sequential Spine** (SEQ-0 → SEQ-4) merged in **PR #301** on top of
@@ -710,7 +712,7 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 ---
 
-## Phase C — Commercialise & Distribute · PC · 🔵 **IN PROGRESS (PC.1/PC.2 shipped)** · 🥇 TOP PRIORITY
+## Phase C — Commercialise & Distribute · PC · 🔵 **BUILD SIDE COMPLETE (2026-06-11) — sell side open** · 🥇 TOP PRIORITY
 
 > **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
 > *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
@@ -735,6 +737,16 @@ there are still **zero paying customers** against ~164k LOC. The diligence's cen
 the sell side** — the remaining gates are true multi-tenancy (**PC.3**), validated
 pricing (**PC.4**) and a go-to-market motion (**PC.6**).
 
+**Update 2026-06-11 — the build side is now fully closed.** **PC.3 shipped** (org →
+workspace membership binding, Council-pressure-tested, [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md)),
+and the engineering halves of **PC.4** (revealed-WTP quote ledger + per-quote Stripe
+Checkout + verified payment recording) and **PC.6** (warm-first pipeline tooling + the
+drafted Swim England application) landed with it on the operator console
+(`/operator/commercial`). Everything that remains in Phase C is selling: set the
+`STRIPE_*` keys, pre-bind the pilot clubs, quote real annual prices, run the warm +
+referral motion, submit the NGB application. The exit gates are unchanged and unmet —
+**zero paying clubs** today; code can no longer be the excuse.
+
 **Exit criteria (both are hard gates on later phases).**
 1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
    involvement.* No scaling work (P3/P4/P5) starts until this holds.
@@ -755,24 +767,52 @@ routes honest-error (`503 "billing not configured"`) when `STRIPE_*` is unset, s
 free/self-host path is unaffected. *Ref: Appendix B Step 7.*
 Shipped in PR #267 (Checkout, Customer Portal, signed webhook driving plan state). Routes honest-503 when STRIPE_* is unset so there is zero added running cost until the operator sets keys; live-verified 2026-06-09.
 
-### PC.3 — True multi-tenancy: org → workspace · ⚠️ **PARTIAL (foundation only) — BLOCKING**
-**The #1 architectural fix.** Single-instance-per-club rises linearly in ops/support
-against fixed founder hours and collapses around 15–40 clubs. Generalise to **org →
-workspace isolation in one shared instance.** The cross-tenant **isolation invariant
-already shipped** (`_can_access_run`, [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md))
-— that is the foundation, not the finish line. This is the **Organisation → Club → Run
-hierarchy** of Appendix B **Step 14**, pulled forward from "enterprise leadership" to a
-**blocking prerequisite**. *Ref: cross-cutting "Multi-tenancy: org → workspace"; Appendix B
-Step 14.*
+### PC.3 — True multi-tenancy: org → workspace · ✅ **DONE (2026-06-11)**
+**The #1 architectural fix — shipped.** Single-instance-per-club rises linearly in
+ops/support against fixed founder hours and collapses around 15–40 clubs; MediaHub now
+runs **org → workspace isolation in one shared instance.** The 2026-06-09 escalation was
+resolved exactly as governance required: the schema was **Council-pressure-tested**
+(five advisors + anonymous peer review + chairman) and **operator-signed-off** (the
+operator's direct instruction to complete Phase C), with the verdict recorded in
+[`adr/0014-org-workspace-multitenancy-schema.md`](adr/0014-org-workspace-multitenancy-schema.md).
+What shipped:
 
-Escalation (2026-06-09, autobuild): the remaining work binds user-account identity to org membership and generalises cross-org isolation in one shared instance, which directly touches the locked cross-tenant isolation invariant (ADR-0003). Per CLAUDE.md governance this is a high-stakes, hard-to-reverse architecture fork that must be Council-pressure-tested and operator-signed-off before the org to workspace schema is committed; the autonomous build loop must NOT rearchitect it unattended. NEEDS OPERATOR/COUNCIL sign-off on the schema before implementation.
+- **Per-org membership binding** (`web/tenancy.py` + `DATA_DIR/memberships.jsonl`,
+  mirroring the `users.jsonl` ledger): an org with ≥1 ACTIVE membership is **bound** —
+  members-only at every choke point (the `_active_profile_id()` resolver, set-active,
+  the `/sign-in` picker, `/organisation` edits, deletion, run stamping) — while an org
+  with no members behaves exactly as before (Step 14's standalone default), so pilot
+  deployments and the existing anonymous fixtures are untouched.
+- **Zero-founder-involvement first claim:** orgs created by a signed-in user are born
+  bound to their creator; existing pilot orgs are pre-bound by a one-time operator
+  invite (`invited` rows deliberately do not lock the org) that **auto-activates at
+  signup**. Owners manage members at `/organisation/members` (pending invites by
+  email — no email-sending infrastructure pretended).
+- **ADR-0003 strengthened, never weakened:** `_can_access_run` is untouched for owned
+  runs; the ownerless-legacy-run branch now refuses signed-in *foreign* accounts (the
+  shared-instance blast-radius fix the Council made a precondition), while anonymous
+  pilot and operator behaviour is preserved.
+- **Pinned by a second invariant suite** — `tests/test_workspace_membership_invariant.py`
+  sweeps the pinning surfaces the ADR-0003 test never covered (plus an ownerless-run
+  route sweep under account mode), alongside `tests/test_tenancy.py` unit coverage.
 
-### PC.4 — Repricing & packaging (validate, don't assume) · ❌ **NOT STARTED**
-The £30/£250 tiers in the code are **unvalidated and too low**, and the £30 anchor must
-die. But the corrective is **not** to swap in a new fixed price — it is to **discover the
-price from revealed willingness-to-pay before locking any public list price.** WTP at the
-candidate tiers is the single most load-bearing *unproven* assumption on the whole revenue
-path, so PC.4 is structured as an evidence gate, not a one-off reprice:
+*Ref: cross-cutting "Multi-tenancy: org → workspace"; Appendix B Step 14 (Step 14's
+federation dashboards / template-push surfaces remain later-stage work — NOT pulled
+forward).*
+
+### PC.4 — Repricing & packaging (validate, don't assume) · 🔵 **IN PROGRESS (instrumented 2026-06-11; evidence gate open)**
+**Build side shipped; the gate is now a selling exercise.** The revealed-WTP machinery
+landed with PC.3 (same PR, [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md) §7):
+a quote ledger (`commercial/wtp.py`, `DATA_DIR/commercial/wtp_quotes.jsonl`) records every
+real annual price quoted per club; **per-quote Stripe Checkout** charges exactly the
+quoted annual figure (`billing.create_quote_checkout_session`, ad-hoc `price_data`,
+quote-id metadata); and the signed webhook records the payment **idempotently and
+amount-verified** — a figure that doesn't match the quote is stored as a mismatch and
+never counts. Both gates render live on the operator console (`/operator/commercial`):
+the **≥5 clubs paid annual** pricing gate and the **≥10 paying clubs** traction gate.
+`/pricing` still honestly shows "Pricing TBC" and stays that way until the pricing gate
+is met. What remains is not code: quote real prices to real clubs and record what clears.
+The original evidence-gate design (unchanged, still the rule):
 
 - **Candidate hypothesis (to test, not to publish):** Club **£49–£99/mo billed
   annually**, Federation **£250+/mo**. Annual prepay is non-negotiable — SMB/volunteer
@@ -824,8 +864,18 @@ truly-free self-host** product principle is retired; [`CLAUDE.md`](../CLAUDE.md)
 authoritative statement. Recorded in
 [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md).
 
-### PC.6 — Go-to-market / distribution · ❌ **NOT STARTED**
-Distribution kills solo ventures, not product gaps. The sub-track:
+### PC.6 — Go-to-market / distribution · 🔵 **IN PROGRESS (tooling + NGB application drafted 2026-06-11; the selling is founder work)**
+Distribution kills solo ventures, not product gaps. **Instrumented 2026-06-11:** the
+warm-first funnel now has an operational home on the operator console
+(`/operator/commercial`, backed by `commercial/pipeline.py`): a lead ledger by source
+(warm_local / referral / meet_presence / cold), a **cold-share readout** that flags when
+cold stops being the capped supplement, and a **referral-debt readout** listing every won
+club still owing its **2 named intros** (the 5 → 10 compounding mechanism). The Swim
+England approved-systems application is **drafted and submission-ready** at
+[`commercial/SWIM_ENGLAND_API_APPLICATION.md`](commercial/SWIM_ENGLAND_API_APPLICATION.md)
+(safeguarding/isolation evidence included), with its status tracked on the console
+(PC.6(a) — the founder must actually submit it). The clubs themselves cannot be built in
+code: the funnel below is the founder's motion, unchanged. The sub-track:
 - **Governing-body channel — split into two mechanisms with very different evidence (reality-checked 2026-06-09):**
   - **(a) Official data-API access — REAL, dated, the concrete first NGB action.** Swim England launched a secure **approved-systems API** (announced 1 Oct 2025) letting approved platforms read official swim times/PBs directly from its databases; initial partners are the club-admin platforms Swim Club Manager and Swim Manager, and it explicitly invites *“commercial organisations interested in benefiting from the Swim England API”* to apply, with *“more to follow in 2026”* toward a “connected digital eco-system.” Applying for approved access is high-confidence-available and strengthens the deterministic data moat + credibility — but it grants **data, not promotion.** *(>95% this step is correct/available; sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).)*
   - **(b) Promotional NGB endorsement to hundreds of clubs — DOWN-WEIGHTED to speculative.** No evidence any NGB promotes a third-party *content* tool to its member clubs. Swim England’s partner slots are **category-exclusive and already held** (SportsEngine = “preferred technology supplier” for swim schools; GoCardless = “Official Payments Partner”); the corporate-partner tier (Speedo, Sport England, SportsHotels) is sponsorship-based and slow. So “one deal reaches hundreds of clubs” is a *possibility, not the assumed highest-leverage channel.* **Threshold: if no NGB/region will pilot or promote after ~6 months, treat it as speculative and lean on direct + word-of-mouth.** This re-weighting reinforces **Route C** — the incumbents who already hold the endorsement *and* the official data integration are the realistic distribution partners. *([adr/0012](adr/0012-ngb-distribution-channel-reality-check.md).)*
@@ -986,8 +1036,8 @@ built around.
 | Investment | Status | Notes |
 |---|---|---|
 | No-hidden-fees discipline | ✅ enforced | The [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) register is now pinned by the Phase-0 guard suites (P0.3/P0.4/P0.5, 2026-06-10): every paid path stays optional with a free default, every AI surface admits a local provider, and no AGPL code can enter the process. |
-| Multi-tenancy: org → workspace | ❌ **blocking** | **Prerequisite for commercial scale (PC.3), not a nice-to-have** — single-instance-per-club can't scale. Cross-tenant isolation invariant shipped (the foundation only); generalise org → per-team workspace in one shared instance. Reference Postiz/Mixpost schemas over a network boundary (never embed AGPL). |
-| Go-to-market / distribution | ❌ not started | The build/sell imbalance is the #1 risk (PC.6): governing-body endorsement (Swim Wales / Swim England), annual prepay, and a deliberate build/sell rebalance. See [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). |
+| Multi-tenancy: org → workspace | ✅ shipped (2026-06-11) | **PC.3 done:** per-org membership binding in one shared instance (`web/tenancy.py`, `memberships.jsonl`, ADR-0014) on top of the ADR-0003 invariant; pinned by `tests/test_workspace_membership_invariant.py`. Postiz/Mixpost stayed reference-only — nothing embedded. |
+| Go-to-market / distribution | 🔵 instrumented; selling open | The build/sell imbalance is the #1 risk (PC.6): warm-first pipeline + referral-debt + cold-cap readouts and the drafted Swim England application now live on `/operator/commercial`; the founder's selling motion (and the ≥10-club gate) remains open. See [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). |
 | Safeguarding / minors' data | ✅ locked | Isolation invariant per [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md); applies with extra force to autonomous post types. |
 | Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions (gate verdicts, auto-approvals, publish attempts) land in the immutable per-org ledger (P2.3, 2026-06-11). |
 | Product design / UI polish | ❌ | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
@@ -1013,7 +1063,11 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    (PC.1), Stripe billing (PC.2), **true multi-tenancy** (PC.3), validated pricing with
    annual prepay (PC.4), the free-self-host call (PC.5, **resolved: hosted-only**), and GTM/distribution (PC.6).
    *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
-   **Nothing below ships ahead of this.** (Update 2026-06-09: PC.1 + PC.2 shipped and live; PC.3 is the remaining engineering item but its org->workspace schema needs operator/Council sign-off — see PC.3.)
+   **Nothing below ships ahead of this.** (Update 2026-06-11: the engineering is done —
+   PC.1 + PC.2 live, **PC.3 shipped** (Council-tested schema, ADR-0014), PC.4/PC.6
+   instrumented on `/operator/commercial`. What's left of Phase C is the founder's
+   selling motion: set `STRIPE_*`, pre-bind pilots, quote real prices, submit the Swim
+   England application, win the first 10 annual clubs.)
 2. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
    director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
    the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar

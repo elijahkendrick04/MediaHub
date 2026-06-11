@@ -75,6 +75,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import tenancy as _tenancy
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
 # the call sites that use them (see e.g. build_spotlight_pack, BrandKit), so
@@ -1640,8 +1641,32 @@ def _can_access_run(run_id: str, run_data: Optional[dict], active_pid: Optional[
         return True
     owner = _run_owner_id(run_id, run_data)
     if not owner:
-        return True
+        return _ownerless_run_readable()
     return owner == active_pid
+
+
+def _ownerless_run_readable() -> bool:
+    """Shared-instance blast-radius rule for ownerless legacy runs (ADR-0014).
+
+    "Runs with no owner stamped stay readable" was a single-org-box design
+    choice; on a shared multi-tenant instance the same rule would mean
+    "readable by any signed-in stranger". So: the env-gated operator and
+    legacy *anonymous* sessions (single-instance / pilot mode, where the
+    whole box is one trust domain) keep today's behaviour, while a
+    signed-in regular account — an actor that exists only in the shared-
+    instance world — is refused. Outside a request context (direct unit
+    calls) this stays permissive, preserving the original contract.
+    """
+    try:
+        from flask import has_request_context
+
+        if not has_request_context():
+            return True
+        if _auth.is_dev_operator():
+            return True
+        return _auth.current_user_email() is None
+    except Exception:
+        return True
 
 
 def _can_access_pack(rec: Optional[dict], active_pid: Optional[str]) -> bool:
@@ -7770,6 +7795,17 @@ def create_app() -> Flask:
             # the handlers themselves 404 unless MEDIAHUB_DEV_KEY is set.
             "developer_login",
             "developer_login_post",
+            # Phase C operator commercial console (PC.4/PC.6) — operator-only
+            # (404s unless MEDIAHUB_DEV_KEY is set, redirects non-operator
+            # sessions) and org-independent, so it bypasses the org gate
+            # exactly like the developer sign-in above.
+            "operator_commercial",
+            "operator_commercial_quote_add",
+            "operator_commercial_quote_update",
+            "operator_commercial_lead_add",
+            "operator_commercial_lead_update",
+            "operator_commercial_ngb",
+            "operator_commercial_bind",
             # /settings now redirects to / so doesn't actually need exempting,
             # but we keep the endpoint name in the allow-list so a directly-
             # hit /settings URL doesn't get caught by the gate before reaching
@@ -7834,6 +7870,48 @@ def create_app() -> Flask:
         session["active_profile_id"] = pid
         session["login_seen_at"] = int(time.time())
 
+    # ---- PC.3 workspace binding (ADR-0014) ------------------------------
+    # An org with ≥1 ACTIVE membership is "bound" — members-only at every
+    # pinning/editing surface. An org with zero active memberships behaves
+    # exactly as it always has (standalone/pilot mode), so deployments with
+    # no accounts are untouched. The env-gated operator bypasses all gates.
+
+    def _session_can_use_profile(pid: str) -> bool:
+        """May the CURRENT session pin / read-as-active / edit this org?"""
+        store = _tenancy.MembershipStore()
+        if not store.is_bound(pid):
+            return True
+        if _auth.is_dev_operator():
+            return True
+        email = _auth.current_user_email()
+        return bool(email and store.is_active_member(email, pid))
+
+    def _session_owns_profile(pid: str) -> bool:
+        """Operator, or an ACTIVE owner of a bound org (delete/member-admin)."""
+        if _auth.is_dev_operator():
+            return True
+        email = _auth.current_user_email()
+        return bool(email and _tenancy.MembershipStore().is_active_owner(email, pid))
+
+    def _bind_creator_if_signed_in(pid: str) -> None:
+        """A NEW org created by a signed-in regular user is born bound to its
+        creator as owner. Operator and anonymous creations stay unbound (the
+        pilot/concierge flow) — binding those is a deliberate invite, never a
+        side effect, so an edit can never 'grab' an existing open org."""
+        if _auth.is_dev_operator():
+            return
+        email = _auth.current_user_email()
+        if not email:
+            return
+        _tenancy.MembershipStore().add(
+            email,
+            pid,
+            role=_tenancy.ROLE_OWNER,
+            status=_tenancy.STATUS_ACTIVE,
+            invited_by=email,
+            invited_via_profile_id=pid,
+        )
+
     def _active_profile_id() -> Optional[str]:
         """Return the signed-in organisation id, or ``None``.
 
@@ -7871,6 +7949,13 @@ def create_app() -> Flask:
         if not prof:
             # Stale pin (the profile was deleted) — drop it and report
             # signed-out rather than guessing another org.
+            session.pop("active_profile_id", None)
+            session.pop("login_seen_at", None)
+            return None
+        if not _session_can_use_profile(prof.profile_id):
+            # PC.3 (ADR-0014): the org became members-only, or this
+            # session's membership was removed/logged out mid-session.
+            # Self-heal at the choke point every org-scoped surface reads.
             session.pop("active_profile_id", None)
             session.pop("login_seen_at", None)
             return None
@@ -9549,8 +9634,13 @@ def create_app() -> Flask:
             # /activity for the right tenant. Falls back to the upload
             # meta only if it carries a profile_id (older flows); modern
             # flows always come through the org-gated Create tab,
-            # so the session pin is the authoritative source.
-            profile_id = meta.get("profile_id") or _active_profile_id() or None
+            # so the session pin is the authoritative source. A meta id
+            # naming a bound workspace this session may not enter is
+            # ignored (PC.3) — never stamp a run into a foreign tenant.
+            meta_pid = (meta.get("profile_id") or "").strip()
+            if meta_pid and not _session_can_use_profile(meta_pid):
+                meta_pid = ""
+            profile_id = meta_pid or _active_profile_id() or None
             use_cache = bool(meta.get("use_cache", True))
             fetch_pbs = bool(meta.get("fetch_pbs", True))
             filename = meta.get("filename") or "upload.bin"
@@ -17126,7 +17216,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             action = (request.form.get("action") or "save").strip().lower()
             raw_id = (request.form.get("profile_id") or "default").strip().lower()
             profile_id = re.sub(r"[^a-z0-9_-]", "-", raw_id).strip("-") or "default"
-            existing = load_profile(profile_id) or ClubProfile(
+            _prior_profile = load_profile(profile_id)
+            _is_new_profile = _prior_profile is None
+            if _prior_profile is not None and not _session_can_use_profile(profile_id):
+                # PC.3: a bound org is editable by its members (or the
+                # operator) only, and answers like a nonexistent one.
+                abort(404)
+            existing = _prior_profile or ClubProfile(
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
             )
@@ -17447,6 +17543,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         "status": "error",
                     }
                 save_profile(existing)
+                if _is_new_profile:
+                    # PC.3: a workspace created by a signed-in user is born
+                    # bound to its creator (ADR-0014).
+                    _bind_creator_if_signed_in(existing.profile_id)
                 # Pin into session so the routing gate unlocks and so
                 # the next session lands on the same org.
                 _pin_active_profile(existing.profile_id)
@@ -17457,7 +17557,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             pid_pin = _active_profile_id()
             profile = load_profile(pid_pin) if pid_pin else None
             if profile is None:
-                profiles = list_profiles()
+                # PC.3: never pre-fill the form from a workspace this
+                # session couldn't enter — bound orgs' data must not leak
+                # into a foreign/anonymous editor view (ADR-0014).
+                profiles = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
                 profile = (
                     profiles[0] if profiles else ClubProfile(profile_id="default", display_name="")
                 )
@@ -17939,6 +18042,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </div>
 </form>
 """
+        # PC.3: workspace-membership teaser (outside the main form — it is
+        # its own page). Only rendered for an org that exists on disk.
+        if load_profile(profile.profile_id):
+            _ms = _tenancy.MembershipStore()
+            _n_members = len(
+                [
+                    m
+                    for m in _ms.list_for_profile(profile.profile_id)
+                    if m.status == _tenancy.STATUS_ACTIVE
+                ]
+            )
+            _bound_label = (
+                f"Members-only &middot; {_n_members} active member"
+                + ("s" if _n_members != 1 else "")
+                if _ms.is_bound(profile.profile_id)
+                else "Open workspace &mdash; becomes members-only when the first membership activates"
+            )
+            body += (
+                '<div class="card" style="margin-top:20px;padding:20px 24px">'
+                '<h2 style="margin-top:0;font-size:16px">Workspace members</h2>'
+                f'<p class="dim" style="font-size:13px;margin:0 0 12px">{_bound_label}.</p>'
+                f'<a class="btn secondary" href="{url_for("organisation_members_page")}">'
+                "Manage members &rarr;</a></div>"
+            )
         return _layout("Organisation", body, active="organisation")
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
@@ -18134,6 +18261,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 400,
             )
         _auth.login_user(user)
+        # PC.3 (ADR-0014): activate any operator-issued workspace invites for
+        # this email — the zero-founder-involvement first-claim path. The org
+        # binds the moment its invited owner signs up.
+        try:
+            _tenancy.MembershipStore().activate_invites(user.email)
+        except Exception:
+            log.warning("invite activation failed for a new account", exc_info=True)
         # Land new users on the create surface (Step 7: redirect to /add-input).
         return redirect(url_for("make_page"))
 
@@ -18267,6 +18401,510 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
             return redirect(nxt or url_for("make_page"))
         return _developer_login_page(error="Invalid developer key."), 401
+
+    # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
+    # Operator-only, exactly like /developer: the surface does not exist
+    # (404) unless MEDIAHUB_DEV_KEY is configured, and non-operator sessions
+    # are sent to the developer sign-in. It holds commercially sensitive
+    # data (quotes, pipeline) so it must never render for org users.
+
+    def _require_operator():
+        if not _auth.dev_login_enabled():
+            abort(404)
+        if not _auth.is_dev_operator():
+            return redirect(url_for("developer_login", next=url_for("operator_commercial")))
+        return None
+
+    def _op_flash(notice: str = "", error: str = "") -> None:
+        if notice:
+            session["op_notice"] = notice
+        if error:
+            session["op_error"] = error
+
+    def _pounds_to_pence(raw: str) -> int:
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            return int((Decimal((raw or "").strip().lstrip("£")) * 100).quantize(Decimal("1")))
+        except (InvalidOperation, ValueError):
+            return -1
+
+    def _pence_str(p) -> str:
+        return f"£{p / 100:,.2f}" if isinstance(p, int) and p >= 0 else "—"
+
+    @app.route("/operator/commercial")
+    def operator_commercial():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial import ngb as _ngb
+        from mediahub.commercial.pipeline import (
+            LeadStore,
+            VALID_SOURCES,
+            VALID_STATUSES as LEAD_STATUSES,
+            funnel_summary,
+            referral_debt,
+            warm_first_discipline,
+        )
+        from mediahub.commercial.wtp import QuoteStore, pc4_pricing_gate, traction_gate
+
+        notice = session.pop("op_notice", "")
+        error = session.pop("op_error", "")
+        quotes = QuoteStore().list_all()
+        leads = LeadStore().list_all()
+        pc4 = pc4_pricing_gate(quotes)
+        traction = traction_gate(quotes)
+        funnel = funnel_summary(leads)
+        discipline = warm_first_discipline(leads)
+        debt = referral_debt(leads)
+        ngb_state = _ngb.load_state()
+
+        def _gate_card(title, n, req, met, detail):
+            colour = "var(--good)" if met else "var(--warn)"
+            badge = "MET" if met else "OPEN"
+            return (
+                '<div class="card" style="padding:18px 22px;flex:1;min-width:260px">'
+                f'<h2 style="margin:0 0 6px;font-size:15px">{title}</h2>'
+                f'<div style="font-size:28px;font-weight:700">{n}<span '
+                f'style="font-size:15px;color:var(--ink-muted)"> / {req}</span> '
+                f'<span class="pill" style="color:{colour};border-color:{colour}">'
+                f"{badge}</span></div>"
+                f'<p class="dim" style="font-size:12px;margin:8px 0 0">{detail}</p></div>'
+            )
+
+        tested = ", ".join(_pence_str(p) for p in pc4["tested_prices_pence"]) or "none yet"
+        gates_html = (
+            '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:22px">'
+            + _gate_card(
+                "PC.4 pricing gate — publish a list price only when met",
+                pc4["paid_clubs"],
+                pc4["required"],
+                pc4["met"],
+                f"Distinct clubs paid annual at a tested price. Tested prices: {_h(tested)}. "
+                "Until met, /pricing stays at “Pricing TBC” (ADR-0011).",
+            )
+            + _gate_card(
+                "Traction gate — Phase C exit (gates P3/P4/P5)",
+                traction["paying_clubs"],
+                traction["required"],
+                traction["met"],
+                "Distinct clubs paying annually. No new sport before this is met.",
+            )
+            + "</div>"
+        )
+
+        # ---- quotes table ------------------------------------------------
+        q_rows = ""
+        for q in quotes:
+            status_colour = {
+                "paid": "var(--good)",
+                "payment_mismatch": "var(--bad, #f87171)",
+                "declined": "var(--ink-muted)",
+            }.get(q.status, "var(--warn)")
+            actions = (
+                f'<form method="post" action="{url_for("operator_commercial_quote_update")}" '
+                'style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+                f'<input type="hidden" name="quote_id" value="{_h(q.quote_id)}"/>'
+                '<button class="btn secondary" style="padding:3px 8px;font-size:11px" '
+                'name="op" value="accepted">Accepted</button>'
+                '<button class="btn secondary" style="padding:3px 8px;font-size:11px" '
+                'name="op" value="declined">Declined</button>'
+                '<button class="btn secondary" style="padding:3px 8px;font-size:11px" '
+                'name="op" value="checkout">Checkout link</button>'
+                '<span style="white-space:nowrap"><input name="paid_pounds" '
+                'placeholder="£ paid" style="width:70px;padding:3px 6px;font-size:11px"/>'
+                '<button class="btn secondary" style="padding:3px 8px;font-size:11px" '
+                'name="op" value="paid_manual">Record payment</button></span>'
+                "</form>"
+            )
+            link_html = (
+                f'<div style="font-size:10px;word-break:break-all;color:var(--ink-muted)">'
+                f"{_h(q.last_checkout_url)}</div>"
+                if q.last_checkout_url
+                else ""
+            )
+            paid_html = f"{_pence_str(q.paid_amount_pence)} ({_h(q.method)})" if q.method else "—"
+            q_rows += (
+                "<tr>"
+                f'<td style="padding:7px 10px">{_h(q.club_name)}'
+                f'<div style="font-size:11px;color:var(--ink-muted)">{_h(q.contact_email)}</div></td>'
+                f'<td style="padding:7px 10px">{_pence_str(q.amount_pence)}/yr</td>'
+                f'<td style="padding:7px 10px"><span class="pill" '
+                f'style="color:{status_colour};border-color:{status_colour}">'
+                f"{_h(q.status)}</span></td>"
+                f'<td style="padding:7px 10px">{paid_html}</td>'
+                f'<td style="padding:7px 10px">{actions}{link_html}</td>'
+                "</tr>"
+            )
+        if not q_rows:
+            q_rows = (
+                '<tr><td colspan="5" style="padding:12px;color:var(--ink-muted)">'
+                "No quotes yet — quote a real annual price to every prospect club "
+                "and record the outcome here.</td></tr>"
+            )
+        quotes_html = (
+            '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+            '<h2 style="margin-top:0;font-size:16px">Revealed-WTP quotes (PC.4)</h2>'
+            '<p class="dim" style="font-size:12px;margin:0 0 12px">'
+            "Vary the annual price across clubs; only a verified payment at the "
+            "quoted amount counts. “Checkout link” creates a Stripe Checkout at "
+            "exactly the quoted annual price (requires STRIPE_SECRET_KEY).</p>"
+            '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            '<thead><tr style="text-align:left;border-bottom:1px solid rgba(255,255,255,0.08)">'
+            "<th style='padding:7px 10px'>Club</th><th style='padding:7px 10px'>Quoted</th>"
+            "<th style='padding:7px 10px'>Status</th><th style='padding:7px 10px'>Paid</th>"
+            "<th style='padding:7px 10px'>Actions</th></tr></thead>"
+            f"<tbody>{q_rows}</tbody></table>"
+            f'<form method="post" action="{url_for("operator_commercial_quote_add")}" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">'
+            '<div><label style="font-size:11px">Club</label><br/>'
+            '<input name="club_name" required style="padding:6px 8px"/></div>'
+            '<div><label style="font-size:11px">Contact email</label><br/>'
+            '<input name="contact_email" type="email" style="padding:6px 8px"/></div>'
+            '<div><label style="font-size:11px">Annual price (£)</label><br/>'
+            '<input name="pounds" required placeholder="588" style="padding:6px 8px;width:90px"/></div>'
+            '<div><label style="font-size:11px">Notes</label><br/>'
+            '<input name="notes" style="padding:6px 8px;min-width:200px"/></div>'
+            '<button class="btn" type="submit">Add quote</button></form></div>'
+        )
+
+        # ---- pipeline ------------------------------------------------------
+        src_counts = (
+            " &middot; ".join(f"{_h(k)}: {v}" for k, v in funnel["by_source"].items() if v)
+            or "none"
+        )
+        status_counts = (
+            " &middot; ".join(f"{_h(k)}: {v}" for k, v in funnel["by_status"].items() if v)
+            or "none"
+        )
+        discipline_html = (
+            f'<p class="tag bad" style="margin:8px 0 0">Cold share '
+            f"{discipline['cold_share']:.0%} exceeds the capped-supplement threshold "
+            f"({discipline['threshold']:.0%}) — the gate is reached warm + referral, "
+            "not cold broadcast.</p>"
+            if discipline["warn"]
+            else (
+                f'<p class="dim" style="font-size:12px;margin:8px 0 0">Cold share '
+                f"{discipline['cold_share']:.0%} (capped-supplement threshold "
+                f"{discipline['threshold']:.0%}).</p>"
+            )
+        )
+        debt_html = ""
+        if debt:
+            items = "".join(
+                f"<li>{_h(d['club_name'])} — {d['intros_recorded']}/2 intros recorded</li>"
+                for d in debt
+            )
+            debt_html = (
+                '<p class="tag warn" style="margin:10px 0 4px">Referral debt — ask each '
+                f"signed club for 2 named intros:</p><ul style='font-size:12px'>{items}</ul>"
+            )
+        l_rows = ""
+        for lead in leads:
+            sel = "".join(
+                f'<option value="{s}"{" selected" if s == lead.status else ""}>{s}</option>'
+                for s in sorted(LEAD_STATUSES)
+            )
+            l_rows += (
+                "<tr>"
+                f'<td style="padding:7px 10px">{_h(lead.club_name)}'
+                f'<div style="font-size:11px;color:var(--ink-muted)">{_h(lead.region)}</div></td>'
+                f'<td style="padding:7px 10px">{_h(lead.source)}'
+                + (
+                    f'<div style="font-size:11px;color:var(--ink-muted)">via {_h(lead.referrer_club)}</div>'
+                    if lead.referrer_club
+                    else ""
+                )
+                + "</td>"
+                f'<td style="padding:7px 10px">'
+                f'<form method="post" action="{url_for("operator_commercial_lead_update")}" '
+                'style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+                f'<input type="hidden" name="lead_id" value="{_h(lead.lead_id)}"/>'
+                f'<select name="status" style="padding:3px 6px;font-size:11px">{sel}</select>'
+                f'<input name="intros" placeholder="2 named intros, comma-sep" '
+                f'value="{_h(", ".join(lead.intros))}" style="padding:3px 6px;font-size:11px;min-width:170px"/>'
+                '<button class="btn secondary" style="padding:3px 8px;font-size:11px">Update</button>'
+                "</form></td></tr>"
+            )
+        if not l_rows:
+            l_rows = (
+                '<tr><td colspan="3" style="padding:12px;color:var(--ink-muted)">'
+                "No leads yet — start with the local-warm Swansea / South-East-Wales "
+                "base, then compound through referrals.</td></tr>"
+            )
+        src_options = "".join(f'<option value="{s}">{s}</option>' for s in sorted(VALID_SOURCES))
+        pipeline_html = (
+            '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+            '<h2 style="margin-top:0;font-size:16px">Warm-first pipeline (PC.6)</h2>'
+            f'<p class="dim" style="font-size:12px;margin:0">Sources — {src_counts}</p>'
+            f'<p class="dim" style="font-size:12px;margin:4px 0 0">Stages — {status_counts}</p>'
+            + discipline_html
+            + debt_html
+            + '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'
+            '<thead><tr style="text-align:left;border-bottom:1px solid rgba(255,255,255,0.08)">'
+            "<th style='padding:7px 10px'>Club</th><th style='padding:7px 10px'>Source</th>"
+            "<th style='padding:7px 10px'>Stage / intros</th></tr></thead>"
+            f"<tbody>{l_rows}</tbody></table>"
+            f'<form method="post" action="{url_for("operator_commercial_lead_add")}" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">'
+            '<div><label style="font-size:11px">Club</label><br/>'
+            '<input name="club_name" required style="padding:6px 8px"/></div>'
+            '<div><label style="font-size:11px">Region</label><br/>'
+            '<input name="region" placeholder="Swansea" style="padding:6px 8px;width:110px"/></div>'
+            '<div><label style="font-size:11px">Source</label><br/>'
+            f'<select name="source" style="padding:6px 8px">{src_options}</select></div>'
+            '<div><label style="font-size:11px">Referrer (if referral)</label><br/>'
+            '<input name="referrer_club" style="padding:6px 8px"/></div>'
+            '<button class="btn" type="submit">Add lead</button></form></div>'
+        )
+
+        # ---- NGB + workspace binding --------------------------------------
+        ngb_opts = "".join(
+            f'<option value="{s}"{" selected" if s == ngb_state["status"] else ""}>{s}</option>'
+            for s in _ngb.VALID_STATUSES
+        )
+        ngb_html = (
+            '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+            '<h2 style="margin-top:0;font-size:16px">Swim England approved-systems API (PC.6a)</h2>'
+            '<p class="dim" style="font-size:12px;margin:0 0 10px">'
+            "Official data-API access is real — apply (ADR-0012). It grants data + "
+            "credibility, not promotion. Application draft: "
+            f"<code style='font-size:11px'>{_h(_ngb.APPLICATION_DOC)}</code>"
+            + (
+                f" &middot; applied {_h(ngb_state['applied_at'])}"
+                if ngb_state["applied_at"]
+                else ""
+            )
+            + "</p>"
+            f'<form method="post" action="{url_for("operator_commercial_ngb")}" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+            '<div><label style="font-size:11px">Status</label><br/>'
+            f'<select name="status" style="padding:6px 8px">{ngb_opts}</select></div>'
+            '<div><label style="font-size:11px">Notes</label><br/>'
+            f'<input name="notes" value="{_h(ngb_state["notes"])}" '
+            'style="padding:6px 8px;min-width:260px"/></div>'
+            '<button class="btn secondary" type="submit">Save</button></form></div>'
+        )
+
+        ms = _tenancy.MembershipStore()
+        org_rows = ""
+        for p in list_profiles():
+            members = ms.list_for_profile(p.profile_id)
+            active_n = sum(1 for m in members if m.status == _tenancy.STATUS_ACTIVE)
+            invited = [m for m in members if m.status == _tenancy.STATUS_INVITED]
+            state = (
+                f"bound &middot; {active_n} member" + ("s" if active_n != 1 else "")
+                if ms.is_bound(p.profile_id)
+                else "open (unbound)"
+            )
+            inv = (
+                '<div style="font-size:11px;color:var(--warn)">invited: '
+                + ", ".join(_h(m.email) for m in invited)
+                + "</div>"
+                if invited
+                else ""
+            )
+            org_rows += (
+                "<tr>"
+                f'<td style="padding:7px 10px">{_h(p.display_name)} '
+                f'<span style="font-size:11px;color:var(--ink-muted)">({_h(p.profile_id)})</span></td>'
+                f'<td style="padding:7px 10px">{state}{inv}</td>'
+                "</tr>"
+            )
+        bind_html = (
+            '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+            '<h2 style="margin-top:0;font-size:16px">Workspace binding (PC.3)</h2>'
+            '<p class="dim" style="font-size:12px;margin:0 0 10px">'
+            "Pre-bind each pilot club's contact email as an invited owner — the org "
+            "stays open until that email signs up, then becomes members-only with "
+            "zero further founder involvement (ADR-0014).</p>"
+            '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+            f"<tbody>{org_rows or ''}</tbody></table>"
+            f'<form method="post" action="{url_for("operator_commercial_bind")}" '
+            'style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">'
+            '<div><label style="font-size:11px">Profile id</label><br/>'
+            '<input name="profile_id" required placeholder="org-slug" style="padding:6px 8px"/></div>'
+            '<div><label style="font-size:11px">Owner email</label><br/>'
+            '<input name="email" type="email" required style="padding:6px 8px"/></div>'
+            '<button class="btn" type="submit">Invite as owner</button></form></div>'
+        )
+
+        flash_html = ""
+        if notice:
+            flash_html += f'<p class="tag good" style="margin-bottom:14px">{_h(notice)}</p>'
+        if error:
+            flash_html += f'<p class="tag bad" style="margin-bottom:14px">{_h(error)}</p>'
+        body = (
+            "<h1>Commercial console</h1>"
+            '<p class="lede" style="margin-bottom:var(--sp-6)">Phase C sell-side: '
+            "revealed-WTP price discovery, the warm-first funnel, the NGB data-API "
+            "application, and pilot workspace binding. Operator-only.</p>"
+            + flash_html
+            + gates_html
+            + quotes_html
+            + pipeline_html
+            + ngb_html
+            + bind_html
+        )
+        return _layout("Commercial console", body, active="")
+
+    @app.route("/operator/commercial/quotes", methods=["POST"])
+    def operator_commercial_quote_add():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial.wtp import QuoteError, QuoteStore
+
+        pence = _pounds_to_pence(request.form.get("pounds") or "")
+        try:
+            if pence <= 0:
+                raise QuoteError("Enter the annual price in pounds, e.g. 588 or 49.50.")
+            q = QuoteStore().create(
+                request.form.get("club_name") or "",
+                pence,
+                contact_email=request.form.get("contact_email") or "",
+                notes=request.form.get("notes") or "",
+            )
+            _op_flash(notice=f"Quoted {_pence_str(q.amount_pence)}/yr to {q.club_name}.")
+        except QuoteError as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
+
+    @app.route("/operator/commercial/quotes/update", methods=["POST"])
+    def operator_commercial_quote_update():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial.wtp import QuoteError, QuoteStore
+
+        store = QuoteStore()
+        quote_id = (request.form.get("quote_id") or "").strip()
+        op = (request.form.get("op") or "").strip().lower()
+        try:
+            if op in ("accepted", "declined"):
+                q = store.set_status(quote_id, op)
+                _op_flash(notice=f"{q.club_name}: {q.status}.")
+            elif op == "paid_manual":
+                pence = _pounds_to_pence(request.form.get("paid_pounds") or "")
+                if pence <= 0:
+                    raise QuoteError("Enter the amount actually paid (in pounds).")
+                q = store.record_manual_payment(quote_id, amount_pence=pence)
+                _op_flash(
+                    notice=(
+                        f"{q.club_name}: payment recorded — {q.status} "
+                        f"({_pence_str(q.paid_amount_pence)} vs quoted {_pence_str(q.amount_pence)})."
+                    )
+                )
+            elif op == "checkout":
+                q = store.get(quote_id)
+                if q is None:
+                    raise QuoteError("No such quote.")
+                if not _billing.billing_configured():
+                    raise QuoteError(
+                        "Billing is not configured (set STRIPE_SECRET_KEY) — "
+                        "record the payment manually instead."
+                    )
+                url = _billing.create_quote_checkout_session(
+                    quote_id=q.quote_id,
+                    club_name=q.club_name,
+                    amount_pence=q.amount_pence,
+                    currency=q.currency,
+                    customer_email=q.contact_email,
+                    success_url=url_for("signup_page", _external=True),
+                    cancel_url=url_for("pricing_page", _external=True),
+                )
+                store.set_checkout_url(q.quote_id, url)
+                _op_flash(notice=f"Checkout link created for {q.club_name} — copy it below.")
+            else:
+                raise QuoteError("Unknown quote action.")
+        except (_billing.BillingError, QuoteError) as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
+
+    @app.route("/operator/commercial/leads", methods=["POST"])
+    def operator_commercial_lead_add():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial.pipeline import LeadStore, PipelineError
+
+        try:
+            lead = LeadStore().create(
+                request.form.get("club_name") or "",
+                source=request.form.get("source") or "",
+                region=request.form.get("region") or "",
+                referrer_club=request.form.get("referrer_club") or "",
+            )
+            _op_flash(notice=f"Lead added: {lead.club_name} ({lead.source}).")
+        except PipelineError as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
+
+    @app.route("/operator/commercial/leads/update", methods=["POST"])
+    def operator_commercial_lead_update():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial.pipeline import LeadStore, PipelineError
+
+        store = LeadStore()
+        lead_id = (request.form.get("lead_id") or "").strip()
+        try:
+            lead = store.set_status(lead_id, request.form.get("status") or "")
+            intros_raw = request.form.get("intros")
+            if intros_raw is not None:
+                store.set_intros(lead_id, [s for s in intros_raw.split(",")])
+            _op_flash(notice=f"{lead.club_name}: updated.")
+        except PipelineError as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
+
+    @app.route("/operator/commercial/ngb", methods=["POST"])
+    def operator_commercial_ngb():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.commercial import ngb as _ngb
+
+        try:
+            state = _ngb.save_state(
+                request.form.get("status") or "", notes=request.form.get("notes") or ""
+            )
+            _op_flash(notice=f"NGB application: {state['status']}.")
+        except ValueError as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
+
+    @app.route("/operator/commercial/bind", methods=["POST"])
+    def operator_commercial_bind():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        pid = (request.form.get("profile_id") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        if not load_profile(pid):
+            _op_flash(error=f"No profile with id '{pid}'.")
+            return redirect(url_for("operator_commercial"))
+        try:
+            has_account = _user_store().get(email) is not None
+            m = _tenancy.MembershipStore().add(
+                email,
+                pid,
+                role=_tenancy.ROLE_OWNER,
+                status=(_tenancy.STATUS_ACTIVE if has_account else _tenancy.STATUS_INVITED),
+                invited_by=_auth._dev_operator_email(),
+                invited_via_profile_id=pid,
+            )
+            _op_flash(
+                notice=(
+                    f"{m.email} bound as owner of {pid}."
+                    if m.status == _tenancy.STATUS_ACTIVE
+                    else (f"{m.email} invited as owner of {pid} — binds when they sign up.")
+                )
+            )
+        except _tenancy.TenancyError as exc:
+            _op_flash(error=str(exc))
+        return redirect(url_for("operator_commercial"))
 
     # ---- /pricing -----------------------------------------------------
     @app.route("/pricing", methods=["GET"])
@@ -18564,6 +19202,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # A verified event we simply don't act on.
             return jsonify({"ok": True, "handled": False}), 200
 
+        # PC.4: a checkout that originated from a price-discovery quote
+        # records revealed-WTP evidence FIRST — the prospect may well not
+        # have an account yet, and the quote ledger must capture the
+        # payment either way. record_stripe_payment is idempotent per
+        # event and verifies the paid amount against the quoted amount
+        # (an unverified figure is stored as a mismatch, never counted).
+        if update.quote_id:
+            try:
+                from mediahub.commercial.wtp import QuoteStore
+
+                QuoteStore().record_stripe_payment(
+                    update.quote_id,
+                    amount_total_pence=update.amount_total_pence,
+                    currency=update.currency,
+                    event_id=update.event_id,
+                )
+            except Exception:
+                log.warning("quote payment recording failed", exc_info=True)
+
         store = _user_store()
         target = None
         if update.email:
@@ -18595,7 +19252,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # button on the pinned-state hero links here too.
     @app.route("/sign-in", methods=["GET"])
     def sign_in_page():
-        profiles = list_profiles()
+        # PC.3: the picker only offers workspaces this session may enter —
+        # bound orgs are invisible to non-members (ADR-0014).
+        profiles = [p for p in list_profiles() if _session_can_use_profile(p.profile_id)]
         current_id = _active_profile_id() or ""
 
         # No profiles yet — render an honest empty state with a clear
@@ -18755,7 +19414,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             session["sign_in_error"] = "Pick an organisation before signing in."
             return redirect(url_for("sign_in_page"))
         prof = load_profile(pid)
-        if prof is None:
+        if prof is None or not _session_can_use_profile(prof.profile_id):
+            # Same message for "doesn't exist" and "members-only" so the
+            # picker can't be used to probe which orgs exist (ADR-0014).
             session["sign_in_error"] = (
                 f"Couldn't find a profile with id '{pid}'. " "It may have been deleted."
             )
@@ -18780,6 +19441,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         pid = (request.form.get("profile_id") or "").strip()
         if not pid:
             return redirect(url_for("sign_in_page"))
+        if _tenancy.MembershipStore().is_bound(pid) and not _session_owns_profile(pid):
+            # Deleting a bound workspace is owner/operator-only (ADR-0014);
+            # silently bounce — the picker never offered it to this session.
+            return redirect(url_for("sign_in_page"))
         from .club_profile import _profiles_dir
 
         p = _profiles_dir() / f"{pid}.json"
@@ -18791,6 +19456,171 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if _active_profile_id() == pid:
             session.pop("active_profile_id", None)
         return redirect(url_for("sign_in_page"))
+
+    # ---- /organisation/members — PC.3 workspace membership (ADR-0014) ----
+    @app.route("/organisation/members", methods=["GET", "POST"])
+    def organisation_members_page():
+        """Who can sign in to the active workspace.
+
+        Owners (and the operator) add members by email — if the email has no
+        account yet the row sits ``invited`` and activates itself at signup
+        (no email-sending; the owner shares the signup link out-of-band).
+        On an unbound (open) workspace only the operator can seed the first
+        membership, which is what turns it members-only.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        store = _tenancy.MembershipStore()
+        user_email = _auth.current_user_email()
+        is_operator = _auth.is_dev_operator()
+        can_admin = is_operator or bool(user_email and store.is_active_owner(user_email, pid))
+
+        notice, error = "", ""
+        if request.method == "POST":
+            if not can_admin:
+                abort(404)  # same anti-enumeration posture as the other gates
+            action = (request.form.get("action") or "").strip().lower()
+            target = (request.form.get("email") or "").strip()
+            try:
+                if action == "add":
+                    role = (request.form.get("role") or _tenancy.ROLE_MEMBER).strip().lower()
+                    has_account = _user_store().get(target) is not None
+                    inviter = user_email or _auth._dev_operator_email()
+                    m = store.add(
+                        target,
+                        pid,
+                        role=role,
+                        status=(_tenancy.STATUS_ACTIVE if has_account else _tenancy.STATUS_INVITED),
+                        invited_by=inviter,
+                        invited_via_profile_id=pid,
+                    )
+                    notice = (
+                        f"{m.email} added as {m.role}."
+                        if m.status == _tenancy.STATUS_ACTIVE
+                        else (
+                            f"{m.email} invited as {m.role} — the membership "
+                            "activates when they sign up with that email."
+                        )
+                    )
+                elif action == "remove":
+                    store.remove(target, pid)
+                    notice = f"{_tenancy.normalize_email(target)} removed."
+                else:
+                    error = "Unknown action."
+            except _tenancy.TenancyError as exc:
+                error = str(exc)
+
+        rows = store.list_for_profile(pid)
+        bound = store.is_bound(pid)
+        prof = _active_profile()
+        org_name = _h(prof.display_name if prof else pid)
+
+        def _row_html(m):
+            role_badge = "Owner" if m.role == _tenancy.ROLE_OWNER else "Member"
+            status_badge = {
+                _tenancy.STATUS_ACTIVE: '<span class="pill">Active</span>',
+                _tenancy.STATUS_INVITED: (
+                    '<span class="pill" style="background:rgba(245,158,11,0.10);'
+                    'border-color:rgba(245,158,11,0.30);color:var(--warn)">'
+                    "Invited — activates at signup</span>"
+                ),
+            }.get(m.status, "")
+            remove_html = ""
+            if can_admin:
+                remove_html = (
+                    f'<form method="post" action="{url_for("organisation_members_page")}" '
+                    'style="display:inline">'
+                    '<input type="hidden" name="action" value="remove"/>'
+                    f'<input type="hidden" name="email" value="{_h(m.email)}"/>'
+                    '<button type="submit" class="btn secondary" '
+                    'style="padding:4px 10px;font-size:12px">Remove</button></form>'
+                )
+            return (
+                "<tr>"
+                f'<td style="padding:8px 12px">{_h(m.email)}</td>'
+                f'<td style="padding:8px 12px">{role_badge}</td>'
+                f'<td style="padding:8px 12px">{status_badge}</td>'
+                f'<td style="padding:8px 12px;font-size:12px;color:var(--ink-muted)">'
+                f"{_h(m.invited_by or '')}</td>"
+                f'<td style="padding:8px 12px;text-align:right">{remove_html}</td>'
+                "</tr>"
+            )
+
+        rows_html = "".join(_row_html(m) for m in rows) or (
+            '<tr><td colspan="5" style="padding:14px 12px;color:var(--ink-muted)">'
+            "No members yet.</td></tr>"
+        )
+        if bound:
+            state_html = (
+                '<p class="lede" style="margin-bottom:var(--sp-6)">'
+                f"<strong>{org_name}</strong> is a members-only workspace: only the "
+                "people below (and the deployment operator) can sign in to it."
+                "</p>"
+            )
+        else:
+            state_html = (
+                '<p class="lede" style="margin-bottom:var(--sp-6)">'
+                f"<strong>{org_name}</strong> is currently an <strong>open</strong> "
+                "workspace (no active members), so any session on this deployment "
+                "can use it — the pre-multi-tenant behaviour. It becomes "
+                "members-only the moment its first membership activates."
+                "</p>"
+            )
+        add_form_html = ""
+        if can_admin:
+            add_form_html = (
+                '<div class="card" style="padding:20px 24px;margin-top:18px">'
+                '<h2 style="margin-top:0;font-size:16px">Add a member</h2>'
+                f'<form method="post" action="{url_for("organisation_members_page")}" '
+                'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+                '<input type="hidden" name="action" value="add"/>'
+                '<div><label>Email</label><br/>'
+                '<input type="email" name="email" required placeholder="coach@club.org" '
+                'style="padding:8px 10px;min-width:260px"/></div>'
+                "<div><label>Role</label><br/>"
+                '<select name="role" style="padding:8px 10px">'
+                '<option value="member">Member</option>'
+                '<option value="owner">Owner</option>'
+                "</select></div>"
+                '<button type="submit" class="btn">Add member</button>'
+                "</form>"
+                '<p class="dim" style="font-size:12px;margin:10px 0 0">'
+                "No account with that email yet? The membership is saved as an "
+                "invite and activates automatically when they sign up."
+                "</p></div>"
+            )
+        elif not is_operator and not user_email:
+            add_form_html = (
+                '<p class="dim" style="font-size:13px;margin-top:14px">'
+                f'<a href="{url_for("login_page")}" style="color:var(--accent)">Log in</a> '
+                "as a workspace owner to manage members."
+                "</p>"
+            )
+        flash_html = ""
+        if notice:
+            flash_html = f'<p class="tag good" style="margin-bottom:16px">{_h(notice)}</p>'
+        if error:
+            flash_html += f'<p class="tag bad" style="margin-bottom:16px">{_h(error)}</p>'
+        body = (
+            "<h1>Workspace members</h1>"
+            + state_html
+            + flash_html
+            + '<div class="card" style="padding:0;overflow:hidden">'
+            '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            '<thead><tr style="text-align:left;border-bottom:1px solid '
+            'rgba(255,255,255,0.08)">'
+            '<th style="padding:10px 12px">Email</th>'
+            '<th style="padding:10px 12px">Role</th>'
+            '<th style="padding:10px 12px">Status</th>'
+            '<th style="padding:10px 12px">Invited by</th>'
+            "<th></th></tr></thead>"
+            f"<tbody>{rows_html}</tbody></table></div>"
+            + add_form_html
+            + f'<p style="margin-top:18px"><a class="btn secondary" '
+            f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
+        )
+        return _layout("Workspace members", body, active="organisation")
 
     # into session so the user never sees this page again unless they
     # ask to re-run it.
@@ -19945,12 +20775,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # genuinely collides with a DIFFERENT organisation, so we
             # never clobber someone else's profile.
             slug_match = load_profile(profile_id)
-            if (
-                slug_match is not None
-                and slug_match.display_name.strip().lower() != display_name.lower()
+            if slug_match is not None and (
+                slug_match.display_name.strip().lower() != display_name.lower()
+                or not _session_can_use_profile(profile_id)
             ):
+                # Different organisation under this slug — or a bound
+                # workspace this session may not touch (PC.3): either way,
+                # set up a fresh profile instead of clobbering it.
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
 
+        _setup_is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
             profile_id=profile_id,
             display_name=display_name,
@@ -20232,6 +21066,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             }
 
         save_profile(prof)
+        if _setup_is_new_profile:
+            # PC.3: setup-created workspaces bind to their signed-in creator.
+            _bind_creator_if_signed_in(prof.profile_id)
         _pin_active_profile(prof.profile_id)
         return redirect(url_for("organisation_setup"))
 
@@ -20556,7 +21393,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             if not pid and request.is_json:
                 body = request.get_json(silent=True) or {}
                 pid = str(body.get("profile_id") or "").strip()
-            if not pid or not load_profile(pid):
+            if not pid or not load_profile(pid) or not _session_can_use_profile(pid):
+                # A bound org answers exactly like a nonexistent one to
+                # non-members (anti-enumeration — ADR-0014).
                 return jsonify({"ok": False, "error": "unknown_profile"}), 404
             _pin_active_profile(pid)
             return jsonify({"ok": True, "profile_id": pid})
