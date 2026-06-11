@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `3abec31bd` · Merge pull request #327 from elijahkendrick04/claude/inspiring-ritchie-9tj6d3
+**Last updated:** 2026-06-11 · `d9d02e1ea` · Merge pull request #333 from elijahkendrick04/claude/inspiring-ritchie-9tj6d3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,8 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
+| 2026-06-11 | `42ae68f42` | fix: a11y: Documents must have <title> element to aid in navigati (#332) |
 | 2026-06-11 | `745653965` | Format main's healthz a11y block (ruff 0.8.4) after merging origin/main |
 | 2026-06-11 | `99f3c4601` | Apply ruff 0.8.4 formatting to the files this PR touches (CI hygiene hook) |
 | 2026-06-11 | `281782cc4` | Fix double-wrapped error responses in spotlight caption composer |
@@ -39,8 +41,6 @@ in any commit message to move an item:
 | 2026-06-11 | `b99e85941` | Homepage: centre hero + section titles, drop trust strip, calm fonts, neutral demo copy |
 | 2026-06-11 | `f46f2c602` | Fix spinners site-wide, async reel rendering, logo precedence, PB audit, approve-only review |
 | 2026-06-11 | `582e36e8b` | fix: a11y: Documents must have <title> element to aid in navigati |
-| 2026-06-11 | `4a2331275` | autotest: refresh bug report [skip ci] |
-| 2026-06-11 | `45aa7f2c9` | fix: a11y: Documents must have <title> element to aid in navigati |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
