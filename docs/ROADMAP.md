@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `3c6c67f4b` · Merge pull request #317 from elijahkendrick04/claude/gracious-carson-hdz1bt
+**Last updated:** 2026-06-11 · `3e236b960` · Merge pull request #319 from elijahkendrick04/claude/vigilant-sagan-vhxni1
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `c627fd4f7` | chore(docs): delete stale V-era build reports and one-time migration audits |
 | 2026-06-11 | `302f11464` | feat(p2): complete Phase 2 — approval signal, single publish gate, guardrails, enum reconciliation |
 | 2026-06-11 | `5ac99091f` | style: apply pre-commit hygiene (ruff-format 0.8.4) to PR-touched files |
 | 2026-06-11 | `e31aaa362` | feat(p1): complete Phase 1 — slug-canonical taxonomy, cross-source planner, local brand-DNA |
@@ -39,7 +40,6 @@ in any commit message to move an item:
 | 2026-06-10 | `c6aea1433` | fix: a11y: Documents must have <title> element to aid in navigati |
 | 2026-06-10 | `c3f58776d` | autotest: refresh bug report [skip ci] |
 | 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
-| 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
