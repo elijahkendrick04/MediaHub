@@ -3,11 +3,16 @@
  * MediaHub Remotion CLI entrypoint.
  *
  * Usage:
- *   node render.js --composition <id> --props <path-to-props.json> --output <path-to-output.mp4> [--duration <seconds>]
+ *   node render.js --composition <id> --props <path-to-props.json> --output <path-to-output.mp4> [--duration <seconds>] [--width <px>] [--height <px>]
  *
  * Compositions:
  *   StoryCard  — 1080x1920 @ 30fps, default 6s.
  *   MeetReel   — 1080x1920 @ 30fps, default 15s.
+ *
+ * --width/--height override the composition's declared canvas so the same
+ * composition renders the story (1080x1920), square (1080x1080) and
+ * landscape (1920x1080) cuts; the TSX lays out responsively from
+ * useVideoConfig().
  *
  * Exits 0 on success, non-zero on any error with the error message on stderr.
  *
@@ -42,6 +47,8 @@ async function main() {
   const propsPath = args.props;
   const outputPath = args.output;
   const durationSec = args.duration ? parseFloat(args.duration) : null;
+  const widthPx = args.width ? parseInt(args.width, 10) : null;
+  const heightPx = args.height ? parseInt(args.height, 10) : null;
 
   if (!compositionId || !propsPath || !outputPath) {
     console.error(
@@ -98,14 +105,18 @@ async function main() {
   if (durationSec) {
     durationInFrames = Math.max(1, Math.round(durationSec * composition.fps));
   }
+  const width = widthPx && widthPx > 0 ? widthPx : composition.width;
+  const height = heightPx && heightPx > 0 ? heightPx : composition.height;
 
   console.error(
-    `[remotion] rendering ${compositionId} (${composition.width}x${composition.height} @ ${composition.fps}fps × ${durationInFrames} frames)`,
+    `[remotion] rendering ${compositionId} (${width}x${height} @ ${composition.fps}fps × ${durationInFrames} frames)`,
   );
   await renderMedia({
     composition: {
       ...composition,
       durationInFrames,
+      width,
+      height,
     },
     serveUrl,
     codec: "h264",

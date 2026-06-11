@@ -83,10 +83,11 @@ def _render_reel_capture(tmp_path, monkeypatch, cards, **kwargs):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     captured: dict = {}
 
-    def _fake_run(*, composition_id, props, out_path, duration_sec=None, timeout=600):
+    def _fake_run(*, composition_id, props, out_path, duration_sec=None, size=None, timeout=600):
         captured["composition_id"] = composition_id
         captured["props"] = props
         captured["duration_sec"] = duration_sec
+        captured["size"] = size
         out = Path(out_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"0" * 2048)  # > the 1KB sanity floor
@@ -153,11 +154,20 @@ def test_card_props_without_brief_keep_archetype_empty():
 
 
 def test_tsx_compositions_declare_the_forwarded_fields():
-    """zod strips undeclared keys — both compositions must declare them."""
-    for name in ("StoryCard.tsx", "MeetReel.tsx"):
-        src = (motion.REMOTION_DIR / "src" / "compositions" / name).read_text()
-        assert "archetype" in src, name
-        assert "heroStat" in src, name
+    """zod strips undeclared keys — every forwarded card prop must be declared.
+
+    StoryCard owns the single card schema; MeetReel must IMPORT that shared
+    schema (rather than re-declare its own copy) so a field added for the
+    story can never be silently stripped on its reel beat.
+    """
+    story = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    for field in ("archetype", "heroStat", "motionIntent", "photoPos",
+                  "roleGround", "roleSurface", "roleAccent", "roleOnGround"):
+        assert field in story, field
+    reel = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text()
+    assert "cardSchema" in reel and 'from "./StoryCard"' in reel, (
+        "MeetReel must reuse StoryCard's exported cardSchema"
+    )
 
 
 # ---------------------------------------------------------------------------

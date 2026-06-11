@@ -2716,9 +2716,27 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
 }
 
 // Motion-graphic generation: lazy, cached server-side. Streams the resulting
-// MP4 into an inline <video> on the card panel.
+// MP4 into an inline <video> on the card panel. fmt picks the output cut
+// (story 9:16 default, square 1:1, landscape 16:9) \u2014 same card facts, same
+// brand, re-laid-out per platform.
 var _motionCache = {};
-function generateMotion(btn, motionUrl, cardId) {
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'};
+function _motionFmtChips(motionUrl, cardId, active) {
+  var out = '';
+  ['story', 'square', 'landscape'].forEach(function(f) {
+    var label = f.charAt(0).toUpperCase() + f.slice(1);
+    if (f === active) {
+      out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
+    } else {
+      out += '<button class="btn secondary" style="font-size:11px;padding:4px 10px" onclick=' +
+        _attrEsc('generateMotion(this, ' + JSON.stringify(motionUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(f) + ')') +
+        '>' + label + '</button>';
+    }
+  });
+  return out;
+}
+function generateMotion(btn, motionUrl, cardId, fmt) {
+  fmt = fmt || 'story';
   var panel = document.querySelector('.motion-panel[data-card="' + cardId + '"]');
   if (!panel) return;
   panel.style.display = '';
@@ -2727,8 +2745,9 @@ function generateMotion(btn, motionUrl, cardId) {
   btn.textContent = 'Rendering motion\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
-  fetch(motionUrl, {method:'POST'})
+    'Rendering ' + fmt + ' motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
+  var fetchUrl = motionUrl + (fmt !== 'story' ? (motionUrl.indexOf('?') === -1 ? '?' : '&') + 'format=' + encodeURIComponent(fmt) : '');
+  fetch(fetchUrl, {method:'POST'})
     .then(function(r) {
       if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
         return r.blob().then(function(b) { return {ok:true, blob:b}; });
@@ -2747,17 +2766,19 @@ function generateMotion(btn, motionUrl, cardId) {
         return;
       }
       var url = URL.createObjectURL(res.blob);
-      _motionCache[cardId] = url;
+      _motionCache[cardId + ':' + fmt] = url;
+      var vidCol = fmt === 'landscape' ? 'flex:0 0 300px;max-width:320px' : 'flex:0 0 200px;max-width:220px';
       panel.innerHTML =
         '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 200px;max-width:220px">' +
+          '<div style="' + vidCol + '">' +
             '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
           '</div>' +
           '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; 1080&times;1920 &middot; 6s</div>' +
-            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded story-format MP4 rendered via Remotion. Same brand colours, palette, and seed as the static card.</div>' +
+            '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Motion &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + ' &middot; 6s</div>' +
+            '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.4">Branded MP4 rendered via Remotion. Same archetype, colours, and seed as the static card &mdash; the motion mirrors the approved still.</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _motionFmtChips(motionUrl, cardId, fmt) + '</div>' +
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
+              '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -2771,7 +2792,23 @@ function generateMotion(btn, motionUrl, cardId) {
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
 // far past what front-line proxies tolerate on a held connection \u2014 so the
 // button kicks off a background job and polls until the MP4 is ready.
-function generateReel(btn, reelUrl) {
+// fmt picks the output cut (story 9:16 default, square 1:1, landscape 16:9).
+function _reelFmtChips(reelUrl, active) {
+  var out = '';
+  ['story', 'square', 'landscape'].forEach(function(f) {
+    var label = f.charAt(0).toUpperCase() + f.slice(1);
+    if (f === active) {
+      out += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
+    } else {
+      out += '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' +
+        _attrEsc('generateReel(this, ' + JSON.stringify(reelUrl) + ', ' + JSON.stringify(f) + ')') +
+        '>' + label + '</button>';
+    }
+  });
+  return out;
+}
+function generateReel(btn, reelUrl, fmt) {
+  fmt = fmt || 'story';
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
   panel.style.display = '';
@@ -2780,28 +2817,30 @@ function generateReel(btn, reelUrl) {
   btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
   var fail = function(msg) {
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   };
   var success = function(videoUrl) {
     btn.disabled = false; btn.textContent = origLabel;
+    var vidCol = fmt === 'landscape' ? 'flex:0 0 340px;max-width:360px' : 'flex:0 0 240px;max-width:260px';
     panel.innerHTML =
       '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="flex:0 0 240px;max-width:260px">' +
+        '<div style="' + vidCol + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
         '<div style="flex:1;min-width:240px">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; ' + (_MOTION_FMT_DIMS[fmt] || '') + '</div>' +
+          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top ranked moments stitched into a branded reel &mdash; honest cover stats, archetype-matched beats, and a club outro. Length follows the number of moments.</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + _reelFmtChips(reelUrl, fmt) + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
           '</div>' +
         '</div>' +
       '</div>';
   };
-  fetch(reelUrl + '-job', {method:'POST'})
+  fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {method:'POST'})
     .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
       if (res.status !== 202 || !res.body || !res.body.poll_url) {
@@ -23348,7 +23387,14 @@ function copyText(btn, taId) {{
 }}
 // V9: Copy "Why this card?" reasoning.
 function copyWhyCard(btn, taId) {{ copyText(btn, taId); }}
-function generateReelGrouped(btn, reelUrl) {{
+// Escape a JS expression for an HTML onclick attribute (this page's script
+// block doesn't share the card-toolbar _attrEsc helper).
+function _attrEsc(jsExpr) {{
+  return '"' + jsExpr.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"';
+}}
+function generateReelGrouped(btn, reelUrl, fmt) {{
+  fmt = fmt || 'story';
+  var dims = {{story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'}};
   var panel = document.getElementById('reel-panel-grouped');
   if (!panel) return;
   panel.style.display = '';
@@ -23357,25 +23403,36 @@ function generateReelGrouped(btn, reelUrl) {{
   btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+    'Producing your ' + fmt + ' highlight reel from the top ranked moments&hellip; this can take up to 90 seconds the first time.</div>';
   var fail = function(msg) {{
     btn.disabled = false; btn.textContent = origLabel;
     panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
   }};
   var success = function(videoUrl) {{
     btn.disabled = false; btn.textContent = origLabel;
+    var chips = '';
+    ['story', 'square', 'landscape'].forEach(function(f) {{
+      var label = f.charAt(0).toUpperCase() + f.slice(1);
+      if (f === fmt) {{
+        chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
+      }} else {{
+        chips += '<button class="btn secondary" style="font-size:12px;padding:4px 12px" onclick=' +
+          _attrEsc('generateReelGrouped(this, ' + JSON.stringify(reelUrl) + ', ' + JSON.stringify(f) + ')') + '>' + label + '</button>';
+      }}
+    }});
     panel.innerHTML =
       '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-        '<div style="flex:0 0 220px;max-width:240px">' +
+        '<div style="' + (fmt === 'landscape' ? 'flex:0 0 320px;max-width:340px' : 'flex:0 0 220px;max-width:240px') + '">' +
           '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
         '</div>' +
         '<div style="flex:1;min-width:200px">' +
-          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; ' + (dims[fmt] || '') + '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">' + chips + '</div>' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel-' + fmt + '.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
         '</div>' +
       '</div>';
   }};
-  fetch(reelUrl + '-job', {{method:'POST'}})
+  fetch(reelUrl + '-job' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : ''), {{method:'POST'}})
     .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
     .then(function(res) {{
       if (res.status !== 202 || !res.body || !res.body.poll_url) {{
@@ -25033,6 +25090,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         Lazy: returns the cached file on cache hit; renders via Remotion on
         cache miss. Always serves the MP4 with the correct mime type so the
         UI can use <video src=&hellip;> or a direct download.
+
+        ``?format=story|square|landscape`` picks the output cut (default
+        story, 1080×1920).
         """
         from flask import send_file
 
@@ -25040,6 +25100,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             from mediahub.visual import motion as _motion
         except Exception as e:
             return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return jsonify(
+                {
+                    "error": "bad_format",
+                    "detail": f"unknown motion format {fmt!r}",
+                    "valid_formats": sorted(_motion.MOTION_FORMATS),
+                }
+            ), 400
 
         run_data = _load_run(run_id)
         if run_data is None:
@@ -25100,7 +25170,10 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{card_id}.mp4"
+        # The story format keeps its historic filename so existing links and
+        # cached artifacts stay valid; other cuts get a format suffix.
+        out_name = f"{card_id}.mp4" if fmt == "story" else f"{card_id}_{fmt}.mp4"
+        out_path = out_dir / out_name
 
         # Load the most recent Gemini-directed brief for this card so the
         # motion render picks up the layout / typography / background /
@@ -25117,6 +25190,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     out_path,
                     variation_seed=variation_seed,
                     brief=brief_dict,
+                    format_name=fmt,
                 )
         except _RenderBusy:
             return _render_busy_response("motion")
@@ -25140,7 +25214,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 }
             ), 500
         return send_file(
-            str(mp4), mimetype="video/mp4", as_attachment=False, download_name=f"{card_id}.mp4"
+            str(mp4), mimetype="video/mp4", as_attachment=False, download_name=out_name
         )
 
     def _assemble_reel_inputs(run_id: str):
@@ -25150,6 +25224,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         status))`` so the sync route and the async job route stay
         behaviourally identical.
         """
+        from mediahub.visual import motion as _motion
+
         run_data = _load_run(run_id)
         if run_data is None:
             run_dir = RUNS_DIR / run_id
@@ -25169,6 +25245,19 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except (TypeError, ValueError):
             n = 3
         n = max(1, min(5, n))
+
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return None, (
+                jsonify(
+                    {
+                        "error": "bad_format",
+                        "detail": f"unknown motion format {fmt!r}",
+                        "valid_formats": sorted(_motion.MOTION_FORMATS),
+                    }
+                ),
+                400,
+            )
 
         rr = run_data.get("recognition_report") or {}
         ranked = rr.get("ranked_achievements") or []
@@ -25209,7 +25298,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 
         out_dir = RUNS_DIR / run_id / "motion"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"reel_{n}.mp4"
+        # Story keeps the historic reel_<n>.mp4 name; other cuts are suffixed.
+        out_path = out_dir / (f"reel_{n}.mp4" if fmt == "story" else f"reel_{n}_{fmt}.mp4")
 
         # Look up the latest brief per card so every beat of the reel
         # carries its own AI-directed variation. Cards without a brief
@@ -25222,6 +25312,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         return (
             {
                 "n": n,
+                "format": fmt,
                 "cards": cards,
                 "brand_kit": brand_kit,
                 "out_path": out_path,
@@ -25257,6 +25348,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     inputs["out_path"],
                     meet_name=inputs["meet_name"],
                     briefs=inputs["briefs"],
+                    format_name=inputs["format"],
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -25306,7 +25398,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return err
 
         # url_for needs the request context — resolve before the thread.
-        file_url = url_for("api_run_reel_file", run_id=run_id, n=inputs["n"])
+        file_url = url_for(
+            "api_run_reel_file", run_id=run_id, n=inputs["n"], format=inputs["format"]
+        )
         job_id = uuid.uuid4().hex
         job: dict = {
             "id": job_id,
@@ -25330,6 +25424,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         inputs["out_path"],
                         meet_name=inputs["meet_name"],
                         briefs=inputs["briefs"],
+                        format_name=inputs["format"],
                     )
                 if not Path(mp4).exists():
                     raise RuntimeError("mp4 missing after render")
@@ -25391,6 +25486,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         """Serve an already-rendered reel MP4 — never triggers a render."""
         from flask import send_file
 
+        from mediahub.visual import motion as _motion
+
         run_data = _load_run(run_id)
         if run_data is None:
             run_json = RUNS_DIR / run_id / "run.json"
@@ -25408,14 +25505,20 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         except (TypeError, ValueError):
             n = 3
         n = max(1, min(5, n))
-        path = RUNS_DIR / run_id / "motion" / f"reel_{n}.mp4"
+        fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+        if fmt not in _motion.MOTION_FORMATS:
+            return jsonify({"error": "bad_format"}), 400
+        name = f"reel_{n}.mp4" if fmt == "story" else f"reel_{n}_{fmt}.mp4"
+        path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
             return jsonify({"error": "reel_not_rendered"}), 404
         return send_file(
             str(path),
             mimetype="video/mp4",
             as_attachment=False,
-            download_name=f"meet_reel_{run_id}.mp4",
+            download_name=f"meet_reel_{run_id}_{fmt}.mp4"
+            if fmt != "story"
+            else f"meet_reel_{run_id}.mp4",
         )
 
     @app.route("/api/runs/<run_id>/card/<card_id>/voiceover", methods=["POST", "GET"])

@@ -8,36 +8,11 @@ import {
   useVideoConfig,
 } from "remotion";
 import { z } from "zod";
-import { StoryCard } from "./StoryCard";
+import { StoryCard, cardSchema } from "./StoryCard";
 
-const cardSchema = z.object({
-  athleteFullName: z.string().default(""),
-  athleteFirstName: z.string().default(""),
-  athleteSurname: z.string().default(""),
-  eventName: z.string().default(""),
-  resultValue: z.string().default(""),
-  achievementLabel: z.string().default(""),
-  meetName: z.string().default(""),
-  place: z.string().default(""),
-  variationSeed: z.number().default(0),
-  // Variation axes flow through to the inner StoryCard renders so every
-  // beat of the reel can carry its own direction (different layout,
-  // background pattern, accent, etc.). Empty strings keep the
-  // pre-Gemini-director behaviour for cards built by older callers.
-  backgroundStyle: z.string().default(""),
-  composition: z.string().default(""),
-  typographyPair: z.string().default(""),
-  accentStyle: z.string().default(""),
-  mood: z.string().default(""),
-  photoTreatment: z.string().default(""),
-  // The card's attached photo as a data URI — declared here so zod
-  // doesn't strip it before the inner StoryCard render sees it.
-  photoSrc: z.string().default(""),
-  // Gen v2 (SEQ-4): forwarded so each reel beat matches its still graphic
-  // (zod strips undeclared keys, so these must be declared here too).
-  archetype: z.string().default(""),
-  heroStat: z.string().default(""),
-});
+// The reel reuses StoryCard's card schema verbatim (single source of truth):
+// zod strips undeclared keys, so a shared schema means a prop added for the
+// story can never be silently dropped on its reel beat.
 
 const brandSchema = z.object({
   primary: z.string().default("#0A2540"),
@@ -55,14 +30,105 @@ export const meetReelSchema = z.object({
 });
 
 type Props = z.infer<typeof meetReelSchema>;
+type CardItem = Props["cards"][number];
+
+// The reel's headline face — the same self-hosted brand stack the story
+// cards lead with (src/fonts.ts), so cover/outro match the posted card.
+const COVER_FONT =
+  "'Anton', 'Oswald', 'Impact', 'Helvetica Neue Condensed', 'Arial Narrow', sans-serif";
+const BODY_FONT =
+  "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
+
+// Honest cover/outro stats — derived ONLY from the real card labels the
+// recognition layer produced. A medal counts only when the label says so;
+// no place-number guessing, no invented numbers.
+export function reelStats(cards: CardItem[]): { swims: number; pbs: number; medals: number } {
+  const labels = (cards || []).map((c) => (c.achievementLabel || "").toUpperCase());
+  return {
+    swims: (cards || []).length,
+    pbs: labels.filter((l) => l.includes("PB")).length,
+    medals: labels.filter(
+      (l) =>
+        l.includes("GOLD") ||
+        l.includes("SILVER") ||
+        l.includes("BRONZE") ||
+        l.includes("MEDAL"),
+    ).length,
+  };
+}
+
+// Per-beat transition variety, picked deterministically from the card's
+// variation seed so re-renders are stable: crossfade / push-up / wipe.
+type TransitionKind = "crossfade" | "push" | "wipe";
+
+export function transitionFor(seed: number): TransitionKind {
+  const mode = ((seed | 0) % 3 + 3) % 3;
+  if (mode === 1) return "push";
+  if (mode === 2) return "wipe";
+  return "crossfade";
+}
+
+const StatChips: React.FC<{
+  stats: { swims: number; pbs: number; medals: number };
+  accent: string;
+  ground: string;
+  ts: number;
+  opacity: number;
+}> = ({ stats, accent, ground, ts, opacity }) => {
+  const chips: string[] = [];
+  if (stats.swims > 0) {
+    chips.push(`TOP ${stats.swims} SWIM${stats.swims === 1 ? "" : "S"}`);
+  }
+  if (stats.pbs > 0) {
+    chips.push(`${stats.pbs} PB${stats.pbs === 1 ? "" : "S"}`);
+  }
+  if (stats.medals > 0) {
+    chips.push(`${stats.medals} MEDAL${stats.medals === 1 ? "" : "S"}`);
+  }
+  if (chips.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      style={{
+        marginTop: Math.round(44 * ts),
+        display: "flex",
+        gap: Math.round(18 * ts),
+        justifyContent: "center",
+        opacity,
+      }}
+    >
+      {chips.map((c) => (
+        <div
+          key={c}
+          style={{
+            padding: `${Math.round(12 * ts)}px ${Math.round(24 * ts)}px`,
+            border: `3px solid ${accent}`,
+            borderRadius: 999,
+            color: accent,
+            background: `${ground}00`,
+            fontSize: Math.round(30 * ts),
+            fontWeight: 800,
+            letterSpacing: "0.12em",
+            fontFamily: BODY_FONT,
+          }}
+        >
+          {c}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const CoverScreen: React.FC<{
   brand: Props["brand"];
   meetName: string;
   durationInFrames: number;
-}> = ({ brand, meetName, durationInFrames }) => {
+  stats: { swims: number; pbs: number; medals: number };
+}> = ({ brand, meetName, durationInFrames, stats }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
+  const ts = Math.min(width / 1080, height / 1440, 1);
   const introSpring = spring({
     frame,
     fps,
@@ -70,6 +136,9 @@ const CoverScreen: React.FC<{
   });
   const titleY = interpolate(introSpring, [0, 1], [80, 0]);
   const titleOpacity = interpolate(frame, [0, fps * 0.4], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const chipsOpacity = interpolate(frame, [fps * 0.6, fps * 1.1], [0, 1], {
     extrapolateRight: "clamp",
   });
   const outroFade = interpolate(
@@ -84,8 +153,7 @@ const CoverScreen: React.FC<{
     <AbsoluteFill
       style={{
         backgroundColor: brand.primary || "#0A2540",
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif",
+        fontFamily: COVER_FONT,
         opacity: outroFade,
       }}
     >
@@ -108,36 +176,39 @@ const CoverScreen: React.FC<{
             src={brand.logoDataUri}
             alt={brand.displayName || "club logo"}
             style={{
-              width: 220,
-              height: 220,
+              width: Math.round(220 * ts),
+              height: Math.round(220 * ts),
               objectFit: "contain",
-              marginBottom: 48,
+              marginBottom: Math.round(48 * ts),
             }}
           />
         ) : null}
         <div
           style={{
-            fontSize: 38,
+            fontSize: Math.round(38 * ts),
             letterSpacing: "0.2em",
             // Eyebrow stays on accent for contrast against the
             // primary background; the secondary brand colour
             // carries through on the rule below the meet name.
             color: brand.accent || "#FFFFFF",
             opacity: 0.85,
-            marginBottom: 36,
+            marginBottom: Math.round(36 * ts),
             textTransform: "uppercase",
+            fontFamily: BODY_FONT,
+            fontWeight: 700,
           }}
         >
           Meet Recap
         </div>
         <div
           style={{
-            fontSize: 132,
+            fontSize: Math.round(132 * ts),
             fontWeight: 900,
             color: brand.accent || "#FFFFFF",
             lineHeight: 1.0,
             letterSpacing: "-0.02em",
             textTransform: "uppercase",
+            maxWidth: width - 160,
           }}
         >
           {meetName || "WEEKEND HIGHLIGHTS"}
@@ -148,7 +219,7 @@ const CoverScreen: React.FC<{
             the secondary brand colour was absent from the reel cover. */}
         <div
           style={{
-            marginTop: 36,
+            marginTop: Math.round(36 * ts),
             width: 220,
             height: 4,
             background: brand.secondary || brand.accent || "#FFFFFF",
@@ -157,16 +228,141 @@ const CoverScreen: React.FC<{
         />
         <div
           style={{
-            marginTop: 28,
-            fontSize: 40,
+            marginTop: Math.round(28 * ts),
+            fontSize: Math.round(40 * ts),
             color: brand.accent || "#FFFFFF",
             letterSpacing: "0.16em",
             fontWeight: 700,
             textTransform: "uppercase",
+            fontFamily: BODY_FONT,
           }}
         >
           {display}
         </div>
+        <StatChips
+          stats={stats}
+          accent={brand.accent || "#FFFFFF"}
+          ground={brand.primary || "#0A2540"}
+          ts={ts}
+          opacity={chipsOpacity}
+        />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+// Closing beat — logo, club, follow CTA. The reel ends on the brand, not on
+// a hard cut out of the last result.
+const OutroScreen: React.FC<{
+  brand: Props["brand"];
+  meetName: string;
+  durationInFrames: number;
+}> = ({ brand, meetName, durationInFrames }) => {
+  const frame = useCurrentFrame();
+  const { fps, width, height } = useVideoConfig();
+  const ts = Math.min(width / 1080, height / 1440, 1);
+  const grow = spring({
+    frame,
+    fps,
+    config: { damping: 14, stiffness: 120, mass: 0.6 },
+  });
+  const fadeIn = interpolate(frame, [0, fps * 0.3], [0, 1], {
+    extrapolateRight: "clamp",
+  });
+  const outroFade = interpolate(
+    frame,
+    [durationInFrames - fps * 0.35, durationInFrames],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const display = (brand.displayName || brand.shortName || "").toUpperCase();
+  const handle = (brand.shortName || brand.displayName || "").toUpperCase();
+  return (
+    <AbsoluteFill
+      style={{
+        backgroundColor: brand.primary || "#0A2540",
+        fontFamily: COVER_FONT,
+        opacity: outroFade,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          textAlign: "center",
+          padding: 96,
+          opacity: fadeIn,
+        }}
+      >
+        {brand.logoDataUri ? (
+          <img
+            src={brand.logoDataUri}
+            alt={brand.displayName || "club logo"}
+            style={{
+              width: Math.round(260 * ts),
+              height: Math.round(260 * ts),
+              objectFit: "contain",
+              marginBottom: Math.round(44 * ts),
+              transform: `scale(${0.8 + 0.2 * grow})`,
+            }}
+          />
+        ) : null}
+        <div
+          style={{
+            fontSize: Math.round(72 * ts),
+            fontWeight: 900,
+            color: brand.accent || "#FFFFFF",
+            letterSpacing: "0.02em",
+            textTransform: "uppercase",
+            maxWidth: width - 160,
+          }}
+        >
+          {display}
+        </div>
+        <div
+          style={{
+            marginTop: Math.round(26 * ts),
+            width: 180,
+            height: 4,
+            background: brand.secondary || brand.accent || "#FFFFFF",
+            opacity: 0.9,
+          }}
+        />
+        {handle ? (
+          <div
+            style={{
+              marginTop: Math.round(30 * ts),
+              fontSize: Math.round(34 * ts),
+              color: brand.accent || "#FFFFFF",
+              letterSpacing: "0.22em",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              fontFamily: BODY_FONT,
+              opacity: 0.9,
+            }}
+          >
+            FOLLOW {handle} FOR MORE
+          </div>
+        ) : null}
+        {meetName ? (
+          <div
+            style={{
+              marginTop: Math.round(20 * ts),
+              fontSize: Math.round(26 * ts),
+              color: brand.accent || "#FFFFFF",
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              fontFamily: BODY_FONT,
+              opacity: 0.6,
+            }}
+          >
+            {meetName}
+          </div>
+        ) : null}
       </div>
     </AbsoluteFill>
   );
@@ -175,24 +371,33 @@ const CoverScreen: React.FC<{
 export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
   const { fps, durationInFrames } = useVideoConfig();
 
-  // Allocate the reel: 2s cover + N card scenes + 1s outro accent.
+  // Allocate the reel: 2s cover + rank-weighted card beats + 1s outro.
   const safeCards = (cards || []).slice(0, 5);
+  const stats = reelStats(safeCards);
   if (safeCards.length === 0) {
     return (
       <CoverScreen
         brand={brand}
         meetName={meetName}
         durationInFrames={durationInFrames}
+        stats={stats}
       />
     );
   }
 
   const coverFrames = Math.round(fps * 2.0);
+  const outroFrames = Math.round(fps * 1.0);
   const transitionFrames = Math.round(fps * 0.35);
-  const remaining = Math.max(0, durationInFrames - coverFrames);
-  const perCardFrames = Math.max(
-    transitionFrames * 2 + fps * 0.5,
-    Math.floor(remaining / safeCards.length) + transitionFrames,
+  const remaining = Math.max(0, durationInFrames - coverFrames - outroFrames);
+
+  // Rank-weighted beats: the top-ranked moment breathes ~25% longer than
+  // the rest (cards arrive ranked from the Python side). Deterministic
+  // arithmetic — the same card list always yields the same allocation.
+  const weights = safeCards.map((_, i) => (i === 0 && safeCards.length > 1 ? 1.25 : 1.0));
+  const weightSum = weights.reduce((a, b) => a + b, 0);
+  const minBeat = transitionFrames * 2 + Math.round(fps * 0.5);
+  const beatFrames = weights.map((w) =>
+    Math.max(minBeat, Math.floor((remaining * w) / weightSum) + transitionFrames),
   );
 
   let cursor = 0;
@@ -207,45 +412,87 @@ export const MeetReel: React.FC<Props> = ({ cards, brand, meetName }) => {
         brand={brand}
         meetName={meetName}
         durationInFrames={coverFrames + transitionFrames}
+        stats={stats}
       />
     </Sequence>,
   );
   cursor += coverFrames;
 
   safeCards.forEach((card, i) => {
-    const isLast = i === safeCards.length - 1;
-    const dur = isLast
-      ? Math.max(perCardFrames, durationInFrames - cursor)
-      : perCardFrames;
+    const dur = beatFrames[i];
     sequences.push(
       <Sequence
         key={`card-${i}`}
         from={cursor}
         durationInFrames={dur + transitionFrames}
       >
-        <CrossfadeWrap fadeInFrames={transitionFrames}>
+        <TransitionWrap
+          fadeInFrames={transitionFrames}
+          kind={transitionFor(card.variationSeed || i)}
+        >
           <StoryCard card={card} brand={brand} />
-        </CrossfadeWrap>
+        </TransitionWrap>
       </Sequence>,
     );
     cursor += dur - transitionFrames;
   });
 
+  // Outro — runs to the end of the reel, whatever rounding left over.
+  sequences.push(
+    <Sequence
+      key="outro"
+      from={cursor}
+      durationInFrames={Math.max(outroFrames, durationInFrames - cursor)}
+    >
+      <TransitionWrap fadeInFrames={transitionFrames} kind="crossfade">
+        <OutroScreen
+          brand={brand}
+          meetName={meetName}
+          durationInFrames={Math.max(outroFrames, durationInFrames - cursor)}
+        />
+      </TransitionWrap>
+    </Sequence>,
+  );
+
   return <AbsoluteFill>{sequences}</AbsoluteFill>;
 };
 
-// Small wrapper that crossfades its children in over `fadeInFrames`.
-const CrossfadeWrap: React.FC<{
+// Transition wrapper — eases its children in over `fadeInFrames` with the
+// chosen language. Pure function of the frame (no CSS transitions).
+const TransitionWrap: React.FC<{
   fadeInFrames: number;
+  kind: TransitionKind;
   children: React.ReactNode;
-}> = ({ fadeInFrames, children }) => {
+}> = ({ fadeInFrames, kind, children }) => {
   const frame = useCurrentFrame();
-  const opacity = interpolate(frame, [0, fadeInFrames], [0, 1], {
+  const { height } = useVideoConfig();
+  const t = interpolate(frame, [0, fadeInFrames], [0, 1], {
     extrapolateRight: "clamp",
   });
-  return (
-    <AbsoluteFill style={{ opacity }}>
-      {children}
-    </AbsoluteFill>
-  );
+  if (kind === "push") {
+    return (
+      <AbsoluteFill
+        style={{
+          opacity: t,
+          transform: `translateY(${(1 - t) * height * 0.12}px)`,
+        }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  if (kind === "wipe") {
+    const pct = Math.round((1 - t) * 100);
+    return (
+      <AbsoluteFill
+        style={{
+          opacity: Math.min(1, t * 2),
+          clipPath: `inset(0 ${pct}% 0 0)`,
+        }}
+      >
+        {children}
+      </AbsoluteFill>
+    );
+  }
+  return <AbsoluteFill style={{ opacity: t }}>{children}</AbsoluteFill>;
 };

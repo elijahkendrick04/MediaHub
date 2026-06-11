@@ -36,8 +36,14 @@ const defaultCard = {
   mood: "",
   photoTreatment: "",
   photoSrc: "",
+  photoPos: "",
   archetype: "",
   heroStat: "",
+  motionIntent: "",
+  roleGround: "",
+  roleSurface: "",
+  roleAccent: "",
+  roleOnGround: "",
 };
 
 export const RemotionRoot: React.FC = () => {

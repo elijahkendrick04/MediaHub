@@ -48,6 +48,30 @@ RENDER_SCRIPT = REMOTION_DIR / "render.js"
 COMP_STORY = "StoryCard"
 COMP_REEL = "MeetReel"
 
+# Output formats (platform comprehensiveness): the canonical 9:16 story plus
+# the 1:1 feed square and 16:9 landscape cuts. The TSX compositions lay out
+# responsively from useVideoConfig(), so one composition serves every size.
+# "story" is the default and keeps every pre-format cache key and output
+# filename byte-identical.
+MOTION_FORMATS: dict[str, tuple[int, int]] = {
+    "story": (1080, 1920),
+    "square": (1080, 1080),
+    "landscape": (1920, 1080),
+}
+DEFAULT_MOTION_FORMAT = "story"
+
+
+def motion_format_size(format_name: str) -> tuple[int, int]:
+    """Resolve a motion format name to ``(width, height)``.
+
+    Unknown names raise ``ValueError`` — an honest configuration error
+    beats silently rendering the wrong aspect ratio.
+    """
+    key = (format_name or DEFAULT_MOTION_FORMAT).strip().lower()
+    if key not in MOTION_FORMATS:
+        raise ValueError(f"unknown motion format {format_name!r}; valid: {sorted(MOTION_FORMATS)}")
+    return MOTION_FORMATS[key]
+
 
 def _data_dir() -> Path:
     """Resolve the DATA_DIR at call time so tests can monkeypatch it."""
@@ -178,26 +202,25 @@ _PHOTO_MAX_EDGE = 1280
 _PHOTO_MAX_BYTES = 12_000_000  # refuse to embed originals beyond this raw size
 
 
-def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
-    """Resolve the photo a brief sourced into an embeddable JPEG data URI.
+def _photo_asset_path_for_brief(brief: Optional[dict]) -> Optional[Path]:
+    """Resolve the on-disk path of the photo a brief sourced, or ``None``.
 
-    Remotion's headless Chromium only sees what the props carry, so the
-    user's chosen photo is downscaled and inlined. Empty string on any
-    miss (no brief, "no-photo" treatment, asset gone, decode failure) —
-    a missing photo must never fail a motion render.
+    Mirrors the sourcing rules of the still renderer: skips "no-photo"
+    treatments, the synthetic ``_brand_logo_`` id, missing files, and
+    oversized originals. Never raises.
     """
     b = brief if isinstance(brief, dict) else {}
     if not b or str(b.get("photo_treatment") or "") == "no-photo":
-        return ""
+        return None
     asset_ids = [str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"]
     if not asset_ids:
-        return ""
+        return None
     try:
         from mediahub.media_library.store import get_store
 
         store = get_store()
     except Exception:
-        return ""
+        return None
     for aid in asset_ids:
         try:
             asset = store.get(aid)
@@ -207,25 +230,85 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
             continue
         p = Path(getattr(asset, "path", "") or "")
         try:
-            if not p.exists() or p.stat().st_size > _PHOTO_MAX_BYTES:
-                continue
+            if p.exists() and p.stat().st_size <= _PHOTO_MAX_BYTES:
+                return p
         except OSError:
             continue
-        try:
-            import base64
-            import io
+    return None
 
-            from PIL import Image
 
-            with Image.open(p) as im:
-                im = im.convert("RGB")
-                im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
-                buf = io.BytesIO()
-                im.save(buf, format="JPEG", quality=82)
-            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-        except Exception:
-            continue
-    return ""
+def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """Resolve the photo a brief sourced into an embeddable JPEG data URI.
+
+    Remotion's headless Chromium only sees what the props carry, so the
+    user's chosen photo is downscaled and inlined. Empty string on any
+    miss (no brief, "no-photo" treatment, asset gone, decode failure) —
+    a missing photo must never fail a motion render.
+    """
+    p = _photo_asset_path_for_brief(brief)
+    if p is None:
+        return ""
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        with Image.open(p) as im:
+            im = im.convert("RGB")
+            im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=82)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
+def _photo_focus_for_brief(brief: Optional[dict]) -> str:
+    """Saliency ``object-position`` for the brief's photo ("" when no photo).
+
+    Reuses the still renderer's deterministic saliency maths so a face that
+    the still keeps in frame stays in frame on the video too.
+    """
+    p = _photo_asset_path_for_brief(brief)
+    if p is None:
+        return ""
+    try:
+        from mediahub.graphic_renderer.saliency import focus_position
+
+        return focus_position(p, "9:16")
+    except Exception:
+        return ""
+
+
+def _resolved_motion_roles(brief: Optional[dict], brand_kit: Any) -> dict[str, str]:
+    """The exact colour roles the card's STILL graphic paints, for motion.
+
+    Rehydrates the persisted brief and runs the still renderer's single
+    role resolver (Tier A brand baseline → the director's APCA-gated
+    colour-role assignment → medal tint), then maps the ``--mh-*`` vars
+    onto the motion prop names. Empty dict on any miss — the TSX then
+    falls back to its seed-permutation roles, exactly the pre-parity
+    behaviour.
+    """
+    if not isinstance(brief, dict) or not brief:
+        return {}
+    try:
+        from mediahub.creative_brief.generator import CreativeBrief
+        from mediahub.graphic_renderer.render import resolved_role_vars_for_brief
+
+        b = CreativeBrief.from_dict(brief)
+        if b is None:
+            return {}
+        root_vars = resolved_role_vars_for_brief(b, brand_kit)
+        return {
+            "roleGround": str(root_vars.get("--mh-primary") or ""),
+            "roleSurface": str(root_vars.get("--mh-surface") or ""),
+            "roleAccent": str(root_vars.get("--mh-accent") or ""),
+            "roleOnGround": str(root_vars.get("--mh-on-primary") or ""),
+        }
+    except Exception:
+        return {}
 
 
 def _card_to_props(
@@ -233,6 +316,7 @@ def _card_to_props(
     *,
     variation_seed: int = 0,
     brief: Optional[dict] = None,
+    brand_kit: Any = None,
 ) -> dict[str, Any]:
     """Coerce one content-pack card payload into the StoryCard props shape.
 
@@ -242,12 +326,18 @@ def _card_to_props(
     When ``brief`` is supplied (the AI-directed CreativeBrief for this
     card, as a dict via ``brief.to_dict()``), the variation axes the
     director picked — layout family, typography pair, composition,
-    background style, accent style, mood, photo treatment — are
-    forwarded to Remotion. The TypeScript StoryCard composition uses
-    those axes to vary fonts, layout, animation spring, background
+    background style, accent style, mood, photo treatment, motion intent —
+    are forwarded to Remotion. The TypeScript StoryCard composition uses
+    those axes to vary fonts, layout, animation programme, background
     pattern, and accent decoration, so a Gemini-directed run produces
     visually distinct motion for every card instead of just rotating
     palette roles.
+
+    When ``brand_kit`` is also supplied, the card's resolved colour roles
+    (the exact APCA-gated set the still graphic painted, medal tint
+    included) ride along as ``roleGround``/``roleSurface``/``roleAccent``/
+    ``roleOnGround`` so the motion render and the approved still can never
+    disagree on colour. Empty strings keep the seed-permutation fallback.
     """
     ach = card.get("achievement") if isinstance(card, dict) else None
     if not isinstance(ach, dict):
@@ -307,6 +397,7 @@ def _card_to_props(
     # engine produced the brief (a v1 family name otherwise — the TSX
     # treats unknown names as "no archetype treatment").
     brief_layers = b.get("text_layers") if isinstance(b.get("text_layers"), dict) else {}
+    roles = _resolved_motion_roles(b, brand_kit)
     return {
         "athleteFullName": str(athlete),
         "athleteFirstName": str(first),
@@ -324,8 +415,17 @@ def _card_to_props(
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
         "photoSrc": _photo_data_uri_for_brief(b),
+        "photoPos": _photo_focus_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
         "heroStat": str(brief_layers.get("hero_stat") or ""),
+        # The director's motion language for this card (design_spec
+        # MOTION_INTENTS). "" = the composition's mood/seed default.
+        "motionIntent": str(b.get("motion_intent") or ""),
+        # Resolved still-parity colour roles ("" = seed-permutation fallback).
+        "roleGround": roles.get("roleGround", ""),
+        "roleSurface": roles.get("roleSurface", ""),
+        "roleAccent": roles.get("roleAccent", ""),
+        "roleOnGround": roles.get("roleOnGround", ""),
     }
 
 
@@ -336,12 +436,47 @@ def _content_hash(payload: dict, *, kind: str) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
 
+def _write_render_manifest(cached: Path, manifest: dict) -> None:
+    """Persist the explainability record for one motion render.
+
+    A small JSON sidecar next to the cached MP4 answering "why does this
+    video look like this?" — archetype, motion intent, where the colours
+    came from, the seed, format, and durations. Best-effort: a manifest
+    failure must never fail (or follow) a successful render.
+    """
+    try:
+        sidecar = cached.with_suffix(".json")
+        sidecar.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _card_manifest_axes(card_props: dict) -> dict:
+    """The per-card explainability axes worth recording (no photo bytes)."""
+    return {
+        "archetype": card_props.get("archetype") or "",
+        "motion_intent": card_props.get("motionIntent") or "",
+        "mood": card_props.get("mood") or "",
+        "variation_seed": card_props.get("variationSeed") or 0,
+        "colour_source": "still-parity-roles"
+        if card_props.get("roleGround")
+        else "seed-permutation",
+        "has_photo": bool(card_props.get("photoSrc")),
+        "photo_focus": card_props.get("photoPos") or "",
+        "hero_stat": card_props.get("heroStat") or "",
+    }
+
+
 def _run_remotion(
     *,
     composition_id: str,
     props: dict,
     out_path: Path,
     duration_sec: Optional[float] = None,
+    size: Optional[tuple[int, int]] = None,
     timeout: int = 600,
 ) -> Path:
     """Invoke the Node render script. Raises RuntimeError on failure."""
@@ -375,6 +510,8 @@ def _run_remotion(
     ]
     if duration_sec is not None:
         cmd.extend(["--duration", str(duration_sec)])
+    if size is not None:
+        cmd.extend(["--width", str(int(size[0])), "--height", str(int(size[1]))])
 
     try:
         proc = subprocess.run(
@@ -437,28 +574,41 @@ def render_story_card(
     variation_seed: int = 0,
     duration_sec: float = 6.0,
     brief: Optional[dict] = None,
+    format_name: str = DEFAULT_MOTION_FORMAT,
 ) -> Path:
-    """Render a single content-pack card to a 1080x1920 MP4 story.
+    """Render a single content-pack card to an MP4 story.
 
     Returns the path to the rendered MP4. Cached by content hash so
-    repeated calls with the same card + brand + seed + brief reuse
-    the existing file.
+    repeated calls with the same card + brand + seed + brief + format
+    reuse the existing file.
 
     Pass ``brief`` (as ``CreativeBrief.to_dict()``) to forward the
     Gemini-directed variation axes (layout/typography/background/
-    accent/mood) to the TSX composition. Without a brief the render
-    falls back to variationSeed-only behaviour for backwards compat.
+    accent/mood/motion intent) to the TSX composition. Without a brief
+    the render falls back to variationSeed-only behaviour for backwards
+    compat.
+
+    ``format_name`` picks the output cut: ``story`` (1080×1920, default),
+    ``square`` (1080×1080) or ``landscape`` (1920×1080).
     """
     engine = _dispatch_engine()
+    size = motion_format_size(format_name)
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
     card_dict = _card_to_props(
         card_payload,
         variation_seed=variation_seed,
         brief=brief,
+        brand_kit=brand_kit,
     )
 
     if engine == "ffmpeg":
+        if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
+            raise ReelEngineUnavailable(
+                "The 'ffmpeg' reel engine currently renders the story "
+                "(1080×1920) format only. Use the Remotion engine for "
+                f"the {format_name!r} cut, or request format=story."
+            )
         from mediahub.visual import reel_ffmpeg
 
         return reel_ffmpeg.render_story_card_from_props(
@@ -471,7 +621,12 @@ def render_story_card(
         )
 
     cache_key = _content_hash(
-        {"card": card_dict, "brand": brand_dict, "duration": duration_sec},
+        {
+            "card": card_dict,
+            "brand": brand_dict,
+            "duration": duration_sec,
+            "size": list(size),
+        },
         kind="story",
     )
     cached = _cache_dir() / f"{cache_key}.mp4"
@@ -491,6 +646,18 @@ def render_story_card(
         props={"card": card_dict, "brand": brand_dict},
         out_path=cached,
         duration_sec=duration_sec,
+        size=size,
+    )
+    _write_render_manifest(
+        cached,
+        {
+            "kind": "story",
+            "engine": engine,
+            "format": format_name,
+            "size": list(size),
+            "duration_sec": duration_sec,
+            "card": _card_manifest_axes(card_dict),
+        },
     )
     if cached.resolve() != out_path.resolve():
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -527,6 +694,7 @@ def render_meet_reel(
     meet_name: str = "",
     duration_sec: Optional[float] = None,
     briefs: Optional[list[Optional[dict]]] = None,
+    format_name: str = DEFAULT_MOTION_FORMAT,
 ) -> Path:
     """Render a multi-card reel from the top cards for a meet.
 
@@ -542,8 +710,10 @@ def render_meet_reel(
                   data-driven: ``reel_duration_for(len(top_cards))``, so the
                   reel's structure follows the number of ranked moments
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
+      format_name  output cut: ``story`` (default) / ``square`` / ``landscape``.
     """
     engine = _dispatch_engine()
+    size = motion_format_size(format_name)
     out_path = Path(out_path)
     brand_dict = _brand_to_dict(brand_kit)
 
@@ -575,7 +745,7 @@ def render_meet_reel(
                         seed = 1
         brief = briefs_list[idx] if idx < len(briefs_list) else None
         cards_props.append(
-            _card_to_props(c, variation_seed=seed, brief=brief),
+            _card_to_props(c, variation_seed=seed, brief=brief, brand_kit=brand_kit),
         )
 
     if not meet_name:
@@ -588,6 +758,12 @@ def render_meet_reel(
         duration_sec = reel_duration_for(len(cards_props))
 
     if engine == "ffmpeg":
+        if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
+            raise ReelEngineUnavailable(
+                "The 'ffmpeg' reel engine currently renders the story "
+                "(1080×1920) format only. Use the Remotion engine for "
+                f"the {format_name!r} cut, or request format=story."
+            )
         from mediahub.visual import reel_ffmpeg
 
         return reel_ffmpeg.render_meet_reel_from_props(
@@ -606,6 +782,7 @@ def render_meet_reel(
             "brand": brand_dict,
             "meet": meet_name,
             "duration": duration_sec,
+            "size": list(size),
         },
         kind="reel",
     )
@@ -622,6 +799,19 @@ def render_meet_reel(
         props={"cards": cards_props, "brand": brand_dict, "meetName": meet_name},
         out_path=cached,
         duration_sec=duration_sec,
+        size=size,
+    )
+    _write_render_manifest(
+        cached,
+        {
+            "kind": "reel",
+            "engine": engine,
+            "format": format_name,
+            "size": list(size),
+            "duration_sec": duration_sec,
+            "meet_name": meet_name,
+            "cards": [_card_manifest_axes(cp) for cp in cards_props],
+        },
     )
     if cached.resolve() != out_path.resolve():
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -633,6 +823,9 @@ __all__ = [
     "render_story_card",
     "render_meet_reel",
     "reel_duration_for",
+    "motion_format_size",
+    "MOTION_FORMATS",
+    "DEFAULT_MOTION_FORMAT",
     "node_available",
     "remotion_installed",
     "REMOTION_DIR",

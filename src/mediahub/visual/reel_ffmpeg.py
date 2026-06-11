@@ -42,7 +42,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any, Optional
 
@@ -196,13 +195,7 @@ def _rehydrate_brief(brief_dict: dict):
     """
     from mediahub.creative_brief.generator import CreativeBrief
 
-    try:
-        known = {f.name for f in dataclass_fields(CreativeBrief)}
-        kwargs = {k: v for k, v in brief_dict.items() if k in known}
-        brief = CreativeBrief(**kwargs)
-    except (TypeError, ValueError):
-        return None
-    return brief
+    return CreativeBrief.from_dict(brief_dict)
 
 
 def _frame_brief(props: dict, brand_dict: dict, brand_kit: Any, brief_dict: Optional[dict]):
