@@ -66,10 +66,54 @@ TRACEBACK_MARK = "Traceback (most recent call last):"
 # Links we must never click during a read-only crawl (mutate/destroy/leave site).
 DESTRUCTIVE_HINTS = ("/delete", "/disconnect", "/clear", "/logout", "/destroy", "/remove")
 
+# Binary / downloadable asset links. Navigating a real browser tab at one of
+# these raises "Page.goto: Download is starting" — a harness artifact that was
+# filed as a HIGH navigation_error (and burned fixer ticks on non-bugs). They
+# are verified with the request API instead (still a real 404/5xx check), never
+# with page.goto.
+ASSET_EXTENSIONS = (
+    ".woff2", ".woff", ".ttf", ".otf", ".eot",
+    ".pdf", ".zip", ".csv", ".xlsx", ".xls", ".hy3", ".sd3",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".mp4", ".webm", ".mp3", ".wav", ".wasm", ".map",
+)
+
+
+def _is_asset_url(url: str) -> bool:
+    return urlparse(url).path.lower().endswith(ASSET_EXTENSIONS)
+
 
 def _is_ai_unconfigured(text: str) -> bool:
     low = (text or "").lower()
     return any(sig in low for sig in AI_SIGNATURES)
+
+
+def _judge_inputs_digest(artifacts: dict) -> str:
+    """Stable digest of EVERYTHING the AI judges would see this sweep — the
+    judge-facing text artifacts (volatile run ids/timestamps stripped, real
+    numbers kept) plus the surface screenshots. When it matches the previous
+    sweep's digest the judges are skipped: re-judging an unchanged deployment
+    re-burns subscription quota to re-state the same opinions (and re-confirm
+    the same subjective findings) without any new information. Empty string on
+    any failure → caller never skips on an unknown digest."""
+    import hashlib
+    try:
+        from autotest import semantic
+        arts = semantic._build_artifacts(artifacts)
+    except Exception:
+        return ""
+    h = hashlib.sha1()
+    for k in sorted(arts):
+        h.update(k.encode("utf-8"))
+        h.update(report.normalise_volatile(str(arts[k])).encode("utf-8"))
+    for k in sorted(artifacts):
+        if k.endswith("_screenshot"):
+            p = REPO_ROOT / str(artifacts[k])
+            try:
+                h.update(p.read_bytes())
+            except OSError:
+                h.update(str(artifacts[k]).encode("utf-8"))
+    return h.hexdigest()
 
 
 def _extract_suspect(traceback_text: str) -> str:
@@ -973,11 +1017,41 @@ class Tester:
             if url in seen:
                 continue
             seen.add(url)
+            if _is_asset_url(url):
+                # A font/PDF/image link: verify it serves (request API), never
+                # page.goto it — navigation to a download is a harness artifact,
+                # not a product bug. Doesn't consume the page budget.
+                self._check_asset(url, path)
+                continue
             self.pages_crawled += 1
             _, _, links = self.probe(url, f"crawl:{path}", route_template=path, from_link=True)
             for ln in links:
                 if ln not in seen and ln not in queue:
                     queue.append(ln)
+
+    def _check_asset(self, url: str, route: str) -> None:
+        """Deterministic check that a linked binary asset actually serves. A
+        404/5xx (or a dead connection) is a REAL broken-asset bug — same class as
+        the in-page sub-request detector — filed as ``network_error``."""
+        try:
+            resp = self.page.request.get(url, timeout=15000)
+            st = resp.status
+            if st >= 400:
+                self._add(Finding(
+                    category="network_error",
+                    severity="high" if st >= 500 else "medium",
+                    title=f"Linked asset {st}: {route}", route=route,
+                    expected="Assets the app links to (fonts, images, files) serve successfully",
+                    actual=f"GET {route} → HTTP {st}",
+                    evidence=f"GET {url} returned HTTP {st}",
+                    repro=[f"GET {url}"]), shoot=False)
+        except Exception as exc:
+            self._add(Finding(
+                category="network_error", severity="medium",
+                title=f"Linked asset unreachable: {route}", route=route,
+                expected="Assets the app links to (fonts, images, files) serve successfully",
+                actual=f"request failed: {str(exc)[:200]}",
+                evidence=str(exc), repro=[f"GET {url}"]), shoot=False)
 
 
 def _launch_browser(pw, headless: bool):
@@ -1034,6 +1108,8 @@ def _run(run_id: str) -> int:
         profile_id = _seed_ready_profile(server.data_dir)
     flow_result = "not-run"
     council_verdict = ""
+    judges_ran = True       # safe default: never freeze lifecycles by accident
+    judge_digest = ""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
@@ -1108,14 +1184,28 @@ def _run(run_id: str) -> int:
             tester.reconcile_artifact_meta()
             _judgeable = any(tester.artifacts.get(k) for k in
                              ("export_json", "home_text", "signup_text", "review_text"))
+            # Skip-unchanged: when every surface a judge would see is byte-for-byte
+            # what the LAST sweep judged, re-running the judges burns quota to
+            # restate the same opinions. Skip them and FREEZE the subjective
+            # lifecycle clocks (judges_ran=False below) — no decay, no confirms,
+            # no new sightings, because there was no new information.
+            judge_digest = _judge_inputs_digest(tester.artifacts)
+            skip_unchanged = (
+                os.environ.get("AUTOTEST_JUDGE_SKIP_UNCHANGED", "1") == "1"
+                and bool(judge_digest)
+                and judge_digest == report.get_judge_inputs_digest())
+            judges_attempted = False
             try:
                 ai_findings: list[Finding] = []
-                if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
-                    from autotest import semantic
-                    ai_findings += semantic.evaluate(tester.artifacts, tester.artifact_meta)
-                if os.environ.get("AUTOTEST_VISION", "1") != "0":
-                    from autotest import vision
-                    ai_findings += vision.evaluate(tester.artifacts)
+                if not skip_unchanged:
+                    if os.environ.get("AUTOTEST_SEMANTIC", "1") != "0" and _judgeable:
+                        from autotest import semantic
+                        judges_attempted = True
+                        ai_findings += semantic.evaluate(tester.artifacts, tester.artifact_meta)
+                    if os.environ.get("AUTOTEST_VISION", "1") != "0":
+                        from autotest import vision
+                        judges_attempted = True
+                        ai_findings += vision.evaluate(tester.artifacts)
                 candidates = [f for f in ai_findings if f.is_bug]
                 passthrough = [f for f in ai_findings if not f.is_bug]
                 if candidates and os.environ.get("AUTOTEST_COUNCIL", "1") != "0":
@@ -1125,6 +1215,14 @@ def _run(run_id: str) -> int:
                 tester.findings.extend(passthrough + candidates)
             except Exception:
                 pass
+            # The judges RAN if they were attempted and didn't all self-skip
+            # (CLI missing / no provider key emits only *_skipped markers).
+            _SKIP_MARKERS = ("semantic_skipped", "vision_skipped")
+            judges_ran = judges_attempted and not (
+                ai_findings and all(f.category in _SKIP_MARKERS for f in ai_findings))
+            if skip_unchanged:
+                print("autotest: judge inputs unchanged since last sweep — "
+                      "AI judges skipped (subjective lifecycle frozen)")
             browser.close()
     finally:
         if server:
@@ -1159,7 +1257,9 @@ def _run(run_id: str) -> int:
         tester.findings.extend(_ground_truth.check())
     except Exception:
         pass
-    stats = report.merge_findings(tester.findings, run_id)
+    stats = report.merge_findings(tester.findings, run_id, judges_ran=judges_ran)
+    if judges_ran and judge_digest:
+        report.set_judge_inputs_digest(judge_digest)
     run_meta = {"run_id": run_id, "base_url": base, "routes_probed": tester.routes_probed,
                 "pages_crawled": tester.pages_crawled, "flow_result": flow_result,
                 "council_verdict": council_verdict, "engine": getattr(tester, "engine", "chromium")}
@@ -1171,15 +1271,17 @@ def _run(run_id: str) -> int:
         "findings": [vars(f) for f in tester.findings]}, indent=2), encoding="utf-8")
 
     summary = (f"autotest {run_id}: {stats['open']} open bug(s) "
-               f"({stats['new']} new), {stats['fixing']} in progress, "
-               f"{stats['skipped']} skipped · flow={flow_result} · "
+               f"({stats['new']} new), {stats['regressed']} regressed, "
+               f"{stats['fixing']} in progress, {stats['fixed']} fixed, "
+               f"{stats['meta_open']} meta, {stats['skipped']} skipped · "
+               f"judges={'ran' if judges_ran else 'skipped'} · flow={flow_result} · "
                f"routes={tester.routes_probed} crawled={tester.pages_crawled}")
     print(summary)
     gh_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if gh_summary:
         with open(gh_summary, "a", encoding="utf-8") as fh:
             fh.write(f"### 🔎 Autonomous test sweep\n\n{summary}\n\n"
-                     f"See `autotest/reports/BUGS.md` on the `autotest/bug-reports` branch.\n")
+                     f"Live report: `autotest/reports/BUGS.md` on the `autotest/state` branch.\n")
     return 0  # finding bugs is success; non-zero is reserved for tester crashes
 
 

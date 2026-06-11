@@ -264,8 +264,28 @@ _VERDICT_CONTRACT = (
     '"confidence":"low|medium|high","area":"route or feature",'
     '"expected":"...","actual":"...","evidence":"quote/specifics"}]}\n'
     'If everything is correct, return {"issues":[]}. Only report concrete, '
-    'evidence-backed problems — when unsure, omit it.'
+    'evidence-backed problems — when unsure, omit it. The "evidence" field MUST '
+    'contain a VERBATIM quote from the material above (copy the exact words); an '
+    'issue whose evidence is not a verbatim quote will be mechanically discarded.'
 )
+
+
+def evidence_grounded(evidence: str, material: str, span_words: int = 5) -> bool:
+    """Deterministic anti-hallucination gate: does the judge's ``evidence`` contain
+    at least one verbatim ``span_words``-word run that appears in the ``material``
+    it was shown? A judge that cannot quote what it saw is describing something it
+    imagined — the measured council precision of 0.06 was driven by exactly such
+    unquoted claims. Whitespace-normalised, case-insensitive; very short evidence
+    (under one span) falls back to a whole-substring check."""
+    ev = " ".join((evidence or "").lower().split())
+    mat = " ".join((material or "").lower().split())
+    if not ev or not mat:
+        return False
+    words = ev.split(" ")
+    if len(words) < span_words:
+        return ev in mat
+    return any(" ".join(words[i:i + span_words]) in mat
+               for i in range(len(words) - span_words + 1))
 
 
 def _trim(text: str, n: int = _MAX_TEXT) -> str:
@@ -373,17 +393,27 @@ def _run_charter(charter: Charter, arts: dict[str, str],
             continue  # conservative: drop speculation
         sev = str(issue.get("severity", "medium")).lower()
         sev = sev if sev in ("low", "medium", "high") else "medium"
+        # Anti-hallucination gate: the contract demands a verbatim quote; an
+        # issue whose evidence quotes nothing in the material the judge was
+        # shown is recorded as ungrounded (visible, never an open bug).
+        grounded = evidence_grounded(str(issue.get("evidence", "")), body)
         findings.append(Finding(
-            category=f"semantic:{charter.name}", severity=sev,
+            category=(f"semantic:{charter.name}" if grounded
+                      else f"semantic:{charter.name} (ungrounded)"),
+            severity=sev,
             title=str(issue.get("title", "Semantic issue"))[:140],
             route=str(issue.get("area", "(semantic)"))[:120],
             expected=str(issue.get("expected", ""))[:600],
             actual=str(issue.get("actual", ""))[:600],
             evidence=("AI judge (" + charter.name + ", confidence "
                       + str(issue.get("confidence", "?")) + "):\n"
-                      + str(issue.get("evidence", ""))[:1500]),
+                      + str(issue.get("evidence", ""))[:1500]
+                      + ("" if grounded else
+                         "\n\n[grounding] DISCARDED — the evidence quotes nothing "
+                         "verbatim from the material this judge was shown")),
             repro=[f"Reproduce the flow (result: {arts.get('flow_result')}) and inspect "
-                   f"the {charter.name} aspect described above"]))
+                   f"the {charter.name} aspect described above"],
+            is_bug=grounded))
     return findings
 
 

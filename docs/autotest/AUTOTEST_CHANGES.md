@@ -251,3 +251,87 @@
   every capture site, an artifact absent from `tester.artifacts` (its flow didn't run) is
   the unexercised signal — a single, robust reconciliation that covers signup-disabled,
   live-no-content, and any future skipped flow.
+
+---
+
+## 2026-06-11 — close the loop: state persistence, fixed lifecycle, deploy grace, judge grounding
+
+> Trigger: a one-by-one audit of the bots' REAL output (not their green CI badges) found
+> the loop blind-firing: every report push to the protected `main` was rejected with
+> GH006 (swallowed by fail-soft `|| echo`), so the bot woke up amnesiac each tick — the
+> same finding was fixed TWICE in one day (PRs #321 + #325), six bugs sat in `fixing`
+> forever (nothing ever set `fixed`), `.woff2` links were filed as HIGH navigation
+> errors, fix PRs needed a hand-merge (`gh pr merge --auto` refuses a "clean status"
+> PR), and the council's measured precision was 0.06.
+
+**State branch (the GH006 fix)** — `.github/workflows/autotest.yml`
+- Bot memory (`autotest/reports/*` + `calibration/precision.json`) now lives on the
+  unprotected, bot-owned **`autotest/state`** branch: restored at the start of each run,
+  pushed (via a temp worktree) at the end. No PR noise, no required-CI cycles on ledger
+  refreshes, `main` protection intact. The copies committed on `main` are a stale
+  snapshot; the live report is `autotest/reports/BUGS.md` **on `autotest/state`**.
+- The fix pass snapshots the finder's reports to `/tmp` first (crash insurance);
+  `fix_loop._persist_to_main` re-applies the fixer journal onto that snapshot instead of
+  onto a stale `origin/main` checkout, and no longer pushes anywhere itself.
+- The cross-browser matrix restores the same state read-only for current dedup context.
+
+**`fixing` → `fixed` reconcile + deploy grace** — `autotest/fix_loop.py`, `autotest/report.py`
+- `fix_loop.reconcile_in_flight()` (runs first every fix pass) asks GitHub what happened
+  to each in-flight PR: merged → `fixed` (+`fixed_at`), closed-unmerged → back to `open`
+  (`fix_pr` → `last_fix_pr`). `gitops.pr_state()` does the lookup; unknown → untouched.
+- `report.mark_fixed()` + a **deploy-grace window** (`AUTOTEST_DEPLOY_GRACE_HOURS`,
+  default 24): a `fixed` finding re-seen on the live site INSIDE the window stays
+  `fixed` (`reseen_during_grace`) — the deploy lags the merge; re-seen AFTER the window
+  → `regressed`, and the in-flight claim is released (`fix_pr` → `last_fix_pr`) so the
+  fixer may retry. Kills the re-fix loop at both ends.
+
+**Judge-input skip + lifecycle freeze** — `autotest/run.py`, `autotest/report.py`
+- `_judge_inputs_digest()` hashes every judge-facing surface (volatile ids/timestamps
+  stripped, real numbers kept, screenshots included). Unchanged since the last judged
+  sweep → the semantic/vision/council calls are skipped (`AUTOTEST_JUDGE_SKIP_UNCHANGED`,
+  default on) — no quota burned restating the same opinions.
+- `merge_findings(..., judges_ran=False)` freezes the SUBJECTIVE lifecycle clocks when
+  no judge looked (skip-unchanged, judges off, or CLI missing): no decay, no
+  `present_last_run=False`. A subjective finding must never age out merely because
+  nobody re-judged it. (Also fixes the latent bug where keyless CI decayed all
+  subjective findings.)
+
+**Judge grounding (precision)** — `autotest/semantic.py`, `autotest/council.py`
+- The verdict contract now demands a VERBATIM quote in `evidence`, and
+  `evidence_grounded()` enforces it mechanically (a 5-word span of the evidence must
+  appear in the material the judge was shown). Ungrounded issues are recorded as
+  `(ungrounded)` non-bugs — visible, never open. Same gate on the council clerk's
+  `new_issues` (against the verdict + candidates), plus a default-skeptical clerk rule
+  ("when the verdict hedges, keep=false").
+- `council:blind_spot` + harness-meta findings moved out of the **Open bugs** headline
+  into a **🧭 Coverage gaps** section (`report.is_meta_entry`, single source shared with
+  the fixer's `_is_meta_finding`); stats split `open` (product-actionable) vs `meta_open`.
+
+**Asset links** — `autotest/run.py`
+- The crawler no longer `page.goto`s binary/downloadable links (`.woff2`, `.pdf`, …):
+  Playwright raises "Download is starting" — a harness artifact that was filed as a HIGH
+  `navigation_error` and burned fixer ticks. Assets are verified with the request API
+  (`_check_asset`); a real 404/5xx still files a deterministic `network_error` finding.
+
+**Merge fallthrough** — `autotest/gitops.py`
+- `_merge_to_main`: when `gh pr merge --auto` is refused because the PR is already
+  "clean" (checks finished before arming), fall through to an immediate direct merge —
+  the same fix the roadmap workflow needed. Fix PRs no longer wait for a human.
+
+**Throughput** — `.github/workflows/autotest.yml`, `autotest/gitops.py`, `autotest/coder.py`
+- `AUTOTEST_GATE_XDIST=1` runs the local full-suite gate on all cores (pytest-xdist,
+  already a dev extra): 3,896 tests in ~6:24 vs ~20 min serial (verified 2026-06-11).
+  That speed pays for `AUTOTEST_FIX_MAX=2` — two careful fixes per tick in the same
+  wall clock (8/day vs 4/day ceiling), with zero ticks wasted on re-fixes.
+- Playwright browsers cached (`actions/cache`) in both sweep workflows (~275 MB × 4/day
+  off the wire); the duplicate Claude-CLI install in the fix step removed; the fixer's
+  JSON results now land in the job summary.
+- `AUTOTEST_CODER_MODEL_CLAUDE` optionally pins the coder's model (e.g. `opus` for the
+  hardest bugs); unset keeps the CLI/subscription default.
+- `_fix_prompt` now carries the council rationale, the screenshot path, the browser
+  engine, a REGRESSION note (prior PR + "don't repeat it") and a DEPLOY-LAG check
+  ("verify the defect exists in THIS checkout before editing").
+
+- Tests: `tests/test_autotest_state_and_grace.py` (28 cases) — grace window, reconcile,
+  judges-ran freeze, meta partition, asset crawl, merge fallthrough, grounding,
+  volatile digest, knobs, prompt context.

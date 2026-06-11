@@ -100,6 +100,12 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         env = os.environ.copy()
         cmd = ["claude", "-p", prompt, *flags, "--verbose",
                "--output-format", "stream-json"]
+        # Optional model pin for the Claude coder (e.g. "opus" for the hardest
+        # bugs, "sonnet" for throughput). Unset → the CLI/subscription default,
+        # so existing behaviour is unchanged unless the operator opts in.
+        model = os.environ.get("AUTOTEST_CODER_MODEL_CLAUDE", "").strip()
+        if model:
+            cmd += ["--model", model]
     else:
         return False, "no coding agent available (install gemini-cli or claude-code)"
 
