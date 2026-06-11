@@ -31,6 +31,7 @@ Public API
 - ``background_data_uri_for(brief, *, format_name="feed_portrait") -> Optional[str]``
   Returns a ``data:image/png;base64,...`` URI or None if generation fails.
 """
+
 from __future__ import annotations
 
 import base64
@@ -72,6 +73,7 @@ def _resolve_key() -> Optional[str]:
     """Reuse the same Gemini key the rest of MediaHub uses."""
     try:
         from mediahub.media_ai.llm import _resolve_gemini_key
+
         return _resolve_gemini_key()
     except Exception:
         # Fall back to env-only resolution if the import isn't available
@@ -91,6 +93,7 @@ def is_available() -> bool:
 # ---------------------------------------------------------------------------
 # Prompting
 # ---------------------------------------------------------------------------
+
 
 def _palette_words(palette: dict) -> str:
     """Describe the palette so Imagen outputs colour-matched imagery."""
@@ -127,12 +130,11 @@ def _build_prompt(brief, palette: dict, format_name: str) -> str:
 # Cache
 # ---------------------------------------------------------------------------
 
+
 def _hash_key(prompt: str, format_name: str) -> str:
     # Include the model so switching tiers (fast / ultra) invalidates
     # cached results from the previous tier.
-    h = hashlib.sha256(
-        f"{_IMAGEN_MODEL}|{prompt}|{format_name}".encode("utf-8")
-    ).hexdigest()
+    h = hashlib.sha256(f"{_IMAGEN_MODEL}|{prompt}|{format_name}".encode("utf-8")).hexdigest()
     return h[:16]
 
 
@@ -168,10 +170,10 @@ def _cache_put(key: str, data: bytes) -> None:
 # Map MediaHub format names to Imagen's supported aspectRatio enum.
 # Imagen 4 supports: "1:1", "9:16", "16:9", "3:4", "4:3".
 _FORMAT_ASPECT = {
-    "feed_square":   "1:1",
+    "feed_square": "1:1",
     "feed_portrait": "3:4",
-    "story":         "9:16",
-    "reel_cover":    "9:16",
+    "story": "9:16",
+    "reel_cover": "9:16",
 }
 
 
@@ -190,10 +192,7 @@ def _call_imagen(prompt: str, aspect_ratio: str) -> Optional[bytes]:
     except Exception:
         return None
 
-    url = (
-        f"{_GEMINI_API_BASE}/models/{_IMAGEN_MODEL}:predict"
-        f"?key={key}"
-    )
+    url = f"{_GEMINI_API_BASE}/models/{_IMAGEN_MODEL}:predict" f"?key={key}"
     payload = {
         "instances": [{"prompt": prompt}],
         "parameters": {
@@ -219,7 +218,8 @@ def _call_imagen(prompt: str, aspect_ratio: str) -> Optional[bytes]:
     if r.status_code != 200:
         log.debug(
             "ai_background: imagen non-200: %s %s",
-            r.status_code, (r.text or "")[:300],
+            r.status_code,
+            (r.text or "")[:300],
         )
         return None
 
@@ -248,6 +248,7 @@ def _call_imagen(prompt: str, aspect_ratio: str) -> Optional[bytes]:
 # ---------------------------------------------------------------------------
 # Public entry-point
 # ---------------------------------------------------------------------------
+
 
 def background_data_uri_for(brief, *, format_name: str = "feed_portrait") -> Optional[str]:
     """Return an Imagen-generated background as a data URI, or None.

@@ -21,6 +21,7 @@ Provider selection (operator-controlled at deploy time, env vars only):
   1. MEDIAHUB_LLM_PROVIDER env var ∈ {claude, gemini, auto}
   2. "auto" (the default) → Gemini first if configured, then Claude
 """
+
 from .llm import (
     ProviderNotConfigured,
     ProviderError,

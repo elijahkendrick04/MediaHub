@@ -8,6 +8,7 @@ Usage:
 
 No swim-vocabulary literals in this file.
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,9 +39,7 @@ _LOW_CONF_THRESHOLD = 0.6
 _MIN_OVERALL_CONF = 0.5
 
 # Regex for meet-level metadata — structural only, no domain vocab
-_DATE_RE = re.compile(
-    r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}[\-/]\d{2}[\-/]\d{2})\b"
-)
+_DATE_RE = re.compile(r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}[\-/]\d{2}[\-/]\d{2})\b")
 
 
 def _get_singletons(
@@ -58,6 +57,7 @@ def _get_singletons(
 # ---------------------------------------------------------------------------
 # Meet-level metadata extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_meet_metadata(
     text: str,
@@ -122,6 +122,7 @@ def _extract_meet_metadata(
 # Confidence calculation
 # ---------------------------------------------------------------------------
 
+
 def _overall_confidence(events: list[InterpretedEvent]) -> float:
     if not events:
         return 0.0
@@ -151,16 +152,25 @@ def _merge_meets(meets: list[InterpretedMeet]) -> InterpretedMeet:
     """
     if not meets:
         return InterpretedMeet(
-            meet_name=None, venue=None, dates=None, course_default=None,
-            governing_body_hint=None, events=[], overall_confidence=0.0,
-            needs_review=[], sources_used=[], patterns_used=[],
+            meet_name=None,
+            venue=None,
+            dates=None,
+            course_default=None,
+            governing_body_hint=None,
+            events=[],
+            overall_confidence=0.0,
+            needs_review=[],
+            sources_used=[],
+            patterns_used=[],
             new_patterns_proposed=[],
         )
+
     # Sort by overall_confidence desc, then by # of swims desc, then prefer hy3
     def _rank(m: InterpretedMeet) -> tuple:
         n_swims = sum(len(e.swims) for e in m.events)
         is_hy3 = any("hy3" in s for s in m.sources_used)
         return (m.overall_confidence, n_swims, 1 if is_hy3 else 0)
+
     meets.sort(key=_rank, reverse=True)
     primary = meets[0]
     sources = []
@@ -205,6 +215,7 @@ def _try_native_parse(
         import zipfile  # noqa: PLC0415
         import io  # noqa: PLC0415
         from ._zip_safety import safe_member_names, safe_read_member, UnsafeZipError  # noqa: PLC0415
+
         try:
             zf = zipfile.ZipFile(io.BytesIO(data))
         except Exception:  # noqa: BLE001
@@ -238,9 +249,9 @@ def _try_native_parse(
             if results:
                 merged = _merge_meets(results)
                 # Tag that the source was a ZIP wrapper
-                merged.sources_used = (
-                    ["format:zip"] + [s for s in merged.sources_used if s != "format:zip"]
-                )
+                merged.sources_used = ["format:zip"] + [
+                    s for s in merged.sources_used if s != "format:zip"
+                ]
                 return merged
         finally:
             zf.close()
@@ -250,6 +261,7 @@ def _try_native_parse(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def interpret_document(
     data: bytes,
@@ -327,12 +339,14 @@ def interpret_document(
     # Flag low-confidence columns
     for schema in schemas:
         if schema.confidence < _LOW_CONF_THRESHOLD:
-            needs_review.append({
-                "reason": "low-confidence-column",
-                "col_type": schema.col_type,
-                "confidence": schema.confidence,
-                "header": schema.header_text,
-            })
+            needs_review.append(
+                {
+                    "reason": "low-confidence-column",
+                    "col_type": schema.col_type,
+                    "confidence": schema.confidence,
+                    "header": schema.header_text,
+                }
+            )
             # Hypothesis: propose patterns for failing sections
             if stream.text:
                 proposed = propose_patterns(
@@ -351,10 +365,12 @@ def interpret_document(
     events = induce_events(stream, ontology=ontology)
 
     if not events:
-        needs_review.append({
-            "reason": "no-events-detected",
-            "detail": "Event-header detection found no events; synthetic fallback used.",
-        })
+        needs_review.append(
+            {
+                "reason": "no-events-detected",
+                "detail": "Event-header detection found no events; synthetic fallback used.",
+            }
+        )
         # Hypothesis: propose patterns for event headers
         for line in stream.lines[:20]:
             text = getattr(line, "text", "").strip()
@@ -383,11 +399,13 @@ def interpret_document(
             pattern_type="document_layout",
         )
         new_patterns_proposed.extend(proposed)
-        needs_review.append({
-            "reason": "low-overall-confidence",
-            "confidence": overall_conf,
-            "note": f"Proposed {len(proposed)} new patterns (provisional=True)",
-        })
+        needs_review.append(
+            {
+                "reason": "low-overall-confidence",
+                "confidence": overall_conf,
+                "note": f"Proposed {len(proposed)} new patterns (provisional=True)",
+            }
+        )
 
     # Save successful sections to corpus for future validation
     if overall_conf >= _LOW_CONF_THRESHOLD and stream.text:

@@ -12,6 +12,7 @@ Why a shim instead of porting V3 modules?
 The shim is read-only: it builds V3 ParsedMeet/ParsedSwim/ParsedSwimmer
 objects from canonical inputs.
 """
+
 from __future__ import annotations
 from typing import Optional
 
@@ -68,7 +69,7 @@ def canonical_to_v3(meet: Meet) -> ParsedMeet:
     # asa_id; non-asa swimmers will be missing from claims (acceptable
     # for the pilot — surfaced via warnings).
     swimmers_v3: dict[str, ParsedSwimmer] = {}
-    asa_lookup: dict[str, str] = {}   # swimmer_key -> asa_id
+    asa_lookup: dict[str, str] = {}  # swimmer_key -> asa_id
     for key, sw in meet.swimmers.items():
         v3sw = _swimmer_to_v3(sw)
         if v3sw is None:

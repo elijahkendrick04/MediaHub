@@ -45,6 +45,7 @@ Field positions verified against V8.1 corpus samples (Westhill, Elgin,
 Garioch, Dyce). Different Hy-Tek versions can shift columns by ±1; we
 parse defensively.
 """
+
 from __future__ import annotations
 
 import logging
@@ -82,7 +83,7 @@ def detect_sdif(data: bytes) -> bool:
 def _safe_str(line: str, start: int, length: int) -> str:
     if start >= len(line):
         return ""
-    return line[start:start + length].strip()
+    return line[start : start + length].strip()
 
 
 def _safe_int(line: str, start: int, length: int) -> Optional[int]:
@@ -194,7 +195,7 @@ def _parse_d0(line: str) -> dict:
     for span in ((67, 4), (66, 4), (62, 5), (63, 4)):
         if span[0] + span[1] > len(line):
             continue
-        s = line[span[0]:span[0] + span[1]].strip()
+        s = line[span[0] : span[0] + span[1]].strip()
         if s.isdigit():
             v = int(s)
             if 25 <= v <= 1500:
@@ -350,11 +351,7 @@ def parse_sdif(data: bytes) -> InterpretedMeet:
     events = list(events_by_key.values())
     if events:
         total_swims = sum(len(e.swims) for e in events) or 1
-        overall = sum(
-            e.confidence * (len(e.swims) / total_swims)
-            for e in events
-            if e.swims
-        )
+        overall = sum(e.confidence * (len(e.swims) / total_swims) for e in events if e.swims)
         overall = round(min(0.99, max(0.5, overall)), 3)
     else:
         overall = 0.0

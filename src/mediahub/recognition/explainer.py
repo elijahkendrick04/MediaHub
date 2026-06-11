@@ -25,6 +25,7 @@ function returns a fallback explanation that says only what is provable:
      "bullets": [],
      "source_lines": []}
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,29 +37,29 @@ from typing import Any
 
 _TYPE_PHRASE = {
     "official_pb_confirmed": "an officially-confirmed personal best",
-    "pb_confirmed":          "a confirmed personal best",
-    "pb_likely":             "a likely personal best",
-    "pb_magnitude_huge":     "a huge personal-best improvement",
-    "pb_magnitude_big":      "a big personal-best improvement",
-    "pb_magnitude_notable":  "a notable personal-best improvement",
-    "first_sub_barrier":     "a first-time sub-barrier swim",
-    "medal_gold":            "a gold medal",
-    "medal_silver":          "a silver medal",
-    "medal_bronze":          "a bronze medal",
-    "relay_medal_gold":      "a gold-medal relay performance",
-    "relay_medal_silver":    "a silver-medal relay performance",
-    "relay_medal_bronze":    "a bronze-medal relay performance",
-    "qual_hit_in_window":    "a qualifying-time hit inside the window",
+    "pb_confirmed": "a confirmed personal best",
+    "pb_likely": "a likely personal best",
+    "pb_magnitude_huge": "a huge personal-best improvement",
+    "pb_magnitude_big": "a big personal-best improvement",
+    "pb_magnitude_notable": "a notable personal-best improvement",
+    "first_sub_barrier": "a first-time sub-barrier swim",
+    "medal_gold": "a gold medal",
+    "medal_silver": "a silver medal",
+    "medal_bronze": "a bronze medal",
+    "relay_medal_gold": "a gold-medal relay performance",
+    "relay_medal_silver": "a silver-medal relay performance",
+    "relay_medal_bronze": "a bronze-medal relay performance",
+    "qual_hit_in_window": "a qualifying-time hit inside the window",
     "qual_hit_out_of_window": "a qualifying-time hit",
-    "top_of_field_top_3":    "a top-3 finish",
-    "top_of_field_top_5":    "a top-5 finish",
-    "top_of_field_top_10":   "a top-10 finish",
-    "multi_pb_weekend":      "a multi-PB weekend",
+    "top_of_field_top_3": "a top-3 finish",
+    "top_of_field_top_5": "a top-5 finish",
+    "top_of_field_top_10": "a top-10 finish",
+    "multi_pb_weekend": "a multi-PB weekend",
     "biggest_drop_candidate": "one of the biggest time drops of the meet",
-    "return_to_form":        "a return-to-form swim",
-    "fastest_since":         "the fastest swim since a long break",
-    "heat_to_final_drop":    "a heat-to-final improvement",
-    "final_appearance":      "a final appearance",
+    "return_to_form": "a return-to-form swim",
+    "fastest_since": "the fastest swim since a long break",
+    "heat_to_final_drop": "a heat-to-final improvement",
+    "final_appearance": "a final appearance",
 }
 
 
@@ -89,10 +90,10 @@ def _factor_dict(f: Any) -> dict:
         except Exception:
             pass
     return {
-        "name":          getattr(f, "name", ""),
-        "value":         getattr(f, "value", 0.0),
-        "weight":        getattr(f, "weight", 0.0),
-        "reason":        getattr(f, "reason", ""),
+        "name": getattr(f, "name", ""),
+        "value": getattr(f, "value", 0.0),
+        "weight": getattr(f, "weight", 0.0),
+        "reason": getattr(f, "reason", ""),
         "plain_summary": getattr(f, "plain_summary", ""),
     }
 
@@ -221,17 +222,20 @@ def _build_source_lines(achievement: dict) -> list[dict]:
             label = source_type.replace("_", " ")
         else:
             label = "source"
-        out.append({
-            "file_offset": idx,            # position in the achievement's evidence list
-            "raw_text":    raw_text,        # verbatim — not AI-reworded
-            "label":       label,
-        })
+        out.append(
+            {
+                "file_offset": idx,  # position in the achievement's evidence list
+                "raw_text": raw_text,  # verbatim — not AI-reworded
+                "label": label,
+            }
+        )
     return out
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def explain_achievement(
     achievement: dict | None,
@@ -270,14 +274,14 @@ def explain_achievement(
     if not sig_factors and not source_lines:
         rank_label = f"top-{rank}" if rank else "top-N"
         return {
-            "headline":     f"Generated for: ranked {rank_label} by overall score.",
-            "bullets":      [],
+            "headline": f"Generated for: ranked {rank_label} by overall score.",
+            "bullets": [],
             "source_lines": [],
         }
 
     return {
-        "headline":     _build_headline(a, sig_factors, profile=profile),
-        "bullets":      _build_bullets(a, sig_factors),
+        "headline": _build_headline(a, sig_factors, profile=profile),
+        "bullets": _build_bullets(a, sig_factors),
         "source_lines": source_lines,
     }
 

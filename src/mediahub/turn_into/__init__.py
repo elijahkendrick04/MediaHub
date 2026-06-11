@@ -19,6 +19,7 @@ All builders reuse the existing brand kit, voice profile, and the
 ``generate_caption_for_tone`` primitive — there is no parallel generation
 pipeline here.
 """
+
 from __future__ import annotations
 
 from .pipeline import turn_meet_into_pack, save_pack, load_pack, list_packs

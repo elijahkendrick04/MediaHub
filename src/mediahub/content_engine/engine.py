@@ -19,6 +19,7 @@ There is no hand-coded template fallback: when no provider is configured the
 writer raises ``ProviderNotConfigured`` / ``ProviderError`` and the caller
 surfaces an honest error, exactly as the meet-recap caption path does.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from .director import plan_content_directions
 # ---------------------------------------------------------------------------
 # Brand context — one truth-source for the active organisation
 # ---------------------------------------------------------------------------
+
 
 def load_brand_context() -> dict:
     """Best-effort load of the ACTIVE ClubProfile for brand voice grounding.
@@ -47,6 +49,7 @@ def load_brand_context() -> dict:
     prof = None
     try:
         from flask import current_app
+
         get_active = getattr(current_app, "active_profile", None)
         if get_active:
             prof = get_active()
@@ -60,6 +63,7 @@ def load_brand_context() -> dict:
             best_pid = None
             try:
                 from mediahub.web.club_profile import _profiles_dir  # type: ignore
+
                 d = _profiles_dir()
                 best = max(
                     profiles,
@@ -69,7 +73,8 @@ def load_brand_context() -> dict:
             except Exception:
                 first = profiles[0]
                 best_pid = (
-                    first.get("profile_id") if isinstance(first, dict)
+                    first.get("profile_id")
+                    if isinstance(first, dict)
                     else getattr(first, "profile_id", None)
                 )
             if not best_pid:
@@ -81,6 +86,7 @@ def load_brand_context() -> dict:
         return {}
     try:
         from mediahub.brand.palette import effective_palette
+
         eff = effective_palette(
             manual=getattr(prof, "brand_palette_manual", {}) or {},
             extracted=getattr(prof, "brand_palette_extracted", {}) or {},
@@ -88,19 +94,19 @@ def load_brand_context() -> dict:
     except Exception:
         eff = {}
     return {
-        "name":          getattr(prof, "display_name", "") or "",
-        "short_name":    getattr(prof, "short_name", "") or "",
-        "org_type":      getattr(prof, "org_type", "") or "",
-        "tone":          getattr(prof, "tone", "") or "",
-        "tone_notes":    getattr(prof, "tone_notes", "") or "",
-        "exemplars":     getattr(prof, "exemplar_captions", []) or [],
-        "sponsor_name":  getattr(prof, "sponsor_name", "") or "",
+        "name": getattr(prof, "display_name", "") or "",
+        "short_name": getattr(prof, "short_name", "") or "",
+        "org_type": getattr(prof, "org_type", "") or "",
+        "tone": getattr(prof, "tone", "") or "",
+        "tone_notes": getattr(prof, "tone_notes", "") or "",
+        "exemplars": getattr(prof, "exemplar_captions", []) or [],
+        "sponsor_name": getattr(prof, "sponsor_name", "") or "",
         "sponsor_rules": getattr(prof, "sponsor_guidelines", "") or "",
         "voice_summary": (getattr(prof, "brand_voice_summary", "") or "")[:600],
-        "keywords":      list(getattr(prof, "brand_keywords", []) or [])[:8],
-        "phrases_to_use":   list(getattr(prof, "brand_phrases_to_use", []) or [])[:6],
+        "keywords": list(getattr(prof, "brand_keywords", []) or [])[:8],
+        "phrases_to_use": list(getattr(prof, "brand_phrases_to_use", []) or [])[:6],
         "phrases_to_avoid": list(getattr(prof, "brand_phrases_to_avoid", []) or [])[:6],
-        "palette":       eff,
+        "palette": eff,
     }
 
 
@@ -108,27 +114,32 @@ def load_brand_context() -> dict:
 # Writer — tool-based, structured cards
 # ---------------------------------------------------------------------------
 
-_SUBMIT_CARD_TOOL = [{
-    "name": "submit_card",
-    "description": (
-        "Emit one social-media card. Call this once per card in the creative "
-        "direction, in order. Each call produces one draft the user reviews."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "platform": {"type": "string",
-                         "description": "Instagram | Stories | Twitter | Facebook | LinkedIn | TikTok"},
-            "caption":  {"type": "string",
-                         "description": "The caption body, 1-4 short lines."},
-            "hashtags": {"type": "array", "items": {"type": "string"},
-                         "description": "2-6 hashtags, no leading #."},
-            "notes":    {"type": "string",
-                         "description": "One-line rationale for this card."},
+_SUBMIT_CARD_TOOL = [
+    {
+        "name": "submit_card",
+        "description": (
+            "Emit one social-media card. Call this once per card in the creative "
+            "direction, in order. Each call produces one draft the user reviews."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "description": "Instagram | Stories | Twitter | Facebook | LinkedIn | TikTok",
+                },
+                "caption": {"type": "string", "description": "The caption body, 1-4 short lines."},
+                "hashtags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-6 hashtags, no leading #.",
+                },
+                "notes": {"type": "string", "description": "One-line rationale for this card."},
+            },
+            "required": ["platform", "caption"],
         },
-        "required": ["platform", "caption"],
-    },
-}]
+    }
+]
 
 
 def _brand_facts_block(brand: dict) -> str:
@@ -171,7 +182,8 @@ def _direction_block(directions: list[dict]) -> str:
     return (
         "Creative direction from the art director (one card per line — honour "
         "the platform and angle, but write the caption in your own fresh "
-        "words):\n" + "\n".join(lines)
+        "words):\n"
+        + "\n".join(lines)
         + f"\n\nProduce exactly {len(directions)} card(s), one per direction "
         "above, calling submit_card once per card in order."
     )
@@ -205,6 +217,7 @@ def _build_system_prompt(
 ) -> str:
     try:
         from mediahub.ai_core import narrate_brand
+
         brand_prose = narrate_brand(brand)
     except Exception:
         brand_prose = ""
@@ -248,6 +261,7 @@ def _tone_descriptor(tone: str) -> str:
         return ""
     try:
         from mediahub.web.ai_caption import _TONE_DESCRIPTORS
+
         return _TONE_DESCRIPTORS.get(tone, "")
     except Exception:
         return ""
@@ -256,6 +270,7 @@ def _tone_descriptor(tone: str) -> str:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def generate_content(
     *,
@@ -306,18 +321,25 @@ def generate_content(
         notes = (inp.get("notes") or "").strip()
         if not caption:
             return json.dumps({"ok": False, "reason": "empty caption — skipped"})
-        cards.append({
-            "platform":   platform,
-            "caption":    caption,
-            "hashtags":   [str(h).lstrip("#").strip() for h in list(hashtags)[:6] if str(h).strip()],
-            "confidence": 0.8,
-            "notes":      notes,
-        })
+        cards.append(
+            {
+                "platform": platform,
+                "caption": caption,
+                "hashtags": [
+                    str(h).lstrip("#").strip() for h in list(hashtags)[:6] if str(h).strip()
+                ],
+                "confidence": 0.8,
+                "notes": notes,
+            }
+        )
         return json.dumps({"ok": True, "received": len(cards)})
 
     system = _build_system_prompt(
-        brand=brand, requirements=requirements, directions=directions,
-        recent_cards=recent_cards, tone=tone,
+        brand=brand,
+        requirements=requirements,
+        directions=directions,
+        recent_cards=recent_cards,
+        tone=tone,
     )
     # Per-call nonce so the provider can't return cached identical output
     # across regenerations (the prompt asks for tool calls only, so it never
@@ -357,11 +379,17 @@ def generate_caption(
     ``ClaudeUnavailableError`` when no provider can answer (no fake fallback).
     """
     from mediahub.web.ai_caption import generate_caption_for_tone
+
     return generate_caption_for_tone(
-        achievement_dict, club_brand, tone=tone,
-        voice_profile=voice_profile, club_profile=club_profile,
-        recent_captions=recent_captions, brief_prose=brief_prose,
-        direction=direction, requirements=requirements,
+        achievement_dict,
+        club_brand,
+        tone=tone,
+        voice_profile=voice_profile,
+        club_profile=club_profile,
+        recent_captions=recent_captions,
+        brief_prose=brief_prose,
+        direction=direction,
+        requirements=requirements,
     )
 
 

@@ -4,6 +4,7 @@ Intent: bio, recent video captions, trending hashtags the account
 participates in, and any audio / music affinity worth knowing about for
 motion compositions.
 """
+
 from __future__ import annotations
 
 from . import process_link

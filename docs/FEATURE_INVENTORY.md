@@ -28,4 +28,3 @@ User-visible features, mapped to the routes / modules that implement them.
 > **Configuration:** Secrets and operator config are env-var only (see
 > `.env.example` and `docs/ENV_INVENTORY.md`). The previous in-app
 > `/settings/secrets` page was removed in the operator-config rewrite.
-

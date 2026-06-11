@@ -42,6 +42,7 @@ References:
     - W3C Design Tokens Format Module (DTCG)
     - docs/THEMING.md
 """
+
 from __future__ import annotations
 
 import json
@@ -91,9 +92,7 @@ def themes_dir() -> Path:
 
 def _validate_pid(profile_id: str) -> str:
     if not isinstance(profile_id, str) or not _PROFILE_ID_RE.fullmatch(profile_id):
-        raise ProfileIdError(
-            f"profile_id must match {_PROFILE_ID_RE.pattern}, got {profile_id!r}"
-        )
+        raise ProfileIdError(f"profile_id must match {_PROFILE_ID_RE.pattern}, got {profile_id!r}")
     return profile_id
 
 
@@ -227,11 +226,11 @@ def palette_for_motion(theme_json: dict) -> dict:
     handles saturated primaries cleanly, and MD3's dark.primary is
     the lighter / more saturated tone of the brand."""
     return {
-        "primary":   _role(theme_json, "dark", "primary",              _FALLBACK_PRIMARY),
+        "primary": _role(theme_json, "dark", "primary", _FALLBACK_PRIMARY),
         "secondary": _role(theme_json, "dark", "secondary_container", _FALLBACK_SECONDARY),
-        "accent":    _role(theme_json, "dark", "tertiary",             _FALLBACK_ACCENT),
-        "scheme":    "dark",
-        "source":    "theme-store",
+        "accent": _role(theme_json, "dark", "tertiary", _FALLBACK_ACCENT),
+        "scheme": "dark",
+        "source": "theme-store",
     }
 
 
@@ -242,11 +241,11 @@ def palette_for_email(theme_json: dict) -> dict:
     body, and MD3's light.primary is the darker/more contrasting
     brand tone."""
     return {
-        "primary":   _role(theme_json, "light", "primary",              _FALLBACK_PRIMARY),
+        "primary": _role(theme_json, "light", "primary", _FALLBACK_PRIMARY),
         "secondary": _role(theme_json, "light", "secondary_container", _FALLBACK_SECONDARY),
-        "accent":    _role(theme_json, "light", "tertiary",             _FALLBACK_ACCENT),
-        "scheme":    "light",
-        "source":    "theme-store",
+        "accent": _role(theme_json, "light", "tertiary", _FALLBACK_ACCENT),
+        "scheme": "light",
+        "source": "theme-store",
     }
 
 
@@ -257,9 +256,9 @@ def palette_for_static(theme_json: dict) -> dict:
     Uses the LIGHT scheme — static graphics are posted to social
     feeds, which default to white backgrounds on mobile."""
     return {
-        "primary":   _role(theme_json, "light", "primary",              _FALLBACK_PRIMARY),
+        "primary": _role(theme_json, "light", "primary", _FALLBACK_PRIMARY),
         "secondary": _role(theme_json, "light", "secondary_container", _FALLBACK_SECONDARY),
-        "accent":    _role(theme_json, "light", "tertiary",             _FALLBACK_ACCENT),
-        "scheme":    "light",
-        "source":    "theme-store",
+        "accent": _role(theme_json, "light", "tertiary", _FALLBACK_ACCENT),
+        "scheme": "light",
+        "source": "theme-store",
     }

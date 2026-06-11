@@ -35,6 +35,7 @@ Sources informing this layer:
   * https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html
   * https://web.dev/blog/viewport-units
 """
+
 from __future__ import annotations
 
 RESPONSIVE_GUARDRAILS_CSS = r"""

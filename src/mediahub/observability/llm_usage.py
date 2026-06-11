@@ -24,6 +24,7 @@ Public API:
 
 Every public function is exception-safe — DB issues yield a safe default.
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,7 +64,7 @@ _PRUNE_TARGET = 27_000
 # Anthropic Claude — public list, May 2026.
 # (sonnet-4-6 + opus-4-7 + haiku-4-5)
 _ANTHROPIC_RATES_USD_PER_MTOK = {
-    "input":  3.00,   # Sonnet input — conservative midpoint
+    "input": 3.00,  # Sonnet input — conservative midpoint
     "output": 15.00,  # Sonnet output — conservative midpoint
 }
 
@@ -71,7 +72,7 @@ _ANTHROPIC_RATES_USD_PER_MTOK = {
 # These rates apply only if the operator has exceeded the free tier
 # and moved to paid billing (rare for the target audience).
 _GEMINI_RATES_USD_PER_MTOK = {
-    "input":  0.075,
+    "input": 0.075,
     "output": 0.30,
 }
 
@@ -107,6 +108,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_ts
 # Connection helper
 # ---------------------------------------------------------------------------
 
+
 def _connect() -> sqlite3.Connection:
     try:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +143,7 @@ _ensure_schema()
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def record_call(
     *,
@@ -199,9 +202,7 @@ def record_call(
         _ensure_schema()
         conn = _connect()
         try:
-            cur = conn.execute(
-                sql, (when, p, m, 1 if ok else 0, ti, to, dms, ek, em)
-            )
+            cur = conn.execute(sql, (when, p, m, 1 if ok else 0, ti, to, dms, ek, em))
             new_id = int(cur.lastrowid or 0)
             conn.commit()
             _maybe_prune(conn)
@@ -277,14 +278,17 @@ def usage_for_window(window_hours: int = 24) -> dict:
     per_provider: dict[str, dict] = {}
     for r in rows:
         p = r["provider"] or "unknown"
-        bucket = per_provider.setdefault(p, {
-            "provider": p,
-            "calls": 0,
-            "ok": 0,
-            "failed": 0,
-            "tokens_in": 0,
-            "tokens_out": 0,
-        })
+        bucket = per_provider.setdefault(
+            p,
+            {
+                "provider": p,
+                "calls": 0,
+                "ok": 0,
+                "failed": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+            },
+        )
         bucket["calls"] += 1
         if r["ok"]:
             bucket["ok"] += 1
@@ -313,9 +317,7 @@ def usage_for_window(window_hours: int = 24) -> dict:
 
     # Gemini free-tier headroom is "today" (rolling 24h is a fine proxy
     # for the published per-day reset).
-    gemini_calls_today = sum(
-        b["calls"] for b in by_provider if b["provider"] == "gemini"
-    )
+    gemini_calls_today = sum(b["calls"] for b in by_provider if b["provider"] == "gemini")
     headroom = None
     if gemini_calls_today > 0:
         headroom = max(0, GEMINI_FREE_TIER_DAILY_REQ - gemini_calls_today)
@@ -371,10 +373,16 @@ def daily_usage(days: int = 30) -> list[dict]:
     by_day: dict[str, dict] = {}
     for r in rows:
         day = r["day"]
-        bucket = by_day.setdefault(day, {
-            "date": day, "calls": 0, "ok": 0, "failed": 0,
-            "_per_provider": {},
-        })
+        bucket = by_day.setdefault(
+            day,
+            {
+                "date": day,
+                "calls": 0,
+                "ok": 0,
+                "failed": 0,
+                "_per_provider": {},
+            },
+        )
         bucket["calls"] += 1
         if r["ok"]:
             bucket["ok"] += 1
@@ -392,16 +400,16 @@ def daily_usage(days: int = 30) -> list[dict]:
     for day, bucket in sorted(by_day.items()):
         cost = 0.0
         for provider, pp in bucket["_per_provider"].items():
-            cost += _estimate_cost_usd(
-                provider, pp["calls"], pp["tokens_in"], pp["tokens_out"]
-            )
-        out.append({
-            "date": day,
-            "calls": bucket["calls"],
-            "ok": bucket["ok"],
-            "failed": bucket["failed"],
-            "est_cost_usd": round(cost, 4),
-        })
+            cost += _estimate_cost_usd(provider, pp["calls"], pp["tokens_in"], pp["tokens_out"])
+        out.append(
+            {
+                "date": day,
+                "calls": bucket["calls"],
+                "ok": bucket["ok"],
+                "failed": bucket["failed"],
+                "est_cost_usd": round(cost, 4),
+            }
+        )
     return out
 
 
@@ -444,8 +452,8 @@ def last_error() -> Optional[dict]:
 # Internals
 # ---------------------------------------------------------------------------
 
-def _estimate_cost_usd(provider: str, calls: int,
-                       tokens_in: int, tokens_out: int) -> float:
+
+def _estimate_cost_usd(provider: str, calls: int, tokens_in: int, tokens_out: int) -> float:
     """Estimate USD cost for a provider given call/token counts.
 
     Uses published list pricing for Anthropic. Returns 0 for Gemini
@@ -460,12 +468,12 @@ def _estimate_cost_usd(provider: str, calls: int,
     if p == "anthropic":
         rates = _ANTHROPIC_RATES_USD_PER_MTOK
         if tokens_in or tokens_out:
-            return (tokens_in / 1_000_000.0) * rates["input"] + \
-                   (tokens_out / 1_000_000.0) * rates["output"]
+            return (tokens_in / 1_000_000.0) * rates["input"] + (tokens_out / 1_000_000.0) * rates[
+                "output"
+            ]
         # Heuristic: assume 1.5k tokens in + 0.5k tokens out per call.
         return calls * (
-            (1500 / 1_000_000.0) * rates["input"] +
-            (500 / 1_000_000.0) * rates["output"]
+            (1500 / 1_000_000.0) * rates["input"] + (500 / 1_000_000.0) * rates["output"]
         )
     return 0.0
 

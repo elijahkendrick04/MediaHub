@@ -7,6 +7,7 @@ This detector checks for the CONFIRMED_OFFICIAL_PB status produced by the
 PB-audit pipeline (sourced from whichever provider pb_discovery selected at
 runtime) and creates a high-confidence achievement.
 """
+
 from __future__ import annotations
 
 from swim_content_v5.achievements.base import AchievementDetector
@@ -37,6 +38,7 @@ def _swim_id(swim, suffix: str = "") -> str:
 
 def _event_label(swim) -> str:
     from swim_content_v5.report import _event_label as _el
+
     return _el(swim)
 
 
@@ -50,6 +52,7 @@ class OfficialPBDetector(AchievementDetector):
     domain is read from the PB-decision evidence at runtime; no provider
     is hardcoded here.
     """
+
     name = "official_pb_confirmed"
 
     def detect(self, swim, ctx, history, all_results=None, extra=None) -> list[Achievement]:
@@ -84,6 +87,7 @@ class OfficialPBDetector(AchievementDetector):
             if source_url:
                 try:
                     from urllib.parse import urlparse
+
                     host = (urlparse(source_url).hostname or "").lower()
                     if host.startswith("www."):
                         host = host[4:]
@@ -102,34 +106,38 @@ class OfficialPBDetector(AchievementDetector):
             ),
         ]
         if source_url:
-            evidence.append(AchievementEvidence(
-                source_type="live_research",
-                source_name=source_label,
-                statement=reason,
-                source_url=source_url,
-                confidence="high",
-            ))
+            evidence.append(
+                AchievementEvidence(
+                    source_type="live_research",
+                    source_name=source_label,
+                    statement=reason,
+                    source_url=source_url,
+                    confidence="high",
+                )
+            )
 
-        return [Achievement(
-            type="official_pb_confirmed",
-            swim_id=_swim_id(swim, ":official_pb"),
-            swimmer_id=swim.swimmer_key,
-            swimmer_name=swimmer_name,
-            event=evt,
-            headline=f"{swimmer_name} — official PB confirmed: {time_str} in {evt}",
-            angle_hint=f"Official PB confirmed by {source_label}: {time_str} is their listed all-time PB for {evt}.",
-            confidence=0.98,
-            confidence_label="high",
-            evidence=evidence,
-            raw_facts={
-                "time_str": time_str,
-                "time_cs": swim.finals_time_cs,
-                "pb_decision_status": "CONFIRMED_OFFICIAL_PB",
-                "reason": reason,
-            },
-            uncertainty_notes=[],
-            detector_name=self.name,
-        )]
+        return [
+            Achievement(
+                type="official_pb_confirmed",
+                swim_id=_swim_id(swim, ":official_pb"),
+                swimmer_id=swim.swimmer_key,
+                swimmer_name=swimmer_name,
+                event=evt,
+                headline=f"{swimmer_name} — official PB confirmed: {time_str} in {evt}",
+                angle_hint=f"Official PB confirmed by {source_label}: {time_str} is their listed all-time PB for {evt}.",
+                confidence=0.98,
+                confidence_label="high",
+                evidence=evidence,
+                raw_facts={
+                    "time_str": time_str,
+                    "time_cs": swim.finals_time_cs,
+                    "pb_decision_status": "CONFIRMED_OFFICIAL_PB",
+                    "reason": reason,
+                },
+                uncertainty_notes=[],
+                detector_name=self.name,
+            )
+        ]
 
     def _get_pb_decision(self, swim, history) -> dict | None:
         """Extract the PBDecision dict from the history object."""
@@ -152,7 +160,11 @@ class OfficialPBDetector(AchievementDetector):
         pb_decision = self._get_pb_decision(swim, history)
         if pb_decision is None:
             return "no PB decision data on history object"
-        status = pb_decision.get("status", "") if isinstance(pb_decision, dict) else getattr(pb_decision, "status", "")
+        status = (
+            pb_decision.get("status", "")
+            if isinstance(pb_decision, dict)
+            else getattr(pb_decision, "status", "")
+        )
         if status != "CONFIRMED_OFFICIAL_PB":
             return f"PB decision is {status}, not CONFIRMED_OFFICIAL_PB"
         return "did not fire"

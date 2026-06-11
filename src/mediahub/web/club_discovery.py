@@ -17,6 +17,7 @@ Schema (per JSON file):
         "last_seen": "2024-..."
     }
 """
+
 from __future__ import annotations
 
 import json

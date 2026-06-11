@@ -11,6 +11,7 @@ Compatibility shims:
    `swim_content_pb`, and `engine_v4` keep importing from their preserved
    sources without modification.
 """
+
 from __future__ import annotations
 
 import sys as _sys

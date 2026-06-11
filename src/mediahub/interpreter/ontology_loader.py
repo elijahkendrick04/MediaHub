@@ -5,6 +5,7 @@ No domain vocabulary literals.  This module simply locates and loads JSON
 files from the ontology directory; the content (swim terms, column labels,
 etc.) lives entirely in those JSON files.
 """
+
 from __future__ import annotations
 
 import json

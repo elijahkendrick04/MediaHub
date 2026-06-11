@@ -25,6 +25,7 @@ The pack dict shape::
 Storage layout under ``DATA_DIR / turn_into_packs / <run_id> / <pack_id>.json``
 keeps old packs alongside new ones — the user can re-generate freely.
 """
+
 from __future__ import annotations
 
 import json
@@ -88,13 +89,15 @@ def list_packs(run_id: str, base_dir: Optional[Path] = None) -> list[dict]:
             data = json.loads(f.read_text())
         except Exception:
             continue
-        out.append({
-            "pack_id": data.get("pack_id", f.stem),
-            "generated_at": data.get("generated_at", ""),
-            "n_artefacts": len(data.get("artefacts", []) or []),
-            "n_skipped": len(data.get("skipped", []) or []),
-            "deterministic": bool(data.get("deterministic", False)),
-        })
+        out.append(
+            {
+                "pack_id": data.get("pack_id", f.stem),
+                "generated_at": data.get("generated_at", ""),
+                "n_artefacts": len(data.get("artefacts", []) or []),
+                "n_skipped": len(data.get("skipped", []) or []),
+                "deterministic": bool(data.get("deterministic", False)),
+            }
+        )
     out.sort(key=lambda x: x.get("generated_at", ""), reverse=True)
     return out
 
@@ -118,6 +121,7 @@ def _resolve_voice_profile(profile_id: str):
     """Load the voice profile if available; never crash."""
     try:
         from mediahub.voice.store import load_voice_profile
+
         return load_voice_profile(profile_id)
     except Exception:
         return None
@@ -170,22 +174,23 @@ def turn_meet_into_pack(
     # them in parallel cuts a 7-artefact pack from ~3 min to ~45s with Gemini.
     # All builders are pure functions of their inputs, so this is safe.
     # Disable via MEDIAHUB_TURNINTO_PARALLEL=0 (e.g. for deterministic tests).
-    _parallel = (
-        os.environ.get("MEDIAHUB_TURNINTO_PARALLEL", "1") != "0"
-        and not deterministic
-    )
+    _parallel = os.environ.get("MEDIAHUB_TURNINTO_PARALLEL", "1") != "0" and not deterministic
 
-    _kw = dict(profile=profile, voice_profile=voice_profile,
-               brand_kit=brand_kit, deterministic=deterministic)
+    _kw = dict(
+        profile=profile,
+        voice_profile=voice_profile,
+        brand_kit=brand_kit,
+        deterministic=deterministic,
+    )
     # (label, callable) tuples — order here is the order shown in the pack UI.
     _jobs: list[tuple[str, callable]] = [
-        ("meet_recap",         lambda: _t.build_meet_recap(meet_summary, ranked, **_kw)),
-        ("swimmer_spotlight",  lambda: _t.build_swimmer_spotlights(meet_summary, ranked, **_kw)),
-        ("data_thread",        lambda: _t.build_data_thread(meet_summary, ranked, **_kw)),
-        ("parent_newsletter",  lambda: _t.build_parent_newsletter(meet_summary, ranked, **_kw)),
-        ("sponsor_thank_you",  lambda: _t.build_sponsor_thank_you(meet_summary, ranked, **_kw)),
-        ("coach_quote",        lambda: _t.build_coach_quote(meet_summary, ranked, **_kw)),
-        ("next_meet_preview",  lambda: _t.build_next_meet_preview(meet_summary, ranked, **_kw)),
+        ("meet_recap", lambda: _t.build_meet_recap(meet_summary, ranked, **_kw)),
+        ("swimmer_spotlight", lambda: _t.build_swimmer_spotlights(meet_summary, ranked, **_kw)),
+        ("data_thread", lambda: _t.build_data_thread(meet_summary, ranked, **_kw)),
+        ("parent_newsletter", lambda: _t.build_parent_newsletter(meet_summary, ranked, **_kw)),
+        ("sponsor_thank_you", lambda: _t.build_sponsor_thank_you(meet_summary, ranked, **_kw)),
+        ("coach_quote", lambda: _t.build_coach_quote(meet_summary, ranked, **_kw)),
+        ("next_meet_preview", lambda: _t.build_next_meet_preview(meet_summary, ranked, **_kw)),
     ]
     _skip_reasons = {
         "sponsor_thank_you": "No sponsor_name set on club profile.",
@@ -197,6 +202,7 @@ def turn_meet_into_pack(
 
     if _parallel:
         from concurrent.futures import ThreadPoolExecutor
+
         max_workers = int(os.environ.get("MEDIAHUB_TURNINTO_WORKERS", "4"))
         with ThreadPoolExecutor(max_workers=min(max_workers, len(_jobs))) as pool:
             results = list(pool.map(lambda j: (j[0], j[1]()), _jobs))
@@ -217,8 +223,9 @@ def turn_meet_into_pack(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "meet_name": meet_summary["name"],
         "profile_id": profile_id,
-        "voice_tone": (voice_profile.tone if voice_profile else
-                       (profile.tone if profile else "warm-club")),
+        "voice_tone": (
+            voice_profile.tone if voice_profile else (profile.tone if profile else "warm-club")
+        ),
         "deterministic": bool(deterministic),
         "artefacts": artefacts,
         "skipped": skipped,

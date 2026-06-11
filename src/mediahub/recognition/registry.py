@@ -5,6 +5,7 @@ register_sport(name, ...) registers a sport config.
 get_sport(name) retrieves it.
 list_sports() returns sorted list of registered sport names.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -15,8 +16,8 @@ from typing import Optional
 class SportConfig:
     sport: str
     display_name: str
-    detectors: list                    # list of AchievementDetector instances
-    history_provider: Optional[object] = None   # HistoryProvider implementation
+    detectors: list  # list of AchievementDetector instances
+    history_provider: Optional[object] = None  # HistoryProvider implementation
     default_voice_templates: dict = field(default_factory=dict)
 
 

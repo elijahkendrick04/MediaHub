@@ -30,6 +30,7 @@ References:
     - Cohen-Or et al. (SIGGRAPH 2006) — original paper
     - github.com/tasoshi/colorharmonization — reference Python port
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict, field
@@ -59,10 +60,11 @@ HARMONIC_TEMPLATES: dict[str, list[Tuple[float, float]]] = {
 @dataclass
 class HarmonicFit:
     """The best-fit harmonic template for a set of hues."""
-    template: str                    # one of i / V / L / I / T / Y / X
-    rotation: float                   # best rotation in degrees [0, 360)
-    energy: float                     # total out-of-band distance (lower = better)
-    hue_count: int                    # how many hues were scored
+
+    template: str  # one of i / V / L / I / T / Y / X
+    rotation: float  # best rotation in degrees [0, 360)
+    energy: float  # total out-of-band distance (lower = better)
+    hue_count: int  # how many hues were scored
     template_bands: list[Tuple[float, float]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -150,7 +152,10 @@ def fit_harmonic_template(
     """
     if not hues:
         return HarmonicFit(
-            template="i", rotation=0.0, energy=0.0, hue_count=0,
+            template="i",
+            rotation=0.0,
+            energy=0.0,
+            hue_count=0,
             template_bands=list(HARMONIC_TEMPLATES["i"]),
         )
 

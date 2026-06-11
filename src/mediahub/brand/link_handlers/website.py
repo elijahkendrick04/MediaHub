@@ -5,6 +5,7 @@ story, sponsor relationships, and key messages. The website is
 typically the richest single source so the orchestrator's strategy
 proposer is told to look for About / Mission / Press / Brand pages.
 """
+
 from __future__ import annotations
 
 from . import process_link

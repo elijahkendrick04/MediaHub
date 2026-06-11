@@ -46,6 +46,7 @@ References:
   - material-color-utilities/concepts/dynamic_color_scheme.md
   - flutter.dev/ColorScheme (canonical list of ~30 roles)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -65,60 +66,53 @@ __all__ = ["RoleScheme", "ThemeRoles", "derive_roles", "ROLE_TONE_MAP"]
 
 ROLE_TONE_MAP: dict[str, tuple[str, int, int]] = {
     # Primary
-    "primary":                  ("primary", 40, 80),
-    "on_primary":               ("primary", 100, 20),
-    "primary_container":        ("primary", 90, 30),
-    "on_primary_container":     ("primary", 10, 90),
-
+    "primary": ("primary", 40, 80),
+    "on_primary": ("primary", 100, 20),
+    "primary_container": ("primary", 90, 30),
+    "on_primary_container": ("primary", 10, 90),
     # Secondary
-    "secondary":                ("secondary", 40, 80),
-    "on_secondary":             ("secondary", 100, 20),
-    "secondary_container":      ("secondary", 90, 30),
-    "on_secondary_container":   ("secondary", 10, 90),
-
+    "secondary": ("secondary", 40, 80),
+    "on_secondary": ("secondary", 100, 20),
+    "secondary_container": ("secondary", 90, 30),
+    "on_secondary_container": ("secondary", 10, 90),
     # Tertiary
-    "tertiary":                 ("tertiary", 40, 80),
-    "on_tertiary":              ("tertiary", 100, 20),
-    "tertiary_container":       ("tertiary", 90, 30),
-    "on_tertiary_container":    ("tertiary", 10, 90),
-
+    "tertiary": ("tertiary", 40, 80),
+    "on_tertiary": ("tertiary", 100, 20),
+    "tertiary_container": ("tertiary", 90, 30),
+    "on_tertiary_container": ("tertiary", 10, 90),
     # Error
-    "error":                    ("error", 40, 80),
-    "on_error":                 ("error", 100, 20),
-    "error_container":          ("error", 90, 30),
-    "on_error_container":       ("error", 10, 90),
-
+    "error": ("error", 40, 80),
+    "on_error": ("error", 100, 20),
+    "error_container": ("error", 90, 30),
+    "on_error_container": ("error", 10, 90),
     # Background + Surface
-    "background":               ("neutral", 99, 10),
-    "on_background":            ("neutral", 10, 90),
-    "surface":                  ("neutral", 99, 10),
-    "on_surface":               ("neutral", 10, 90),
-
+    "background": ("neutral", 99, 10),
+    "on_background": ("neutral", 10, 90),
+    "surface": ("neutral", 99, 10),
+    "on_surface": ("neutral", 10, 90),
     # Surface containers (M3 elevation tints)
     "surface_container_lowest": ("neutral", 100, 0),
-    "surface_container_low":    ("neutral", 95, 10),
-    "surface_container":        ("neutral", 90, 20),
-    "surface_container_high":   ("neutral", 90, 30),
-    "surface_container_highest":("neutral", 90, 30),
-
+    "surface_container_low": ("neutral", 95, 10),
+    "surface_container": ("neutral", 90, 20),
+    "surface_container_high": ("neutral", 90, 30),
+    "surface_container_highest": ("neutral", 90, 30),
     # Surface-variant (neutral_variant palette)
-    "surface_variant":          ("neutral_variant", 90, 30),
-    "on_surface_variant":       ("neutral_variant", 30, 80),
-
+    "surface_variant": ("neutral_variant", 90, 30),
+    "on_surface_variant": ("neutral_variant", 30, 80),
     # Outline
-    "outline":                  ("neutral_variant", 50, 60),
-    "outline_variant":          ("neutral_variant", 80, 30),
-
+    "outline": ("neutral_variant", 50, 60),
+    "outline_variant": ("neutral_variant", 80, 30),
     # Inverse
-    "inverse_surface":          ("neutral", 20, 90),
-    "inverse_on_surface":       ("neutral", 95, 20),
-    "inverse_primary":          ("primary", 80, 40),
+    "inverse_surface": ("neutral", 20, 90),
+    "inverse_on_surface": ("neutral", 95, 20),
+    "inverse_primary": ("primary", 80, 40),
 }
 
 
 @dataclass
 class RoleScheme:
     """~30 MD3 role tokens for a single scheme (light or dark)."""
+
     primary: str
     on_primary: str
     primary_container: str

@@ -36,6 +36,7 @@ References:
   - Chromium vision_deficiency.cc — chromium.googlesource.com.
   - DaltonLens review of CVD libraries — daltonlens.org/opensource-cvd-simulation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -67,23 +68,29 @@ CVD_TYPES: tuple[CVD, ...] = ("deutan", "protan", "tritan")
 # Source: Machado et al. 2009 (Table 1) and Chromium vision_deficiency.cc.
 # These operate on LINEAR-LIGHT sRGB (not gamma-corrected).
 
-DEUTAN_MATRIX = np.array([
-    [0.367,  0.861, -0.228],
-    [0.280,  0.673,  0.047],
-    [-0.012, 0.043,  0.969],
-])
+DEUTAN_MATRIX = np.array(
+    [
+        [0.367, 0.861, -0.228],
+        [0.280, 0.673, 0.047],
+        [-0.012, 0.043, 0.969],
+    ]
+)
 
-PROTAN_MATRIX = np.array([
-    [0.152, 1.053, -0.205],
-    [0.115, 0.786,  0.099],
-    [-0.004,-0.048, 1.052],
-])
+PROTAN_MATRIX = np.array(
+    [
+        [0.152, 1.053, -0.205],
+        [0.115, 0.786, 0.099],
+        [-0.004, -0.048, 1.052],
+    ]
+)
 
-TRITAN_MATRIX = np.array([
-    [1.256, -0.077, -0.179],
-    [-0.078, 0.931,  0.148],
-    [0.005,  0.691,  0.304],
-])
+TRITAN_MATRIX = np.array(
+    [
+        [1.256, -0.077, -0.179],
+        [-0.078, 0.931, 0.148],
+        [0.005, 0.691, 0.304],
+    ]
+)
 
 _MATRICES: dict[str, np.ndarray] = {
     "deutan": DEUTAN_MATRIX,
@@ -110,7 +117,7 @@ def _hex_to_linear(hex_str: str) -> np.ndarray:
     h = hex_str.lstrip("#")
     if len(h) == 3:
         h = "".join(ch + ch for ch in h)
-    r, g, b = (int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    r, g, b = (int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
     return np.array([_srgb_to_linear(r), _srgb_to_linear(g), _srgb_to_linear(b)])
 
 
@@ -145,11 +152,10 @@ class CVDPair:
     a_simulated: str
     b_simulated: str
     delta_e_2000: float
-    distinguishable: bool   # ΔE2000 ≥ 10
+    distinguishable: bool  # ΔE2000 ≥ 10
 
 
-def delta_e_under_cvd(a_hex: str, b_hex: str, cvd: CVD,
-                      *, threshold: float = 10.0) -> CVDPair:
+def delta_e_under_cvd(a_hex: str, b_hex: str, cvd: CVD, *, threshold: float = 10.0) -> CVDPair:
     """Return the CIEDE2000 ΔE between two colours after both are
     Machado-simulated for the given CVD. Distinguishable iff
     ΔE2000 ≥ `threshold` (default 10, the ColorBrewer floor)."""

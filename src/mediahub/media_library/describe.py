@@ -6,6 +6,7 @@ typed when uploading a media asset. There is no regex fallback —
 without an AI provider configured the function returns an empty result
 rather than fabricating tags from keyword matching.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -83,6 +84,7 @@ def parse_description(description: str, *, hint: Optional[dict] = None) -> dict:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _empty_result() -> dict:
     return {
         "athletes": [],
@@ -119,8 +121,15 @@ def _normalise(d: dict, description: str, hint: Optional[dict]) -> dict:
         base["tags"] = []
     base["tags"] = [str(x).strip().lower() for x in base["tags"] if x][:12]
     if base["asset_type"] not in (
-        "athlete_headshot", "athlete_action", "team_photo", "venue_photo",
-        "logo", "sponsor_logo", "brand_pattern", "exemplar_post", "other"
+        "athlete_headshot",
+        "athlete_action",
+        "team_photo",
+        "venue_photo",
+        "logo",
+        "sponsor_logo",
+        "brand_pattern",
+        "exemplar_post",
+        "other",
     ):
         base["asset_type"] = "other"
     return base

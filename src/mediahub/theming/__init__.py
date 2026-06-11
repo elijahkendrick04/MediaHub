@@ -30,6 +30,7 @@ academic citations. The seven internal modules:
   quality      — every QA gate → PaletteQualityReport
   repair       — constraint-satisfaction loop with curated fallbacks
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -68,17 +69,18 @@ class ThemeJSON(TypedDict, total=False):
     Stable serialised form — the source of truth that Stage D (CSS),
     Stage G (Remotion / email / static graphic) all consume.
     """
-    schema_version: str          # "1" — bump if breaking changes ever needed
-    seed_hex: str                # the canonical brand-seed hex
-    seed_hct: list[float]        # [hue, chroma, tone] in HCT space
-    seed_source: str             # "hex" | "svg" | "raster" | "fallback"
+
+    schema_version: str  # "1" — bump if breaking changes ever needed
+    seed_hex: str  # the canonical brand-seed hex
+    seed_hct: list[float]  # [hue, chroma, tone] in HCT space
+    seed_source: str  # "hex" | "svg" | "raster" | "fallback"
     seed_candidates: list[dict]  # top-N quantizer candidates for audit panel
-    palettes: dict[str, dict]    # palette name → {"hue": h, "chroma": c, "tones": {"0": "#...", ...}}
-    roles: dict[str, dict]       # "light" / "dark" → {role_name: "#hex", ...}
-    quality: dict                # PaletteQualityReport as dict
-    decision_trace: list[str]    # human-readable audit log
+    palettes: dict[str, dict]  # palette name → {"hue": h, "chroma": c, "tones": {"0": "#...", ...}}
+    roles: dict[str, dict]  # "light" / "dark" → {role_name: "#hex", ...}
+    quality: dict  # PaletteQualityReport as dict
+    decision_trace: list[str]  # human-readable audit log
     was_repaired: bool
-    generated_at: str            # ISO-8601 UTC
+    generated_at: str  # ISO-8601 UTC
 
 
 # ---------------------------------------------------------------------------
@@ -182,9 +184,7 @@ def derive_theme(
     was_repaired = False
 
     if force_repair or not report.passed:
-        palette, repair_trace = repair_palette(
-            palette, report, max_iters=repair_max_iters
-        )
+        palette, repair_trace = repair_palette(palette, report, max_iters=repair_max_iters)
         roles = derive_roles(palette)
         report = audit_palette(palette, roles)
         decision_trace.extend(repair_trace)

@@ -4,6 +4,7 @@ Intent: Company About text, recent post voice (more formal than the
 other socials), professional positioning, sponsor / partner ecosystem,
 and any awards or accreditations the organisation references.
 """
+
 from __future__ import annotations
 
 from . import process_link

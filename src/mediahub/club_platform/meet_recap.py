@@ -5,6 +5,7 @@ V4 pipeline. This is the original core product: upload → ranked content cards.
 No new processing happens here; this module is the registry entry that wires
 the existing pipeline into the content-type abstraction layer.
 """
+
 from __future__ import annotations
 
 from .content_types import ContentType, ContentTypeMeta, REGISTRY

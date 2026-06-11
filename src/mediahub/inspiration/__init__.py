@@ -1,4 +1,5 @@
 """inspiration — pattern library + exemplar analyser."""
+
 from .pattern_library import (
     PATTERNS,
     get_pattern,

@@ -16,6 +16,7 @@ We deliberately do NOT add "sponsor" as a fifth tone — tones describe
 voice, not content angle. Sponsor acknowledgement is an additional
 *requirement* over the org's existing tone.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -82,16 +83,13 @@ def generate_sponsor_caption(
 
     # Default to the org's preferred tone but let callers override.
     if tone is None:
-        tone = (_get(profile, "tone") or _get(profile, "caption_tone")
-                or "warm-club")
+        tone = _get(profile, "tone") or _get(profile, "caption_tone") or "warm-club"
 
     enriched = dict(achievement_dict)
     # Layer the sponsor requirement on top of whatever was already on
     # the payload (the Turn-Into path may have set _artefact_intent).
     prev_extra = enriched.get("_extra_instructions") or ""
-    enriched["_extra_instructions"] = (
-        (prev_extra + " " + requirement).strip()
-    )
+    enriched["_extra_instructions"] = (prev_extra + " " + requirement).strip()
     return generate_caption_for_tone(
         enriched,
         club_brand={"club_name": _get(profile, "display_name") or ""},

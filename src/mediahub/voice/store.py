@@ -4,6 +4,7 @@ voice/store.py — Load and save VoiceProfile per club profile.
 Stores voice profiles as JSON sidecar files in the club_profiles/ directory.
 Format: club_profiles/<profile_id>.voice.json
 """
+
 from __future__ import annotations
 
 import json

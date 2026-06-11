@@ -3,6 +3,7 @@
 Intent: Page About text, recent post voice, sponsor / partner mentions,
 and the overall positioning the page projects.
 """
+
 from __future__ import annotations
 
 from . import process_link

@@ -3,6 +3,7 @@ history/provider.py — Abstract HistoryProvider base class.
 
 Swimming implements this via swim_content_pb.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

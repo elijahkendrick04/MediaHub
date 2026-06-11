@@ -8,6 +8,7 @@ moment; recall = how many ground-truth moments are surfaced by our cards.
 Matching is fuzzy — we look for shared swimmer surname, distance, and
 stroke. A moment can also be a free-text sentence; we tokenise.
 """
+
 from __future__ import annotations
 import re
 from dataclasses import dataclass, field, asdict
@@ -15,11 +16,17 @@ from typing import Optional
 
 
 _STROKE_WORDS = {
-    "free": "FR", "freestyle": "FR",
-    "back": "BK", "backstroke": "BK",
-    "breast": "BR", "breaststroke": "BR",
-    "fly": "FL", "butterfly": "FL",
-    "im": "IM", "medley": "IM", "individual": "IM",
+    "free": "FR",
+    "freestyle": "FR",
+    "back": "BK",
+    "backstroke": "BK",
+    "breast": "BR",
+    "breaststroke": "BR",
+    "fly": "FL",
+    "butterfly": "FL",
+    "im": "IM",
+    "medley": "IM",
+    "individual": "IM",
 }
 
 
@@ -133,24 +140,32 @@ def evaluate(moments_text: str, cards: list) -> GroundTruthReport:
         if best_card and best_score >= 0.5:
             matched_card_ids.add(best_card.card_id)
             n_matched += 1
-            rep.matches.append(asdict(GroundTruthMatch(
-                moment=m.raw,
-                matched_card=best_card.card_id,
-                matched_headline=best_card.headline,
-                score=round(best_score, 2),
-            )))
+            rep.matches.append(
+                asdict(
+                    GroundTruthMatch(
+                        moment=m.raw,
+                        matched_card=best_card.card_id,
+                        matched_headline=best_card.headline,
+                        score=round(best_score, 2),
+                    )
+                )
+            )
         else:
-            rep.matches.append(asdict(GroundTruthMatch(
-                moment=m.raw, matched_card=None, score=round(best_score, 2),
-            )))
+            rep.matches.append(
+                asdict(
+                    GroundTruthMatch(
+                        moment=m.raw,
+                        matched_card=None,
+                        score=round(best_score, 2),
+                    )
+                )
+            )
 
     rep.n_matched_moments = n_matched
     rep.n_unmatched_moments = len(moments) - n_matched
     rep.n_extra_cards = max(0, len(cards) - len(matched_card_ids))
 
-    rep.precision = (
-        len(matched_card_ids) / len(cards) if cards else 0.0
-    )
+    rep.precision = len(matched_card_ids) / len(cards) if cards else 0.0
     rep.recall = (n_matched / len(moments)) if moments else 0.0
     if rep.precision + rep.recall:
         rep.f1 = (2 * rep.precision * rep.recall) / (rep.precision + rep.recall)

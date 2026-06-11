@@ -11,6 +11,7 @@ uncompressed for a multi-session championship; we allow up to 64 MB
 per member and 128 MB total. Anything beyond that is far outside the
 operational envelope and is treated as hostile input.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,9 +42,7 @@ def safe_infolist(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     """
     members = zf.infolist()
     if len(members) > MAX_ZIP_MEMBERS:
-        raise UnsafeZipError(
-            f"ZIP contains {len(members)} members (limit {MAX_ZIP_MEMBERS})"
-        )
+        raise UnsafeZipError(f"ZIP contains {len(members)} members (limit {MAX_ZIP_MEMBERS})")
     safe: list[zipfile.ZipInfo] = []
     total = 0
     for info in members:
@@ -54,19 +53,24 @@ def safe_infolist(zf: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
         if usize > MAX_MEMBER_UNCOMPRESSED_BYTES:
             log.warning(
                 "ZIP member %r rejected: uncompressed %d > limit %d",
-                info.filename, usize, MAX_MEMBER_UNCOMPRESSED_BYTES,
+                info.filename,
+                usize,
+                MAX_MEMBER_UNCOMPRESSED_BYTES,
             )
             continue
         if csize > 0 and (usize // csize) > MAX_COMPRESSION_RATIO:
             log.warning(
                 "ZIP member %r rejected: compression ratio %.1f > %d",
-                info.filename, usize / csize, MAX_COMPRESSION_RATIO,
+                info.filename,
+                usize / csize,
+                MAX_COMPRESSION_RATIO,
             )
             continue
         if total + usize > MAX_TOTAL_UNCOMPRESSED_BYTES:
             log.warning(
                 "ZIP member %r rejected: total uncompressed would exceed %d",
-                info.filename, MAX_TOTAL_UNCOMPRESSED_BYTES,
+                info.filename,
+                MAX_TOTAL_UNCOMPRESSED_BYTES,
             )
             continue
         total += usize
@@ -122,7 +126,8 @@ def safe_iter_members(
         if total + info.file_size > MAX_TOTAL_UNCOMPRESSED_BYTES:
             log.warning(
                 "ZIP iteration halted at %r: total cap %d would be exceeded",
-                name, MAX_TOTAL_UNCOMPRESSED_BYTES,
+                name,
+                MAX_TOTAL_UNCOMPRESSED_BYTES,
             )
             return
         try:

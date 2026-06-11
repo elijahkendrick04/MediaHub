@@ -4,6 +4,7 @@ voice/learned/models.py — VoiceProfile and VoiceFeatures dataclasses.
 These are the V7.5 learned-voice schema types.  Nothing here references
 any specific named voice; all slug/label data lives in the seed JSON files.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -15,18 +16,18 @@ class VoiceFeatures:
     """Statistically-induced style features from exemplar posts."""
 
     avg_sentence_len: float = 0.0
-    capitalisation_style: str = "sentence"     # "sentence" | "title" | "all_caps_emphasis"
-    emoji_density: float = 0.0                 # emojis per 100 chars
+    capitalisation_style: str = "sentence"  # "sentence" | "title" | "all_caps_emphasis"
+    emoji_density: float = 0.0  # emojis per 100 chars
     emoji_palette: List[str] = field(default_factory=list)
-    hashtag_density: float = 0.0              # hashtags per 100 chars
+    hashtag_density: float = 0.0  # hashtags per 100 chars
     common_hashtags: List[str] = field(default_factory=list)
     starting_phrases: List[str] = field(default_factory=list)
     sign_offs: List[str] = field(default_factory=list)
-    name_format: str = "first_only"            # "first_only" | "full" | "first_initial"
-    time_format: str = "m:ss.cc"               # how times are written in posts
+    name_format: str = "first_only"  # "first_only" | "full" | "first_initial"
+    time_format: str = "m:ss.cc"  # how times are written in posts
     achievement_words: List[str] = field(default_factory=list)
-    exclamation_density: float = 0.0           # exclamation marks per sentence
-    second_person_density: float = 0.0         # "you/your" per 100 words
+    exclamation_density: float = 0.0  # exclamation marks per sentence
+    second_person_density: float = 0.0  # "you/your" per 100 words
 
     # ------------------------------------------------------------------ #
     # Serialisation                                                        #
@@ -72,10 +73,10 @@ class VoiceFeatures:
 class VoiceProfile:
     """A named, learned voice profile derived from exemplar posts."""
 
-    voice_id: str                              # slug, e.g. "yourclub_warm"
-    display_name: str = ""                     # human label, e.g. "Warm club voice"
+    voice_id: str  # slug, e.g. "yourclub_warm"
+    display_name: str = ""  # human label, e.g. "Warm club voice"
     description: str = ""
-    exemplars: List[str] = field(default_factory=list)   # raw post texts
+    exemplars: List[str] = field(default_factory=list)  # raw post texts
     features: VoiceFeatures = field(default_factory=VoiceFeatures)
     created_at: str = ""
     updated_at: str = ""

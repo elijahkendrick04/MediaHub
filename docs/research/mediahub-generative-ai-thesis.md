@@ -486,5 +486,3 @@ A concrete map from the surgery to the codebase, so the plan is actionable rathe
 Tests: extend `tests/` with archetype-diversity assertions, compliance-pass-rate checks, and a "data accuracy is 100%" guard; the existing suite (~253 passed) is the regression floor.
 
 *— End of thesis.*
-
-

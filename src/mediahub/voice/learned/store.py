@@ -12,6 +12,7 @@ load_voice_from_path(path) -> VoiceProfile
 list_voices(base_dir=None, include_seed=True) -> list[VoiceProfile]
 delete_voice(voice_id, base_dir=None) -> bool
 """
+
 from __future__ import annotations
 
 import json

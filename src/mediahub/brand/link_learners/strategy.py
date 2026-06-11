@@ -37,6 +37,7 @@ scraper layer, not a stand-in for AI-derived brand voice. AI-driven
 surfaces elsewhere in the codebase surface ``ClaudeUnavailableError``
 when the LLM is missing rather than inventing output.
 """
+
 from __future__ import annotations
 
 import logging
@@ -47,8 +48,7 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; MediaHubBrandDNA/1.0; "
-        "+https://mediahub.example/about)"
+        "Mozilla/5.0 (compatible; MediaHubBrandDNA/1.0; " "+https://mediahub.example/about)"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9",
@@ -79,10 +79,19 @@ def _build_prompt(
     body_excerpt = (sample.get("body_excerpt") or "")[:8_000]
     headers = sample.get("response_headers") or {}
     status = sample.get("status_code", "")
-    header_summary = "; ".join(f"{k}: {v}" for k, v in headers.items() if k.lower() in (
-        "content-type", "server", "x-frame-options", "content-security-policy",
-        "set-cookie", "x-powered-by",
-    ))
+    header_summary = "; ".join(
+        f"{k}: {v}"
+        for k, v in headers.items()
+        if k.lower()
+        in (
+            "content-type",
+            "server",
+            "x-frame-options",
+            "content-security-policy",
+            "set-cookie",
+            "x-powered-by",
+        )
+    )
     parts = [
         f"URL: {url}",
         f"Platform intent: {platform_intent}",
@@ -96,7 +105,7 @@ def _build_prompt(
         "one. If the input URL is already correct, return it verbatim.",
         "  headers: object — request headers to send. At minimum include "
         "a sensible User-Agent and Accept-Language.",
-        "  parser: one of \"html\", \"json\", \"jsonld\", \"oembed\", \"rss\".",
+        '  parser: one of "html", "json", "jsonld", "oembed", "rss".',
         "  selectors_or_jsonpath: array of CSS selectors (for html) or "
         "JSONPath expressions (for json/jsonld/oembed/rss) you expect "
         "to contain useful brand text. Empty array if not applicable.",
@@ -144,14 +153,10 @@ def _normalise(raw: object, fallback_url: str) -> dict:
         out["parser"] = parser.lower()
     sel = raw.get("selectors_or_jsonpath")
     if isinstance(sel, list):
-        out["selectors_or_jsonpath"] = [
-            str(s).strip()[:240] for s in sel if str(s).strip()
-        ][:12]
+        out["selectors_or_jsonpath"] = [str(s).strip()[:240] for s in sel if str(s).strip()][:12]
     alt = raw.get("alt_endpoints")
     if isinstance(alt, list):
-        out["alt_endpoints"] = [
-            str(a).strip()[:1_000] for a in alt if str(a).strip()
-        ][:6]
+        out["alt_endpoints"] = [str(a).strip()[:1_000] for a in alt if str(a).strip()][:6]
     notes = raw.get("notes")
     if isinstance(notes, str):
         out["notes"] = notes.strip()[:600]

@@ -13,6 +13,7 @@ render_caption(
     n_variants: int = 1,
 ) -> list[str]
 """
+
 from __future__ import annotations
 
 import random
@@ -46,8 +47,23 @@ def _apply_capitalisation(text: str, style: str) -> str:
     """Apply the profile's capitalisation style to a text string."""
     if style == "title":
         # Title-case every word except minor words
-        minor = {"a", "an", "the", "and", "but", "or", "for", "nor",
-                 "on", "at", "to", "by", "in", "of", "up"}
+        minor = {
+            "a",
+            "an",
+            "the",
+            "and",
+            "but",
+            "or",
+            "for",
+            "nor",
+            "on",
+            "at",
+            "to",
+            "by",
+            "in",
+            "of",
+            "up",
+        }
         words = text.split()
         result = []
         for i, w in enumerate(words):
@@ -246,10 +262,7 @@ def render_caption(
         if feats.emoji_density > 0 and feats.emoji_palette:
             n_emojis = max(1, round(feats.emoji_density * len(body) / 100))
             n_emojis = min(n_emojis, 6)
-            emojis = [
-                feats.emoji_palette[j % len(feats.emoji_palette)]
-                for j in range(n_emojis)
-            ]
+            emojis = [feats.emoji_palette[j % len(feats.emoji_palette)] for j in range(n_emojis)]
             emoji_block = " " + "".join(emojis)
 
         hashtag_block = _build_hashtag_block(profile, rng)

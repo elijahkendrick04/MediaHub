@@ -4,6 +4,7 @@ The engine layer is sport-agnostic: rules are keyed off post_angle / card_type
 strings that the recognition/content_pack layers produce. Swim-specific
 vocabulary (events, strokes) is *not* referenced here.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,9 +13,9 @@ from typing import Optional
 
 @dataclass
 class MediaRequirement:
-    role: str                     # e.g. "hero_athlete", "venue", "logo"
-    required: bool                # True = must have to render; False = optional
-    description: str              # human-facing label
+    role: str  # e.g. "hero_athlete", "venue", "logo"
+    required: bool  # True = must have to render; False = optional
+    description: str  # human-facing label
     fallback_role: Optional[str] = None  # what to look for if primary role missing
 
 
@@ -37,7 +38,6 @@ class MediaRequirementSet:
 # --------------------------------------------------------------------------
 
 REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
-
     # --- PB family -------------------------------------------------------
     "confirmed_official_pb": MediaRequirementSet(
         content_type="confirmed_official_pb",
@@ -73,7 +73,6 @@ REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
             MediaRequirement("logo", False, "Club logo"),
         ],
     ),
-
     # --- Medals ----------------------------------------------------------
     "medal_gold": MediaRequirementSet(
         content_type="medal_gold",
@@ -107,7 +106,6 @@ REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
             MediaRequirement("logo", False, "Club logo"),
         ],
     ),
-
     # --- Field context --------------------------------------------------
     "finalist": MediaRequirementSet(
         content_type="finalist",
@@ -147,7 +145,6 @@ REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
             MediaRequirement("hero_athlete", True, "Real photo of the athlete"),
         ],
     ),
-
     # --- Team / aggregate ----------------------------------------------
     "weekend_in_numbers": MediaRequirementSet(
         content_type="weekend_in_numbers",
@@ -200,7 +197,6 @@ REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
             MediaRequirement("logo", False, "Club logo"),
         ],
     ),
-
     # --- Preview / non-meet --------------------------------------------
     "meet_preview": MediaRequirementSet(
         content_type="meet_preview",
@@ -236,9 +232,7 @@ REQUIREMENT_RULES: dict[str, MediaRequirementSet] = {
 
 def requirements_for(content_type: str) -> MediaRequirementSet:
     """Look up requirement set for a content type, falling back to recap_mention."""
-    return REQUIREMENT_RULES.get(
-        content_type, REQUIREMENT_RULES["recap_mention"]
-    )
+    return REQUIREMENT_RULES.get(content_type, REQUIREMENT_RULES["recap_mention"])
 
 
 __all__ = [

@@ -38,6 +38,7 @@ playbook change last Tuesday?" without spelunking through git.
 This file never imports from link_handlers / link_learners — they
 depend on it, not the other way round.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,6 +66,7 @@ _MAX_HISTORY = 25
 # ---------------------------------------------------------------------------
 # Filesystem layout
 # ---------------------------------------------------------------------------
+
 
 def _root() -> Path:
     """Resolve the on-disk playbook directory. Honours DATA_DIR for
@@ -94,6 +96,7 @@ def _path_for(domain: str) -> Path:
 # Domain extraction
 # ---------------------------------------------------------------------------
 
+
 def domain_for(url: str) -> str:
     """Return the canonical host for a URL.
 
@@ -117,6 +120,7 @@ def domain_for(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Load / save
 # ---------------------------------------------------------------------------
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -166,14 +170,14 @@ def save(playbook: dict) -> Path:
     if isinstance(hist, list) and len(hist) > _MAX_HISTORY:
         playbook["history"] = hist[-_MAX_HISTORY:]
     p = _path_for(domain)
-    p.write_text(json.dumps(playbook, indent=2, ensure_ascii=False),
-                  encoding="utf-8")
+    p.write_text(json.dumps(playbook, indent=2, ensure_ascii=False), encoding="utf-8")
     return p
 
 
 # ---------------------------------------------------------------------------
 # Drift detection — continuous self-updating playbooks
 # ---------------------------------------------------------------------------
+
 
 def _parse_iso(s: str) -> Optional[datetime]:
     if not s:
@@ -212,14 +216,21 @@ def needs_regeneration(playbook: dict, recent_failure_threshold: int = 3) -> boo
     if len(hist) < recent_failure_threshold:
         return False
     recent = hist[-recent_failure_threshold:]
-    bad = {"hard_blocked", "auth_walled", "rate_limited",
-           "fetch_failed", "unknown", "soft_blocked_spa"}
+    bad = {
+        "hard_blocked",
+        "auth_walled",
+        "rate_limited",
+        "fetch_failed",
+        "unknown",
+        "soft_blocked_spa",
+    }
     return all(e.get("status") in bad for e in recent if isinstance(e, dict))
 
 
 # ---------------------------------------------------------------------------
 # Attempt recording — observable history for explainability + audit
 # ---------------------------------------------------------------------------
+
 
 def record_attempt(
     playbook: dict,
@@ -237,13 +248,14 @@ def record_attempt(
     if not isinstance(playbook, dict):
         return playbook
     hist = playbook.setdefault("history", [])
-    hist.append({
-        "ts": _now_iso(),
-        "status": status,
-        "notes": (notes or "")[:400],
-    })
-    bad = {"hard_blocked", "auth_walled", "rate_limited",
-           "fetch_failed", "unknown"}
+    hist.append(
+        {
+            "ts": _now_iso(),
+            "status": status,
+            "notes": (notes or "")[:400],
+        }
+    )
+    bad = {"hard_blocked", "auth_walled", "rate_limited", "fetch_failed", "unknown"}
     if status in ("real_content", "ok"):
         playbook["success_count"] = int(playbook.get("success_count", 0)) + 1
         playbook["last_validated_at"] = _now_iso()
@@ -299,6 +311,7 @@ def audit_tail(limit: int = 50) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Convenience: list all known playbooks (for the audit UI / debug)
 # ---------------------------------------------------------------------------
+
 
 def list_all() -> list[dict]:
     out: list[dict] = []

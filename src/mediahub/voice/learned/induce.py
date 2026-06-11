@@ -12,6 +12,7 @@ induce_voice(
     description: str = "",
 ) -> VoiceProfile
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

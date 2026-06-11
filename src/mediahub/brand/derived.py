@@ -64,6 +64,7 @@ The schema returned by `derive_operating_profile()`:
       "status":      "ok" | "no_context" | "error"
     }
 """
+
 from __future__ import annotations
 
 import logging
@@ -191,9 +192,9 @@ PLATFORM_FORMATS: dict[str, str] = {
 
 # Artefact-key → platform mapping. Anything not listed defaults to "generic".
 ARTEFACT_PLATFORM: dict[str, str] = {
-    "instagram_long":    "instagram",
-    "data_thread_post":  "x",
-    "linkedin_long":     "linkedin",
+    "instagram_long": "instagram",
+    "data_thread_post": "x",
+    "linkedin_long": "linkedin",
     "parent_newsletter": "email",
 }
 
@@ -235,24 +236,24 @@ def _build_prompt(brand_context: str) -> str:
         f"({ach_types}). Each value is a number between 0.3 and 2.0 "
         "expressing how much THIS organisation cares about that type "
         "of moment relative to others. Use 1.0 as neutral. A community "
-        "club might boost \"first_sub_barrier\" and \"pb_confirmed\"; an "
-        "elite team might boost \"medal_gold\". Also include a "
-        "\"_default\" key (typically 1.0) for types you don't have an "
+        'club might boost "first_sub_barrier" and "pb_confirmed"; an '
+        'elite team might boost "medal_gold". Also include a '
+        '"_default" key (typically 1.0) for types you don\'t have an '
         "opinion on. Only include types where the brief gives you "
-        "reason to deviate from 1.0 — silence means \"use the default\".\n\n"
+        'reason to deviate from 1.0 — silence means "use the default".\n\n'
         f"  type_phrases: object keyed by achievement type. Each value "
         "is the SHORT noun phrase (3-6 words) this org would naturally "
         "use to refer to that achievement when narrating it. E.g. for "
-        "\"pb_confirmed\" a community club might say \"a brand-new "
-        "personal best\" but a data-led elite team might say \"a "
-        "verified PB\". Only include types where the brief gives you "
-        "language guidance — silence means \"use the default phrase\".\n\n"
+        '"pb_confirmed" a community club might say "a brand-new '
+        'personal best" but a data-led elite team might say "a '
+        'verified PB". Only include types where the brief gives you '
+        'language guidance — silence means "use the default phrase".\n\n'
         f"  artefact_voice: object keyed by artefact type ({artefacts}). "
         "Each value is a 1-2 sentence creative intent: what should this "
         "org's version of that artefact feel like? Lead with the angle, "
         "not the format constraints (the format constraints are handled "
         "elsewhere). Only include artefacts where the brief gives you "
-        "an opinion — silence means \"use the default intent\".\n"
+        'an opinion — silence means "use the default intent".\n'
     )
 
 
@@ -279,6 +280,7 @@ def _call_llm(brand_context: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Normalisation
 # ---------------------------------------------------------------------------
+
 
 def _norm_str(v, cap: int) -> str:
     return str(v).strip()[:cap] if isinstance(v, str) and v.strip() else ""
@@ -349,6 +351,7 @@ def _now_iso() -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def derive_operating_profile(profile) -> dict:
     """Run one LLM call to convert a profile's brand context into a
     cached operating profile (tone prose, priority weights, type
@@ -388,6 +391,7 @@ def derive_operating_profile(profile) -> dict:
     raw = _call_llm(ctx)
     if not raw:
         from mediahub.media_ai.llm import ClaudeUnavailableError
+
         raise ClaudeUnavailableError(
             "No cloud LLM provider is reachable; cannot derive operating "
             "profile. Configure GEMINI_API_KEY or ANTHROPIC_API_KEY."
@@ -400,18 +404,24 @@ def derive_operating_profile(profile) -> dict:
         "derived_at": _now_iso(),
         "status": "ok",
     }
-    if not any((out["tone_prose"], out["achievement_priorities"],
-                out["type_phrases"], out["artefact_voice"])):
-        from mediahub.media_ai.llm import ClaudeUnavailableError
-        raise ClaudeUnavailableError(
-            "The LLM returned no usable signal for the operating profile."
+    if not any(
+        (
+            out["tone_prose"],
+            out["achievement_priorities"],
+            out["type_phrases"],
+            out["artefact_voice"],
         )
+    ):
+        from mediahub.media_ai.llm import ClaudeUnavailableError
+
+        raise ClaudeUnavailableError("The LLM returned no usable signal for the operating profile.")
     return out
 
 
 # ---------------------------------------------------------------------------
 # Lookup helpers — used by every downstream consumer
 # ---------------------------------------------------------------------------
+
 
 def _get_op_profile(profile) -> dict:
     if profile is None:

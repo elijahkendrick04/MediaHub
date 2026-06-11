@@ -4,6 +4,7 @@ Intent: bio, pinned tweet, recent tweet/reply tone (length, register,
 emoji usage), and the account's voice — formal news-line vs casual
 community vs hype-fan.
 """
+
 from __future__ import annotations
 
 from . import process_link

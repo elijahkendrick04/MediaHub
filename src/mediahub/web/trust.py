@@ -11,6 +11,7 @@ This module does NOT change the underlying detection logic; it inspects
 existing claims/evidence and decides what to display. That keeps the
 trust layer a pure read on top of the V3 pipeline.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 
@@ -25,9 +26,9 @@ class ClaimTrust:
     card_id: str
     card_type: str
     headline: str
-    confidence: str               # high | medium | low
-    safe_to_post: str             # post | review | hold
-    reason: str                   # plain-English why-this-status
+    confidence: str  # high | medium | low
+    safe_to_post: str  # post | review | hold
+    reason: str  # plain-English why-this-status
     sources: list[dict] = field(default_factory=list)  # [{name,url,note,confidence}]
     flags: list[str] = field(default_factory=list)
 
@@ -73,6 +74,7 @@ def _pb_source_label(snap) -> str:
     if url:
         try:
             from urllib.parse import urlparse
+
             host = (urlparse(url).hostname or "").lower()
             if host.startswith("www."):
                 host = host[4:]
@@ -88,12 +90,14 @@ def _evaluate_card(card, pb_snapshots: dict) -> ClaimTrust:
     flags = []
 
     # Always: meet results file is one source.
-    sources.append({
-        "name": "Meet results file",
-        "url": None,
-        "note": "Imported from uploaded HY3 file",
-        "confidence": "high",
-    })
+    sources.append(
+        {
+            "name": "Meet results file",
+            "url": None,
+            "note": "Imported from uploaded HY3 file",
+            "confidence": "high",
+        }
+    )
 
     # Per-claim signals: confirmed PB references the PB snapshot from
     # whichever provider pb_discovery selected at runtime.
@@ -107,20 +111,24 @@ def _evaluate_card(card, pb_snapshots: dict) -> ClaimTrust:
     for tiref in sorted(referenced_tirefs):
         snap = pb_snapshots.get(tiref) if pb_snapshots else None
         if snap and snap.fetch_ok:
-            sources.append({
-                "name": _pb_source_label(snap),
-                "url": _pb_url_from_snap(snap),
-                "note": "Pre-meet PB snapshot",
-                "confidence": "high",
-            })
+            sources.append(
+                {
+                    "name": _pb_source_label(snap),
+                    "url": _pb_url_from_snap(snap),
+                    "note": "Pre-meet PB snapshot",
+                    "confidence": "high",
+                }
+            )
 
     if has_qual:
-        sources.append({
-            "name": "Qualification standards registry",
-            "url": "https://www.bucs.org.uk/competitions/swimming.html",
-            "note": "Active standards including BUCS LC 2026-27",
-            "confidence": "high",
-        })
+        sources.append(
+            {
+                "name": "Qualification standards registry",
+                "url": "https://www.bucs.org.uk/competitions/swimming.html",
+                "note": "Active standards including BUCS LC 2026-27",
+                "confidence": "high",
+            }
+        )
 
     # Decide overall card confidence and safe-to-post
     confidence = "medium"
@@ -140,7 +148,8 @@ def _evaluate_card(card, pb_snapshots: dict) -> ClaimTrust:
         safe = SAFE_REVIEW
         reasons.append(
             "Same-day PB without a pre-meet snapshot — likely but not proven. "
-            "Confirm before posting.")
+            "Confirm before posting."
+        )
         flags.append("likely_pb_only")
     elif has_unverified_pb:
         confidence = "low"

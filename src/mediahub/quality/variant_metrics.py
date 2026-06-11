@@ -20,6 +20,7 @@ creative judgement (which would belong in ``media_ai.llm`` / ``ai_core.llm``).
   - a pack of 10 cards uses ≥6 distinct archetypes      → ``archetype_diversity`` ≥ 0.6
   - consecutive captions for a card stay below a repetition threshold
 """
+
 from __future__ import annotations
 
 import re
@@ -106,9 +107,7 @@ def _difference_hash(path: Union[str, Path]) -> np.ndarray:
     (thesis §2.2), so it must not register as perceptual spread.
     """
     with Image.open(path) as img:
-        small = img.convert("L").resize(
-            (_HASH_SIZE + 1, _HASH_SIZE), Image.Resampling.LANCZOS
-        )
+        small = img.convert("L").resize((_HASH_SIZE + 1, _HASH_SIZE), Image.Resampling.LANCZOS)
     grid = np.asarray(small, dtype=np.int16)
     return (grid[:, 1:] > grid[:, :-1]).flatten()
 
