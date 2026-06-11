@@ -35,6 +35,7 @@ const defaultCard = {
   accentStyle: "",
   mood: "",
   photoTreatment: "",
+  photoSrc: "",
   archetype: "",
   heroStat: "",
 };

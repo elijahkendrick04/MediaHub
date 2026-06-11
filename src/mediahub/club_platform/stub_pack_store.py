@@ -95,6 +95,35 @@ def save_pack(
     return record
 
 
+def update_pack(
+    pack_id: str,
+    *,
+    cards: Optional[list[dict]] = None,
+    form_data_updates: Optional[dict] = None,
+) -> Optional[dict]:
+    """Update an existing pack in place (cards and/or form_data keys).
+
+    Returns the updated record, or None when the pack doesn't exist.
+    Used by tools that refine a saved draft after the fact — e.g. the
+    athlete-spotlight tone rewrite, which swaps the caption without
+    minting a new pack id.
+    """
+    rec = load_pack(pack_id)
+    if rec is None:
+        return None
+    if cards is not None:
+        rec["cards"] = list(cards)
+    if form_data_updates:
+        fd = dict(rec.get("form_data") or {})
+        fd.update(
+            {k: v for k, v in form_data_updates.items() if isinstance(v, (str, int, float))}
+        )
+        rec["form_data"] = fd
+    path = _packs_dir() / f"{pack_id}.json"
+    path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    return rec
+
+
 def load_pack(pack_id: str) -> Optional[dict]:
     """Load a single pack record, or None if missing/invalid."""
     if not pack_id or not pack_id.replace("-", "").isalnum():

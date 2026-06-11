@@ -28,6 +28,10 @@ const cardSchema = z.object({
   accentStyle: z.string().default(""),
   mood: z.string().default(""),
   photoTreatment: z.string().default(""),
+  // The card's actual photo (the one the user attached to the still
+  // graphic), inlined by motion.py as a JPEG data URI. Empty = no photo
+  // layer, which keeps the pre-photo behaviour for older callers.
+  photoSrc: z.string().default(""),
   // Gen v2 (SEQ-4): the still graphic's archetype + measured emphasis line,
   // so the motion render of a card visually matches its still. Empty keeps
   // the pre-v2 behaviour for cards rendered by older callers.
@@ -413,6 +417,33 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
         opacity: outroFade,
       }}
     >
+      {/* Athlete photo — full-bleed base layer when the card carries one.
+          The ground-colour gradient keeps every text layer legible;
+          "no-photo" treatments never receive a photoSrc (motion.py
+          strips it before the props reach us). */}
+      {card.photoSrc ? (
+        <>
+          <img
+            src={card.photoSrc}
+            alt=""
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(180deg, ${roles.ground}40 0%, ${roles.ground}B0 55%, ${roles.ground}F0 100%)`,
+            }}
+          />
+        </>
+      ) : null}
+
       {/* Background pattern overlay (driven by brief.background_style). */}
       {bgPattern ? (
         <div

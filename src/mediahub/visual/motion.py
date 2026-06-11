@@ -174,6 +174,64 @@ def _brand_to_dict(brand_kit: Any) -> dict[str, str]:
     }
 
 
+_PHOTO_MAX_EDGE = 1280
+_PHOTO_MAX_BYTES = 12_000_000  # refuse to embed originals beyond this raw size
+
+
+def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
+    """Resolve the photo a brief sourced into an embeddable JPEG data URI.
+
+    Remotion's headless Chromium only sees what the props carry, so the
+    user's chosen photo is downscaled and inlined. Empty string on any
+    miss (no brief, "no-photo" treatment, asset gone, decode failure) —
+    a missing photo must never fail a motion render.
+    """
+    b = brief if isinstance(brief, dict) else {}
+    if not b or str(b.get("photo_treatment") or "") == "no-photo":
+        return ""
+    asset_ids = [
+        str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"
+    ]
+    if not asset_ids:
+        return ""
+    try:
+        from mediahub.media_library.store import get_store
+
+        store = get_store()
+    except Exception:
+        return ""
+    for aid in asset_ids:
+        try:
+            asset = store.get(aid)
+        except Exception:
+            continue
+        if asset is None:
+            continue
+        p = Path(getattr(asset, "path", "") or "")
+        try:
+            if not p.exists() or p.stat().st_size > _PHOTO_MAX_BYTES:
+                continue
+        except OSError:
+            continue
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            with Image.open(p) as im:
+                im = im.convert("RGB")
+                im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=82)
+            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(
+                "ascii"
+            )
+        except Exception:
+            continue
+    return ""
+
+
 def _card_to_props(
     card: dict,
     *,
@@ -269,6 +327,7 @@ def _card_to_props(
         "accentStyle": str(b.get("accent_style") or ""),
         "mood": str(b.get("mood") or ""),
         "photoTreatment": str(b.get("photo_treatment") or ""),
+        "photoSrc": _photo_data_uri_for_brief(b),
         "archetype": str(b.get("layout_template") or ""),
         "heroStat": str(brief_layers.get("hero_stat") or ""),
     }
