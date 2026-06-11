@@ -744,67 +744,6 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   .mh-hero .mh-hero-meta { animation: none; }
 }
 
-/* TRUST STRIP — a thin horizontal row of icon + label + count chips.
-   Used on the logged-out / under-furnished home to communicate the
-   product without resorting to logos we don't own yet. */
-.mh-trust-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--sp-3);
-  margin: var(--sp-7) 0 var(--sp-6);
-  padding: var(--sp-4) var(--sp-4);
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
-  border-top: 2px solid var(--lane);
-  position: relative;
-}
-.mh-trust-strip::before {
-  content: 'TRUSTED PIPELINE';
-  position: absolute;
-  top: -10px; left: var(--sp-4);
-  padding: 2px 8px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-9);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  background: var(--bg);
-  border: 1px solid var(--hairline);
-  border-radius: 2px;
-}
-.mh-trust-cell {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-fast) var(--ease-out-quick);
-}
-.mh-trust-cell:hover { background: rgba(245, 242, 232, 0.025); }
-.mh-trust-cell svg {
-  flex-shrink: 0;
-  width: 22px; height: 22px;
-  color: var(--lane);
-}
-.mh-trust-cell .label {
-  font-family: var(--font-mono);
-  font-size: var(--fs-9);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  display: block;
-  margin-bottom: 1px;
-}
-.mh-trust-cell .value {
-  display: block;
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--fs-md);
-  color: var(--ink);
-  line-height: 1.2;
-}
-
 /* STEP CARDS — adds an icon slot above the step number. The base
    layer's .mh-step survives unchanged; this is purely additive. */
 .mh-step {
@@ -1089,7 +1028,7 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
     --ink-faint: var(--mh-on-surface-muted, #9a988a);
   }
   .card, .stat, .mh-template, .mh-audience, .mh-sample,
-  .mh-trust-strip, .mh-fieldset, .mh-recent-card {
+  .mh-fieldset, .mh-recent-card {
     border-width: 1.5px;
   }
   a { text-decoration: underline; }
@@ -1111,7 +1050,7 @@ time.mh-rel[title] { cursor: help; border-bottom: 1px dotted var(--hairline); }
   }
   *:focus-visible { outline: 2px solid CanvasText; outline-offset: 2px; }
   .mh-promise::before, .mh-final-cta::after, .mh-final-cta,
-  .mh-trust-strip, body::before { background: none !important; }
+  body::before { background: none !important; }
   .card, .stat, .mh-template, .mh-audience, .mh-sample {
     border: 1px solid CanvasText;
   }

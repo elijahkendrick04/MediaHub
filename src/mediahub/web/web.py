@@ -4939,16 +4939,17 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 .mh-hero-trust > * { display: inline-flex; align-items: center; gap: 6px; }
 .mh-hero-trust svg { width: 13px; height: 13px; }
 
-/* Section heading — left-aligned editorial, like a newspaper section header */
+/* Section heading — centred: titles sit on the page's centre line so the
+   page reads tidy on wide screens (body content below stays left-aligned). */
 .mh-section-eyebrow {
-  display: flex; align-items: center; justify-content: flex-start;
+  display: flex; align-items: center; justify-content: center;
   gap: 14px;
   font-family: var(--font-mono);
   font-size: 11px; font-weight: 500;
   text-transform: uppercase; letter-spacing: 0.22em;
   color: var(--lane);
   margin: var(--sp-9) 0 var(--sp-3);
-  text-align: left;
+  text-align: center;
 }
 .mh-section-eyebrow::before {
   content: '';
@@ -4962,8 +4963,8 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: -0.01em;
-  text-align: left;
-  margin: 0 0 var(--sp-7);
+  text-align: center;
+  margin: 0 auto var(--sp-7);
   max-width: 22ch;
   line-height: 0.95;
   color: var(--ink);
@@ -5057,9 +5058,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
 
 /* === Hero (rebuilt home page) — sport-editorial cover === */
 /* HERO — broadsheet masthead. No gradient text, no glass, no purple.
-   Type carries the weight. Lane-yellow earns its keep on the CTA only. */
+   Type carries the weight. Lane-yellow earns its keep on the CTA only.
+   Centred: page titles sit on the page's centre line all the way down
+   (headline, lede, actions, meta) so wide screens never read lopsided. */
 .mh-hero {
   position: relative;
+  text-align: center;
   padding: var(--sp-9) var(--sp-7) var(--sp-8);
   margin-bottom: var(--sp-8);
   border-radius: 0;
@@ -5134,7 +5138,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   letter-spacing: -0.015em;
   text-transform: uppercase;
   line-height: 0.88;
-  margin: 0 0 var(--sp-6);
+  margin: 0 auto var(--sp-6);
   max-width: 14ch;
   color: var(--ink);
   text-wrap: balance;
@@ -5160,18 +5164,21 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   display: inline;
   -webkit-text-fill-color: var(--medal);
 }
+/* Lede reads in the body face: the headline's display-caps + serif-italic
+   pairing is the one editorial move per hero — a serif lede on top of it
+   made four typographic voices compete in the first screenful. */
 .mh-hero p.lede {
-  font-family: var(--font-serif);
-  font-variation-settings: 'opsz' 72;
-  font-size: clamp(17px, 1.6vw, 22px);
+  font-family: var(--font-body);
+  font-size: clamp(16px, 1.5vw, 20px);
   color: var(--ink-dim);
-  margin: 0 0 var(--sp-7);
+  margin: 0 auto var(--sp-7);
   max-width: 52ch;
-  line-height: 1.45;
+  line-height: 1.55;
   font-weight: 400;
 }
 .mh-hero-actions {
   display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center;
+  justify-content: center;
   margin-top: var(--sp-6);
 }
 
@@ -5222,6 +5229,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   text-transform: uppercase;
   color: var(--ink-muted);
   display: flex; gap: var(--sp-5); flex-wrap: wrap;
+  justify-content: center;
 }
 .mh-hero-meta .dot { color: var(--ink-faint); }
 .mh-hero-meta b { color: var(--lane); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -8203,30 +8211,6 @@ def create_app() -> Flask:
             "</section>"
         )
 
-        # --- Trust strip — "what we read / what we make" pipeline glance.
-        # Communicates the inputs and outputs without leaning on logos we
-        # don't yet own. Numbers come from the seeded run counts.
-        trust_html = (
-            '<div class="mh-trust-strip">'
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="HY3, SD3, Sportsystems PDF — parsed deterministically, never guessed." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
-            '<div><span class="label">We read</span><span class="value">Hytek .hy3, .zip, PDF</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Your site and socials feed brand voice, palette, and tone." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>'
-            '<div><span class="label">We crawl</span><span class="value">Club site &amp; socials</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="A deterministic ranker scores content-worthiness with confidence." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 9 8.5 12 2"/></svg>'
-            '<div><span class="label">We rank</span><span class="value">PBs, medals, first-times</span></div>'
-            "</div>"
-            '<div class="mh-trust-cell" tabindex="0" data-mh-tip="Captions via Gemini; graphics + reels rendered server-side." data-mh-tip-pos="bottom">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>'
-            '<div><span class="label">We render</span><span class="value">Captions, graphics, reels</span></div>'
-            "</div>"
-            "</div>"
-        )
-
         # --- Four-step explainer — sport newsroom workflow ---
         # Each step now carries an SVG icon and a "time-to" footnote so the
         # block reads as a real product walkthrough, not a paragraph wall.
@@ -8299,7 +8283,7 @@ def create_app() -> Flask:
             "</div>"
             '<div class="mh-sample reel">'
             '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
-            '<div class="mh-sample-title">Aquatica <em>highlights</em></div>'
+            '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
             '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Top three cards stitched together with crossfades, your wordmark, and the day’s headline — rendered server-side.</p>'
             '<div class="mh-sample-meta">Reel <span class="sep">/</span> Motion <span class="sep">/</span> 1080×1920</div>'
@@ -8406,9 +8390,8 @@ def create_app() -> Flask:
         return _layout(
             "Home",
             hero_html
-            + trust_html
-            + sample_html
             + steps_html
+            + sample_html
             + audience_html
             + promise_html
             + final_cta_html,
