@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `3e236b960` · Merge pull request #319 from elijahkendrick04/claude/vigilant-sagan-vhxni1
+**Last updated:** 2026-06-11 · `3803627aa` · Merge pull request #320 from elijahkendrick04/claude/clever-hopper-laousr
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `ab71bef95` | feat(pc): close Phase C's build side — org→workspace multi-tenancy (PC.3) + revealed-WTP and GTM ins |
 | 2026-06-11 | `c627fd4f7` | chore(docs): delete stale V-era build reports and one-time migration audits |
 | 2026-06-11 | `302f11464` | feat(p2): complete Phase 2 — approval signal, single publish gate, guardrails, enum reconciliation |
 | 2026-06-11 | `5ac99091f` | style: apply pre-commit hygiene (ruff-format 0.8.4) to PR-touched files |
@@ -39,7 +40,6 @@ in any commit message to move an item:
 | 2026-06-10 | `e3b227c51` | feat(p0): complete Phase 0 — free reel engine, paid-dep guards, provider slots, AGPL isolation |
 | 2026-06-10 | `c6aea1433` | fix: a11y: Documents must have <title> element to aid in navigati |
 | 2026-06-10 | `c3f58776d` | autotest: refresh bug report [skip ci] |
-| 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -48,9 +48,8 @@ Ordered by priority: **Phase C (commercialise) outranks everything**; P3/P4/P5
 are gated behind Phase C's exit criteria (see Standing context).
 
 <!-- ROADMAP:TODO -->
-- **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant · ⚠️ **BLOCKED**
-- **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · ❌ **NOT STARTED**
-- **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · ❌ **NOT STARTED**
+- **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
+- **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -86,6 +85,7 @@ are gated behind Phase C's exit criteria (see Standing context).
 - ✅ **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) *(completed 2026-06-11)*
 - ✅ **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) *(completed 2026-06-11)*
 - ✅ **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums *(completed 2026-06-11)*
+- ✅ **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant *(completed 2026-06-11)*
 <!-- /ROADMAP:DONE -->
 
 ## Standing context
