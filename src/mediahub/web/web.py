@@ -3167,20 +3167,36 @@ def _render_turn_into_card(run_id: str) -> str:
             '</div>'
         )
 
+    _ti_chips = "".join(
+        f'<span style="display:inline-block;padding:3px 10px;margin:0 6px 6px 0;'
+        f"border:1px solid var(--border);border-radius:999px;font-size:11.5px;"
+        f'color:var(--ink-dim)">{label}</span>'
+        for label in (
+            "Meet recap",
+            "Swimmer spotlights",
+            "X / LinkedIn thread",
+            "Parent newsletter",
+            "Sponsor thank-you",
+            "Coach quote (draft)",
+            "Next-meet preview",
+        )
+    )
     return f"""
 <div class="card" id="turn-into-card" style="border-left:3px solid var(--accent)">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div style="flex:1;min-width:240px">
-      <h2 style="margin-bottom:6px">Derivative content pack</h2>
-      <p class="dim" style="margin:0;font-size:13px;max-width:540px">
-        Turn this meet into a full pack of 7 derivative artefacts &mdash;
-        recap, swimmer spotlights, X / LinkedIn thread, parent newsletter,
-        sponsor thank-you, coach quote, and next-meet preview.
+      <h2 style="margin-bottom:6px">Turn this meet into more</h2>
+      <p class="dim" style="margin:0 0 10px 0;font-size:13px;max-width:540px">
+        One click re-uses everything this meet already produced &mdash; the
+        results, the approved cards, your brand voice &mdash; and drafts a
+        full set of follow-on content. Everything lands on one page where
+        you can edit each caption before using it:
       </p>
+      <div>{_ti_chips}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       <button id="ti-btn" class="btn" onclick="turnMeetIntoPack()" style="background:var(--lane);color:var(--lane-ink);border:none">
-        &#x2726; Generate derivative pack
+        &#x2726; Generate the pack
       </button>
     </div>
   </div>
@@ -3196,10 +3212,12 @@ function turnMeetIntoPack() {{
   btn.disabled = true;
   btn.textContent = 'Generating…';
   status.style.display = '';
-  status.textContent = 'Building artefacts — starting…';
+  status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
+    '<span id="ti-status-text">Drafting all seven artefacts with live AI&hellip;</span>';
+  var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
     secs++;
-    status.textContent = 'Building artefacts with live AI — ' + secs + 's elapsed…';
+    if (statusText) statusText.textContent = 'Drafting all seven artefacts with live AI — ' + secs + 's. Usually under a minute.';
   }}, 1000);
   function _fail(msg) {{
     clearInterval(ticker);
@@ -14327,12 +14345,43 @@ Relay team broke club record"></textarea>
         plan = load_latest_plan(pid)
         inputs = load_planner_inputs(pid)
         sports = [(p.sport, p.display_name) for p in list_sport_profiles()]
-        current_sport = (plan or {}).get("sport") or "swimming"
 
-        sport_opts = "".join(
-            f'<option value="{_h(slug)}"{" selected" if slug == current_sport else ""}>{_h(name)}</option>'
-            for slug, name in sports
-        )
+        # The sport comes from the ORGANISATION, not a per-page dropdown.
+        # org_type was chosen at setup; map it onto an available sport
+        # profile. Only when the org type doesn't imply a sport (a
+        # university society could run anything) do we fall back to a
+        # visible selector.
+        _ORG_TYPE_TO_SPORT = {
+            "swimming_club": "swimming",
+            "football": "football",
+            "athletics": "athletics",
+        }
+        _prof = _active_profile()
+        _avail = {slug for slug, _ in sports}
+        org_sport = _ORG_TYPE_TO_SPORT.get(getattr(_prof, "org_type", "") or "")
+        if org_sport not in _avail:
+            org_sport = None
+        current_sport = org_sport or (plan or {}).get("sport") or "swimming"
+
+        if org_sport:
+            _sport_display = dict(sports).get(org_sport, org_sport.title())
+            sport_control_html = (
+                f'<input type="hidden" id="mh-plan-sport" value="{_h(org_sport)}"/>'
+                f'<span style="font-weight:600">Planning for {_h(_sport_display)}</span>'
+                f'<span class="dim" style="font-size:12px">set by your '
+                f'<a href="{url_for("organisation_page")}" style="text-decoration:underline">organisation profile</a></span>'
+            )
+        else:
+            _sport_opts = "".join(
+                f'<option value="{_h(slug)}"{" selected" if slug == current_sport else ""}>{_h(name)}</option>'
+                for slug, name in sports
+            )
+            sport_control_html = (
+                '<label for="mh-plan-sport" style="font-weight:600">Sport</label>'
+                f'<select id="mh-plan-sport" style="min-width:160px">{_sport_opts}</select>'
+                '<span class="dim" style="font-size:12px">your organisation type doesn&rsquo;t '
+                "pin a sport, so pick one here</span>"
+            )
 
         src_chip = {
             "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">OWN</span>',
@@ -14419,16 +14468,23 @@ Relay team broke club record"></textarea>
 
         body = f"""
 <section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Strategy</span>
+  <span class="mh-hero-eyebrow">Plan</span>
   <h1>What should we<br><em class="editorial">post next?</em></h1>
-  <p class="lede">A ranked plan fused from three sources — your results and drafts (<strong>own</strong>),
-  discovered context and the calendar (<strong>external</strong>), and what you tell us below (<strong>direct</strong>).
-  The planner recommends; you decide. Nothing publishes from here.</p>
+  <p class="lede">This page suggests your next posts, in order, and shows its working.
+  Hit <strong>Generate plan</strong> and you get a ranked to-post list built from your
+  recent results, the calendar, and anything you tell it below. Each item explains
+  why it ranks where it does, and the ones marked <strong>Ready to create</strong>
+  jump straight into the matching tool. Nothing publishes from here.</p>
 </section>
 
-<div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-  <label for="mh-plan-sport" style="font-weight:600">Sport profile</label>
-  <select id="mh-plan-sport" style="min-width:160px">{sport_opts}</select>
+<div class="mh-next-strip" aria-label="How the plan works" style="margin-bottom:16px">
+  <div class="cell"><span class="num">1</span><span class="text"><b>Generate</b><br>One click fuses your results, drafts, the calendar and your direct notes.</span></div>
+  <div class="cell"><span class="num">2</span><span class="text"><b>Read the why</b><br>Every item lists the exact signals that put it at that rank.</span></div>
+  <div class="cell"><span class="num">3</span><span class="text"><b>Create</b><br>Click <i>Create</i> on an item to open the right tool with that idea.</span></div>
+</div>
+
+<div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center">
+  {sport_control_html}
   <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
           data-loader-text="Fusing signals">Generate plan</button>
   <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
@@ -16065,7 +16121,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         "Event Preview": (
             "Event preview",
             "preview it",
-            "Tell us the event, athletes to watch, and angles. We draft preview captions for Instagram, Stories, and Twitter — ready to edit and post.",
+            "Give us the event name — add its website or meet pack and the AI works out what the event is. It can even read the entries and pick your ones to watch.",
         ),
         "Sponsor Post": (
             "Sponsor post",
@@ -16225,6 +16281,47 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     form_data["attached_photo_path"] = resolved_assets[0]["path"]
                     form_data["attached_photo_filename"] = resolved_assets[0]["filename"]
                 form_data["profile_id"] = active_pid_for_pack
+
+            # Event-preview enrichment: read the event's website, the
+            # uploaded meet pack, and the entries source so the AI can work
+            # out what the event IS and pick ones-to-watch from REAL
+            # entries. All best-effort — a dead link or unreadable file
+            # just means that source contributes nothing.
+            if stub_cls_name == "WeekendPreviewStub":
+                try:
+                    from mediahub.brand.guidelines import extract_text as _doc_text
+                    from mediahub.web_research.safe_fetch import safe_fetch as _sfetch
+
+                    _site_url = (form_data.get("event_website_url") or "").strip()
+                    if _site_url:
+                        _site_text = _sfetch(_site_url, max_chars=8000)
+                        if _site_text:
+                            form_data["event_site_text"] = _site_text
+                    _entries_url = (form_data.get("entries_url") or "").strip()
+                    if _entries_url:
+                        _etext = _sfetch(_entries_url, max_chars=20000)
+                        if _etext:
+                            form_data["entries_text"] = _etext
+                    for _field, _key, _cap in (
+                        ("event_pack", "event_pack_text", 8000),
+                        ("entries_file", "entries_text", 20000),
+                    ):
+                        _up = request.files.get(_field)
+                        if _up and getattr(_up, "filename", ""):
+                            try:
+                                _res = _doc_text(_up.filename, _up.read() or b"")
+                            except Exception:
+                                app.logger.exception(
+                                    "event preview: %s extraction failed", _field
+                                )
+                                continue
+                            if _res.get("status") == "ok" and (_res.get("text") or "").strip():
+                                form_data[_key] = _res["text"][:_cap]
+                    _pv_prof = _active_profile()
+                    if _pv_prof is not None:
+                        form_data["club_name"] = _pv_prof.display_name
+                except Exception:
+                    app.logger.exception("event preview enrichment failed")
             generation_error = None
             try:
                 cards_payload = stub.generate_cards(form_data)
@@ -16951,13 +17048,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _graphic_api_base = url_for(
             "api_stub_pack_create_graphic", pack_id=pack_id, card_idx=0
         ).rsplit("/", 2)[0]
+        # Per-card Schedule (plan-gated; free tier sees the upgrade nudge).
+        # Spotlight packs schedule against their source run; pure drafts
+        # (event preview, sponsor, free text) use a synthetic stub run id —
+        # the schedule API only needs the caption + Buffer channels.
+        _pack_cards = rec.get("cards") or []
+        _pack_fd = rec.get("form_data") or {}
+        _sched_run_id = str(_pack_fd.get("run_id") or f"_stub_{pack_id}")
+        _extra_actions = [
+            _schedule_button_html(_sched_run_id, f"stub:{pack_id}:{_i}", f"stub-card-{_i}")
+            for _i in range(len(_pack_cards))
+        ]
         cards_html = render_cards_html(
-            {"cards": rec.get("cards") or []},
+            {"cards": _pack_cards},
             back_url,
             rec.get("title") or "Draft pack",
             pack_id=pack_id,
             status_api_base=_status_api_base,
             graphic_api_base=_graphic_api_base,
+            extra_card_actions=_extra_actions,
         )
         # Replace the renderer's default footer to add export + regenerate.
         export_url = url_for("stub_pack_export", pack_id=pack_id)
@@ -16989,12 +17098,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<span class="tag info">{_h(type_label)}</span> '
             f'<span style="margin-left:8px">Generated {_h(ts)}</span></p>'
         )
-        # Athlete-spotlight drafts get the meet-recap treatment: caption
-        # tone rewrite (same approved moments, different register) and the
-        # plan-gated Schedule hand-off.
+        # Every saved pack page carries the schedule modal — the per-card
+        # Schedule buttons above need it.
+        spotlight_modal_html = _schedule_modal_html() + _schedule_modal_js()
+        # Athlete-spotlight drafts additionally get the meet-recap caption
+        # tone rewrite (same approved moments, different register).
         spotlight_tools_html = ""
-        spotlight_modal_html = ""
-        _fd = rec.get("form_data") or {}
+        _fd = _pack_fd
         if _fd.get("source") == "athlete_spotlight":
             from mediahub.brand.tone import TONE_META as _TM
 
@@ -17012,25 +17122,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     f'style="font-size:11px;padding:4px 12px"{" disabled" if _on else ""}>'
                     f"{_h(_m['label'])}</button></form> "
                 )
-            _sp_run_id = str(_fd.get("run_id") or "")
-            _sched_btn = ""
-            if _sp_run_id:
-                _sched_btn = _schedule_button_html(
-                    _sp_run_id,
-                    f"spotlight:{_fd.get('swimmer_key', '')}",
-                    "sp-pack-card-0",
-                )
             spotlight_tools_html = (
                 '<div class="card" style="margin-bottom:14px">'
                 '<div style="font-size:13px;font-weight:700;margin-bottom:4px">Caption tone</div>'
                 '<div style="font-size:12px;color:var(--ink-dim);margin-bottom:10px">'
                 "Rewrite the post in a different register — same approved moments, "
                 "same brand grounding.</div>"
-                f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">{_tone_btns}{_sched_btn}</div>'
+                f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">{_tone_btns}</div>'
                 "</div>"
             )
-            if _sp_run_id:
-                spotlight_modal_html = _schedule_modal_html() + _schedule_modal_js()
         # Show any media-library assets the draft was created with so the
         # user can see which photos are attached without re-opening the
         # source form. Profile-scoped: only assets that still belong to
