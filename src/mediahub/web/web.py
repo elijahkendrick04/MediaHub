@@ -12778,7 +12778,8 @@ Relay team broke club record"></textarea>
         wants_html = (
             request.accept_mimetypes.best_match(
                 ["text/html", "application/json"], default="application/json"
-            ) == "text/html"
+            )
+            == "text/html"
             or request.headers.get("Sec-Fetch-Dest", "") == "document"
         )
         if wants_html:
@@ -12793,8 +12794,9 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=200, mimetype="text/html",
-                            headers={"Vary": "Accept, Sec-Fetch-Dest"})
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
         resp = jsonify(payload)
         resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
         return resp
