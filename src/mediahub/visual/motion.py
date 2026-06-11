@@ -189,9 +189,7 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
     b = brief if isinstance(brief, dict) else {}
     if not b or str(b.get("photo_treatment") or "") == "no-photo":
         return ""
-    asset_ids = [
-        str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"
-    ]
+    asset_ids = [str(a) for a in (b.get("sourced_asset_ids") or []) if a and a != "_brand_logo_"]
     if not asset_ids:
         return ""
     try:
@@ -224,9 +222,7 @@ def _photo_data_uri_for_brief(brief: Optional[dict]) -> str:
                 im.thumbnail((_PHOTO_MAX_EDGE, _PHOTO_MAX_EDGE))
                 buf = io.BytesIO()
                 im.save(buf, format="JPEG", quality=82)
-            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(
-                "ascii"
-            )
+            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
         except Exception:
             continue
     return ""

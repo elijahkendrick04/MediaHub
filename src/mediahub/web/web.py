@@ -8494,12 +8494,7 @@ def create_app() -> Flask:
 
         return _layout(
             "Home",
-            hero_html
-            + steps_html
-            + sample_html
-            + audience_html
-            + promise_html
-            + final_cta_html,
+            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
             active="home",
         )
 
@@ -9836,8 +9831,10 @@ def create_app() -> Flask:
                     # Fall back to the website-discovered logo URL only when
                     # nothing was uploaded.
                     url = (getattr(active_prof_for_run, "brand_logo_url", "") or "").strip()
-                    if profile_logo_bytes is None and url and (
-                        url.startswith("http://") or url.startswith("https://")
+                    if (
+                        profile_logo_bytes is None
+                        and url
+                        and (url.startswith("http://") or url.startswith("https://"))
                     ):
                         try:
                             import requests as _rq
@@ -15520,8 +15517,7 @@ function mhPlanGenerate(btn) {{
             + "\n\nWrite ONE single Instagram-ready caption: a hooky "
             "opener, a tight body weaving the approved moments together, "
             "and a closing line. Use the swimmer's first name. Don't "
-            "invent facts. ~700 characters max. Output the caption only."
-            + tone_line
+            "invent facts. ~700 characters max. Output the caption only." + tone_line
         )
         from mediahub.ai_core import (
             ask,
@@ -15755,9 +15751,7 @@ function mhPlanGenerate(btn) {{
         if _stale_ids:
             try:
                 conn = _db()
-                conn.executemany(
-                    "DELETE FROM runs WHERE id = ?", [(i,) for i in _stale_ids]
-                )
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(i,) for i in _stale_ids])
                 conn.commit()
                 conn.close()
             except Exception as e:  # noqa: BLE001
@@ -16012,14 +16006,10 @@ function mhPlanGenerate(btn) {{
             return wf.status.value if wf else "queue"
 
         _approved_ras = [
-            ra
-            for ra in pack["ranked_achievements"]
-            if _sp_status(ra) in ("approved", "posted")
+            ra for ra in pack["ranked_achievements"] if _sp_status(ra) in ("approved", "posted")
         ]
         _other_ras = [
-            ra
-            for ra in pack["ranked_achievements"]
-            if _sp_status(ra) not in ("approved", "posted")
+            ra for ra in pack["ranked_achievements"] if _sp_status(ra) not in ("approved", "posted")
         ]
         approved_rows = "".join(_sp_row_html(ra) for ra in _approved_ras)
         other_rows = "".join(_sp_row_html(ra) for ra in _other_ras)
@@ -16306,9 +16296,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             try:
                                 _res = _doc_text(_up.filename, _up.read() or b"")
                             except Exception:
-                                app.logger.exception(
-                                    "event preview: %s extraction failed", _field
-                                )
+                                app.logger.exception("event preview: %s extraction failed", _field)
                                 continue
                             if _res.get("status") == "ok" and (_res.get("text") or "").strip():
                                 form_data[_key] = _res["text"][:_cap]
@@ -20664,9 +20652,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         _m_accent = _safe_hex(_manual_pal.get("accent") or "", "#D4FF3A")
         _m_fourth = _safe_hex(_manual_pal.get("fourth") or "", "#F4D58D")
-        _m_use_fourth_checked = (
-            " checked" if (prof and prof.brand_palette_use_fourth) else ""
-        )
+        _m_use_fourth_checked = " checked" if (prof and prof.brand_palette_use_fourth) else ""
         _m_tone = (prof.tone or prof.caption_tone) if prof else "warm-club"
         _tone_opts = "".join(
             f'<option value="{_h(t.value)}"{" selected" if t.value == _m_tone else ""}>'

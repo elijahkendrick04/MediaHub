@@ -328,7 +328,7 @@ def _build_llm_prompt(
         "  - Colours mentioned EXPLICITLY in the brand-guidelines document and the logo dominant colours are deliberate; prefer picks corroborated there.",
         "  - If the same colour shows high usage AND appears in the guidelines/logo, it is almost certainly the primary.",
         "  - Pure white (#ffffff) and pure black (#000000) only belong in the chosen palette if the brand explicitly uses them as a key colour.",
-        "  - The fourth slot defaults to empty: leave it \"\" unless the evidence for a real fourth brand colour is unambiguous. When in doubt, omit it.",
+        '  - The fourth slot defaults to empty: leave it "" unless the evidence for a real fourth brand colour is unambiguous. When in doubt, omit it.',
         "  - Every chosen colour MUST come from the colours above. Do not invent new hex values.",
         "  - All hex values lower-case #rrggbb.",
         "No prose, no fences, no commentary — only the JSON object.",

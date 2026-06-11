@@ -115,9 +115,7 @@ def update_pack(
         rec["cards"] = list(cards)
     if form_data_updates:
         fd = dict(rec.get("form_data") or {})
-        fd.update(
-            {k: v for k, v in form_data_updates.items() if isinstance(v, (str, int, float))}
-        )
+        fd.update({k: v for k, v in form_data_updates.items() if isinstance(v, (str, int, float))})
         rec["form_data"] = fd
     path = _packs_dir() / f"{pack_id}.json"
     path.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -714,9 +714,7 @@ def _build_pb_audit(
         sw = meet.swimmers.get(key)
         name = f"{sw.first_name} {sw.last_name}".strip() if sw is not None else str(key)
         snap = pb_snapshots.get(key)
-        events = (
-            sorted((getattr(snap, "pb_times", None) or {}).keys()) if snap is not None else []
-        )
+        events = sorted((getattr(snap, "pb_times", None) or {}).keys()) if snap is not None else []
         src = getattr(snap, "source_url", None) if snap is not None else None
         per_swimmer.append(
             PBAudit(
