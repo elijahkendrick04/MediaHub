@@ -75,3 +75,38 @@ def test_health_json_explicit_accept(client):
     assert r.status_code in (200, 503)
     assert r.content_type.startswith("application/json")
     assert r.get_json() is not None
+
+
+# ---------------------------------------------------------------------------
+# /healthz — same content-negotiation contract
+# ---------------------------------------------------------------------------
+
+
+def test_healthz_html_has_title(client):
+    """Browser requests to /healthz must receive an HTML page with a <title>
+    element — the axe-core document-title rule (WCAG 2.4.2) requires this."""
+    r = client.get("/healthz", headers={"Accept": "text/html"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_json_by_default(client):
+    """Clients that send no Accept header must still receive JSON from /healthz
+    — the HTML path must not break the existing liveness-probe contract."""
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert payload.get("ok") is True
+
+
+def test_healthz_json_explicit_accept(client):
+    """Explicit Accept: application/json must return JSON from /healthz."""
+    r = client.get("/healthz", headers={"Accept": "application/json"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    assert r.get_json() is not None
