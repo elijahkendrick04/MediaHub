@@ -9,7 +9,10 @@ Each pack has:
   pack_id:    short hex id, also the filename stem
   profile_id: organisation that owns the pack (None for legacy/anonymous)
   created_at: ISO-8601 UTC timestamp
-  stub_type:  free_text | weekend_preview | sponsor_post | session_update
+  stub_type:  free_text | event_preview | sponsor_activation | session_update
+              (canonical post-type slugs, ADR-0013; packs persisted before the
+              rename carry "weekend_preview"/"sponsor_post" and are normalised
+              on load via post_types.canonical_slug)
   title:      human-friendly title (taken from form input where possible)
   form_data:  the raw form values that produced the cards
   cards:      list of {platform, caption, hashtags, confidence, notes}
@@ -50,9 +53,9 @@ def _derive_title(stub_type: str, form_data: dict) -> str:
         first = next((l.strip() for l in txt.splitlines() if l.strip()), "")
         return (first[:77] + "…") if len(first) > 80 else (first or "Free text draft")
     meet = (form_data.get("meet_name") or "").strip()
-    if stub_type == "weekend_preview":
+    if stub_type == "event_preview":
         return f"Preview — {meet}" if meet else "Event preview"
-    if stub_type == "sponsor_post":
+    if stub_type == "sponsor_activation":
         sponsor = (form_data.get("sponsor_name") or "").strip()
         if sponsor and meet:
             return f"{sponsor} × {meet}"
@@ -72,6 +75,9 @@ def save_pack(
     disk that have no ``profile_id`` stamped are still readable (lenient
     legacy fallback), but every pack saved going forward names its owner.
     """
+    from mediahub.club_platform.post_types import canonical_slug
+
+    stub_type = canonical_slug(stub_type)
     pack_id = uuid.uuid4().hex[:10]
     record = {
         "pack_id": pack_id,
@@ -97,13 +103,22 @@ def load_pack(pack_id: str) -> Optional[dict]:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        rec = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if isinstance(rec, dict) and rec.get("stub_type"):
+        # Packs saved before ADR-0013 carry legacy type strings; normalise so
+        # every downstream branch sees the canonical slug.
+        from mediahub.club_platform.post_types import canonical_slug
+
+        rec["stub_type"] = canonical_slug(rec["stub_type"])
+    return rec
 
 
 def list_packs(limit: int = 50) -> list[dict]:
     """List the most recent packs, newest first."""
+    from mediahub.club_platform.post_types import canonical_slug
+
     items: list[dict] = []
     for p in _packs_dir().glob("*.json"):
         try:
@@ -112,7 +127,7 @@ def list_packs(limit: int = 50) -> list[dict]:
                 {
                     "pack_id": data.get("pack_id", p.stem),
                     "created_at": data.get("created_at", ""),
-                    "stub_type": data.get("stub_type", "other"),
+                    "stub_type": canonical_slug(data.get("stub_type", "other")),
                     "title": data.get("title", "Untitled"),
                     "n_cards": len(data.get("cards") or []),
                 }

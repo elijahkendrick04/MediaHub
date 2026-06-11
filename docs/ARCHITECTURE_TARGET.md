@@ -57,9 +57,9 @@ connect**, not to spawn a parallel structure.
 
 | Target component | Maps onto (shipped today) | Gap to close |
 |---|---|---|
-| **Strategy brain (hub)** | `content_engine` (planner `plan_content_directions` + writer `generate_content`) + `context_engine` (identity, research, trust) + `workflow` (status/queue) | A cross-source planner that fuses the three sources into a ranked, multi-sport content *plan* (today's planner is swim-result-centric). |
+| **Strategy brain (hub)** | `content_engine` — **the cross-source planner ships (P1.3)**: `signals.py` gathers own/external/direct, `planner.py` fuses them into a ranked, explainable, per-org plan keyed by sport profile (`/plan` + `/api/plan/*`); plus the writer `generate_content` and `context_engine` (identity, research, trust) | Deepen the external spokes (fixtures/news feeds arrive with P3 data sources); plan→draft one-click handoff beyond the implemented surfaces. |
 | **Sport adapters (spokes)** | `recognition` (sport-agnostic bus + `registry.register_sport`) + `recognition_swim` (swim impl) | Add `recognition_<sport>` packages; the seam already exists ([`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). |
-| **Sport config** | `sport_profiles` (new, inert) + `club_platform.content_types` (post-type registry) | Wire profiles into planning; reconcile profile post types with the `ContentType` enum. |
+| **Sport config** | `sport_profiles` (live — feeds the planner) + `club_platform.post_types` (slug-canonical taxonomy layer, ADR-0013) over `content_types` (implemented-surface badge) | ✅ Reconciled (P1.2): slugs are canonical, the enum is the implemented subset, legacy persisted strings normalise at read boundaries. |
 | **Ingestion spokes** | `interpreter` (HY3/SDIF/PDF/HTML), `pb_discovery` | Add sports-data APIs (`nba_api`, `openfootball`), fixture generators, FIT/CSV parsers; normalise to the canonical schema (`canonical.*`). |
 | **Asset: graphics** | `graphic_renderer` (Playwright→PNG), `creative_brief` | Optional Satori fast-path (Phase 5) to cut headless-Chromium weight. |
 | **Asset: video/reels** | `remotion` + `visual/motion.py` | Cost-flag Remotion; Satori+FFmpeg fallback (Phase 0/5). |

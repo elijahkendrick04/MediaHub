@@ -5,10 +5,12 @@
 # the schema; docs/POST_TYPE_TAXONOMY.md for the post types; docs/AUTONOMY_MODEL.md
 # for the autonomy levels.
 #
-# INERT scaffolding — there is no football detector engine yet. `engine_sport`
-# below names the recognition.registry sport this profile WILL bind to once a
-# `recognition_football` adapter is registered (roadmap Phase 3). Until then the
-# profile loads and validates, but produces nothing at runtime.
+# The football DETECTOR engine does not exist yet: `engine_sport` below names
+# the recognition.registry sport this profile WILL bind to once a
+# `recognition_football` adapter is registered (roadmap Phase 3). The profile
+# itself is live config — the cross-source planner (`content_engine.planner`,
+# P1.3) plans from it via `club_platform.post_types.post_types_for()`
+# (ADR-0013); result-detection signals stay empty until Phase 3.
 #
 # Data-input licensing note: `openfootball_json` is public-domain fixture/result
 # data (the genuinely-free default). `statsbomb_open_data` is free to access but
@@ -82,11 +84,29 @@ post_types:
     template_namespace: universal/signing
     default_autonomy: draft_only
 
-  sponsor_activation:             # brand-contractual: hand-placed by default
+  sponsor_activation:             # maps to ContentType.SPONSOR_ACTIVATION; brand-contractual: hand-placed by default
     enabled: true
     data_inputs: [manual_entry, sponsor_kit]
     template_namespace: universal/sponsor
     default_autonomy: draft_only
+
+  event_preview:                  # maps to ContentType.EVENT_PREVIEW
+    enabled: true
+    data_inputs: [fixtures, manual_entry]
+    template_namespace: universal/event_preview
+    default_autonomy: approval_required
+
+  session_update:                 # maps to ContentType.SESSION_UPDATE
+    enabled: true
+    data_inputs: [manual_entry, partial_results]
+    template_namespace: universal/session_update
+    default_autonomy: approval_required
+
+  free_text:                      # maps to ContentType.FREE_TEXT
+    enabled: true
+    data_inputs: [free_text]
+    template_namespace: universal/free_text
+    default_autonomy: approval_required
 
 notes: >
   Football has the widest club footprint and the cleanest free data source

@@ -56,6 +56,8 @@ data/brand_dna_cache/
 data/runs_v4/
 data/voices/
 data/patterns.jsonl
+data/planner_inputs/
+data/content_plans/
 
 # Local-dev runtime writes (created when DATA_DIR env var is not set and the
 # app or tests run from inside the package tree)

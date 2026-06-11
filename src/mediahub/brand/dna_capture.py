@@ -1,10 +1,22 @@
 """brand/dna_capture.py — Capture a structured brand profile from a website.
 
-Given a URL, fetch the page, extract visual identity and voice signals
-deterministically (title, headings, og:image, theme-color, inline-style
-colours, likely logo image), then ask the LLM for the structured voice
-fields (50-word voice summary, 8-12 keywords, 3-5 phrases to use,
-3-5 phrases to avoid, palette in hex, typography hint).
+Given a URL, fetch the page (SSRF-safe — public hosts only, re-validated on
+every redirect hop), extract visual identity and voice signals
+deterministically (title, headings, og:image, theme-color, site-wide
+colour-usage frequencies incl. linked CSS, likely logo image, and — P1.5 —
+`materialyoucolor`-quantized candidates from the logo/og-image **pixels**),
+then ask the LLM for the structured voice fields (50-word voice summary,
+8-12 keywords, 3-5 phrases to use, 3-5 phrases to avoid, palette in hex,
+typography hint).
+
+The whole flow runs with no paid API: the scrape is local, the colour
+science is local (Apache-2.0 material-color-utilities, the same maths the
+theming engine uses), and the one judgement step rides ``media_ai.llm`` —
+which serves local OpenAI-compatible endpoints (Ollama, llama.cpp, vLLM via
+``MEDIAHUB_LLM_ENDPOINTS``) exactly like the hosted providers. The LLM's
+palette picks are validated against the gathered evidence universe — a hex
+the site never exhibited is dropped, never trusted (the anti-hallucination
+guard ``brand/bootstrap_extract`` established).
 
 Public surface:
     capture_brand_dna(website_url: str, *, force: bool = False) -> dict
@@ -13,12 +25,14 @@ The returned dict has the same keys as the ClubProfile brand_* fields:
     brand_voice_summary, brand_keywords, brand_palette_extracted,
     brand_logo_url, brand_typography_hint, brand_phrases_to_avoid,
     brand_phrases_to_use, brand_source_url, brand_captured_at,
-    brand_capture_status
+    brand_capture_status, brand_palette_sources, brand_palette_reasoning
 
-Graceful failure: every failure mode (unreachable URL, malformed HTML,
-LLM unavailable) returns a dict with brand_capture_status set to a
-clear error string and the other fields populated with whatever could
-be extracted. Never raises.
+Graceful failure: every failure mode (unreachable or unsafe URL, malformed
+HTML, LLM unavailable) returns a dict with brand_capture_status set to a
+clear error string and the other fields populated with whatever could be
+extracted. With no provider configured the deterministic palette evidence
+is preserved but voice fields stay empty (status ``no_provider``) — an
+honest gap, never an invented voice. Never raises.
 """
 
 from __future__ import annotations
@@ -102,30 +116,60 @@ def _save_cache(url: str, payload: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+_FETCH_MAX_HOPS = 4
+
+
+def _url_is_safe(url: str) -> bool:
+    """Public-host gate shared with the research fetcher. Fail-closed."""
+    try:
+        from mediahub.web_research.safe_fetch import is_url_safe
+
+        return is_url_safe(url)
+    except Exception:  # pragma: no cover - safe_fetch is a core module
+        return False
+
+
 def _fetch(url: str) -> Optional[str]:
-    """Fetch a URL with a sane UA, size cap, and timeout. Returns text or None."""
+    """Fetch a URL with a sane UA, size cap, and timeout. Returns text or None.
+
+    SSRF-safe: the host must resolve to public IPs, and redirects are
+    followed manually so every hop is re-validated — a public URL can never
+    302 the capture into a private/loopback address.
+    """
     try:
         import requests  # already a project dep
     except Exception:
         log.debug("requests not installed")
         return None
-    try:
-        r = requests.get(
-            url,
-            headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*;q=0.8"},
-            timeout=_FETCH_TIMEOUT,
-            allow_redirects=True,
-        )
-    except Exception as e:
-        log.debug("brand-dna fetch failed for %s: %s", url, e)
-        return None
-    if r.status_code != 200:
-        log.debug("brand-dna non-200 (%s) for %s", r.status_code, url)
-        return None
-    text = r.text or ""
-    if len(text) > _MAX_HTML_BYTES:
-        text = text[:_MAX_HTML_BYTES]
-    return text
+    current = url
+    for _ in range(_FETCH_MAX_HOPS):
+        if not _url_is_safe(current):
+            log.debug("brand-dna fetch blocked (unsafe host): %s", current)
+            return None
+        try:
+            r = requests.get(
+                current,
+                headers={"User-Agent": _USER_AGENT, "Accept": "text/html,*/*;q=0.8"},
+                timeout=_FETCH_TIMEOUT,
+                allow_redirects=False,
+            )
+        except Exception as e:
+            log.debug("brand-dna fetch failed for %s: %s", current, e)
+            return None
+        if r.status_code in (301, 302, 303, 307, 308):
+            nxt = r.headers.get("Location", "")
+            if not nxt:
+                return None
+            current = urljoin(current, nxt)
+            continue
+        if r.status_code != 200:
+            log.debug("brand-dna non-200 (%s) for %s", r.status_code, current)
+            return None
+        text = r.text or ""
+        if len(text) > _MAX_HTML_BYTES:
+            text = text[:_MAX_HTML_BYTES]
+        return text
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -256,17 +300,24 @@ def _stylesheet_hrefs(html: str) -> list[str]:
 
 
 def _default_css_fetcher(css_url: str) -> Optional[str]:
-    """Best-effort GET of one stylesheet. Returns text or None. Never raises."""
+    """Best-effort GET of one stylesheet. Returns text or None. Never raises.
+
+    SSRF-safe: same public-host gate as the page fetch; redirects are not
+    followed (a stylesheet that redirects is simply skipped).
+    """
     try:
         import requests
     except Exception:
+        return None
+    if not _url_is_safe(css_url):
+        log.debug("css fetch blocked (unsafe host): %s", css_url)
         return None
     try:
         r = requests.get(
             css_url,
             headers={"User-Agent": _USER_AGENT, "Accept": "text/css,*/*;q=0.1"},
             timeout=_CSS_FETCH_TIMEOUT,
-            allow_redirects=True,
+            allow_redirects=False,
             stream=False,
         )
     except Exception as e:
@@ -464,17 +515,115 @@ def _extract_signals(html: str, url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Palette evidence — usage frequencies + image pixels (P1.5)
+# ---------------------------------------------------------------------------
+
+
+def gather_palette_evidence(
+    html: str,
+    url: str,
+    signals: dict,
+    *,
+    css_fetcher=None,
+    image_fetcher=None,
+) -> dict:
+    """All the deterministic colour evidence for one site, with provenance.
+
+    Combines (a) the site-wide colour-USAGE map (page HTML + linked CSS),
+    (b) `materialyoucolor`-quantized candidates from the detected logo and
+    og:image pixels, and (c) the declared theme-color. Returns::
+
+        {
+          "usage":   [(hex, count), ...],
+          "images":  {"logo": [...], "og_image": [...]},
+          "sources": {hex: provenance_string},   # strongest source wins
+          "ordered": [hex, ...],                 # evidence-strength order
+        }
+
+    Evidence-gathering only — semantic role assignment stays with the LLM.
+    """
+    usage = colour_usage_evidence(html, url, css_fetcher=css_fetcher)
+
+    try:
+        from mediahub.brand.palette_evidence import gather_image_evidence
+
+        images = gather_image_evidence(
+            logo_url=signals.get("logo_url") or "",
+            og_image_url=signals.get("og_image") or "",
+            image_fetcher=image_fetcher,
+        )
+    except Exception as e:
+        log.debug("image evidence unavailable: %s", e)
+        images = {"logo": [], "og_image": []}
+
+    sources: dict[str, str] = {}
+    ordered: list[str] = []
+
+    def _add(hex_value: str, provenance: str) -> None:
+        h = _normalise_hex(hex_value)
+        if not _is_valid_hex(h):
+            return
+        if h not in sources:
+            sources[h] = provenance
+            ordered.append(h)
+
+    # Strongest first: real logo pixels → declared theme-color → og-image
+    # pixels → site-wide CSS usage → raw HTML scan.
+    for cand in images.get("logo") or []:
+        _add(
+            cand["hex"],
+            f"logo pixels (material score rank {cand['rank']}, "
+            f"{cand['population_share']:.0%} of pixels)",
+        )
+    if signals.get("theme_color"):
+        _add(signals["theme_color"], "declared <meta name=theme-color>")
+    for cand in images.get("og_image") or []:
+        _add(cand["hex"], f"og:image pixels (material score rank {cand['rank']})")
+    for hex_value, count in usage:
+        _add(hex_value, f"used {count}× across page + linked CSS")
+    for hex_value in signals.get("colours") or []:
+        _add(hex_value, "found in page HTML")
+
+    return {"usage": usage, "images": images, "sources": sources, "ordered": ordered}
+
+
+def _palette_from_evidence(evidence: dict) -> tuple[dict, dict, str]:
+    """Deterministic palette fill from the evidence-strength order.
+
+    Returns ``(palette, per_slot_sources, reasoning)``. This is a *real*
+    deterministic path — every hex comes from the club's own site/assets —
+    used to fill slots when no provider is configured or an LLM pick fails
+    validation. It assigns by evidence strength, not by judgement.
+    """
+    ordered: list[str] = evidence.get("ordered") or []
+    sources: dict[str, str] = evidence.get("sources") or {}
+    palette: dict[str, str] = {}
+    slot_sources: dict[str, str] = {}
+    for slot, hex_value in zip(("primary", "secondary", "accent"), ordered):
+        palette[slot] = hex_value
+        slot_sources[slot] = f"evidence: {sources.get(hex_value, 'site evidence')}"
+    reasoning = (
+        "Deterministic fill in evidence-strength order (logo pixels → theme-color → "
+        "og:image pixels → CSS usage)."
+        if palette
+        else "No colour evidence found on the site."
+    )
+    return palette, slot_sources, reasoning
+
+
+# ---------------------------------------------------------------------------
 # LLM step
 # ---------------------------------------------------------------------------
 
 _LLM_SYSTEM = (
     "You analyse a club, society or sports team's website signals and "
     "return a structured brand profile as JSON. Be factual, terse and "
-    "concrete. Do not invent details that aren't supported by the signals."
+    "concrete. Do not invent details that aren't supported by the signals. "
+    "Palette colours MUST be chosen verbatim from the evidence list given."
 )
 
 
-def _build_llm_prompt(signals: dict, url: str) -> str:
+def _build_llm_prompt(signals: dict, url: str, evidence: Optional[dict] = None) -> str:
     lines = [
         f"Website URL: {url}",
         f"Page title: {signals.get('title','')}",
@@ -483,12 +632,21 @@ def _build_llm_prompt(signals: dict, url: str) -> str:
     headings = signals.get("headings") or []
     if headings:
         lines.append("Headings: " + " | ".join(headings[:6]))
-    colours = signals.get("colours") or []
-    if colours:
-        lines.append("Most-used colours (frequency-ranked): " + ", ".join(colours[:10]))
-    theme = signals.get("theme_color")
-    if theme:
-        lines.append(f"theme-color meta: {theme}")
+
+    ev = evidence or {}
+    ordered = ev.get("ordered") or []
+    sources = ev.get("sources") or {}
+    if ordered:
+        lines.append("Colour evidence (strongest first — pick palette ONLY from these):")
+        for hex_value in ordered[:14]:
+            lines.append(f"  - {hex_value} — {sources.get(hex_value, 'site evidence')}")
+    else:
+        colours = signals.get("colours") or []
+        if colours:
+            lines.append("Most-used colours (frequency-ranked): " + ", ".join(colours[:10]))
+        theme = signals.get("theme_color")
+        if theme:
+            lines.append(f"theme-color meta: {theme}")
     if signals.get("logo_url"):
         lines.append(f"Detected logo URL: {signals['logo_url']}")
     lines.append("")
@@ -498,7 +656,8 @@ def _build_llm_prompt(signals: dict, url: str) -> str:
         "  keywords: array of 8-12 short keywords this org would use about itself\n"
         "  phrases_to_use: array of 3-5 short phrases that sound like this org\n"
         "  phrases_to_avoid: array of 3-5 short phrases this org would NOT use\n"
-        '  palette: object {"primary":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb"}\n'
+        '  palette: object {"primary":"#rrggbb","secondary":"#rrggbb","accent":"#rrggbb"} — '
+        "every value MUST appear verbatim in the colour evidence above\n"
         '  typography_hint: one of "serif", "sans", "display", "mono"\n'
         "No prose, no fences, no commentary — only the JSON object."
     )
@@ -509,8 +668,13 @@ def _is_valid_hex(c: str) -> bool:
     return isinstance(c, str) and bool(re.match(r"^#[0-9a-fA-F]{6}$", c))
 
 
-def _call_llm(signals: dict, url: str) -> Optional[dict]:
-    """Ask the LLM for the structured profile. Returns dict or None on failure."""
+def _call_llm(signals: dict, url: str, evidence: Optional[dict] = None) -> Optional[dict]:
+    """Ask the LLM for the structured profile. Returns dict or None on failure.
+
+    Rides ``media_ai.llm`` so the same call serves Gemini, Anthropic, or a
+    local OpenAI-compatible endpoint (Ollama et al. via
+    ``MEDIAHUB_LLM_ENDPOINTS``) — no paid API is required for this step.
+    """
     try:
         from mediahub.media_ai.llm import generate_json, is_available
     except Exception as e:
@@ -518,7 +682,7 @@ def _call_llm(signals: dict, url: str) -> Optional[dict]:
         return None
     if not is_available():
         return None
-    prompt = _build_llm_prompt(signals, url)
+    prompt = _build_llm_prompt(signals, url, evidence)
     try:
         data = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=900, fallback={})
     except Exception as e:
@@ -550,13 +714,21 @@ def _empty_result(url: str, status: str) -> dict:
         "brand_source_url": url,
         "brand_captured_at": _now_iso(),
         "brand_capture_status": status,
+        "brand_palette_sources": {},
+        "brand_palette_reasoning": "",
     }
 
 
-def _merge_llm_into_result(base: dict, llm: dict, signals: dict) -> dict:
+def _merge_llm_into_result(
+    base: dict, llm: dict, signals: dict, evidence: Optional[dict] = None
+) -> dict:
     """Apply the LLM-returned dict to the base result, with type guards.
 
-    Never raises — bad LLM output is replaced with safe defaults.
+    Never raises — bad LLM output is replaced with safe defaults. Palette
+    picks are validated against the evidence universe: a hex the site never
+    exhibited is dropped (anti-hallucination) and the slot falls back to the
+    deterministic evidence fill, with per-slot provenance recorded in
+    ``brand_palette_sources``.
     """
     out = dict(base)
 
@@ -576,25 +748,55 @@ def _merge_llm_into_result(base: dict, llm: dict, signals: dict) -> dict:
     if isinstance(pta, list):
         out["brand_phrases_to_avoid"] = [str(p).strip() for p in pta if str(p).strip()][:5]
 
+    ev = evidence or {}
+    universe: dict[str, str] = ev.get("sources") or {}
+    ordered: list[str] = ev.get("ordered") or []
+
     palette = llm.get("palette")
+    clean: dict[str, str] = {}
+    slot_sources: dict[str, str] = {}
+    dropped: list[str] = []
     if isinstance(palette, dict):
-        clean: dict[str, str] = {}
         for k in ("primary", "secondary", "accent"):
             v = palette.get(k)
-            if isinstance(v, str):
-                v_norm = _normalise_hex(v) if v.startswith("#") else v
-                if _is_valid_hex(v_norm):
-                    clean[k] = v_norm
-        # Fill any missing palette slot from extracted colours
-        colours = signals.get("colours") or []
-        if "primary" not in clean and colours:
-            clean["primary"] = colours[0]
-        if "secondary" not in clean and len(colours) > 1:
-            clean["secondary"] = colours[1]
-        if "accent" not in clean and len(colours) > 2:
-            clean["accent"] = colours[2]
-        if clean:
-            out["brand_palette_extracted"] = clean
+            if not isinstance(v, str):
+                continue
+            v_norm = _normalise_hex(v) if v.startswith("#") else v
+            if not _is_valid_hex(v_norm):
+                continue
+            if universe and v_norm not in universe:
+                # The model invented a colour the site never exhibited.
+                dropped.append(f"{k}={v_norm}")
+                continue
+            clean[k] = v_norm
+            slot_sources[k] = f"ai pick (from {universe.get(v_norm, 'site evidence')})"
+    # Fill any missing palette slot deterministically: walk the evidence in
+    # strength order and take the next colour the AI hasn't already placed.
+    used = set(clean.values())
+    for k in ("primary", "secondary", "accent"):
+        if k in clean:
+            continue
+        candidate = next((h for h in ordered if h not in used), None)
+        if candidate:
+            clean[k] = candidate
+            slot_sources[k] = f"evidence: {universe.get(candidate, 'site evidence')}"
+            used.add(candidate)
+    if clean:
+        out["brand_palette_extracted"] = clean
+        out["brand_palette_sources"] = slot_sources
+        reasoning = llm.get("palette_reasoning")
+        out["brand_palette_reasoning"] = (
+            str(reasoning).strip()[:300]
+            if isinstance(reasoning, str) and str(reasoning).strip()
+            else "AI role assignment over deterministic site evidence "
+            "(logo pixels, theme-color, CSS usage)."
+        )
+        if dropped:
+            out["brand_palette_reasoning"] += (
+                " Dropped invented colour(s) not present in the evidence: "
+                + ", ".join(dropped)
+                + "."
+            )
 
     typo = llm.get("typography_hint")
     if isinstance(typo, str) and typo.strip().lower() in ("serif", "sans", "display", "mono"):
@@ -603,12 +805,20 @@ def _merge_llm_into_result(base: dict, llm: dict, signals: dict) -> dict:
     return out
 
 
-def capture_brand_dna(website_url: str, *, force: bool = False) -> dict:
+def capture_brand_dna(
+    website_url: str,
+    *,
+    force: bool = False,
+    css_fetcher=None,
+    image_fetcher=None,
+) -> dict:
     """Capture a structured brand profile from a website URL.
 
     Args:
         website_url: the URL to analyse. http:// prefix added if missing.
         force: ignore the on-disk cache and re-fetch.
+        css_fetcher / image_fetcher: injectable fetchers (tests); the
+            defaults are the SSRF-safe HTTP fetchers.
 
     Returns:
         A dict with the ClubProfile brand_* keys. Always returns — never
@@ -631,31 +841,32 @@ def capture_brand_dna(website_url: str, *, force: bool = False) -> dict:
         return _empty_result(url, "fetch_failed")
 
     signals = _extract_signals(html, url)
+    evidence = gather_palette_evidence(
+        html, url, signals, css_fetcher=css_fetcher, image_fetcher=image_fetcher
+    )
 
-    # Build the deterministic base result so we always have something
+    # Build the deterministic base result so we always have something:
+    # palette slots filled in evidence-strength order (logo pixels →
+    # theme-color → og:image pixels → CSS usage), each with provenance.
     base = _empty_result(url, "extracted")
     if signals.get("logo_url"):
         base["brand_logo_url"] = signals["logo_url"]
-    colours = signals.get("colours") or []
-    if colours or signals.get("theme_color"):
-        base["brand_palette_extracted"] = {}
-        if signals.get("theme_color"):
-            base["brand_palette_extracted"]["primary"] = signals["theme_color"]
-        if colours:
-            slots = ["primary", "secondary", "accent"]
-            for i, c in enumerate(colours[:3]):
-                slot = slots[i]
-                base["brand_palette_extracted"].setdefault(slot, c)
+    ev_palette, ev_sources, ev_reasoning = _palette_from_evidence(evidence)
+    if ev_palette:
+        base["brand_palette_extracted"] = ev_palette
+        base["brand_palette_sources"] = ev_sources
+        base["brand_palette_reasoning"] = ev_reasoning
 
-    llm_out = _call_llm(signals, url)
+    llm_out = _call_llm(signals, url, evidence)
     if llm_out:
-        out = _merge_llm_into_result(base, llm_out, signals)
+        out = _merge_llm_into_result(base, llm_out, signals, evidence)
         out["brand_capture_status"] = "ok"
     else:
-        # No cloud LLM available — preserve the deterministic palette /
-        # logo signals we extracted from the HTML, but do NOT invent
-        # voice / keywords / phrases. Status "no_provider" tells the UI
-        # to surface an honest "configure an AI provider" message.
+        # No LLM provider reachable (hosted or local) — preserve the
+        # deterministic, evidence-grounded palette / logo signals, but do
+        # NOT invent voice / keywords / phrases. Status "no_provider"
+        # tells the UI to surface an honest "configure an AI provider"
+        # message (a local MEDIAHUB_LLM_ENDPOINTS endpoint counts).
         out = dict(base)
         out["brand_capture_status"] = "no_provider"
 
@@ -670,4 +881,5 @@ __all__ = [
     "build_colour_usage_map",
     "fetch_linked_css",
     "colour_usage_evidence",
+    "gather_palette_evidence",
 ]

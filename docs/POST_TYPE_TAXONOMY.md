@@ -37,23 +37,31 @@ post type along four axes:
 | **template set** | Which graphic/reel template namespace renders it. |
 | **default autonomy** | Starting [`AutonomyLevel`](AUTONOMY_MODEL.md): `draft_only` · `approval_required` · `fully_autonomous`. Gated by default. |
 
-## 2. How this maps onto today's code (verified)
+## 2. How this maps onto today's code (realised — ADR-0013)
 
-The post-type idea is **not new** to MediaHub — it already ships, narrowly, as
-`club_platform.content_types`:
+The Phase-1 extend-vs-layer decision is **settled and shipped**
+([`adr/0013-post-type-taxonomy-slug-canonical.md`](adr/0013-post-type-taxonomy-slug-canonical.md),
+Council-pressure-tested): the taxonomy is realised as a **slug-canonical
+layer**, in `club_platform.post_types`:
 
-- `ContentType` is a `str` enum with `MEET_RECAP`, `ATHLETE_SPOTLIGHT`,
-  `WEEKEND_PREVIEW` (titled "Event Preview"), `SPONSOR_POST`, `SESSION_UPDATE`,
-  `FREE_TEXT`.
-- `REGISTRY: dict[ContentType, ContentTypeMeta]` is the single source of truth,
-  with `is_implemented` flags and `input_contract` strings.
-
-This taxonomy **generalises that registry**: the universal types below subsume the
-existing enum values (e.g. `meet_recap` ↔ `MEET_RECAP`, `athlete_spotlight` ↔
-`ATHLETE_SPOTLIGHT`, `sponsor_activation` ↔ `SPONSOR_POST`, `event_preview` ↔
-`WEEKEND_PREVIEW`), and add the ones the strategy brain needs. The migration path
-(extend the enum/registry vs. layer a profile-driven set on top) is a Phase-1
-decision tracked in [`../docs/ROADMAP.md`](ROADMAP.md), not settled here.
+- **The slug is the canonical post-type identity.** The universal slugs below
+  are declared in code (`post_types.UNIVERSAL_POST_TYPES`); sport-specific
+  slugs live in the sport-profile YAML. The planner, plan persistence and the
+  publish gate all key on slugs.
+- **`ContentType` is the implemented-surface badge**, not a parallel
+  vocabulary: a small enum naming the slugs that have a real clickable
+  product surface (`REGISTRY` carries titles, input contracts and route
+  endpoints). Every enum value IS a canonical slug — the two historic
+  mismatches were renamed (`WEEKEND_PREVIEW`→`EVENT_PREVIEW`,
+  `SPONSOR_POST`→`SPONSOR_ACTIVATION`) — and the subset invariant is pinned
+  by `tests/test_post_types.py`. The enum never grows a member for a
+  merely-planned type, so unimplemented types can't leak "Coming soon" tiles.
+- **Legacy persisted strings keep working**: `post_types.canonical_slug()`
+  maps the pre-rename strings at every read boundary (per-org autonomy
+  policy, saved stub packs, the type gate), so operator-set autonomy levels
+  survived the rename.
+- The bridge for consumers is `post_types.post_types_for(profile)` →
+  slug + title + the profile's four axes + the implemented badge.
 
 Post-type keys in this doc are the canonical slugs used in the sport-profile YAML
 (`data/sport_profiles/*.yaml`).
@@ -65,11 +73,11 @@ Post-type keys in this doc are the canonical slugs used in the sport-profile YAM
 | `fixture_announcement` | Upcoming game/meet/race announcement | `fixtures`, `manual_entry` | — |
 | `result_recap` | Score/result summary after an event | parsed results, `manual_entry` | ≈ `MEET_RECAP` |
 | `athlete_spotlight` | One athlete's story / achievement | parsed results, history, `media_library` | `ATHLETE_SPOTLIGHT` |
-| `event_preview` | Tease athletes & angles before an event | `entry_list`, `manual_entry` | `WEEKEND_PREVIEW` |
+| `event_preview` | Tease athletes & angles before an event | `entry_list`, `manual_entry` | `EVENT_PREVIEW` |
 | `milestone_celebration` | Caps, records, anniversaries, "first-ever" | `manual_entry`, `*_history` | — |
 | `birthday` | Athlete/club birthday | roster, `manual_entry` | — |
 | `signings_recruitment` | New member / signing announcement | `manual_entry` | — |
-| `sponsor_activation` | Sponsor thank-you / activation | `manual_entry`, `sponsor_kit` | `SPONSOR_POST` |
+| `sponsor_activation` | Sponsor thank-you / activation | `manual_entry`, `sponsor_kit` | `SPONSOR_ACTIVATION` |
 | `ticket_merch_promo` | Tickets / merch / fundraiser push | `manual_entry` | — |
 | `behind_the_scenes` | Training, travel, community moments | `media_library`, `manual_entry` | — |
 | `season_recap` | End-of-season / mid-season wrap | season history, parsed results | — |
@@ -141,10 +149,12 @@ point. This sport will need custom parsers (research §D.5).
 ## 5. Adding or changing a post type
 
 1. Add the slug to the relevant sport profile(s) in `data/sport_profiles/*.yaml`
-   with its four axes (see [`SPORT_PROFILES.md`](SPORT_PROFILES.md)).
-2. If it is genuinely new platform-wide, decide whether to extend
-   `club_platform.content_types.ContentType` (the engine-side registry) — a
-   Council-gated data-model change ([`COUNCIL_GOVERNANCE.md`](COUNCIL_GOVERNANCE.md)).
+   with its four axes (see [`SPORT_PROFILES.md`](SPORT_PROFILES.md)). If it is a
+   new *universal* type, also add it to `post_types.UNIVERSAL_POST_TYPES`.
+2. Per ADR-0013 the enum only grows when a *product surface* ships: adding a
+   member (whose value MUST be the canonical slug) + `REGISTRY` entry is the
+   deliberate act of declaring the type implemented — never done for planning
+   vocabulary.
 3. Author its template set under `graphic_renderer/layouts/` (and a Remotion scene
    if it needs a reel) — see [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md).
 4. Wire its data inputs into the relevant ingestion spoke

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from mediahub.club_platform.content_types import ContentType
+from mediahub.club_platform.post_types import canonical_slug
 from mediahub.sport_profiles.autonomy import AutonomyLevel
 
 # Canonical AutonomyLevel for per-type policy is sport_profiles.autonomy.AutonomyLevel
@@ -76,6 +77,10 @@ def load_policy(org_id: str, *, data_dir: Optional[Path] = None) -> dict[str, st
 
     out = _default_policy()
     for key, raw_val in stored.items():
+        # Policies stored before ADR-0013 key on the legacy enum strings
+        # ("weekend_preview", "sponsor_post"); canonicalise so operator-set
+        # levels survive the rename instead of silently resetting.
+        key = canonical_slug(key)
         if key in out:
             level = AutonomyLevel.from_str(raw_val)
             out[key] = level.value
@@ -89,9 +94,10 @@ def save_policy(org_id: str, policy: dict[str, str], *, data_dir: Optional[Path]
     Values are normalised via ``AutonomyLevel.from_str`` so unknown values fall
     back to ``approval_required`` rather than being stored verbatim.
     """
+    incoming = {canonical_slug(k): v for k, v in (policy or {}).items()}
     clean: dict[str, str] = {}
     for key in _ALL_TYPES:
-        raw_val = policy.get(key, AutonomyLevel.APPROVAL_REQUIRED.value)
+        raw_val = incoming.get(key, AutonomyLevel.APPROVAL_REQUIRED.value)
         clean[key] = AutonomyLevel.from_str(raw_val).value
 
     path = _policy_path(org_id, data_dir)

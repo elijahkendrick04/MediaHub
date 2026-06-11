@@ -17,6 +17,7 @@ engine — there is no hardcoded heuristic template fallback.
 Classes:
   WeekendPreviewStub, SponsorPostStub, SessionUpdateStub, FreeTextStub
 """
+
 from __future__ import annotations
 
 import html
@@ -35,18 +36,19 @@ _PHOTO_INPUT_HTML = (
     '<div style="margin-bottom:14px;padding:12px;background:rgba(34,211,238,0.05);'
     'border:1px dashed var(--border);border-radius:6px">'
     '<label for="stub-attached-photo" style="display:block;margin-bottom:6px;font-weight:600">'
-    'Attach a photo (optional)</label>'
+    "Attach a photo (optional)</label>"
     '<input id="stub-attached-photo" type="file" name="attached_photo" accept="image/*" '
     'style="font-size:13px"/>'
     '<p class="muted" style="font-size:11px;margin:6px 0 0 0">'
     "We'll use this photo when generating the visual for this post. "
-    'Leave blank to use a library photo or no photo.</p></div>'
+    "Leave blank to use a library photo or no photo.</p></div>"
 )
 
 
 @dataclass
 class ContentCard:
     """One generated content card — a single platform-ready post draft."""
+
     platform: str = "Instagram"
     caption: str = ""
     hashtags: list[str] = field(default_factory=list)
@@ -55,17 +57,18 @@ class ContentCard:
 
     def to_dict(self) -> dict:
         return {
-            "platform":   self.platform,
-            "caption":    self.caption,
-            "hashtags":   self.hashtags,
+            "platform": self.platform,
+            "caption": self.caption,
+            "hashtags": self.hashtags,
             "confidence": self.confidence,
-            "notes":      self.notes,
+            "notes": self.notes,
         }
 
 
 # ---------------------------------------------------------------------------
 # Shared generator — every stub funnels through the one content engine
 # ---------------------------------------------------------------------------
+
 
 def _generate_cards_via_llm(
     brief_prose: str,
@@ -83,6 +86,7 @@ def _generate_cards_via_llm(
     surface the real reason — no silent template fallback.
     """
     from mediahub.content_engine import generate_content
+
     res = generate_content(
         content_type=content_type,
         brief=brief_prose,
@@ -97,7 +101,7 @@ def _generate_cards_via_llm(
 # kind of brief this is. Keyed by ContentType value so the regenerate route
 # can reuse the exact same requirements without re-instantiating the stub.
 _TYPE_REQUIREMENTS: dict[str, str] = {
-    "weekend_preview": (
+    "event_preview": (
         "an EVENT PREVIEW. Tease what's coming, build anticipation, no "
         "results yet. Stay factual; only use names and events explicitly given."
     ),
@@ -106,7 +110,7 @@ _TYPE_REQUIREMENTS: dict[str, str] = {
         "truth — do not invent specifics. If a fact isn't in the notes, leave "
         "it out. Identify the strongest 2-3 angles and pick the platform per angle."
     ),
-    "sponsor_post": (
+    "sponsor_activation": (
         "a SPONSOR POST. Respect every brand guideline. Never imply the "
         "sponsor caused the achievement — they support, the athletes perform. "
         "Make sponsor mentions feel natural, not forced."
@@ -126,6 +130,7 @@ def _split_lines(raw: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Stub base class
 # ---------------------------------------------------------------------------
+
 
 class _StubContentType:
     _type: ContentType
@@ -156,15 +161,11 @@ class _StubContentType:
             '<button type="submit" class="btn">Generate live update →</button>',
         ):
             if marker in form_html:
-                form_html = form_html.replace(
-                    marker, _PHOTO_INPUT_HTML + marker, 1
-                )
+                form_html = form_html.replace(marker, _PHOTO_INPUT_HTML + marker, 1)
                 injected = True
                 break
         if not injected:
-            form_html = form_html.replace(
-                "</form>", _PHOTO_INPUT_HTML + "</form>", 1
-            )
+            form_html = form_html.replace("</form>", _PHOTO_INPUT_HTML + "</form>", 1)
         return f"""
 <h1>{_h(meta.title)}</h1>
 <p class="dim">{_h(meta.description)}</p>
@@ -194,8 +195,9 @@ class _StubContentType:
 # Weekend / Event Preview
 # ---------------------------------------------------------------------------
 
+
 class WeekendPreviewStub(_StubContentType):
-    _type = ContentType.WEEKEND_PREVIEW
+    _type = ContentType.EVENT_PREVIEW
 
     def render_form_html(self) -> str:
         return """
@@ -249,6 +251,7 @@ class WeekendPreviewStub(_StubContentType):
 # Free Text
 # ---------------------------------------------------------------------------
 
+
 class FreeTextStub(_StubContentType):
     _type = ContentType.FREE_TEXT
 
@@ -288,8 +291,9 @@ class FreeTextStub(_StubContentType):
 # Sponsor Post
 # ---------------------------------------------------------------------------
 
+
 class SponsorPostStub(_StubContentType):
-    _type = ContentType.SPONSOR_POST
+    _type = ContentType.SPONSOR_ACTIVATION
 
     def render_form_html(self) -> str:
         return """
@@ -343,6 +347,7 @@ class SponsorPostStub(_StubContentType):
 # Session Update (live)
 # ---------------------------------------------------------------------------
 
+
 class SessionUpdateStub(_StubContentType):
     _type = ContentType.SESSION_UPDATE
 
@@ -393,68 +398,91 @@ class SessionUpdateStub(_StubContentType):
 # ---------------------------------------------------------------------------
 
 _STUB_CLASS_BY_TYPE: dict[str, type] = {
-    ContentType.WEEKEND_PREVIEW.value: WeekendPreviewStub,
-    ContentType.FREE_TEXT.value:       FreeTextStub,
-    ContentType.SPONSOR_POST.value:    SponsorPostStub,
-    ContentType.SESSION_UPDATE.value:  SessionUpdateStub,
+    ContentType.EVENT_PREVIEW.value: WeekendPreviewStub,
+    ContentType.FREE_TEXT.value: FreeTextStub,
+    ContentType.SPONSOR_ACTIVATION.value: SponsorPostStub,
+    ContentType.SESSION_UPDATE.value: SessionUpdateStub,
 }
 
 
 def stub_for_type(content_type: str) -> Optional["_StubContentType"]:
-    """Return a stub instance for a ContentType value, or None if unknown."""
-    cls = _STUB_CLASS_BY_TYPE.get(content_type)
+    """Return a stub instance for a post-type slug, or None if unknown.
+
+    Accepts legacy persisted strings ("weekend_preview", "sponsor_post") via
+    canonical_slug so packs saved before ADR-0013 keep regenerating.
+    """
+    from mediahub.club_platform.post_types import canonical_slug
+
+    cls = _STUB_CLASS_BY_TYPE.get(canonical_slug(content_type))
     return cls() if cls else None
 
 
 def requirements_for(content_type: str) -> str:
-    """The engine `requirements` line for a content type ('' if unknown)."""
-    return _TYPE_REQUIREMENTS.get(content_type, "")
+    """The engine `requirements` line for a post-type slug ('' if unknown)."""
+    from mediahub.club_platform.post_types import canonical_slug
+
+    return _TYPE_REQUIREMENTS.get(canonical_slug(content_type), "")
 
 
 # ---------------------------------------------------------------------------
 # Renderer — turns the cards into UI
 # ---------------------------------------------------------------------------
 
+
 def _platform_icon(platform: str) -> str:
     p = (platform or "").lower()
     if "instagram" in p or "feed" in p:
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>'
-                '<path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>'
-                '<line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>')
-    if "stor" in p:
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<circle cx="12" cy="12" r="10"/>'
-                '<polyline points="12 6 12 12 16 14"/></svg>')
-    if "tiktok" in p:
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>')
-    if "twitter" in p or "x " in p or p == "x":
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg>')
-    if "facebook" in p:
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>')
-    if "linkedin" in p:
-        return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-                '<path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z"/>'
-                '<rect x="2" y="9" width="4" height="12"/>'
-                '<circle cx="4" cy="4" r="2"/></svg>')
-    return ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
             'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-            '<circle cx="12" cy="12" r="10"/></svg>')
+            '<rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>'
+            '<path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>'
+            '<line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>'
+        )
+    if "stor" in p:
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<circle cx="12" cy="12" r="10"/>'
+            '<polyline points="12 6 12 12 16 14"/></svg>'
+        )
+    if "tiktok" in p:
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>'
+        )
+    if "twitter" in p or "x " in p or p == "x":
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<line x1="4" y1="4" x2="20" y2="20"/><line x1="20" y1="4" x2="4" y2="20"/></svg>'
+        )
+    if "facebook" in p:
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>'
+        )
+    if "linkedin" in p:
+        return (
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z"/>'
+            '<rect x="2" y="9" width="4" height="12"/>'
+            '<circle cx="4" cy="4" r="2"/></svg>'
+        )
+    return (
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="12" cy="12" r="10"/></svg>'
+    )
 
 
 _PILL_STYLE = {
-    "queue":    ("rgba(255,174,59,0.18)", "#ffae3b", "queue"),
+    "queue": ("rgba(255,174,59,0.18)", "#ffae3b", "queue"),
     "approved": ("rgba(74,222,128,0.18)", "#4ade80", "approved"),
-    "rejected": ("rgba(244,63,94,0.18)",  "#f43f5e", "rejected"),
+    "rejected": ("rgba(244,63,94,0.18)", "#f43f5e", "rejected"),
 }
 
 
@@ -469,22 +497,22 @@ def render_cards_html(
     cards = (cards_payload or {}).get("cards") or []
     if not cards:
         return (
-            f'<h1>{_h(title)}</h1>'
+            f"<h1>{_h(title)}</h1>"
             '<div class="card"><p class="muted">No cards generated — '
-            'contact your administrator to make sure a provider is configured, '
-            'and try again with a bit more detail.</p>'
+            "contact your administrator to make sure a provider is configured, "
+            "and try again with a bit more detail.</p>"
             f'<p style="margin-top:12px"><a class="btn secondary" href="{_h(back_url)}">← Try again</a></p></div>'
         )
 
     cards_html = ""
     show_pill = bool(pack_id and status_api_base)
     for idx, card in enumerate(cards):
-        platform   = str(card.get("platform", "Post") or "Post")
-        caption    = str(card.get("caption", "") or "").strip()
-        hashtags   = card.get("hashtags") or []
+        platform = str(card.get("platform", "Post") or "Post")
+        caption = str(card.get("caption", "") or "").strip()
+        hashtags = card.get("hashtags") or []
         confidence = card.get("confidence", 0.6)
-        notes      = str(card.get("notes", "") or "").strip()
-        status     = str(card.get("status") or "queue").lower()
+        notes = str(card.get("notes", "") or "").strip()
+        status = str(card.get("status") or "queue").lower()
         if status not in _PILL_STYLE:
             status = "queue"
 
@@ -495,7 +523,7 @@ def render_cards_html(
 
         tag_chips = ""
         for tag in hashtags[:8]:
-            t = str(tag).strip().lstrip('#')
+            t = str(tag).strip().lstrip("#")
             if t:
                 tag_chips += f'<span class="mh-card-tag">#{_h(t)}</span>'
 
@@ -510,7 +538,9 @@ def render_cards_html(
         caption_for_copy = html.escape(json.dumps(caption), quote=True)
         notes_html = (
             f'<div style="margin-top:10px;font-size:12px;color:var(--ink-muted)">'
-            f'<em>{_h(notes)}</em></div>' if notes else ''
+            f"<em>{_h(notes)}</em></div>"
+            if notes
+            else ""
         )
 
         pill_html = ""
@@ -521,10 +551,10 @@ def render_cards_html(
                 f'<button type="button" class="stub-wf-pill" data-pack="{_h(pack_id)}" '
                 f'data-idx="{idx}" data-status="{_h(status)}" data-url="{_h(pill_url)}" '
                 f'style="border:none;cursor:pointer;padding:3px 10px;border-radius:999px;'
-                f'font-size:11px;font-weight:600;background:{bg};color:{fg};'
+                f"font-size:11px;font-weight:600;background:{bg};color:{fg};"
                 f'font-family:inherit;margin-left:8px"'
                 f' title="Click: queue → approved → rejected → queue. Right-click to reset.">'
-                f'{_h(label)}</button>'
+                f"{_h(label)}</button>"
             )
 
         # "Create graphic" affordance — only when the page wired a graphic API
@@ -545,7 +575,7 @@ def render_cards_html(
             visual_panel = (
                 f'<div class="visual-panel" data-card="{_h(g_card_id)}" '
                 f'style="display:none;margin-top:10px;padding:12px;'
-                f'background:rgba(212,255,58,0.04);border:1px solid var(--border);'
+                f"background:rgba(212,255,58,0.04);border:1px solid var(--border);"
                 f'border-radius:8px"></div>'
             )
 

@@ -1,0 +1,78 @@
+# The Cross-Source Planner (the strategy brain)
+
+> **In plain words.** MediaHub doesn't just turn a results file into posts —
+> it works out *what a club should post next*. The planner looks at three
+> kinds of evidence: what's already in MediaHub (your processed results and
+> drafts), what's happening in the world (discovered meet context, the
+> calendar), and what you've told it (upcoming events, goals, blackout
+> dates). It fuses those into a **ranked list of post types with the
+> reasoning shown for every line**. It recommends — you decide. Nothing
+> publishes from the plan.
+
+Shipped as roadmap **P1.3**. Code: `src/mediahub/content_engine/`
+(`signals.py`, `planner.py`, `inputs.py`); surface: **Plan** in the nav
+(`/plan`) + `/api/plan/*`. Data-model spine: the slug-canonical post-type
+layer ([`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md), ADR-0013) over the
+sport profiles ([`SPORT_PROFILES.md`](SPORT_PROFILES.md)).
+
+## 1. The three signal sources
+
+| Source | What it reads | Where from |
+|---|---|---|
+| **own** | Processed runs + their card workflow state (queued / approved / posted), saved draft packs per type, posting recency | `DATA_DIR/runs_v4/`, `stub_packs/`, `publishing.posting_log` |
+| **external** | Meet identities the context engine has discovered; calendar anniversaries of the club's own past meets | `data/discovered/meets/`, calendar × run history |
+| **direct** | Operator-entered upcoming events, **structured goals** (each goal targets a post type picked from the profile — no free-text guessing), blackout dates; sponsor-configured fact from the org profile | `DATA_DIR/planner_inputs/<org>.json`, `ClubProfile` |
+
+Gathering is deterministic and read-only — no network, no LLM. Every signal
+carries `provenance` (the file/store it was read from). Tenant isolation: a
+gatherer only ever reads the active org's records.
+
+## 2. How ranking works (deterministic, explainable)
+
+The planner generalises the swim newsworthiness ranker's transparent
+additive-scoring pattern: a **category base** (result-led 40 · pre-event 35 ·
+evergreen 25 · sponsor 24 · seasonal 18 · live 12) plus **signal-driven
+modifiers**, each of which appends one reason line quoting the signal it
+fired from. Examples:
+
+- fresh results (≤7d) with cards in the review queue → result-led types +30;
+- an operator-entered event 2 days out → pre-event types +25 (−15 if its
+  date is a blackout);
+- a structured goal targeting a type → +15;
+- a configured sponsor **and** a fresh result to activate → sponsor +8/+12;
+- a one-year anniversary of a past meet → history/milestone types +18;
+- nothing drafted in a type for 21+ days → +6; drafted ≤3 days ago → −10.
+
+Honesty rules: result-led boosts only fire when the run's engine sport
+matches the profile's (`football` types never ride swimming results — they
+carry the reason *"no football results ingested yet"* instead), and a plan
+built with zero signals says so in `notes` rather than inventing context.
+Per CLAUDE.md the ranking is deterministic engine territory — **no LLM in
+the loop**; same inputs → same plan. AI judgement (copy, design) stays in
+the downstream generation surfaces.
+
+## 3. The plan object
+
+`build_content_plan(sport, profile_id)` → `ContentPlan`: ranked `PlanItem`s
+(`post_type` slug, `title`, `score`, `reasons[]`, `sources_used ⊆
+{own,external,direct}`, `signal_refs[]` provenance, the profile's
+`default_autonomy`, and the `implemented` badge linking to the Create
+surface where one exists), plus the gathered `signals`, `source_counts` and
+honest `notes`. Plans persist per org under
+`DATA_DIR/content_plans/<org>/<plan_id>.json` with a `latest.json` pointer
+(ownership-checked on load).
+
+## 4. Boundaries
+
+- **Planner ≠ publisher.** Autonomy stays with the per-type policy + publish
+  gate (P2.4, [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md)); the plan shows each
+  type's default level for context only.
+- **Planner ≠ detector.** "Is this a PB?" and card ranking inside a run stay
+  with the deterministic recognition engine; the planner reads its outputs
+  (achievement counts, queue states) and never overrides them.
+- **≥2 sports by construction.** Any profile in `data/sport_profiles/`
+  plans; swimming plans on all three sources end-to-end today, football
+  plans on profile + direct/external signals until its engine lands (P3).
+
+Tests: `tests/test_cross_source_planner.py` (signals, fusion, determinism,
+honesty, isolation, persistence, routes).
