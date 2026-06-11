@@ -333,3 +333,18 @@ def traction_gate(quotes: list[Quote]) -> dict:
         "met": len(clubs) >= TRACTION_REQUIRED_PAYING_CLUBS,
         "clubs": clubs,
     }
+
+
+def public_list_price(quotes: list[Quote]) -> Optional[dict]:
+    """The committed public annual list price, or ``None`` while the gate is unmet.
+
+    ADR-0011: `/pricing` stays at "Pricing TBC" until ≥5 distinct clubs have
+    paid an annual prepay at a tested price; only then is a list price
+    committed, set at the highest tested point that actually cleared — the
+    number is *derived from the paid ledger*, never typed in.
+    """
+    paid = _paid_annual_quotes(quotes)
+    if len(_distinct_clubs(paid)) < PC4_REQUIRED_PAID_CLUBS:
+        return None
+    top = max(paid, key=lambda q: q.amount_pence)
+    return {"amount_pence": top.amount_pence, "currency": top.currency}

@@ -202,6 +202,29 @@ class ClubProfile:
     # human act until someone explicitly picks channels. Never auto-connected.
     autonomy_channel_ids: list[str] = field(default_factory=list)
 
+    # ---- PC.8: sponsor registry (all optional, backward-compatible) ----
+    # Each entry: {sponsor_id, name, logo_asset_id, tier, active_from,
+    # active_until, website}. ``logo_asset_id`` references a media-library
+    # asset; ``active_from``/``active_until`` are ISO dates ("" = open).
+    # The single legacy ``sponsor_name`` field above stays as a fallback:
+    # when this registry is empty but sponsor_name is set, the renderer
+    # behaves exactly as before. Rotation across cards is deterministic
+    # (seeded per card like auto_variation_seed_for) so stills and motion
+    # agree on which card carries which sponsor.
+    sponsors: list[dict] = field(default_factory=list)
+
+    # ---- PC.10: public achievements wall (opt-in, default OFF) ----
+    # ``public_wall_token`` is the unguessable URL key for the public,
+    # read-only wall/embed/feed routes. Switching the wall off clears the
+    # token (revocation): the old URL 404s. ``public_wall_initials_only``
+    # defaults conservative (True) until per-athlete consent (W.2) exists.
+    # ``public_wall_excluded_cards`` holds "run_id::card_id" keys the club
+    # explicitly pulled from the public surface.
+    public_wall_enabled: bool = False
+    public_wall_token: str = ""
+    public_wall_initials_only: bool = True
+    public_wall_excluded_cards: list[str] = field(default_factory=list)
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)

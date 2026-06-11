@@ -15,6 +15,7 @@ from mediahub.commercial.wtp import (
     QuoteError,
     QuoteStore,
     pc4_pricing_gate,
+    public_list_price,
     traction_gate,
 )
 
@@ -85,9 +86,13 @@ def test_stripe_payment_wrong_currency_is_a_mismatch(store):
 
 def test_stripe_payment_is_idempotent_per_event(store):
     q = store.create("Club A", 58800)
-    store.record_stripe_payment(q.quote_id, amount_total_pence=58800, currency="gbp", event_id="evt_1")
+    store.record_stripe_payment(
+        q.quote_id, amount_total_pence=58800, currency="gbp", event_id="evt_1"
+    )
     before = store.path.read_text().count("\n")
-    store.record_stripe_payment(q.quote_id, amount_total_pence=58800, currency="gbp", event_id="evt_1")
+    store.record_stripe_payment(
+        q.quote_id, amount_total_pence=58800, currency="gbp", event_id="evt_1"
+    )
     after = store.path.read_text().count("\n")
     assert after == before  # exact retry appended nothing
     assert store.get(q.quote_id).status == STATUS_PAID
@@ -121,7 +126,9 @@ def test_pc4_gate_counts_distinct_clubs_paid_annual(store):
     dup = store.create("club a", 58800)  # same club, case-insensitive
     store.record_manual_payment(dup.quote_id, amount_pence=58800)
     bad = store.create("Club E", 58800)
-    store.record_stripe_payment(bad.quote_id, amount_total_pence=100, currency="gbp", event_id="evt_x")
+    store.record_stripe_payment(
+        bad.quote_id, amount_total_pence=100, currency="gbp", event_id="evt_x"
+    )
 
     gate = pc4_pricing_gate(store.list_all())
     assert gate["paid_clubs"] == 4
@@ -145,6 +152,26 @@ def test_traction_gate_requires_ten_paying_clubs(store):
     store.record_manual_payment(q.quote_id, amount_pence=58800)
     gate = traction_gate(store.list_all())
     assert gate["paying_clubs"] == 10 and gate["met"] is True
+
+
+def test_public_list_price_none_until_gate_met(store):
+    # Four paid clubs: gate unmet, no committed price — /pricing stays TBC.
+    for i, price in enumerate([58800, 58800, 82800, 118800]):
+        q = store.create(f"Club {i}", price)
+        store.record_manual_payment(q.quote_id, amount_pence=price)
+    assert public_list_price(store.list_all()) is None
+
+
+def test_public_list_price_is_highest_tested_price_that_cleared(store):
+    prices = [58800, 58800, 82800, 118800, 70800]
+    for i, price in enumerate(prices):
+        q = store.create(f"Club {i}", price)
+        store.record_manual_payment(q.quote_id, amount_pence=price)
+    # A mismatch at a higher figure never sets the list price.
+    bad = store.create("Mismatch Club", 200000)
+    store.record_manual_payment(bad.quote_id, amount_pence=150000)
+    out = public_list_price(store.list_all())
+    assert out == {"amount_pence": 118800, "currency": "gbp"}
 
 
 def test_ledger_is_append_only_and_owner_readable(store):
