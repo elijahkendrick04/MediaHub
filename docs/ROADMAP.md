@@ -8,6 +8,12 @@ per-item detail, the cross-cutting investments, and **Appendices A/B/C** (the
 PAR-*/SEQ-*/Step-N build & verification prompts). The decided strategy lives in
 the ADRs and companion docs linked under [Standing context](#standing-context).
 
+## Changelog (manual — strategy/roadmap engine)
+
+Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
+
+- **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
+
 ## Status (auto-updated)
 
 Refreshes on every push to `main` via
