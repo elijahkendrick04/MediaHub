@@ -18,6 +18,7 @@ Two layers:
 The planner recommends; humans approve; generation drafts. Publishing
 autonomy stays with ``publishing.type_gate`` (P2.4).
 """
+
 from .director import plan_content_directions
 from .engine import generate_caption, generate_content, load_brand_context
 from .inputs import load_planner_inputs, save_planner_inputs

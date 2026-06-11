@@ -6,6 +6,7 @@ knows about.  is_implemented=True → the route generates real output.
 is_implemented=False → the route renders a stub page with the input_contract
 so the user knows what is coming.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,12 +36,12 @@ class ContentType(str, Enum):
 @dataclass
 class ContentTypeMeta:
     type: ContentType
-    title: str                     # e.g. "Meet Recap"
-    description: str               # short — what it produces
-    input_contract: str            # what input is required (long-form)
-    is_implemented: bool           # if False, route renders a stub page
-    icon_svg: str                  # tiny inline SVG for navigation cards
-    primary_route_endpoint: str    # url_for endpoint name
+    title: str  # e.g. "Meet Recap"
+    description: str  # short — what it produces
+    input_contract: str  # what input is required (long-form)
+    is_implemented: bool  # if False, route renders a stub page
+    icon_svg: str  # tiny inline SVG for navigation cards
+    primary_route_endpoint: str  # url_for endpoint name
 
 
 # --- Icon SVGs (inline, 24×24 viewBox) ---
@@ -51,7 +52,7 @@ _WAVES_SVG = (
     '<path d="M2 12c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>'
     '<path d="M2 17c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>'
     '<path d="M2 7c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 4-2"/>'
-    '</svg>'
+    "</svg>"
 )
 
 _PERSON_SVG = (
@@ -59,7 +60,7 @@ _PERSON_SVG = (
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
     '<circle cx="12" cy="8" r="4"/>'
     '<path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>'
-    '</svg>'
+    "</svg>"
 )
 
 _CALENDAR_SVG = (
@@ -69,14 +70,14 @@ _CALENDAR_SVG = (
     '<line x1="16" y1="2" x2="16" y2="6"/>'
     '<line x1="8" y1="2" x2="8" y2="6"/>'
     '<line x1="3" y1="10" x2="21" y2="10"/>'
-    '</svg>'
+    "</svg>"
 )
 
 _STAR_SVG = (
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
     '<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>'
-    '</svg>'
+    "</svg>"
 )
 
 _SESSION_SVG = (
@@ -87,7 +88,7 @@ _SESSION_SVG = (
     '<line x1="16" y1="13" x2="8" y2="13"/>'
     '<line x1="16" y1="17" x2="8" y2="17"/>'
     '<polyline points="10 9 9 9 8 9"/>'
-    '</svg>'
+    "</svg>"
 )
 
 
@@ -96,7 +97,7 @@ _PENCIL_SVG = (
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
     '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>'
     '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>'
-    '</svg>'
+    "</svg>"
 )
 
 

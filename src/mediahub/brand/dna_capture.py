@@ -793,7 +793,9 @@ def _merge_llm_into_result(
         )
         if dropped:
             out["brand_palette_reasoning"] += (
-                " Dropped invented colour(s) not present in the evidence: " + ", ".join(dropped) + "."
+                " Dropped invented colour(s) not present in the evidence: "
+                + ", ".join(dropped)
+                + "."
             )
 
     typo = llm.get("typography_hint")

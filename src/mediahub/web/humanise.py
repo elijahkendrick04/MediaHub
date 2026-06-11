@@ -11,6 +11,7 @@ Usage:
     label = format_post_angle('medal_gold')   # → 'Gold medal'
     label = humanise_status('pb_unverified')  # → 'PB not verified'
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -28,7 +29,6 @@ _ACHIEVEMENT_LABELS: dict[str, str] = {
     "pb_magnitude_huge": "Huge PB",
     "pb_magnitude_big": "Big PB",
     "pb_magnitude_notable": "Notable PB",
-
     # Medal types
     "medal_gold": "Gold medal",
     "medal_silver": "Silver medal",
@@ -36,7 +36,6 @@ _ACHIEVEMENT_LABELS: dict[str, str] = {
     "relay_medal_gold": "Gold relay medal",
     "relay_medal_silver": "Silver relay medal",
     "relay_medal_bronze": "Bronze relay medal",
-
     # Milestone types
     "first_sub_barrier": "First-time barrier break",
     "first_sub_60": "First sub-60 second swim",
@@ -44,34 +43,28 @@ _ACHIEVEMENT_LABELS: dict[str, str] = {
     "first_sub_120": "First sub-2 minute swim",
     "first_sub_barrier_60": "First sub-60",
     "first_sub_barrier_30": "First sub-30",
-
     # Multi-swim types
     "multi_pb_weekend": "Multi-PB weekend",
     "biggest_drop_of_meet": "Biggest time drop of meet",
     "biggest_drop_candidate": "Time drop highlight",
     "heat_to_final_drop": "Heat-to-final improvement",
-
     # History types
     "return_to_form": "Return to form",
     "fastest_since": "Season best",
     "fastest_since_date": "Season best",
-
     # Qualification types
     "qualifying_time": "Qualifying time",
     "qual_hit_in_window": "Qualifier hit",
     "qual_hit_out_of_window": "Qualifying time (outside window)",
-
     # Field / ranking types
     "top_of_field_top_3": "Top-3 finish",
     "top_of_field_top_5": "Top-5 finish",
     "top_of_field_top_10": "Top-10 finish",
     "final_appearance": "Final appearance",
     "standout_field": "Standout swim",
-
     # Relay
     "relay_pb": "Relay PB",
     "relay_win": "Relay win",
-
     # Generic
     "notable_swim": "Notable swim",
     "story": "Story swim",
