@@ -8,6 +8,7 @@ Cache layout:
 The per-run cache ensures that within a single recognition run, each swimmer
 is researched only once, even if they appear in multiple achievements.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -77,6 +78,7 @@ class WarmCache:
     Warm long-lived swimmer cache (7-day TTL).
     Keyed by swimmer_key; shared across runs.
     """
+
     TTL = 7 * 24 * 3600
 
     def __init__(self):
@@ -113,7 +115,8 @@ class WarmCache:
 def _safe(s: str) -> str:
     """Make a string safe for filesystem use."""
     import re
-    return re.sub(r'[^\w\-]', '_', s)[:40]
+
+    return re.sub(r"[^\w\-]", "_", s)[:40]
 
 
 def _now() -> str:

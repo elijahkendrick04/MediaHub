@@ -9,6 +9,7 @@ processing always happens on the deployment side of the network.
 Lazy-imports rembg so the module loads even if rembg/onnxruntime are absent.
 First run downloads the u2net model (~170MB) into ~/.u2net/.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,6 +31,7 @@ class RembgLocalRemover(BackgroundRemover):
         if self._session is None:
             try:
                 from rembg import new_session
+
                 self._session = new_session(self.model)
             except Exception as e:
                 log.warning("rembg session init failed: %s", e)
@@ -40,6 +42,7 @@ class RembgLocalRemover(BackgroundRemover):
         Path(dst_path).parent.mkdir(parents=True, exist_ok=True)
         try:
             from rembg import remove
+
             with open(src_path, "rb") as f:
                 src = f.read()
             session = self._get_session()
@@ -57,6 +60,7 @@ class RembgLocalRemover(BackgroundRemover):
     def _passthrough(self, src_path: str, dst_path: str) -> str:
         """Fallback: just copy the image with alpha channel intact."""
         from PIL import Image
+
         img = Image.open(src_path).convert("RGBA")
         img.save(dst_path, "PNG")
         return dst_path
@@ -64,6 +68,7 @@ class RembgLocalRemover(BackgroundRemover):
     def is_available(self) -> bool:
         try:
             import rembg  # noqa: F401
+
             return True
         except Exception:
             return False

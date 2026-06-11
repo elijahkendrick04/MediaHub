@@ -20,6 +20,7 @@ The fifth "learner" is the persistent memory at brand.playbooks —
 loaded as a sibling module so all the AI-driven decisions can be
 recorded, replayed, and audited.
 """
+
 from __future__ import annotations
 
 from . import block_detector, content_extractor, endpoint_discoverer, strategy

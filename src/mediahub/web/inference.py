@@ -13,6 +13,7 @@ Inferences attempted:
 
 Inference is conservative: anything ambiguous is left blank with a warning.
 """
+
 from __future__ import annotations
 from collections import Counter
 
@@ -58,7 +59,8 @@ def infer_missing(meet: Meet) -> None:
             meet.add_warning(
                 "start_date_inferred",
                 f"Meet start date inferred from results: {sd}.",
-                severity="info", field_name="start_date",
+                severity="info",
+                field_name="start_date",
             )
         if not meet.end_date:
             meet.end_date = ed
@@ -67,7 +69,8 @@ def infer_missing(meet: Meet) -> None:
             meet.add_warning(
                 "end_date_inferred",
                 f"Meet end date inferred from results: {ed}.",
-                severity="info", field_name="end_date",
+                severity="info",
+                field_name="end_date",
             )
 
     # ---- host club ----
@@ -88,7 +91,8 @@ def infer_missing(meet: Meet) -> None:
                     "host_inferred",
                     f"Host club inferred as {top_club} "
                     f"({n} swims, {ratio:.0%}). Confirm in profile if wrong.",
-                    severity="info", field_name="host_club_code",
+                    severity="info",
+                    field_name="host_club_code",
                 )
 
     # ---- governing body ----
@@ -106,5 +110,6 @@ def infer_missing(meet: Meet) -> None:
                 "gb_inferred",
                 "Governing body assumed as Swim England based on 4-letter "
                 "club codes. Adjust in club profile if wrong.",
-                severity="info", field_name="governing_body",
+                severity="info",
+                field_name="governing_body",
             )

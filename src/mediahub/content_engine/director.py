@@ -10,6 +10,7 @@ When no provider is configured (or the call fails / can't be parsed) it returns
 a deterministic spread so the engine still produces cards — the honest
 "no provider" error is raised later by the writer, not here.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,8 +27,12 @@ _PLATFORMS = ("Instagram", "Stories", "Twitter", "Facebook", "LinkedIn", "TikTok
 
 # Default lenses used only by the no-provider fallback spread.
 _FALLBACK_LENSES = (
-    "the headline moment", "the numbers", "the human story",
-    "the team reaction", "the milestone", "looking ahead",
+    "the headline moment",
+    "the numbers",
+    "the human story",
+    "the team reaction",
+    "the milestone",
+    "looking ahead",
 )
 
 
@@ -107,8 +112,7 @@ def _user_prompt(
         if seen:
             parts.append(
                 "Recent angles/cards the user has already seen for this brief "
-                "(plan DIFFERENT angles + hooks, do not repeat these):\n"
-                + "\n".join(seen)
+                "(plan DIFFERENT angles + hooks, do not repeat these):\n" + "\n".join(seen)
             )
     parts.append(f"Variation nonce (do not echo): {random.randint(10_000, 99_999_999)}")
     parts.append("Return ONE JSON object now.")
@@ -129,7 +133,7 @@ def _parse(text: str) -> Optional[list[dict]]:
     if start < 0 or end <= start:
         return None
     try:
-        obj = json.loads(s[start:end + 1])
+        obj = json.loads(s[start : end + 1])
     except json.JSONDecodeError:
         return None
     if not isinstance(obj, dict):
@@ -146,12 +150,14 @@ def _parse(text: str) -> Optional[list[dict]]:
             # Snap unknown platforms to the closest sensible default rather
             # than dropping the card.
             platform = "Instagram"
-        out.append({
-            "platform": platform,
-            "lens":     str(c.get("lens") or "").strip()[:80],
-            "hook":     str(c.get("hook") or "").strip()[:80],
-            "intent":   str(c.get("intent") or "").strip()[:160],
-        })
+        out.append(
+            {
+                "platform": platform,
+                "lens": str(c.get("lens") or "").strip()[:80],
+                "hook": str(c.get("hook") or "").strip()[:80],
+                "intent": str(c.get("intent") or "").strip()[:160],
+            }
+        )
     return out or None
 
 
@@ -165,12 +171,14 @@ def _fallback_spread(n_cards: int, recent_cards: Optional[list[dict]]) -> list[d
     offset = len(recent_cards or []) % len(_FALLBACK_LENSES)
     out = []
     for i in range(n_cards):
-        out.append({
-            "platform": plat_default[i % len(plat_default)],
-            "lens":     _FALLBACK_LENSES[(i + offset) % len(_FALLBACK_LENSES)],
-            "hook":     "",
-            "intent":   "",
-        })
+        out.append(
+            {
+                "platform": plat_default[i % len(plat_default)],
+                "lens": _FALLBACK_LENSES[(i + offset) % len(_FALLBACK_LENSES)],
+                "hook": "",
+                "intent": "",
+            }
+        )
     return out
 
 
@@ -198,9 +206,13 @@ def plan_content_directions(
 
     sys = _system_prompt(n_cards)
     user = _user_prompt(
-        content_type=content_type, brief=brief,
-        brand_line=_brand_line(brand_context), requirements=requirements,
-        recent_cards=recent_cards, n_cards=n_cards, tone=tone,
+        content_type=content_type,
+        brief=brief,
+        brand_line=_brand_line(brand_context),
+        requirements=requirements,
+        recent_cards=recent_cards,
+        n_cards=n_cards,
+        tone=tone,
     )
     try:
         out = ask(sys, user, max_tokens=600)

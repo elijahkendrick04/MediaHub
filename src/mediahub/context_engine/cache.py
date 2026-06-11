@@ -7,6 +7,7 @@ Cache files are stored as:
   data/discovered/swimmers/<key>.json
   data/discovered/pbs/<run_id>/<swimmer_key>.json
 """
+
 from __future__ import annotations
 
 import hashlib

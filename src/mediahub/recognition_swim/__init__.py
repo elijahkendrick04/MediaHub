@@ -3,6 +3,7 @@ recognition_swim — Swimming-specific recognition detectors.
 
 Importing this module auto-registers "swimming" in the sport registry.
 """
+
 from __future__ import annotations
 
 from mediahub.recognition.registry import register_sport

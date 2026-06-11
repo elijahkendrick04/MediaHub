@@ -14,6 +14,7 @@ Usage:
     for r in results:
         print(r.title, r.url)
 """
+
 from .search import WebResearcher, SearchResult
 
 __all__ = ["WebResearcher", "SearchResult"]

@@ -1,6 +1,7 @@
 """
 recognition_swim/achievements — Re-exports all swim achievement detectors.
 """
+
 from swim_content_v5.achievements import (
     AchievementDetector,
     Achievement,

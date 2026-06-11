@@ -10,6 +10,7 @@ scoped to one athlete.
 Entry points:
   build_spotlight_pack(run_data, swimmer_key) -> dict | None
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -78,7 +79,8 @@ def build_spotlight_pack(
 
     # Filter to the target swimmer
     swimmer_achs = [
-        ra for ra in ranked_achs
+        ra
+        for ra in ranked_achs
         if ra.get("achievement", {}).get("swimmer_id", "") == swimmer_key
         or ra.get("achievement", {}).get("swimmer_name", "") == swimmer_key
     ]
@@ -86,9 +88,12 @@ def build_spotlight_pack(
     # If no match by id, try partial name match (for URL-safe keys)
     if not swimmer_achs:
         swimmer_achs = [
-            ra for ra in ranked_achs
-            if _normalise_key(ra.get("achievement", {}).get("swimmer_id", "")) == _normalise_key(swimmer_key)
-            or _normalise_key(ra.get("achievement", {}).get("swimmer_name", "")) == _normalise_key(swimmer_key)
+            ra
+            for ra in ranked_achs
+            if _normalise_key(ra.get("achievement", {}).get("swimmer_id", ""))
+            == _normalise_key(swimmer_key)
+            or _normalise_key(ra.get("achievement", {}).get("swimmer_name", ""))
+            == _normalise_key(swimmer_key)
         ]
 
     if not swimmer_achs:
@@ -107,10 +112,13 @@ def build_spotlight_pack(
     # Resolve swimmer display name from first achievement
     swimmer_name = ""
     if swimmer_achs_sorted:
-        swimmer_name = swimmer_achs_sorted[0].get("achievement", {}).get("swimmer_name", swimmer_key)
+        swimmer_name = (
+            swimmer_achs_sorted[0].get("achievement", {}).get("swimmer_name", swimmer_key)
+        )
 
     # Band counts
     from swim_content_v5.schema import QualityBand
+
     band_labels = {
         QualityBand.ELITE.value: "elite",
         QualityBand.STRONG.value: "strong",

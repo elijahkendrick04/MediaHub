@@ -6,6 +6,7 @@ Three tones are supported:
   HYPE       — energetic, race-day language, full names, exclamation-friendly
   DATA_LED   — numbers-first, formal, sponsor-friendly
 """
+
 from __future__ import annotations
 
 from enum import Enum

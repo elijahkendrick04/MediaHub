@@ -11,6 +11,7 @@ This is a thin overlay around ``content_pack.builder``. It:
 It is *opt-in* — the existing pack builder remains unchanged. Web routes call
 this module instead when they want visuals attached.
 """
+
 from .integration import (
     attach_visuals_to_pack,
     create_visual_for_item,

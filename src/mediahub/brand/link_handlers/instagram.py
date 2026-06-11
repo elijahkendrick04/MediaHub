@@ -4,6 +4,7 @@ Intent: bio, recent caption tone, hashtag rhythm, post cadence pattern.
 No hardcoded Instagram-specific extraction lives here — the orchestrator
 delegates that to the strategy proposer + content extractor.
 """
+
 from __future__ import annotations
 
 from . import process_link

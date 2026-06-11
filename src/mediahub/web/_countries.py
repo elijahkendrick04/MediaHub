@@ -11,6 +11,7 @@ naturally.
 Kept as a single Python list rather than a JSON file so the data
 travels with the source and the import has zero I/O cost.
 """
+
 from __future__ import annotations
 
 COUNTRIES: tuple[str, ...] = (

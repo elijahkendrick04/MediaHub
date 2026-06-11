@@ -24,6 +24,7 @@ mechanical detector, not an AI stand-in. AI-driven surfaces elsewhere
 in the codebase surface ``ClaudeUnavailableError`` when the LLM is
 missing rather than inventing output.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,20 +46,31 @@ VALID_STATUSES: tuple[str, ...] = (
 
 
 _HARD_BLOCK_PATTERNS = (
-    r"\baccess denied\b", r"\bblocked\b", r"\bforbidden\b",
-    r"\bcloudflare\b", r"\bcaptcha\b", r"\bare you a robot\b",
-    r"\bsecurity check\b", r"\bdetected unusual traffic\b",
+    r"\baccess denied\b",
+    r"\bblocked\b",
+    r"\bforbidden\b",
+    r"\bcloudflare\b",
+    r"\bcaptcha\b",
+    r"\bare you a robot\b",
+    r"\bsecurity check\b",
+    r"\bdetected unusual traffic\b",
     r"\bplease enable cookies\b",
 )
 
 _AUTH_PATTERNS = (
-    r"\bsign in\b", r"\blog in\b", r"\blogin to\b", r"\bsign up\b",
-    r"\bregister to view\b", r"\bauthorisation required\b",
+    r"\bsign in\b",
+    r"\blog in\b",
+    r"\blogin to\b",
+    r"\bsign up\b",
+    r"\bregister to view\b",
+    r"\bauthorisation required\b",
     r"\bauthorization required\b",
 )
 
 _NOT_FOUND_PATTERNS = (
-    r"\b404\b", r"\bnot found\b", r"\bpage does not exist\b",
+    r"\b404\b",
+    r"\bnot found\b",
+    r"\bpage does not exist\b",
     r"\bsorry, this page isn't available\b",
 )
 
@@ -134,10 +146,8 @@ def _heuristic(status_code: int, body: str) -> str:
         return "not_found"
 
     # Strip tags for a rough visible-text estimate.
-    visible = re.sub(r"<script[^>]*>.*?</script>", " ", body,
-                      flags=re.IGNORECASE | re.DOTALL)
-    visible = re.sub(r"<style[^>]*>.*?</style>", " ", visible,
-                      flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.IGNORECASE | re.DOTALL)
+    visible = re.sub(r"<style[^>]*>.*?</style>", " ", visible, flags=re.IGNORECASE | re.DOTALL)
     visible = re.sub(r"<[^>]+>", " ", visible)
     visible = re.sub(r"\s+", " ", visible).strip()
 
@@ -202,12 +212,20 @@ _LLM_SYSTEM = (
 
 def _build_prompt(url: str, status_code: int, headers: dict, body: str) -> str:
     body_excerpt = (body or "")[:6_000]
-    hdr_lines = [f"  {k}: {v}" for k, v in (headers or {}).items()
-                  if k.lower() in (
-                      "content-type", "server", "x-frame-options",
-                      "content-security-policy", "set-cookie",
-                      "location", "retry-after",
-                  )]
+    hdr_lines = [
+        f"  {k}: {v}"
+        for k, v in (headers or {}).items()
+        if k.lower()
+        in (
+            "content-type",
+            "server",
+            "x-frame-options",
+            "content-security-policy",
+            "set-cookie",
+            "location",
+            "retry-after",
+        )
+    ]
     parts = [
         f"URL: {url}",
         f"HTTP status: {status_code}",
@@ -216,9 +234,9 @@ def _build_prompt(url: str, status_code: int, headers: dict, body: str) -> str:
         "Body excerpt:",
         body_excerpt or "(empty body)",
         "",
-        "Return JSON: { \"label\": <one of: real_content, "
+        'Return JSON: { "label": <one of: real_content, '
         "soft_blocked_spa, hard_blocked, auth_walled, rate_limited, "
-        "not_found, unknown>, \"reason\": <short string> }",
+        'not_found, unknown>, "reason": <short string> }',
     ]
     return "\n".join(parts)
 

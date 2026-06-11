@@ -10,6 +10,7 @@ clarifying question, run a web-research lookup, or propose a brief. The
 user accepts or declines the brief; on accept, the session's brief is
 the input to caption/image/motion generators.
 """
+
 from __future__ import annotations
 
 import json
@@ -55,14 +56,14 @@ class ChatSession:
 
     def to_dict(self) -> dict:
         return {
-            "chat_id":         self.chat_id,
-            "created_at":      self.created_at,
-            "updated_at":      self.updated_at,
-            "title":           self.title,
-            "messages":        list(self.messages),
-            "pending_brief":   self.pending_brief,
-            "accepted_brief":  self.accepted_brief,
-            "research_log":    list(self.research_log),
+            "chat_id": self.chat_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "title": self.title,
+            "messages": list(self.messages),
+            "pending_brief": self.pending_brief,
+            "accepted_brief": self.accepted_brief,
+            "research_log": list(self.research_log),
         }
 
     @classmethod
@@ -79,16 +80,22 @@ class ChatSession:
         )
 
     def add_user_message(self, text: str) -> None:
-        self.messages.append({
-            "role": "user", "content": text, "ts": _now_iso(),
-        })
+        self.messages.append(
+            {
+                "role": "user",
+                "content": text,
+                "ts": _now_iso(),
+            }
+        )
         if not self.title and text.strip():
             self.title = text.strip()[:80]
         self.updated_at = _now_iso()
 
     def add_assistant_message(self, text: str, meta: Optional[dict] = None) -> None:
         msg: dict[str, Any] = {
-            "role": "assistant", "content": text, "ts": _now_iso(),
+            "role": "assistant",
+            "content": text,
+            "ts": _now_iso(),
         }
         if meta:
             msg["meta"] = meta
@@ -108,8 +115,7 @@ def create_session() -> ChatSession:
 
 def save_session(s: ChatSession) -> None:
     path = _sessions_dir() / f"{s.chat_id}.json"
-    path.write_text(json.dumps(s.to_dict(), indent=2, ensure_ascii=False),
-                    encoding="utf-8")
+    path.write_text(json.dumps(s.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def load_session(chat_id: str) -> Optional[ChatSession]:
@@ -129,14 +135,16 @@ def list_sessions(limit: int = 50) -> list[dict]:
     for p in _sessions_dir().glob("*.json"):
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
-            rows.append({
-                "chat_id":    d.get("chat_id", p.stem),
-                "title":      d.get("title", "") or "Untitled",
-                "created_at": d.get("created_at", ""),
-                "updated_at": d.get("updated_at", ""),
-                "n_messages": len(d.get("messages") or []),
-                "accepted":   bool(d.get("accepted_brief")),
-            })
+            rows.append(
+                {
+                    "chat_id": d.get("chat_id", p.stem),
+                    "title": d.get("title", "") or "Untitled",
+                    "created_at": d.get("created_at", ""),
+                    "updated_at": d.get("updated_at", ""),
+                    "n_messages": len(d.get("messages") or []),
+                    "accepted": bool(d.get("accepted_brief")),
+                }
+            )
         except (OSError, json.JSONDecodeError):
             continue
     rows.sort(key=lambda r: r.get("updated_at", ""), reverse=True)

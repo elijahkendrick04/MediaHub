@@ -14,6 +14,7 @@ selected tone — as a convenience.
 
 The function is pure: it returns a new dict and never mutates the input.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -46,10 +47,7 @@ def _build_ctx(card: dict, kit: BrandKit) -> dict:
     # Previous PB — V6 PBDecision attaches as prev_pb_seconds / prev_pb_time;
     # V4 used prev_pb_cs.
     prev_pb_str = (
-        rf.get("prev_pb_time")
-        or rf.get("prev_pb_str")
-        or _cs_to_str(rf.get("prev_pb_cs"))
-        or "—"
+        rf.get("prev_pb_time") or rf.get("prev_pb_str") or _cs_to_str(rf.get("prev_pb_cs")) or "—"
     )
 
     # Drop magnitude
@@ -134,17 +132,13 @@ def apply_brand(
     for t_str in all_tones:
         # Resolve template source: profile override → defaults
         if caption_templates:
-            slot_map = (
-                caption_templates.get(content_type, {}).get(t_str)
-                or get_default_templates(content_type, t_str)
+            slot_map = caption_templates.get(content_type, {}).get(t_str) or get_default_templates(
+                content_type, t_str
             )
         else:
             slot_map = get_default_templates(content_type, t_str)
 
-        rendered = {
-            slot: render_template(tmpl, ctx)
-            for slot, tmpl in slot_map.items()
-        }
+        rendered = {slot: render_template(tmpl, ctx) for slot, tmpl in slot_map.items()}
 
         # Fallback: if a template renders with too many em-dash placeholders,
         # the achievement context didn't have the keys this template needed.

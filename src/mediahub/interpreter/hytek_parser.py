@@ -22,6 +22,7 @@ Elgin, Garioch, Dyce, Silver City Blues).
 This parser is intentionally **forgiving**: if a field is malformed we
 record the swim with reduced confidence rather than abort.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,11 +63,11 @@ def detect_hy3(data: bytes) -> bool:
 
 
 def _safe_str(line: str, start: int, length: int) -> str:
-    return line[start:start + length].strip()
+    return line[start : start + length].strip()
 
 
 def _safe_int(line: str, start: int, length: int) -> Optional[int]:
-    s = line[start:start + length].strip()
+    s = line[start : start + length].strip()
     if not s.lstrip("-").isdigit():
         return None
     try:
@@ -113,6 +114,7 @@ def _hy3_distance(token: str) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # Athlete cache built from D1 records
 # ---------------------------------------------------------------------------
+
 
 def _parse_d1(line: str) -> dict:
     """Parse a D1 athlete record.
@@ -168,6 +170,7 @@ def _athlete_dob_year(rec: dict) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # Event + result parsing (E1 + E2)
 # ---------------------------------------------------------------------------
+
 
 def _parse_e1(line: str) -> dict:
     """Parse an E1 event-entry record.
@@ -241,6 +244,7 @@ def _parse_e2(line: str) -> dict:
 # Meet metadata
 # ---------------------------------------------------------------------------
 
+
 def _parse_b1(line: str) -> dict:
     """Parse a B1 meet record.
 
@@ -298,6 +302,7 @@ def _parse_c1(line: str) -> dict:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def parse_hy3(data: bytes) -> InterpretedMeet:
     """Parse a `.hy3` byte buffer and return an InterpretedMeet."""
@@ -423,11 +428,7 @@ def parse_hy3(data: bytes) -> InterpretedMeet:
     # Overall confidence: mean of event confidences weighted by # of swims
     if events:
         total_swims = sum(len(e.swims) for e in events) or 1
-        overall = sum(
-            e.confidence * (len(e.swims) / total_swims)
-            for e in events
-            if e.swims
-        )
+        overall = sum(e.confidence * (len(e.swims) / total_swims) for e in events if e.swims)
         overall = round(min(0.99, max(0.5, overall)), 3) if total_swims > 0 else 0.0
     else:
         overall = 0.0

@@ -14,6 +14,7 @@ A brand kit lives at ``<DATA_DIR>/data/brand_kits/<run_id>.json`` and looks like
 The renderer/brand kit lookup at ``_v8_brand_kit_for(profile_id, run_id=...)``
 in :mod:`swim_content_v4.web` reads this file when present.
 """
+
 from __future__ import annotations
 
 import json

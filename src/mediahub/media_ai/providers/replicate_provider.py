@@ -10,6 +10,7 @@ Credential resolution order:
   1. ``REPLICATE_API_TOKEN`` env var
   2. ``replicate_api_token`` in ``data/secrets.json`` (set via /settings)
 """
+
 from __future__ import annotations
 
 import logging
@@ -34,6 +35,7 @@ def _resolve_replicate_token() -> Optional[str]:
         return env.strip()
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = get_secret("replicate_api_token")
         return v if v else None
     except Exception:
@@ -72,6 +74,7 @@ class ReplicateBgRemover(BackgroundRemover):
         except Exception as e:  # pragma: no cover
             raise RuntimeError(f"replicate SDK not installed: {e}")
         import io
+
         client = replicate.Client(api_token=token)
         # Replicate accepts a file-like object via the `image` input on
         # 851-labs/background-remover. Wrap our bytes in BytesIO.
@@ -97,4 +100,5 @@ class ReplicateBgRemover(BackgroundRemover):
         except Exception as e:
             log.warning("Replicate bg-removal failed: %s — falling back to local rembg", e)
             from .rembg_local import RembgLocalRemover
+
             return RembgLocalRemover().remove(src_path, dst_path)

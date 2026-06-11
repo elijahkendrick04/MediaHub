@@ -4,6 +4,7 @@ patterns.py — load and extend data/patterns.jsonl.
 Patterns are language-agnostic regex/heuristic records persisted as
 newline-delimited JSON.  No domain vocabulary literals here.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,9 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_PATTERNS_PATH = pathlib.Path(__file__).resolve().parents[3] / "data" / "patterns.jsonl"
 if not _DEFAULT_PATTERNS_PATH.exists():
-    _DEFAULT_PATTERNS_PATH = pathlib.Path(__file__).resolve().parent.parent / "data" / "patterns.jsonl"
+    _DEFAULT_PATTERNS_PATH = (
+        pathlib.Path(__file__).resolve().parent.parent / "data" / "patterns.jsonl"
+    )
 
 
 class PatternStore:

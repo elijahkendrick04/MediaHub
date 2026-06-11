@@ -4,6 +4,7 @@ recognition/copy_text.py — Plain-text copy builder for cards.
 build_caption_text(card, mode) returns plain text suitable for clipboard.
 Zero HTML tags or inline style fragments.
 """
+
 from __future__ import annotations
 
 import re
@@ -36,7 +37,9 @@ def build_caption_text(card: dict, mode: str = "caption_only") -> str:
         # Try V4 format: prefer 'clean' caption
         captions = card.get("captions") or {}
         headline = _strip_html(card.get("headline", ""))
-        body = _strip_html(captions.get("clean") or captions.get("team") or captions.get("hype") or "")
+        body = _strip_html(
+            captions.get("clean") or captions.get("team") or captions.get("hype") or ""
+        )
         cta = ""
     else:
         headline = _strip_html(cap.get("headline", ""))
@@ -67,7 +70,9 @@ def build_caption_text(card: dict, mode: str = "caption_only") -> str:
     if mode == "full_brief":
         parts.append("")
         parts.append("---")
-        post_type = _strip_html(card.get("suggested_post_type") or card.get("post_type") or "main_feed")
+        post_type = _strip_html(
+            card.get("suggested_post_type") or card.get("post_type") or "main_feed"
+        )
         parts.append(f"Suggested format: {post_type}")
 
         confidence = card.get("confidence") or card.get("priority", "")

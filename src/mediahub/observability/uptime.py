@@ -30,6 +30,7 @@ Public API:
 Every public function is exception-safe — DB issues yield a safe
 default (None / [] / a zeroed dict) rather than raising.
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_heartbeats_ts
 # Connection helper
 # ---------------------------------------------------------------------------
 
+
 def _connect() -> sqlite3.Connection:
     """Open a connection to DB_PATH with WAL journaling enabled.
 
@@ -114,6 +116,7 @@ def _connect() -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 # Schema bootstrap
 # ---------------------------------------------------------------------------
+
 
 def _ensure_schema() -> None:
     """Create the uptime_heartbeats table + index if missing.
@@ -140,6 +143,7 @@ _ensure_schema()
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def record_heartbeat(
     *,
@@ -254,8 +258,7 @@ def uptime_stats(window_hours: int = 24) -> dict:
         conn = _connect()
         try:
             cur = conn.execute(
-                "SELECT ts, ok FROM uptime_heartbeats "
-                "WHERE ts >= ? ORDER BY ts ASC",
+                "SELECT ts, ok FROM uptime_heartbeats " "WHERE ts >= ? ORDER BY ts ASC",
                 (window_start_iso,),
             )
             rows = cur.fetchall()
@@ -289,14 +292,14 @@ def uptime_stats(window_hours: int = 24) -> dict:
         if gap > _DOWNTIME_GAP_SECONDS:
             # Subtract the 5-minute grace window — anything shorter is
             # within the expected ping cadence and shouldn't count.
-            downtime_s += (gap - _DOWNTIME_GAP_SECONDS)
+            downtime_s += gap - _DOWNTIME_GAP_SECONDS
         last_ts = ts_val
 
     # Tail gap — from the last heartbeat to "now".
     now = datetime.now(timezone.utc)
     tail_gap = (now - last_ts).total_seconds()
     if tail_gap > _DOWNTIME_GAP_SECONDS:
-        downtime_s += (tail_gap - _DOWNTIME_GAP_SECONDS)
+        downtime_s += tail_gap - _DOWNTIME_GAP_SECONDS
 
     # Any ok=0 rows add their own minute of downtime — a deep-health
     # failure didn't actually take the server down, but it indicates a
@@ -413,11 +416,13 @@ def recent_gaps(
         if prev is not None:
             duration = (this_ts - prev).total_seconds()
             if duration >= min_gap_seconds:
-                gaps.append({
-                    "from_ts": prev.isoformat(),
-                    "to_ts": this_ts.isoformat(),
-                    "duration_seconds": int(duration),
-                })
+                gaps.append(
+                    {
+                        "from_ts": prev.isoformat(),
+                        "to_ts": this_ts.isoformat(),
+                        "duration_seconds": int(duration),
+                    }
+                )
         prev = this_ts
 
     gaps.sort(key=lambda g: g["to_ts"], reverse=True)
@@ -427,6 +432,7 @@ def recent_gaps(
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
+
 
 def _parse_ts(value: str) -> datetime:
     """Parse an ISO-8601 timestamp; tolerate the trailing 'Z' shorthand."""

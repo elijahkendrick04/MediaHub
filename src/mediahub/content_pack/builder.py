@@ -5,6 +5,7 @@ build_grouped_pack(run_data, profile_id) -> dict with 8 buckets:
   main_feed, stories, athlete_spotlights, weekend_recap,
   weekend_in_numbers, internal_notes, needs_review, rejected
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -61,7 +62,9 @@ def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
 
     # Determine post angle
     atype = a.get("type", "")
-    post_angle = item.get("post_angle") or a.get("post_angle") or _TYPE_TO_ANGLE.get(atype, "recap_mention")
+    post_angle = (
+        item.get("post_angle") or a.get("post_angle") or _TYPE_TO_ANGLE.get(atype, "recap_mention")
+    )
     item["post_angle"] = post_angle
 
     # Ensure safe_to_post exists
@@ -71,9 +74,15 @@ def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
             if conf >= 0.7:
                 item["safe_to_post"] = {"level": "safe", "reason": "High confidence evidence."}
             elif conf >= 0.4:
-                item["safe_to_post"] = {"level": "needs_review", "reason": "Medium confidence — verify before posting."}
+                item["safe_to_post"] = {
+                    "level": "needs_review",
+                    "reason": "Medium confidence — verify before posting.",
+                }
             else:
-                item["safe_to_post"] = {"level": "do_not_post", "reason": "Low confidence evidence."}
+                item["safe_to_post"] = {
+                    "level": "do_not_post",
+                    "reason": "Low confidence evidence.",
+                }
         else:
             item["safe_to_post"] = {"level": "needs_review", "reason": "Confidence unknown."}
 
@@ -90,7 +99,9 @@ def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
             wf_status = wf.status.value if hasattr(wf, "status") else str(wf)
             item["wf_status"] = wf_status
             sched = getattr(wf, "schedule_status", None)
-            item["schedule_status"] = sched.value if sched is not None and hasattr(sched, "value") else "queued"
+            item["schedule_status"] = (
+                sched.value if sched is not None and hasattr(sched, "value") else "queued"
+            )
             item["buffer_update_id"] = getattr(wf, "buffer_update_id", None)
         else:
             item["wf_status"] = "queue"
@@ -136,9 +147,11 @@ def build_grouped_pack(
     wf_states = {}
     try:
         from mediahub.workflow.store import WorkflowStore
+
         if runs_dir is None:
             try:
                 from mediahub.web.web import RUNS_DIR as _RUNS_DIR
+
                 resolved_runs_dir = Path(_RUNS_DIR)
             except Exception:
                 resolved_runs_dir = Path(__file__).resolve().parents[2] / "runs_v4"
@@ -223,7 +236,10 @@ def build_grouped_pack(
                 "n_achievements": len(items),
                 "achievements": sorted(items, key=lambda x: -x.get("priority", 0)),
                 "post_angle": override_angle or "athlete_spotlight",
-                "safe_to_post": {"level": "safe", "reason": "Multiple verified achievements for this athlete."},
+                "safe_to_post": {
+                    "level": "safe",
+                    "reason": "Multiple verified achievements for this athlete.",
+                },
                 "suggested_post_type": "main_feed",
                 "quality_band": "elite",
             }
@@ -235,12 +251,15 @@ def build_grouped_pack(
     for card in cards:
         ct = card.get("card_type", "") or ""
         if "recap" in ct.lower() or "summary" in ct.lower():
-            weekend_recap_item = _enrich_item({
-                "achievement": card,
-                "quality_band": "strong",
-                "priority": 0.7,
-                "post_angle": "recap_mention",
-            }, wf_states)
+            weekend_recap_item = _enrich_item(
+                {
+                    "achievement": card,
+                    "quality_band": "strong",
+                    "priority": 0.7,
+                    "post_angle": "recap_mention",
+                },
+                wf_states,
+            )
             break
 
     # Weekend-in-numbers card

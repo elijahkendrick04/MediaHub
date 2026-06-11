@@ -10,6 +10,7 @@ Credential resolution order:
 
 Docs: https://www.photoroom.com/api/docs/reference/remove-background
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,6 +36,7 @@ def _resolve_photoroom_key() -> Optional[str]:
         return env.strip()
     try:
         from mediahub.web.secrets_store import get_secret
+
         v = get_secret("photoroom_api_key")
         return v if v else None
     except Exception:
@@ -48,9 +50,7 @@ class PhotoroomBgRemover(BackgroundRemover):
 
     def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None):
         self._explicit_key = api_key
-        self.endpoint = endpoint or os.environ.get(
-            "PHOTOROOM_ENDPOINT", DEFAULT_ENDPOINT
-        )
+        self.endpoint = endpoint or os.environ.get("PHOTOROOM_ENDPOINT", DEFAULT_ENDPOINT)
 
     @property
     def api_key(self) -> str:
@@ -85,7 +85,11 @@ class PhotoroomBgRemover(BackgroundRemover):
         # input dimensions are preserved.
         data = {"format": "png", "bg_color": "transparent", "crop": "false"}
         r = requests.post(
-            self.endpoint, headers=headers, files=files, data=data, timeout=60,
+            self.endpoint,
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=60,
         )
         if r.status_code >= 400:
             # Photoroom returns JSON on error; surface it for debuggability.
@@ -96,9 +100,7 @@ class PhotoroomBgRemover(BackgroundRemover):
             raise RuntimeError(f"Photoroom error {r.status_code}: {body}")
         ct = r.headers.get("content-type", "")
         if "image" not in ct:
-            raise RuntimeError(
-                f"Photoroom returned non-image content-type {ct!r}: {r.text[:200]}"
-            )
+            raise RuntimeError(f"Photoroom returned non-image content-type {ct!r}: {r.text[:200]}")
         return r.content
 
     def remove(self, src_path: str, dst_path: str) -> str:
@@ -114,9 +116,11 @@ class PhotoroomBgRemover(BackgroundRemover):
             return dst_path
         except Exception as e:
             log.warning(
-                "Photoroom bg-removal failed: %s — falling back to local rembg", e,
+                "Photoroom bg-removal failed: %s — falling back to local rembg",
+                e,
             )
             from .rembg_local import RembgLocalRemover
+
             return RembgLocalRemover().remove(src_path, dst_path)
 
 

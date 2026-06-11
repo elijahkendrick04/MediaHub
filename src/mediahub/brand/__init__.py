@@ -8,6 +8,7 @@ Exposes:
   load_brand, save_brand            (store)
   apply_brand                       (apply)
 """
+
 from .kit import BrandKit
 from .tone import Tone, TONE_META
 from .templates import CaptionTemplate, render_template

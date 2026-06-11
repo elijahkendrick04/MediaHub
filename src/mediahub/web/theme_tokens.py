@@ -63,6 +63,7 @@ strategy baked in).
 - W3C CSS Properties and Values API Level 1 — @property
 - docs/THEMING.md
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -92,8 +93,7 @@ def _load(filename: str) -> str:
     path = STATIC_THEME_DIR / filename
     if not path.is_file():
         raise FileNotFoundError(
-            f"Theme CSS file missing: {path}. "
-            f"Expected file in src/mediahub/web/static/theme/."
+            f"Theme CSS file missing: {path}. " f"Expected file in src/mediahub/web/static/theme/."
         )
     return path.read_text(encoding="utf-8")
 
@@ -123,11 +123,5 @@ THEME_COMPONENTS_CSS: str = _load("theme-components.css")
 #   4. cascade    — Stage E animation rules (last so they apply
 #                   regardless of @supports branch)
 THEME_TOKENS_CSS: str = (
-    THEME_BASE_CSS
-    + "\n"
-    + THEME_FALLBACK_CSS
-    + "\n"
-    + THEME_DERIVE_CSS
-    + "\n"
-    + THEME_CASCADE_CSS
+    THEME_BASE_CSS + "\n" + THEME_FALLBACK_CSS + "\n" + THEME_DERIVE_CSS + "\n" + THEME_CASCADE_CSS
 )

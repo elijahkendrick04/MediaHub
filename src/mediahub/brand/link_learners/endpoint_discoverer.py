@@ -19,6 +19,7 @@ Returns a ranked list of candidate URLs. Falls back to a small
 deterministic set of mobile/oembed/archive transformations when the
 LLM is unavailable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,7 +62,7 @@ def _build_prompt(
         f"Last fetch status (from block detector): {last_status}",
         f"Last strategy:\n{last_strat_summary or '  (none)'}",
         "",
-        "Return JSON: {\"candidates\": [\"<url1>\", \"<url2>\", ...]} — "
+        'Return JSON: {"candidates": ["<url1>", "<url2>", ...]} — '
         "up to 4 ranked alternative public endpoints to try. Most-"
         "likely-to-work first.",
     ]
@@ -71,6 +72,7 @@ def _build_prompt(
 # ---------------------------------------------------------------------------
 # Deterministic fallback transforms — generic, used when no LLM available
 # ---------------------------------------------------------------------------
+
 
 def _fallback_candidates(url: str) -> list[str]:
     """Generic transforms that often surface a less-blocked version of
@@ -136,8 +138,9 @@ def propose_alternatives(
         return _fallback_candidates(url)
     if not is_available():
         return _fallback_candidates(url)
-    prompt = _build_prompt(url, platform_intent or "(generic web page)",
-                            last_status or "unknown", last_strategy)
+    prompt = _build_prompt(
+        url, platform_intent or "(generic web page)", last_status or "unknown", last_strategy
+    )
     try:
         raw = generate_json(prompt, system=_LLM_SYSTEM, max_tokens=400, fallback={})
     except Exception as e:

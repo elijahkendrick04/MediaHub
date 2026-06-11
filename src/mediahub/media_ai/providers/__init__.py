@@ -25,6 +25,7 @@ through to the in-process server-side rembg backend so cutouts continue to
 work on the deployment even when an operator has selected a cloud provider
 without yet wiring up its credentials.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,6 +50,7 @@ def _resolve_provider_choice() -> str:
     if not raw:
         try:
             from mediahub.web.secrets_store import get_secret
+
             raw = get_secret("mediahub_cutout_provider")
         except Exception:
             raw = None
@@ -75,6 +77,7 @@ def get_bg_remover() -> Optional[BackgroundRemover]:
 
     if choice == "photoroom":
         from .photoroom_provider import PhotoroomBgRemover
+
         prov = PhotoroomBgRemover()
         if prov.is_available():
             return prov
@@ -82,12 +85,16 @@ def get_bg_remover() -> Optional[BackgroundRemover]:
 
     if choice == "replicate":
         from .replicate_provider import ReplicateBgRemover
+
         prov = ReplicateBgRemover()
         if prov.is_available():
             return prov
-        log.info("Replicate selected but REPLICATE_API_TOKEN missing \u2014 using server-side rembg")
+        log.info(
+            "Replicate selected but REPLICATE_API_TOKEN missing \u2014 using server-side rembg"
+        )
 
     from .rembg_local import RembgLocalRemover
+
     return RembgLocalRemover()
 
 

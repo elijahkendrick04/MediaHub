@@ -11,6 +11,7 @@ These helpers are intentionally short and additive. They drop fields
 that are empty so the prose stays readable, and they pick natural
 English connectives instead of comma-spliced facts.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -18,21 +19,21 @@ from typing import Optional
 
 _PB_PHRASES = {
     "official_pb_confirmed": "an officially-confirmed personal best",
-    "pb_confirmed":          "a confirmed personal best",
-    "pb_likely":             "a likely personal best",
-    "pb_magnitude_huge":     "a huge personal-best improvement",
-    "pb_magnitude_big":      "a big personal-best improvement",
-    "pb_magnitude_notable":  "a notable personal-best improvement",
-    "first_sub_barrier":     "a first-time sub-barrier swim",
+    "pb_confirmed": "a confirmed personal best",
+    "pb_likely": "a likely personal best",
+    "pb_magnitude_huge": "a huge personal-best improvement",
+    "pb_magnitude_big": "a big personal-best improvement",
+    "pb_magnitude_notable": "a notable personal-best improvement",
+    "first_sub_barrier": "a first-time sub-barrier swim",
 }
 
 _MEDAL_PHRASES = {
-    "medal_gold":          "a gold medal",
-    "medal_silver":        "a silver medal",
-    "medal_bronze":        "a bronze medal",
-    "relay_medal_gold":    "a gold-medal relay performance",
-    "relay_medal_silver":  "a silver-medal relay performance",
-    "relay_medal_bronze":  "a bronze-medal relay performance",
+    "medal_gold": "a gold medal",
+    "medal_silver": "a silver medal",
+    "medal_bronze": "a bronze medal",
+    "relay_medal_gold": "a gold-medal relay performance",
+    "relay_medal_silver": "a silver-medal relay performance",
+    "relay_medal_bronze": "a bronze-medal relay performance",
 }
 
 
@@ -163,8 +164,7 @@ def narrate_brand(brand: Optional[dict]) -> str:
     tone = (brand.get("tone") or "").strip()
     notes = (brand.get("tone_notes") or "").strip()
     sponsor = (brand.get("sponsor_name") or "").strip()
-    sponsor_rules = (brand.get("sponsor_guidelines")
-                     or brand.get("sponsor_rules") or "").strip()
+    sponsor_rules = (brand.get("sponsor_guidelines") or brand.get("sponsor_rules") or "").strip()
     exemplars = brand.get("exemplars") or brand.get("exemplar_captions") or []
 
     bits: list[str] = []

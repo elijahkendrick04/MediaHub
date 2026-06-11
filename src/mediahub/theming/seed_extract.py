@@ -29,6 +29,7 @@ References:
   - HCT: facelessuser.github.io/coloraide/colors/hct/ — Hue + Chroma
     (CAM16) + Tone (L*).
 """
+
 from __future__ import annotations
 
 import io
@@ -52,14 +53,14 @@ _FALLBACK_HEX = "#0E2A47"  # matches BrandKit.generic_default() primary
 @dataclass
 class SeedCandidate:
     hex: str
-    hct: tuple[float, float, float]   # (hue, chroma, tone)
+    hct: tuple[float, float, float]  # (hue, chroma, tone)
     score: float
 
 
 @dataclass
 class SeedResult:
     hex: str
-    source_kind: str    # "hex" | "svg" | "raster" | "fallback"
+    source_kind: str  # "hex" | "svg" | "raster" | "fallback"
     candidates: list[SeedCandidate] = field(default_factory=list)
     trace: list[str] = field(default_factory=list)
 
@@ -143,10 +144,17 @@ def _has_unparseable_features(svg_text: str) -> bool:
     When present, fall through to the raster branch so the rasterised
     pixels capture the visual result."""
     lc = svg_text.lower()
-    return any(needle in lc for needle in (
-        "<lineargradient", "<radialgradient", "<image",
-        "filter:url(", "mask:url(", "<pattern",
-    ))
+    return any(
+        needle in lc
+        for needle in (
+            "<lineargradient",
+            "<radialgradient",
+            "<image",
+            "filter:url(",
+            "mask:url(",
+            "<pattern",
+        )
+    )
 
 
 def _harvest_svg_colors(svg_text: str) -> list[tuple[str, float]]:
@@ -157,6 +165,7 @@ def _harvest_svg_colors(svg_text: str) -> list[tuple[str, float]]:
     try:
         # defusedxml falls back to lxml.etree internally for parse()
         from lxml import etree  # type: ignore
+
         parser = etree.XMLParser(resolve_entities=False, no_network=True)
         root = etree.fromstring(svg_text.encode("utf-8"), parser=parser)
     except Exception:
@@ -219,11 +228,13 @@ def _try_svg(source: object) -> Optional[SeedResult]:
 
     candidates: list[SeedCandidate] = []
     for argb in ranked_argbs:
-        candidates.append(SeedCandidate(
-            hex=_argb_to_hex(argb),
-            hct=_hct_of(argb),
-            score=counts.get(argb, 1.0),
-        ))
+        candidates.append(
+            SeedCandidate(
+                hex=_argb_to_hex(argb),
+                hct=_hct_of(argb),
+                score=counts.get(argb, 1.0),
+            )
+        )
 
     chosen = candidates[0].hex
     trace.append(f"svg: chose {chosen} from {len(candidates)} candidate(s)")
@@ -262,6 +273,7 @@ def _try_raster(source: object) -> Optional[SeedResult]:
     if is_svg:
         try:
             import cairosvg  # type: ignore
+
             png_bytes = cairosvg.svg2png(bytestring=payload, output_width=256, output_height=256)
             payload = png_bytes
             trace.append("raster: rasterised SVG via cairosvg to 256×256")
@@ -274,6 +286,7 @@ def _try_raster(source: object) -> Optional[SeedResult]:
 
     try:
         from PIL import Image  # type: ignore
+
         img = Image.open(io.BytesIO(payload)).convert("RGBA")
         img.thumbnail((256, 256))
         for x in range(img.width):
@@ -310,11 +323,13 @@ def _try_raster(source: object) -> Optional[SeedResult]:
 
     candidates: list[SeedCandidate] = []
     for argb in ranked_argbs:
-        candidates.append(SeedCandidate(
-            hex=_argb_to_hex(argb),
-            hct=_hct_of(argb),
-            score=float(result.get(argb, 0.0)),
-        ))
+        candidates.append(
+            SeedCandidate(
+                hex=_argb_to_hex(argb),
+                hct=_hct_of(argb),
+                score=float(result.get(argb, 0.0)),
+            )
+        )
 
     chosen = candidates[0].hex
     trace.append(f"raster: chose {chosen} from {len(candidates)} candidate(s)")

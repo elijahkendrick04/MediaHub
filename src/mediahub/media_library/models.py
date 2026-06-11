@@ -3,6 +3,7 @@
 Sport-agnostic. `linked_athlete_ids` / `linked_meet_ids` are opaque strings.
 Fields are *all optional with defaults* so partial dicts deserialise cleanly.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,16 +50,16 @@ class MediaAsset:
 
     id: str
     filename: str
-    path: str                                    # absolute or workspace-relative
-    type: str = "other"                          # one of ASSET_TYPES
-    description_raw: str = ""                    # what the user typed
+    path: str  # absolute or workspace-relative
+    type: str = "other"  # one of ASSET_TYPES
+    description_raw: str = ""  # what the user typed
     description_parsed: dict = field(default_factory=dict)  # AI-extracted tags
     linked_athlete_ids: list[str] = field(default_factory=list)
     linked_athlete_names: list[str] = field(default_factory=list)
     linked_meet_ids: list[str] = field(default_factory=list)
     linked_venue: Optional[str] = None
     linked_event: Optional[str] = None
-    profile_id: Optional[str] = None             # club/team this belongs to
+    profile_id: Optional[str] = None  # club/team this belongs to
     permission_status: str = "unknown"
     approval_status: str = "draft"
     width: int = 0
@@ -67,8 +68,8 @@ class MediaAsset:
     dominant_colours: list[str] = field(default_factory=list)
     has_face: Optional[bool] = None
     safe_for_minors: bool = True
-    cutout_path: Optional[str] = None            # set after rembg
-    source_url: Optional[str] = None             # web-sourced (e.g. Wikimedia)
+    cutout_path: Optional[str] = None  # set after rembg
+    source_url: Optional[str] = None  # web-sourced (e.g. Wikimedia)
     source_attribution: Optional[str] = None
     source_licence: Optional[str] = None
     photographer: Optional[str] = None
@@ -92,8 +93,14 @@ class MediaAsset:
                     v = json.loads(v) if v else {}
                 except Exception:
                     v = {}
-            if k in ("linked_athlete_ids", "linked_athlete_names", "linked_meet_ids",
-                     "dominant_colours", "used_in", "tags") and isinstance(v, str):
+            if k in (
+                "linked_athlete_ids",
+                "linked_athlete_names",
+                "linked_meet_ids",
+                "dominant_colours",
+                "used_in",
+                "tags",
+            ) and isinstance(v, str):
                 try:
                     v = json.loads(v) if v else []
                 except Exception:

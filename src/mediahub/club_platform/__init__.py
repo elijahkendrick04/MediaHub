@@ -7,6 +7,7 @@ Exposes:
   AthleteSpotlightContentType             (athlete_spotlight)
   stub content types                      (stubs)
 """
+
 from .content_types import ContentType, ContentTypeMeta, REGISTRY
 from .meet_recap import MeetRecapContentType
 from .athlete_spotlight import AthleteSpotlightContentType, build_spotlight_pack

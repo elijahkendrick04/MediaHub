@@ -1,4 +1,5 @@
 """Free-text chat — iterative brief-building conversation for content creation."""
+
 from .session import (
     ChatSession,
     create_session,

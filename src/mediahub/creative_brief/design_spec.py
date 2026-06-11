@@ -24,6 +24,7 @@ judge contrast/legibility between the chosen colour roles — that is the
 deterministic brand-compliance gate's job (thesis §5.5, separate task),
 which reuses the existing APCA/ΔE2000 maths.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -304,15 +305,21 @@ def normalise(raw: dict, *, archetypes: list[str], token_roles: list[str]) -> De
     return DesignSpec(
         archetype=_coerce_enum(data.get("archetype"), archetypes, archetypes[0]),
         colour_roles=colour_roles,
-        focal_element=_coerce_enum(data.get("focal_element"), FOCAL_ELEMENTS, DEFAULT_FOCAL_ELEMENT),
+        focal_element=_coerce_enum(
+            data.get("focal_element"), FOCAL_ELEMENTS, DEFAULT_FOCAL_ELEMENT
+        ),
         crop_intent=_coerce_enum(data.get("crop_intent"), CROP_INTENTS, DEFAULT_CROP_INTENT),
         hero_stat=hero_stat,
         secondary_stats=_coerce_stat_list(data.get("secondary_stats"), exclude=hero_stat),
         headline_hook=_clean_text(data.get("headline_hook"), max_len=MAX_HOOK_LEN, oneline=True),
-        accent_treatment=_coerce_enum(data.get("accent_treatment"), ACCENT_TREATMENTS, DEFAULT_ACCENT_TREATMENT),
+        accent_treatment=_coerce_enum(
+            data.get("accent_treatment"), ACCENT_TREATMENTS, DEFAULT_ACCENT_TREATMENT
+        ),
         logo_lockup=_coerce_enum(data.get("logo_lockup"), LOGO_LOCKUPS, DEFAULT_LOGO_LOCKUP),
         mood=_coerce_enum(data.get("mood"), MOODS, DEFAULT_MOOD),
-        motion_intent=_coerce_enum(data.get("motion_intent"), MOTION_INTENTS, DEFAULT_MOTION_INTENT),
+        motion_intent=_coerce_enum(
+            data.get("motion_intent"), MOTION_INTENTS, DEFAULT_MOTION_INTENT
+        ),
         rationale=_clean_text(data.get("rationale"), max_len=MAX_RATIONALE_LEN, oneline=False),
     )
 

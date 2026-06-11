@@ -4,6 +4,7 @@ Calls ``render_brief`` for each declared format size and returns a list of
 ``RenderResult`` records. Default formats produce a feed-square, feed-portrait,
 and a story PNG — the minimum required by the V8 spec.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,11 +14,11 @@ from .render import render_brief, RenderResult
 
 
 FORMAT_SIZES: dict[str, tuple[int, int]] = {
-    "feed_square":     (1080, 1080),
-    "feed_portrait":   (1080, 1350),
-    "story":           (1080, 1920),
-    "reel_cover":      (1080, 1920),
-    "carousel_slide":  (1080, 1080),
+    "feed_square": (1080, 1080),
+    "feed_portrait": (1080, 1350),
+    "story": (1080, 1920),
+    "reel_cover": (1080, 1920),
+    "carousel_slide": (1080, 1080),
 }
 
 
@@ -77,6 +78,7 @@ def render_all_formats(
     # workers so we don't thrash the host on the free Render tier.
     # Disable via MEDIAHUB_RENDER_PARALLEL=0 for debugging.
     import os as _os
+
     # Default to 3 concurrent format renders (square/portrait/story all at
     # once). Each Chromium uses ~150MB so 3 fits in Render's free tier RAM.
     # Disable via MEDIAHUB_RENDER_PARALLEL=0; cap via MEDIAHUB_RENDER_WORKERS=N.
@@ -84,10 +86,13 @@ def render_all_formats(
     max_workers = int(_os.environ.get("MEDIAHUB_RENDER_WORKERS", "3"))
     if parallel:
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
         # Preserve declared order by keying futures back to their index.
         results: list[Optional[RenderResult]] = [None] * len(pending)
         with ThreadPoolExecutor(max_workers=min(max_workers, len(pending))) as pool:
-            future_to_idx = {pool.submit(_one, fmt, size): i for i, (fmt, size) in enumerate(pending)}
+            future_to_idx = {
+                pool.submit(_one, fmt, size): i for i, (fmt, size) in enumerate(pending)
+            }
             for fut in as_completed(future_to_idx):
                 idx = future_to_idx[fut]
                 fmt_name = pending[idx][0]
@@ -95,6 +100,7 @@ def render_all_formats(
                     results[idx] = fut.result()
                 except Exception as e:
                     import sys as _sys
+
                     print(f"[graphic_renderer] format {fmt_name} failed: {e}", file=_sys.stderr)
         out = [r for r in results if r is not None]
     else:
@@ -103,6 +109,7 @@ def render_all_formats(
                 out.append(_one(fmt, size))
             except Exception as e:
                 import sys as _sys
+
                 print(f"[graphic_renderer] format {fmt} failed: {e}", file=_sys.stderr)
     return out
 
