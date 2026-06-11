@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `f747f775c` · Merge pull request #325 from elijahkendrick04/autotest/fix-091768f0d07d
+**Last updated:** 2026-06-11 · `3abec31bd` · Merge pull request #327 from elijahkendrick04/claude/inspiring-ritchie-9tj6d3
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,16 +29,18 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `745653965` | Format main's healthz a11y block (ruff 0.8.4) after merging origin/main |
+| 2026-06-11 | `99f3c4601` | Apply ruff 0.8.4 formatting to the files this PR touches (CI hygiene hook) |
+| 2026-06-11 | `281782cc4` | Fix double-wrapped error responses in spotlight caption composer |
+| 2026-06-11 | `5b4b04359` | Add async reel-job endpoint tests (done/error/tenant-gating/file-route contracts) |
+| 2026-06-11 | `b630c9bc6` | Plan tab from org sport, turn-into entry clarity, Event Preview redesign, draft scheduling |
+| 2026-06-11 | `d558ca581` | Spotlight parity with meet recap; per-card photos with athlete memory; run deletion is total |
+| 2026-06-11 | `c1edb9481` | Onboarding: manual build mode, AI-decided fourth colour, working bottom CTA |
+| 2026-06-11 | `b99e85941` | Homepage: centre hero + section titles, drop trust strip, calm fonts, neutral demo copy |
+| 2026-06-11 | `f46f2c602` | Fix spinners site-wide, async reel rendering, logo precedence, PB audit, approve-only review |
 | 2026-06-11 | `582e36e8b` | fix: a11y: Documents must have <title> element to aid in navigati |
 | 2026-06-11 | `4a2331275` | autotest: refresh bug report [skip ci] |
 | 2026-06-11 | `45aa7f2c9` | fix: a11y: Documents must have <title> element to aid in navigati |
-| 2026-06-11 | `61e2e5656` | autotest: refresh bug report [skip ci] |
-| 2026-06-11 | `ab71bef95` | feat(pc): close Phase C's build side — org→workspace multi-tenancy (PC.3) + revealed-WTP and GTM ins |
-| 2026-06-11 | `c627fd4f7` | chore(docs): delete stale V-era build reports and one-time migration audits |
-| 2026-06-11 | `302f11464` | feat(p2): complete Phase 2 — approval signal, single publish gate, guardrails, enum reconciliation |
-| 2026-06-11 | `5ac99091f` | style: apply pre-commit hygiene (ruff-format 0.8.4) to PR-touched files |
-| 2026-06-11 | `e31aaa362` | feat(p1): complete Phase 1 — slug-canonical taxonomy, cross-source planner, local brand-DNA |
-| 2026-06-10 | `dcf746829` | docs(roadmap): fold June 2026 external research pass into the long-form roadmap |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
