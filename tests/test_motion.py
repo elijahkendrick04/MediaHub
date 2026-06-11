@@ -199,7 +199,8 @@ def test_render_story_card_returns_cached_file_when_present(tmp_path, monkeypatc
     brand_dict = motion._brand_to_dict(brand)
     card_dict = motion._card_to_props(card, variation_seed=7)
     cache_key = motion._content_hash(
-        {"card": card_dict, "brand": brand_dict, "duration": 6.0},
+        {"card": card_dict, "brand": brand_dict, "duration": 6.0,
+         "size": [1080, 1920]},
         kind="story",
     )
     (cache_dir / f"{cache_key}.mp4").write_bytes(fake_mp4_bytes)

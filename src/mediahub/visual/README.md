@@ -11,7 +11,16 @@ reels. There are two ways it can do that, picked by `MEDIAHUB_REEL_ENGINE`:
   steady zoom, and joins the frames with smooth crossfades using FFmpeg.
   Nothing about it costs money: no Node, no Remotion, no license. A reel is
   the meet-name cover plus one beat per top card, exactly the same length the
-  Remotion reel would be.
+  Remotion reel would be. (It renders the story size only; square and
+  landscape cuts need the Remotion engine and say so honestly.)
+
+`motion.py` makes the video match the approved still card exactly: it resolves
+the same colour roles the still painted (medal tints included), reuses the
+still's saliency maths so a photo's subject stays in frame, and forwards the
+AI director's layout archetype and `motion_intent` to the composition. It can
+render three sizes — story (default), square, landscape — and writes a small
+`.json` manifest next to every cached Remotion MP4 saying *why* the video looks
+the way it does (which archetype, which motion, where the colours came from).
 
 `reel_engine.py` is the little switchboard that reads the env var and says which
 engine is active (the health page shows its answer). Asking for an engine that

@@ -378,6 +378,36 @@ Then add the one thing template tools structurally cannot do and Remotion can:
 reel from a single medal (variable `durationInFrames` / scene count derived from
 the number of ranked moments).
 
+**Shipped on top of that (motion ↔ still parity, 2026-06-11):**
+
+- **Archetype scene system** — every v2 still archetype maps to a structurally
+  distinct motion scene in `StoryCard.tsx` (poster / lower-third / spotlight /
+  grid / ticker / split / magazine / hero), guarded by a parity test so a new
+  archetype must consciously pick its scene group.
+- **`motion_intent` executed** — the design-spec director's motion language
+  (`fade_in`, `snap_in_then_settle`, `slide_up`, `scale_in`, `crossfade`,
+  `kinetic_type`, `parallax`, `static`) flows spec → brief → props and is
+  executed as a frame-pure animation programme; a drift test holds the TSX to
+  the full `design_spec.MOTION_INTENTS` vocabulary.
+- **Colour-role parity** — motion consumes the *same* resolved role set the
+  still painted (`resolved_role_vars_for_brief`: Tier A baseline → APCA-gated
+  director assignment → medal tint) via `roleGround/roleSurface/roleAccent/
+  roleOnGround` props; brief-less callers keep the seed-permutation fallback.
+- **Saliency photo focus** — `saliency.focus_position` (shared with the still
+  renderer's `--mh-photo-pos`) steers the video photo's `object-position`.
+- **Formats** — story 1080×1920 (default), square 1080×1080, landscape
+  1920×1080 from the same compositions (`render.js --width/--height`,
+  `?format=` on the motion/reel routes, format chips in the UI). The free
+  ffmpeg engine renders story only and raises an honest error otherwise.
+- **Reel narrative** — branded cover with honest stat chips (PB/medal counts
+  derived only from card labels), rank-weighted beats (the top moment breathes
+  ~25% longer), deterministic per-beat transitions (crossfade/push/wipe from
+  the variation seed), and a club outro scene inside the unchanged
+  `reel_duration_for` budget.
+- **Explainability manifest** — every cached MP4 gets a `.json` sidecar:
+  archetype, motion intent, colour source (still-parity vs seed), seed,
+  format, durations.
+
 **Optional Tier C, behind `MEDIAHUB_GEN_BG` (default off):** activate the dormant
 `visual/ai_background.py` hook (already imported at `render.py`) via a
 commercial-safe API (Bria/Recraft) for **backgrounds only**, composited under the

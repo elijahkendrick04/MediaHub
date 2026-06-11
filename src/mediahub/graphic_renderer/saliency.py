@@ -77,6 +77,30 @@ def best_crop(image_path: Union[str, Path], ratio: RatioSpec) -> Crop:
     return _place_crop(width, height, r, cx, cy)
 
 
+def focus_position(image_path: Union[str, Path], ratio: RatioSpec = "4:5") -> str:
+    """CSS ``object-position`` keeping the saliency focus in frame.
+
+    The :func:`best_crop` centroid for ``ratio``, converted to percentages —
+    the one string both the still renderer (``--mh-photo-pos``) and the motion
+    compositions (``photoPos``) feed to ``object-position`` so a full-bleed
+    photo is steered the same way on every surface. Safe default on any
+    failure so a render never breaks on a missing or odd image.
+    """
+    if not image_path:
+        return "center 28%"
+    try:
+        x, y, w, h = best_crop(image_path, ratio)
+        with Image.open(image_path) as im:
+            iw, ih = im.size
+        if iw <= 0 or ih <= 0:
+            return "center 28%"
+        cx = max(0.0, min(1.0, (x + w / 2.0) / iw)) * 100.0
+        cy = max(0.0, min(1.0, (y + h / 2.0) / ih)) * 100.0
+        return f"{cx:.0f}% {cy:.0f}%"
+    except Exception:
+        return "center 28%"
+
+
 # --------------------------------------------------------------------------- #
 # Ratio parsing
 # --------------------------------------------------------------------------- #
@@ -242,4 +266,4 @@ def _slide(value: float, hi: int) -> int:
     return pos
 
 
-__all__ = ["crops_for", "best_crop", "Crop", "RatioSpec"]
+__all__ = ["crops_for", "best_crop", "focus_position", "Crop", "RatioSpec"]

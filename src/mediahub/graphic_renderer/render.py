@@ -2367,23 +2367,14 @@ def _mh_role_vars(palette: dict, brand_kit=None) -> dict[str, str]:
 def _v2_photo_position(athlete_path) -> str:
     """CSS ``object-position`` that keeps the saliency focus in frame.
 
-    Uses the deterministic ``saliency.best_crop`` centroid for a portrait ratio,
-    converted to a percentage. Safe default on any failure so a render never
-    breaks on a missing or odd image.
+    Delegates to ``saliency.focus_position`` — the same deterministic helper
+    the motion compositions consume, so the still and the video steer a photo
+    identically. Safe default on any failure.
     """
-    if not athlete_path:
-        return "center 28%"
     try:
-        from mediahub.graphic_renderer.saliency import best_crop
+        from mediahub.graphic_renderer.saliency import focus_position
 
-        x, y, w, h = best_crop(athlete_path, "4:5")
-        with Image.open(athlete_path) as im:
-            iw, ih = im.size
-        if iw <= 0 or ih <= 0:
-            return "center 28%"
-        cx = max(0.0, min(1.0, (x + w / 2.0) / iw)) * 100.0
-        cy = max(0.0, min(1.0, (y + h / 2.0) / ih)) * 100.0
-        return f"{cx:.0f}% {cy:.0f}%"
+        return focus_position(athlete_path, "4:5")
     except Exception:
         return "center 28%"
 

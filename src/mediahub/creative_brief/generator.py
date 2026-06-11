@@ -134,11 +134,32 @@ class CreativeBrief:
     # reassigned set clears the APCA compliance gate; empty dict = Tier A
     # brand-default roles.
     colour_role_assignment: dict[str, str] = field(default_factory=dict)
+    # The director's motion language for this card (design_spec.MOTION_INTENTS,
+    # e.g. "kinetic_type"). Consumed by the Remotion compositions; "" lets the
+    # motion render fall back to its mood/seed-driven default programme.
+    motion_intent: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: int = 2
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Optional["CreativeBrief"]:
+        """Rebuild a brief from its persisted ``to_dict()`` form.
+
+        Unknown keys are dropped (older/newer shapes load cleanly); returns
+        ``None`` when required fields are missing so callers can fall back.
+        """
+        if not isinstance(data, dict):
+            return None
+        try:
+            from dataclasses import fields as _dc_fields
+
+            known = {f.name for f in _dc_fields(cls)}
+            return cls(**{k: v for k, v in data.items() if k in known})
+        except (TypeError, ValueError):
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +697,8 @@ def apply_design_spec(brief: CreativeBrief, spec) -> CreativeBrief:
         brief.mood = spec.mood
     if spec.rationale:
         brief.why_this_design = spec.rationale
+    if spec.motion_intent:
+        brief.motion_intent = spec.motion_intent
     brief.ai_directed = True
     opts = brief.hero_stat_options or {}
     if spec.hero_stat in opts:

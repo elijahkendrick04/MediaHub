@@ -255,12 +255,17 @@ MediaHub" path.
 
 MediaHub generates branded MP4 outputs via Remotion 4.x on the deployed
 server:
-- **Story cards** — 1080×1920, 6 seconds, one card per swimmer/achievement
-- **Meet reels** — 1080×1920, 15 seconds, top-3 cards stitched with crossfades
+- **Story cards** — 6 seconds, one card per swimmer/achievement
+- **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
+  5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
+  label-derived stat chips → rank-weighted card beats → club outro
+- **Formats** — story 1080×1920 (default), square 1080×1080, landscape
+  1920×1080 from the same compositions (`render.js --width/--height`)
 
 The Node + Remotion stack lives at `src/mediahub/remotion/`. It is invoked
 from Python via `src/mediahub/visual/motion.py`, which shells out to
-`render.js` and caches outputs under `DATA_DIR/motion_cache/<hash>.mp4`.
+`render.js` and caches outputs under `DATA_DIR/motion_cache/<hash>.mp4`,
+with a `<hash>.json` explainability manifest beside each MP4.
 
 Outputs are programmatic and data-driven (never static templates), club-branded
 from the `BrandKit`, and use real athlete/team imagery where provided — no
@@ -272,16 +277,23 @@ synthetic AI-generated people unless explicitly requested.
 - `POST /api/runs/<run_id>/reel` — render the meet reel from the top-N cards
   (default 3, capped at 5; pass `?n=4` to override)
 
-Both endpoints serve the rendered MP4 directly with `Content-Type: video/mp4`.
-Cache hits return the existing file (< 30s wall-clock); cold renders take
-30–90s on the deployment's worker.
+Both accept `?format=story|square|landscape` (default `story`) and serve the
+rendered MP4 directly with `Content-Type: video/mp4`. Cache hits return the
+existing file (< 30s wall-clock); cold renders take 30–90s on the
+deployment's worker. The free ffmpeg fallback engine renders the story format
+only and raises an honest `ReelEngineUnavailable` for the other cuts.
 
-### Brand consistency
+### Brand consistency (motion ↔ still parity)
 
-Motion compositions read the same `BrandKit` palette as the static graphic
-renderer and honour the per-card `variation_seed` from
-`src/mediahub/creative_brief/generator.py` (`auto_variation_seed_for`), so
-the motion render of a given card visually aligns with its still graphic.
+Motion renders mirror the approved still exactly: every v2 archetype maps to
+a distinct motion scene in `StoryCard.tsx` (parity test-enforced), the
+design-spec director's `motion_intent` picks the animation programme, and the
+card's resolved colour roles — the same APCA-gated set the still painted,
+medal tints included (`graphic_renderer.render.resolved_role_vars_for_brief`)
+— ride into the props as `roleGround/roleSurface/roleAccent/roleOnGround`.
+Photo focus reuses the still's saliency maths (`saliency.focus_position`).
+Brief-less callers keep the legacy seed-permutation roles via the per-card
+`variation_seed` (`auto_variation_seed_for`).
 
 ## Deployment
 
