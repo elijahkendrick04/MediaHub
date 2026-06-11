@@ -86,7 +86,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
           git add docs/ROADMAP.md
-          git commit -m "docs: auto-update roadmap"
+          # [skip render]: a roadmap refresh is docs-only — deploying it is
+          # pure waste, and these bot deploys have repeatedly wedged
+          # Render's build queue (queued with zero build logs for hours,
+          # blocking real deploys behind them). The marker must also be on
+          # the MERGE commit subject below — that's the commit Render
+          # inspects on a push to main.
+          git commit -m "docs: auto-update roadmap [skip render]"
           # Single-purpose branch: force-push is safe and refreshes any
           # still-open bot PR to the newest computed state.
           git push --force origin "$BRANCH"
@@ -107,9 +113,11 @@ jobs:
           # through to an immediate merge. Only if both fail (auto-merge
           # disabled repo-side AND checks pending/failed) is the PR left
           # open for a human — preserved, never lost.
-          if gh pr merge "$PR" --merge --auto; then
+          if gh pr merge "$PR" --merge --auto \
+               --subject "docs: auto-update roadmap (#${PR}) [skip render]"; then
             echo "Auto-merge armed on PR #$PR — lands when checks pass."
-          elif gh pr merge "$PR" --merge; then
+          elif gh pr merge "$PR" --merge \
+               --subject "docs: auto-update roadmap (#${PR}) [skip render]"; then
             echo "PR #$PR was already clean — merged directly."
           else
             echo "::warning::Could not land PR #$PR automatically. Enable"
