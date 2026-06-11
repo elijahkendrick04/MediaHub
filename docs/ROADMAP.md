@@ -397,11 +397,12 @@ honest:
   caption / brand-fidelity polish** — new card layouts, AI-palette-from-usage, logo
   vision colours, caption tone/jargon/locale fixes (the bulk of recent commits).
 
-> **Two `AutonomyLevel` enums now exist** and must be reconciled when Phase 2 is
-> built properly: `sport_profiles/autonomy.py` (`draft_only`/`approval_required`/
-> `fully_autonomous` — the *publishing*-autonomy policy, inert) vs `autonomy/tools.py`
-> (`OFF`/`SUGGEST`/`DRAFT`/`PREPARE` — the *runner*'s pre-approval reach, live). They
-> describe different axes; don't collapse them blindly.
+> **The two same-named autonomy enums are reconciled (P2.3, 2026-06-11):** the
+> runner's pre-approval reach axis is renamed `autonomy.tools.RunnerReach`
+> (`OFF`/`SUGGEST`/`DRAFT`/`PREPARE`), leaving
+> `sport_profiles.autonomy.AutonomyLevel` (`draft_only`/`approval_required`/
+> `fully_autonomous`) as the single enum called AutonomyLevel — the publishing
+> policy axis. Different axes, now structurally impossible to conflate.
 
 > **Test baseline (point-in-time):** the full suite is green — **2836 passed, 1
 > skipped** in a fully-provisioned environment after merging `main` (the lone skip
@@ -594,47 +595,70 @@ plan to act on) and **P3** (new sports need profiles).
 
 ---
 
-## Phase 2 — Autonomy toggles + orchestration backbone · P2 · 🔵 **IN PROGRESS — substrate + per-type policy shipped; P2.2 partially subsumed; P2.3 partial**
+## Phase 2 — Autonomy toggles + orchestration backbone · P2 · ✅ **COMPLETE (2026-06-11)**
 
 **Goal.** Put every content type on a durable workflow with an **optional
 human-approval signal**; implement the guardrails + kill switch + audit trail;
 expose the per-type `autonomy_level` in the workspace.
 
-**Exit criterion.** A content type can be set to any `AutonomyLevel`;
-`fully_autonomous` publishes **only** when all guardrails + the confidence gate pass;
-the kill switch halts publishing instantly; every autonomous decision is recorded in
-an immutable audit trail. Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
-
-> **Reality check (2026-06 reconcile).** A meaningful slice of this phase already
-> shipped under the "Section 6" stream — but via a **different architecture than P2.1
-> proposed**. The council rejected Temporal in favour of an **in-process** design
-> (Flask + `threading` + SQLite, no Celery/Redis/new infra): `scheduler/` fires due
-> tasks exactly-once via an atomic SQLite claim, `autonomy/` is a bounded narrow-tool
-> runner that only ever *queues for human review*, and `workflow/autonomy.py` keeps an
-> audit log. All **off by default**. What's left is the **product surface**, not the
-> backbone: the per-type policy (P2.2/P2.4) and the remaining guardrails (P2.3).
+**Exit criterion — MET (2026-06-11).** A content type can be set to any
+`AutonomyLevel` (P2.4 store + Settings → Autonomy); `fully_autonomous` publishes
+**only** when all guardrails + the confidence gate pass (the P2.3 publish gate,
+evaluated against the exact caption that would ship); the kill switch halts
+publishing instantly — checked first on every gate evaluation and re-asserted
+inside the Buffer call, so a mid-cycle engagement still halts; every autonomous
+decision (allowed AND blocked verdicts, auto-approvals, publish attempts) lands
+in the immutable per-org audit ledger. Pinned end-to-end by
+`tests/test_autonomous_publishing.py::test_phase2_exit_criterion_end_to_end`.
+Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
 
 ### P2.1 — ~~Temporal orchestration adapter~~ → in-process scheduler + bounded runner · ✅ **DONE (in-process, not Temporal)**
 Superseded by a council decision: instead of a Temporal adapter, durability is the
 `scheduler/` atomic-claim SQLite runner + the `autonomy/` bounded loop, both riding
 `ai_core.ask_with_tools`. `workflow.store` remains the card-state precursor. Temporal
 is **not** being adopted; this item is closed by the in-process substrate.
+*Quality-reviewed 2026-06-11:* security strong (atomic claim, fixed tool
+allow-list, structural no-publish, strict tenancy), with five hardening fixes
+applied — the audit ledger no longer raises/corrupts on oversized args (it
+always writes valid JSON), the ledger and the posting log resolve `DATA_DIR`
+per call instead of freezing it at import, a scheduler claim hiccup no longer
+aborts the tick for remaining tasks, the silent busy-timeout fallback is now
+logged, and the runner's enum is renamed (see P2.3).
 
-### P2.2 — Human-approval signal = the autonomy toggle · ❌ **NOT STARTED**
-Gated types pause on the signal; autonomous types skip it. Maps onto the existing
-`workflow.CardStatus` QUEUE → APPROVED → POSTED transition.
+### P2.2 — Human-approval signal = the autonomy toggle · ✅ **DONE (2026-06-11)**
+Shipped as `workflow/approval.py::apply_approval_signal` on the existing
+`workflow.CardStatus` QUEUE → APPROVED → POSTED transition: gated types
+**pause on the signal** (cards stay QUEUE/EDITED until a human approves);
+a `fully_autonomous` type's cards run the P2.3 publish gate against the exact
+caption that would ship — passing cards auto-APPROVE and, when the org has
+chosen autonomous channels (Settings → Autonomy; per-org Buffer token),
+publish through the same Buffer path a human click uses (workflow
+schedule-state + posting log + audit identical to the human path). Failing
+cards stay queued for the human with blockers recorded — autonomy degrades to
+approval, never the reverse; human decisions are never revisited.
+Triggers: `POST /api/autonomy/sweep` (org-scoped) and the `approval_signal`
+scheduler task type. Machine-approved captions deliberately don't feed the
+voice-learning store.
 
-### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · 🔵 **PARTIAL**
-Foundations exist: `workflow/autonomy.py` keeps an immutable audit log; the runner's
-tools are a fixed allow-list (no shell/file/web) and structurally cannot publish;
-`publishing.posting_log` records posting events; `context_engine.trust` scores
-provenance. **Remaining:** wire these into a single per-type *publish gate* with a
-brand-safety check and a global kill switch, on `recognition.schema.SafeToPost`. The
-safeguarding posture from ADR-0003 applies to minors' data.
+### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · ✅ **DONE (2026-06-11)**
+The single per-type publish gate shipped: `publishing/publish_gate.py` —
+kill switch → per-type policy → provenance (`recognition.schema.SafeToPost`
+plus the run trust report's post/review/hold vocabulary, fail-closed on
+missing/unknown) → per-type confidence threshold (default 0.85, floor 0.5,
+operator-tunable per type in Settings → Autonomy) → deterministic
+brand-safety (AI-tell ban-list, the org's `brand_phrases_to_avoid`, platform
+length) → safeguarding (a card concerning a minor never auto-publishes,
+ADR-0003) → per-org rate caps over the posting log
+(`MEDIAHUB_AUTONOMOUS_HOURLY_CAP`/`MEDIAHUB_AUTONOMOUS_DAILY_CAP`). Every
+verdict is explainable per check and audited. The two `AutonomyLevel` enums
+are **reconciled**: the runner's reach axis is renamed
+`autonomy.tools.RunnerReach` (OFF/SUGGEST/DRAFT/PREPARE), leaving
+`sport_profiles.autonomy.AutonomyLevel` as the single publishing-policy enum.
+`/healthz/deps` reports the gate (`publish_gate`) alongside the P2.4 policy.
 
 ### P2.4 — Per-type autonomy controls in the workspace · ✅ **DONE**
 Surface the toggle; default everything gated; warn before enabling `fully_autonomous`.
-Shipped + live (PR #297): Settings>Autonomy tab with per-profile per-type policy defaulting to approval_required; publish gate consults the policy behind the global kill switch; /healthz/deps exposes per_type_autonomy. Canonical enum = sport_profiles.autonomy.AutonomyLevel; the second AutonomyLevel enum still needs reconciliation.
+Shipped + live (PR #297): Settings>Autonomy tab with per-profile per-type policy defaulting to approval_required; publish gate consults the policy behind the global kill switch; /healthz/deps exposes per_type_autonomy. Canonical enum = sport_profiles.autonomy.AutonomyLevel (the runner's separate reach axis was renamed RunnerReach in P2.3). *Extended 2026-06-11 (P2.3):* the tab also carries the per-type auto-publish confidence threshold and the org's autonomous-channel list.
 
 **Building blocks.** **Temporal** (MIT — truly free to self-host; 3,000+ paying
 customers incl. Snap/Netflix/Stripe) for the backbone + human-in-the-loop signal.
@@ -923,7 +947,7 @@ built around.
 | Multi-tenancy: org → workspace | ❌ **blocking** | **Prerequisite for commercial scale (PC.3), not a nice-to-have** — single-instance-per-club can't scale. Cross-tenant isolation invariant shipped (the foundation only); generalise org → per-team workspace in one shared instance. Reference Postiz/Mixpost schemas over a network boundary (never embed AGPL). |
 | Go-to-market / distribution | ❌ not started | The build/sell imbalance is the #1 risk (PC.6): governing-body endorsement (Swim Wales / Swim England), annual prepay, and a deliberate build/sell rebalance. See [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). |
 | Safeguarding / minors' data | ✅ locked | Isolation invariant per [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md); applies with extra force to autonomous post types. |
-| Explainability & audit trail | 🔵 partial | Every step explainable; extend the run audit trail to autonomous-publish decisions (P2.3). |
+| Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions (gate verdicts, auto-approvals, publish attempts) land in the immutable per-org ledger (P2.3, 2026-06-11). |
 | Product design / UI polish | ❌ | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
 | Test-suite stability | ✅ | Full suite green (2836 passed / 1 skipped after merging main). Keep green. |
 | Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. |
@@ -962,10 +986,11 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
 4. **P1.3 — Cross-source planner. ✅ done (2026-06-10)** — with P1.2's
    slug-canonical taxonomy and P1.5's local brand-DNA flow, closing Phase 1.
    *Exit met:* a ranked, explainable plan for ≥2 profiles at `/plan`.
-5. **P2 — finish autonomy (UI + gate).** The substrate shipped in-process; what's left is
-   the per-type toggle (P2.2/P2.4) + the publish gate/kill-switch (P2.3) + resolving the
-   two `AutonomyLevel` enums. *Exit:* `fully_autonomous` publishes only when guardrails
-   pass.
+5. **P2 — ✅ done (2026-06-11).** The approval signal (P2.2), the single
+   publish gate with all guardrails (P2.3) and the enum reconciliation shipped
+   on the in-process substrate. *Exit met:* `fully_autonomous` publishes only
+   when every guardrail + the confidence gate pass; kill switch halts
+   instantly; every decision audited.
 
 **Deferred behind the commercial gate AND "≥10 clubs paying annually":**
 

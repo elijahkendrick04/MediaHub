@@ -16,12 +16,12 @@ for human approval** — never an open-ended agent. Per the council:
 - Off by default, bounded, £0 (rides the existing LLM tool-loop), per-org
   audited, multi-tenant-isolated (org bound once at session start).
 
-Public surface: :func:`run_autonomy`, :class:`AutonomyLevel`.
+Public surface: :func:`run_autonomy`, :class:`RunnerReach`.
 """
 
 from __future__ import annotations
 
-from mediahub.autonomy.tools import AutonomyLevel
+from mediahub.autonomy.tools import RunnerReach
 from mediahub.autonomy.run_loop import (
     AutonomyDisabled,
     AutonomyResult,
@@ -30,7 +30,7 @@ from mediahub.autonomy.run_loop import (
 )
 
 __all__ = [
-    "AutonomyLevel",
+    "RunnerReach",
     "AutonomyResult",
     "AutonomyDisabled",
     "run_autonomy",

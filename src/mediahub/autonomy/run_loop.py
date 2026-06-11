@@ -19,7 +19,7 @@ from typing import Optional
 
 from mediahub.autonomy.tools import (
     AutonomyEnv,
-    AutonomyLevel,
+    RunnerReach,
     ToolContext,
     dispatch,
     tools_for_level,
@@ -86,7 +86,7 @@ def _escape_goal(goal: str) -> str:
 def run_autonomy(
     org_id: str,
     goal: str,
-    level: AutonomyLevel,
+    level: RunnerReach,
     env: AutonomyEnv,
     *,
     max_steps: Optional[int] = None,
@@ -100,8 +100,8 @@ def run_autonomy(
     org_id = (org_id or "").strip()
     if not org_id:
         raise AutonomyDisabled("autonomy requires a signed-in organisation")
-    level = AutonomyLevel(int(level))
-    if level <= AutonomyLevel.OFF:
+    level = RunnerReach(int(level))
+    if level <= RunnerReach.OFF:
         raise AutonomyDisabled("autonomy level is off")
 
     goal = (goal or "").strip()

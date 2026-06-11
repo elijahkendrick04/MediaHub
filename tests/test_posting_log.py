@@ -50,8 +50,8 @@ def fresh_log(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     module = importlib.reload(_posting_log)
-    # Sanity: module-level DB_PATH must have re-resolved to the tmpdir.
-    assert str(module.DB_PATH).startswith(str(tmp_path))
+    # Sanity: the db path must resolve to the tmpdir (per-call resolution).
+    assert str(module._db_path()).startswith(str(tmp_path))
     yield module
     # Reload again with the real env so we don't leave a broken module
     # registered for the next test (some tests don't use this fixture).
@@ -85,7 +85,7 @@ class TestSchema:
         fresh_log._ensure_schema()
         # And the table is queryable after both calls.
         import sqlite3
-        conn = sqlite3.connect(str(fresh_log.DB_PATH))
+        conn = sqlite3.connect(str(fresh_log._db_path()))
         try:
             cur = conn.execute("SELECT COUNT(*) FROM posting_attempts")
             assert cur.fetchone()[0] == 0
@@ -95,7 +95,7 @@ class TestSchema:
     def test_schema_creates_indexes(self, fresh_log):
         fresh_log._ensure_schema()
         import sqlite3
-        conn = sqlite3.connect(str(fresh_log.DB_PATH))
+        conn = sqlite3.connect(str(fresh_log._db_path()))
         try:
             cur = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='index' "

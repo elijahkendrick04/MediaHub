@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from mediahub.autonomy.run_loop import AutonomyResult, is_enabled, run_autonomy
-from mediahub.autonomy.tools import AutonomyEnv, AutonomyLevel
+from mediahub.autonomy.tools import AutonomyEnv, RunnerReach
 from mediahub.workflow.autonomy import AuditLog
 
 log = logging.getLogger(__name__)
@@ -135,9 +135,7 @@ def build_env(org_id: str) -> AutonomyEnv:
     )
 
 
-def run_for_org(
-    org_id: str, goal: str, level: AutonomyLevel = AutonomyLevel.PREPARE
-) -> AutonomyResult:
+def run_for_org(org_id: str, goal: str, level: RunnerReach = RunnerReach.PREPARE) -> AutonomyResult:
     """Build the live env and run one autonomy session for an org."""
     return run_autonomy(org_id, goal, level, build_env(org_id))
 
@@ -151,7 +149,7 @@ def _autonomy_task_handler(params: dict) -> None:
     if not org_id:
         raise ValueError("autonomy task requires an org_id")
     goal = params.get("goal") or "Prepare this organisation's best recent content for review."
-    level = AutonomyLevel(int(params.get("level", int(AutonomyLevel.PREPARE))))
+    level = RunnerReach(int(params.get("level", RunnerReach.PREPARE.value)))
     run_for_org(org_id, goal, level)
 
 

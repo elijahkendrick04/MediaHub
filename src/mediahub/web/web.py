@@ -12749,6 +12749,13 @@ Relay team broke club record"></textarea>
                 deps["per_type_autonomy"] = {"note": "no active org"}
         except Exception as _pt_err:
             deps["per_type_autonomy"] = {"error": str(_pt_err)[:200]}
+        # P2.3 publish-gate summary (thresholds + caps + switch) — additive.
+        try:
+            from mediahub.publishing.publish_gate import publish_gate_status as _pg_status
+
+            deps["publish_gate"] = _pg_status(_active_profile_id() or "")
+        except Exception as _pg_err:
+            deps["publish_gate"] = {"error": str(_pg_err)[:200]}
         # Motion is healthy when the *active* reel engine can render:
         # remotion needs node + node_modules; the ffmpeg fallback (P0.1)
         # makes both optional.
@@ -13640,9 +13647,14 @@ Relay team broke club record"></textarea>
 
         try:
             from mediahub.publishing.per_type_policy import load_policy as _load_policy
+            from mediahub.publishing.publish_gate import (
+                DEFAULT_CONFIDENCE_THRESHOLD as _DEF_THRESH,
+            )
+            from mediahub.publishing.publish_gate import load_thresholds as _load_thresholds
             from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
 
             current_policy = _load_policy(prof.profile_id)
+            current_thresholds = _load_thresholds(prof.profile_id)
         except Exception as _e:
             return (
                 f"{section_header}"
@@ -13672,6 +13684,7 @@ Relay team broke club record"></textarea>
             for val, label, _ in level_opts:
                 sel = " selected" if current_val == val else ""
                 select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
+            thresh_val = current_thresholds.get(ct_str.value, _DEF_THRESH)
             rows_html += (
                 f"<tr>"
                 f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
@@ -13682,6 +13695,13 @@ Relay team broke club record"></textarea>
                 f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
                 f"{select_opts}"
                 f"</select>"
+                f"</td>"
+                f"<td>"
+                f'<input type="number" name="threshold_{_h(ct_str.value)}" '
+                f'value="{thresh_val:.2f}" min="0.5" max="1" step="0.05" '
+                f'title="Minimum recognition confidence for autonomous publishing of this type" '
+                f'style="width:74px;background:var(--bg);color:var(--ink);'
+                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px"/>'
                 f"</td>"
                 f"</tr>"
             )
@@ -13696,6 +13716,26 @@ Relay team broke club record"></textarea>
             "</div>"
         )
 
+        channels_val = _h(", ".join(getattr(prof, "autonomy_channel_ids", []) or []))
+        has_buffer = bool((getattr(prof, "buffer_access_token", "") or "").strip())
+        channels_note = (
+            "Buffer channel ids autonomous posts may go to (comma-separated — ids appear "
+            "in the schedule modal's channel list). Leave empty to let autonomy approve "
+            "gate-passing cards while a human still does all scheduling."
+            if has_buffer
+            else "Connect Buffer (inside any card's schedule modal) before choosing "
+            "autonomous channels — without it, autonomy can approve but never post."
+        )
+        channels_html = (
+            '<div class="card" style="margin-top:14px;padding:16px 18px">'
+            '<label for="mh-autonomy-channels" style="font-weight:600">Autonomous channels</label>'
+            f'<p class="dim" style="font-size:12px;margin:4px 0 8px 0">{channels_note}</p>'
+            f'<input id="mh-autonomy-channels" type="text" name="autonomy_channel_ids" '
+            f'value="{channels_val}" placeholder="e.g. 5f1a…, 5f1b…" '
+            f'style="width:100%;max-width:520px"{"" if has_buffer else " disabled"}/>'
+            "</div>"
+        )
+
         form_html = (
             f'<form id="mh-autonomy-form" method="post" action="{save_url}" '
             f'data-no-loader="1">'
@@ -13703,9 +13743,11 @@ Relay team broke club record"></textarea>
             f'<table class="mh-table-stack" style="width:100%">'
             f"<thead><tr>"
             f"<th>Content type</th><th>Description</th><th>Publishing level</th>"
+            f'<th title="Only used when the level is Fully autonomous">Auto-publish confidence ≥</th>'
             f"</tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             f"</table></div>"
+            f"{channels_html}"
             f"{warning_html}"
             f'<div style="margin-top:14px">'
             f'<button type="submit" class="btn primary">Save autonomy settings</button>'
@@ -13989,16 +14031,65 @@ Relay team broke club record"></textarea>
                 incoming = request.get_json(silent=True) or {}
             else:
                 incoming = dict(request.form)
-            # Merge: start from existing (all keys present), override with incoming.
-            merged = dict(existing)
+            # Split out the P2.3 controls the same form carries: per-type
+            # confidence thresholds (threshold_<slug>) and the autonomous
+            # channel list. What remains is the per-type level policy.
+            thresholds: dict[str, str] = {}
+            channels_raw = None
+            levels: dict[str, str] = {}
             for k, v in incoming.items():
                 if isinstance(v, list):
                     v = v[0] if v else ""
-                merged[k] = str(v)
+                if k == "autonomy_channel_ids":
+                    channels_raw = str(v)
+                elif k.startswith("threshold_"):
+                    thresholds[k[len("threshold_") :]] = str(v)
+                else:
+                    levels[k] = str(v)
+            # Merge: start from existing (all keys present), override with incoming.
+            merged = dict(existing)
+            merged.update(levels)
             _save_policy(pid, merged)
+            if thresholds:
+                from mediahub.publishing.publish_gate import save_thresholds as _save_thresholds
+
+                _save_thresholds(pid, thresholds)
+            if channels_raw is not None:
+                from mediahub.web.club_profile import load_profile as _lp
+                from mediahub.web.club_profile import save_profile as _sp
+
+                prof = _lp(pid)
+                if prof is not None:
+                    prof.autonomy_channel_ids = [
+                        c.strip() for c in channels_raw.split(",") if c.strip()
+                    ]
+                    _sp(prof)
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid})
+
+    # P2.2 — run the human-approval signal over one run NOW: gated types
+    # report "awaiting human"; a fully_autonomous type's cards go through
+    # the full publish gate and, where allowed, auto-approve (+ publish via
+    # the org's autonomous channels). Org-scoped; everything audited.
+    @app.route("/api/autonomy/sweep", methods=["POST"])
+    def api_autonomy_sweep():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        run_id = str(body.get("run_id") or request.form.get("run_id") or "").strip()
+        if not run_id:
+            return jsonify({"error": "run_id is required."}), 400
+        try:
+            from mediahub.workflow.approval import apply_approval_signal
+
+            summary = apply_approval_signal(pid, run_id)
+        except Exception as exc:
+            app.logger.exception("autonomy sweep failed")
+            return jsonify({"error": str(exc)}), 500
+        status = 200 if summary.get("ok") else 404
+        return jsonify(summary), status
 
     # ---- Content plan (P1.3 cross-source planner) ---------------------
     #
@@ -23904,10 +23995,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     try:
         from mediahub.autonomy.app_env import register_autonomy_task
         from mediahub.scheduler import start_scheduler
+        from mediahub.workflow.approval import register_approval_signal_task
 
         # Register the (off-by-default) autonomy task type before the tick loop
         # starts, so a scheduled "prepare my pack for review" run can fire.
         register_autonomy_task()
+        # P2.2: the approval-signal task — inert for fully-gated orgs (every
+        # card just reports awaiting_human); a fully_autonomous type's cards
+        # ride the publish gate on a cadence.
+        register_approval_signal_task()
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)

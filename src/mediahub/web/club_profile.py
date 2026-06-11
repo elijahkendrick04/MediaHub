@@ -14,6 +14,7 @@ Profiles live as JSON files under /club_profiles/. There is no
 auto-seeded demo club; the empty-state UI prompts the user to create
 their own profile.
 """
+
 from __future__ import annotations
 import json
 import os
@@ -24,15 +25,15 @@ from typing import Optional
 
 @dataclass
 class ClubProfile:
-    profile_id: str                       # short slug, e.g. 'your-club'
-    display_name: str                     # human name, e.g. 'Your Club Swimming'
-    short_name: str = ""                  # e.g. 'Your Club'
-    club_codes: list[str] = field(default_factory=list)   # canonical codes meaning "us"
-    exclude_codes: list[str] = field(default_factory=list) # e.g. host clubs to skip
+    profile_id: str  # short slug, e.g. 'your-club'
+    display_name: str  # human name, e.g. 'Your Club Swimming'
+    short_name: str = ""  # e.g. 'Your Club'
+    club_codes: list[str] = field(default_factory=list)  # canonical codes meaning "us"
+    exclude_codes: list[str] = field(default_factory=list)  # e.g. host clubs to skip
     known_asa_ids: list[str] = field(default_factory=list)
     brand_primary: str = "#A30D2D"
     brand_secondary: str = "#000000"
-    caption_tone: str = "warm-club"       # warm-club | sharp-news | playful-fan
+    caption_tone: str = "warm-club"  # warm-club | sharp-news | playful-fan
     important_standards: list[str] = field(default_factory=list)
     important_swimmers: list[str] = field(default_factory=list)  # asa_ids to spotlight
     governing_body: str = ""
@@ -194,6 +195,13 @@ class ClubProfile:
     # manually path.
     buffer_access_token: str = ""
 
+    # ---- P2.2/P2.3: autonomous publishing targets (optional) ----
+    # The Buffer channel ids autonomous posts may go to, chosen by a human in
+    # Settings → Autonomy. Empty (the default) means autonomy can auto-APPROVE
+    # gate-passing cards but never place them anywhere — publishing stays a
+    # human act until someone explicitly picks channels. Never auto-connected.
+    autonomy_channel_ids: list[str] = field(default_factory=list)
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)
@@ -224,8 +232,9 @@ class ClubProfile:
             return True
         return False
 
-    def filter_results(self, results, attr_club: str = "club_code",
-                       attr_asa: str = "asa_id") -> list:
+    def filter_results(
+        self, results, attr_club: str = "club_code", attr_asa: str = "asa_id"
+    ) -> list:
         keep = []
         for r in results:
             cc = getattr(r, attr_club, None)
@@ -251,6 +260,7 @@ class ClubProfile:
           4. ``self.achievement_priorities['_default']``   (legacy default)
           5. ``1.0``
         """
+
         def _as_float(v) -> Optional[float]:
             try:
                 return float(v)
@@ -296,7 +306,9 @@ class ClubProfile:
             extracted=self.brand_palette_extracted,
         )
         primary = palette.get("primary") or bk_data.get("primary_colour") or self.brand_primary
-        secondary = palette.get("secondary") or bk_data.get("secondary_colour") or self.brand_secondary
+        secondary = (
+            palette.get("secondary") or bk_data.get("secondary_colour") or self.brand_secondary
+        )
         accent = palette.get("accent") or bk_data.get("accent_colour")
 
         merged = {
@@ -320,6 +332,7 @@ class ClubProfile:
     def get_tone(self):
         """Return the active Tone enum for this profile."""
         from mediahub.brand.tone import tone_from_str
+
         return tone_from_str(self.tone or self.caption_tone or "warm-club")
 
     def is_ready(self) -> bool:
@@ -352,6 +365,7 @@ class ClubProfile:
 # ---------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------
+
 
 def _profiles_dir() -> Path:
     # Priority: explicit override > DATA_DIR (persistent disk) > source-relative fallback.
