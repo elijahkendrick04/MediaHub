@@ -13234,20 +13234,43 @@ Relay team broke club record"></textarea>
             }
         except Exception:
             providers_configured = {}
-        return jsonify(
-            {
-                "ok": True,
-                "gemini_breaker": snap,
-                "providers_configured": providers_configured,
-                "fallback_available": providers_configured.get("claude", False),
-                "note": (
-                    "Per-worker state. If your deployment runs multiple "
-                    "gunicorn workers, refresh this endpoint to sample each "
-                    "worker. A high 'consecutive_failures' on a worker with "
-                    "'open': false means a few errors but no trip yet."
-                ),
-            }
+        payload = {
+            "ok": True,
+            "gemini_breaker": snap,
+            "providers_configured": providers_configured,
+            "fallback_available": providers_configured.get("claude", False),
+            "note": (
+                "Per-worker state. If your deployment runs multiple "
+                "gunicorn workers, refresh this endpoint to sample each "
+                "worker. A high 'consecutive_failures' on a worker with "
+                "'open': false means a few errors but no trip yet."
+            ),
+        }
+        wants_html = (
+            request.accept_mimetypes.best_match(
+                ["text/html", "application/json"], default="application/json"
+            )
+            == "text/html"
+            or request.headers.get("Sec-Fetch-Dest", "") == "document"
         )
+        if wants_html:
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — Breaker</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     @app.route("/healthz/search")
     def healthz_search():
