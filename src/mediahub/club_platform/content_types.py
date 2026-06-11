@@ -13,10 +13,21 @@ from enum import Enum
 
 
 class ContentType(str, Enum):
+    """The implemented-surface badge (ADR-0013).
+
+    Every value IS a canonical taxonomy slug from docs/POST_TYPE_TAXONOMY.md
+    (subset invariant, pinned by tests/test_post_types.py). The full planning
+    vocabulary lives in club_platform.post_types + the sport-profile YAML;
+    this enum only names the slugs with a real product surface, so it never
+    grows a member for a merely-planned type. Legacy persisted strings
+    ("weekend_preview", "sponsor_post") are normalised at read boundaries via
+    post_types.canonical_slug().
+    """
+
     MEET_RECAP = "meet_recap"
     ATHLETE_SPOTLIGHT = "athlete_spotlight"
-    WEEKEND_PREVIEW = "weekend_preview"
-    SPONSOR_POST = "sponsor_post"
+    EVENT_PREVIEW = "event_preview"
+    SPONSOR_ACTIVATION = "sponsor_activation"
     SESSION_UPDATE = "session_update"
     FREE_TEXT = "free_text"
 
@@ -117,8 +128,8 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         icon_svg=_PERSON_SVG,
         primary_route_endpoint="spotlight_landing",
     ),
-    ContentType.WEEKEND_PREVIEW: ContentTypeMeta(
-        type=ContentType.WEEKEND_PREVIEW,
+    ContentType.EVENT_PREVIEW: ContentTypeMeta(
+        type=ContentType.EVENT_PREVIEW,
         title="Event Preview",
         description="Tease upcoming athletes and story angles before an event.",
         input_contract=(
@@ -130,8 +141,8 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
         icon_svg=_CALENDAR_SVG,
         primary_route_endpoint="stub_weekend_preview",
     ),
-    ContentType.SPONSOR_POST: ContentTypeMeta(
-        type=ContentType.SPONSOR_POST,
+    ContentType.SPONSOR_ACTIVATION: ContentTypeMeta(
+        type=ContentType.SPONSOR_ACTIVATION,
         title="Sponsor Post",
         description="Brand-safe highlight posts for sponsor activation.",
         input_contract=(

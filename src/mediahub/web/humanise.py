@@ -105,7 +105,8 @@ _POST_ANGLE_LABELS: dict[str, str] = {
     "reel_script": "Video script",
     "athlete_spotlight": "Athlete spotlight",
     "session_update": "Session update",
-    "weekend_preview": "Weekend preview",
+    "event_preview": "Event preview",
+    "weekend_preview": "Event preview",  # legacy slug (pre-ADR-0013)
 }
 
 # Status / verification codes
@@ -130,11 +131,14 @@ _STATUS_LABELS: dict[str, str] = {
     "exhibition": "Exhibition",
 }
 
-# Content type labels
+# Content type labels (canonical post-type slugs first, legacy pre-ADR-0013
+# slugs kept so old persisted data still gets a human label)
 _CONTENT_TYPE_LABELS: dict[str, str] = {
     "meet_recap": "Meet recap",
     "athlete_spotlight": "Athlete spotlight",
-    "weekend_preview": "Weekend preview",
+    "event_preview": "Event preview",
+    "sponsor_activation": "Sponsor post",
+    "weekend_preview": "Event preview",
     "sponsor_post": "Sponsor post",
     "session_update": "Session update",
     "weekly_roundup": "Weekly roundup",

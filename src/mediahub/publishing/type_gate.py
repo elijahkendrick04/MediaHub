@@ -53,6 +53,9 @@ def assert_type_publishing_allowed(
     """
     assert_publishing_allowed()
 
+    from mediahub.club_platform.post_types import canonical_slug
+
+    content_type_str = canonical_slug(content_type_str)
     policy = load_policy(org_id, data_dir=data_dir)
     level_str = policy.get(content_type_str, AutonomyLevel.APPROVAL_REQUIRED.value)
     level = AutonomyLevel.from_str(level_str)

@@ -6444,6 +6444,9 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     """
     import re as _re
 
+    from mediahub.club_platform.post_types import canonical_slug
+
+    stub_type = canonical_slug(stub_type)
     caption = _display_clean(card.get("caption") or "")
     fd = form_data or {}
     meet = _display_clean(fd.get("meet_name") or "")
@@ -6452,7 +6455,7 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+|\n+", caption) if p.strip()]
 
     stats: dict[str, str] = {}
-    if stub_type == "sponsor_post":
+    if stub_type == "sponsor_activation":
         hook = "SPONSOR"
         head_src = _short_hook(sponsor or meet or "Thank you")
         line2_default = "THANK YOU"
@@ -6462,7 +6465,7 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
             stats["sponsor"] = sponsor
         if meet:
             stats["event"] = meet
-    elif stub_type == "weekend_preview":
+    elif stub_type == "event_preview":
         hook = "PREVIEW"
         head_src = _short_hook(meet or "Event preview")
         line2_default = "PREVIEW"
@@ -6665,6 +6668,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   </button>
   <nav id="mh-primary-nav">
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
+    <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
@@ -13996,6 +14000,256 @@ Relay team broke club record"></textarea>
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True, "org_id": pid})
 
+    # ---- Content plan (P1.3 cross-source planner) ---------------------
+    #
+    # The strategy brain's product surface: a ranked, explainable plan of
+    # what this org should post next, fused from own / external / direct
+    # signals over a sport profile (ADR-0013 slugs). Deterministic — the
+    # planner recommends, the human decides; publishing autonomy stays with
+    # the P2.4 type gate. All routes are scoped to the active org.
+
+    @app.route("/api/plan/latest", methods=["GET"])
+    def api_plan_latest():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.planner import load_latest_plan
+
+        plan = load_latest_plan(pid)
+        return jsonify({"ok": True, "org_id": pid, "plan": plan})
+
+    @app.route("/api/plan/generate", methods=["POST"])
+    def api_plan_generate():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        body = request.get_json(silent=True) or {}
+        sport = str(body.get("sport") or request.form.get("sport") or "swimming").strip().lower()
+        try:
+            from mediahub.content_engine.planner import build_content_plan, save_plan
+
+            plan = build_content_plan(sport, pid)
+            save_plan(plan)
+        except FileNotFoundError:
+            return jsonify({"error": f"No sport profile named {sport!r}."}), 404
+        except Exception as exc:
+            app.logger.exception("plan generation failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid, "plan": plan.to_dict()})
+
+    @app.route("/api/plan/inputs", methods=["GET", "POST"])
+    def api_plan_inputs():
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.content_engine.inputs import load_planner_inputs, save_planner_inputs
+
+        if request.method == "GET":
+            return jsonify({"ok": True, "org_id": pid, "inputs": load_planner_inputs(pid)})
+        body = request.get_json(silent=True) or {}
+        try:
+            saved = save_planner_inputs(pid, body)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "org_id": pid, "inputs": saved})
+
+    @app.route("/plan")
+    def plan_page():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        from mediahub.club_platform.content_types import REGISTRY as _ct_registry
+        from mediahub.club_platform.post_types import implemented_content_type
+        from mediahub.content_engine.inputs import load_planner_inputs
+        from mediahub.content_engine.planner import load_latest_plan
+        from mediahub.sport_profiles import list_sport_profiles
+
+        plan = load_latest_plan(pid)
+        inputs = load_planner_inputs(pid)
+        sports = [(p.sport, p.display_name) for p in list_sport_profiles()]
+        current_sport = (plan or {}).get("sport") or "swimming"
+
+        sport_opts = "".join(
+            f'<option value="{_h(slug)}"{" selected" if slug == current_sport else ""}>{_h(name)}</option>'
+            for slug, name in sports
+        )
+
+        src_chip = {
+            "own": '<span class="tag" style="background:rgba(34,211,238,.12);color:var(--accent)">OWN</span>',
+            "external": '<span class="tag" style="background:rgba(167,139,250,.12);color:var(--medal)">EXTERNAL</span>',
+            "direct": '<span class="tag" style="background:rgba(250,204,21,.12);color:var(--lane)">DIRECT</span>',
+        }
+
+        items_html = ""
+        if plan:
+            for rank, item in enumerate(plan.get("items") or [], start=1):
+                slug = item.get("post_type", "")
+                ct = implemented_content_type(slug)
+                create_link = ""
+                if ct is not None:
+                    meta = _ct_registry.get(ct)
+                    if meta is not None:
+                        try:
+                            create_link = (
+                                f'<a class="btn" style="font-size:12px;padding:4px 12px" '
+                                f'href="{url_for(meta.primary_route_endpoint)}">Create →</a>'
+                            )
+                        except Exception:
+                            create_link = ""
+                chips = "".join(src_chip.get(s, "") for s in item.get("sources_used") or [])
+                if not chips:
+                    chips = '<span class="tag">baseline</span>'
+                reasons = "".join(
+                    f'<li style="margin:2px 0;color:var(--ink-muted);font-size:12.5px">{_h(r)}</li>'
+                    for r in item.get("reasons") or []
+                )
+                autonomy = _h(item.get("default_autonomy", "approval_required").replace("_", " "))
+                badge = (
+                    '<span class="tag live">Ready to create</span>'
+                    if item.get("implemented")
+                    else '<span class="tag">Planning only</span>'
+                )
+                items_html += f"""
+<details class="card" style="margin-bottom:10px" {"open" if rank <= 3 else ""}>
+  <summary style="display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none">
+    <span style="font-family:var(--font-display,inherit);font-size:20px;min-width:34px;color:var(--ink-muted)">#{rank}</span>
+    <strong style="flex:1">{_h(item.get("title") or slug)}</strong>
+    {chips}
+    {badge}
+    <span class="tag" title="Default autonomy for this type">{autonomy}</span>
+    <span style="font-variant-numeric:tabular-nums;font-weight:700;font-size:15px" title="Priority score">{int(item.get("score", 0))}</span>
+    {create_link}
+  </summary>
+  <div style="padding:10px 4px 2px 46px">
+    <p style="margin:0 0 4px 0;font-size:12px;color:var(--ink-muted)">Why this ranks here — every line traces to a signal:</p>
+    <ul style="margin:0;padding-left:18px">{reasons}</ul>
+  </div>
+</details>"""
+
+            counts = plan.get("source_counts") or {}
+            notes_html = "".join(
+                f'<li style="color:var(--ink-muted);font-size:12.5px">{_h(n)}</li>'
+                for n in plan.get("notes") or []
+            )
+            plan_meta = f"""
+<div class="card" style="margin-bottom:14px">
+  <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+    <strong>{_h(plan.get("sport_display") or plan.get("sport", ""))} plan</strong>
+    <span class="dim" style="font-size:12.5px">generated {_h(str(plan.get("generated_at", ""))[:16].replace("T", " "))} · horizon {int(plan.get("horizon_days", 14))}d</span>
+    <span style="font-size:12.5px">{src_chip["own"]} {int(counts.get("own", 0))} · {src_chip["external"]} {int(counts.get("external", 0))} · {src_chip["direct"]} {int(counts.get("direct", 0))} signals</span>
+  </div>
+  {f'<ul style="margin:8px 0 0 0;padding-left:18px">{notes_html}</ul>' if notes_html else ""}
+</div>"""
+            plan_block = plan_meta + items_html
+        else:
+            plan_block = """
+<div class="card" style="text-align:center;padding:42px 24px">
+  <h2 style="margin:0 0 8px 0">No plan yet</h2>
+  <p class="dim" style="max-width:520px;margin:0 auto 4px auto">Generate your first content plan — MediaHub fuses your processed results,
+  discovered context and anything you tell it below into a ranked list of what to post next, with the reasoning shown for every item.</p>
+</div>"""
+
+        events_rows = "".join(
+            f'<div class="mh-plan-ev" data-name="{_h(e["name"])}" data-date="{_h(e["date"])}" style="display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0">'
+            f'<span style="font-variant-numeric:tabular-nums">{_h(e["date"])}</span><span style="flex:1">{_h(e["name"])}</span>'
+            f'<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button></div>'
+            for e in inputs.get("upcoming_events") or []
+        )
+        blackout_val = _h(", ".join(inputs.get("blackout_dates") or []))
+
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Strategy</span>
+  <h1>What should we<br><em class="editorial">post next?</em></h1>
+  <p class="lede">A ranked plan fused from three sources — your results and drafts (<strong>own</strong>),
+  discovered context and the calendar (<strong>external</strong>), and what you tell us below (<strong>direct</strong>).
+  The planner recommends; you decide. Nothing publishes from here.</p>
+</section>
+
+<div class="card" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <label for="mh-plan-sport" style="font-weight:600">Sport profile</label>
+  <select id="mh-plan-sport" style="min-width:160px">{sport_opts}</select>
+  <button type="button" class="btn primary" id="mh-plan-generate" onclick="mhPlanGenerate(this)"
+          data-loader-text="Fusing signals">Generate plan</button>
+  <span class="dim" id="mh-plan-status" style="font-size:12.5px"></span>
+</div>
+
+{plan_block}
+
+<div class="card" style="margin-top:18px">
+  <h2 style="margin-top:0">Tell the planner (direct signals)</h2>
+  <p class="dim" style="font-size:12.5px;margin-top:0">Upcoming events boost previews and announcements; blackout dates hold them back. Saved per organisation.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px">
+    <div>
+      <label style="font-weight:600">Upcoming events</label>
+      <div id="mh-plan-events">{events_rows}</div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input type="date" id="mh-plan-ev-date" style="flex:0 0 auto"/>
+        <input type="text" id="mh-plan-ev-name" placeholder="e.g. County Championships" style="flex:1"/>
+        <button type="button" class="btn" onclick="mhPlanAddEvent()">Add</button>
+      </div>
+    </div>
+    <div>
+      <label for="mh-plan-blackouts" style="font-weight:600">Blackout dates</label>
+      <input type="text" id="mh-plan-blackouts" value="{blackout_val}" placeholder="YYYY-MM-DD, YYYY-MM-DD"/>
+      <p class="dim" style="font-size:11.5px;margin:4px 0 0 0">Comma-separated ISO dates nothing should be scheduled on.</p>
+    </div>
+  </div>
+  <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+    <button type="button" class="btn" onclick="mhPlanSaveInputs(this)">Save inputs</button>
+    <span class="dim" id="mh-plan-inputs-status" style="font-size:12.5px"></span>
+  </div>
+</div>
+
+<script>
+function mhPlanCollectEvents() {{
+  return Array.from(document.querySelectorAll('#mh-plan-events .mh-plan-ev')).map(function (el) {{
+    return {{ name: el.dataset.name, date: el.dataset.date }};
+  }});
+}}
+function mhPlanAddEvent() {{
+  var d = document.getElementById('mh-plan-ev-date').value;
+  var n = document.getElementById('mh-plan-ev-name').value.trim();
+  if (!d || !n) return;
+  var row = document.createElement('div');
+  row.className = 'mh-plan-ev';
+  row.dataset.name = n; row.dataset.date = d;
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;font-size:13px;margin:3px 0';
+  row.innerHTML = '<span style="font-variant-numeric:tabular-nums"></span><span style="flex:1"></span>' +
+    '<button type="button" class="btn" style="font-size:11px;padding:2px 8px" onclick="mhPlanRemoveEvent(this)">remove</button>';
+  row.children[0].textContent = d; row.children[1].textContent = n;
+  document.getElementById('mh-plan-events').appendChild(row);
+  document.getElementById('mh-plan-ev-name').value = '';
+}}
+function mhPlanRemoveEvent(btn) {{ btn.closest('.mh-plan-ev').remove(); }}
+function mhPlanSaveInputs(btn) {{
+  var status = document.getElementById('mh-plan-inputs-status');
+  status.textContent = 'Saving…';
+  fetch({json.dumps(url_for("api_plan_inputs"))}, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{
+      upcoming_events: mhPlanCollectEvents(),
+      blackout_dates: document.getElementById('mh-plan-blackouts').value.split(',').map(function(s){{return s.trim();}}).filter(Boolean)
+    }})
+  }}).then(function(r){{ return r.json(); }}).then(function(j){{
+    status.textContent = j.ok ? 'Saved. Regenerate the plan to apply.' : (j.error || 'Save failed');
+  }}).catch(function(){{ status.textContent = 'Save failed'; }});
+}}
+function mhPlanGenerate(btn) {{
+  var status = document.getElementById('mh-plan-status');
+  btn.disabled = true; status.textContent = 'Fusing own + external + direct signals…';
+  fetch({json.dumps(url_for("api_plan_generate"))}, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ sport: document.getElementById('mh-plan-sport').value }})
+  }}).then(function(r){{ return r.json(); }}).then(function(j){{
+    if (j.ok) {{ window.location.reload(); }}
+    else {{ btn.disabled = false; status.textContent = j.error || 'Plan generation failed'; }}
+  }}).catch(function(){{ btn.disabled = false; status.textContent = 'Plan generation failed'; }});
+}}
+</script>
+"""
+        return _layout("Content plan", body, active="plan")
+
     # ---- Buffer publishing -------------------------------------------
     #
     # Multi-tenant publishing model (post-rewrite):
@@ -14683,8 +14937,8 @@ Relay team broke club record"></textarea>
         _ct_presentation = {
             "meet_recap": (["Caption", "Graphic", "Reel"], "~ 60s"),
             "athlete_spotlight": (["Caption", "Graphic", "Story"], "~ 45s"),
-            "weekend_preview": (["Caption", "Graphic"], "~ 40s"),
-            "sponsor_post": (["Caption", "Graphic"], "~ 30s"),
+            "event_preview": (["Caption", "Graphic"], "~ 40s"),
+            "sponsor_activation": (["Caption", "Graphic"], "~ 30s"),
             "session_update": (["Caption", "Graphic"], "~ 20s"),
             "free_text": (["Caption", "Graphic"], "~ 15s"),
         }
@@ -15457,8 +15711,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     # ---- Stub routes (now functional with real LLM + fallback) ---------
     _STUB_TYPE_BY_CLASS = {
-        "WeekendPreviewStub": "weekend_preview",
-        "SponsorPostStub": "sponsor_post",
+        "WeekendPreviewStub": "event_preview",
+        "SponsorPostStub": "sponsor_activation",
         "SessionUpdateStub": "session_update",
         "FreeTextStub": "free_text",
     }
@@ -16227,8 +16481,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- Saved stub packs &mdash; list + view + export -----------------------
     _STUB_TYPE_LABEL = {
         "free_text": "Free Text",
-        "weekend_preview": "Event Preview",
-        "sponsor_post": "Sponsor Post",
+        "event_preview": "Event Preview",
+        "sponsor_activation": "Sponsor Post",
         "session_update": "Session Update",
     }
 
@@ -16368,9 +16622,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         export_url = url_for("stub_pack_export", pack_id=pack_id)
         regenerate_url = url_for(
             {
+                # Endpoint names are implementation artifacts (kept across the
+                # ADR-0013 slug rename); keys are canonical post-type slugs.
                 "free_text": "free_text_chat_page",
-                "weekend_preview": "stub_weekend_preview",
-                "sponsor_post": "stub_sponsor_post",
+                "event_preview": "stub_weekend_preview",
+                "sponsor_activation": "stub_sponsor_post",
                 "session_update": "stub_session_update",
             }.get(stub_type, "free_text_chat_page")
         )
@@ -16816,6 +17072,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "brand_source_url",
                             "brand_captured_at",
                             "brand_capture_status",
+                            "brand_palette_sources",
+                            "brand_palette_reasoning",
                         ):
                             if k in result:
                                 setattr(existing, k, result[k])
@@ -20888,6 +21146,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "meet_recap": "Meet recap",
             "swimmer_spotlight": "Swimmer spotlight",
             "athlete_spotlight": "Athlete spotlight",
+            "event_preview": "Event preview",
+            "sponsor_activation": "Sponsor post",
+            # Legacy artefact slugs (pre-ADR-0013) still present in stored
+            # media descriptions / operating profiles.
             "weekend_preview": "Event preview",
             "sponsor_post": "Sponsor post",
             "session_update": "Session update",

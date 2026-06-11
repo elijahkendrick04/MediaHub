@@ -5,9 +5,9 @@
 # renders it, and how autonomous it may be by default.
 #
 # This is read-only shipped config (like data/ontology/ and data/voices/seed/).
-# It is loaded by `mediahub.sport_profiles.load_sport_profile("swimming")`.
-# As of the Phase-1 scaffolding it is INERT — nothing in the running product
-# imports it yet. Later roadmap phases consume it.
+# It is loaded by `mediahub.sport_profiles.load_sport_profile("swimming")` and
+# consumed at runtime by the cross-source planner (`content_engine.planner`,
+# P1.3) via `club_platform.post_types.post_types_for()` (ADR-0013).
 #
 #   Schema ............ docs/SPORT_PROFILES.md
 #   Post-type taxonomy  docs/POST_TYPE_TAXONOMY.md
@@ -83,11 +83,29 @@ post_types:
     template_namespace: universal/season_recap
     default_autonomy: approval_required
 
-  sponsor_activation:             # brand-contractual: hand-placed by default
+  sponsor_activation:             # maps to ContentType.SPONSOR_ACTIVATION; brand-contractual: hand-placed by default
     enabled: true
     data_inputs: [manual_entry, sponsor_kit]
     template_namespace: universal/sponsor
     default_autonomy: draft_only
+
+  event_preview:                  # maps to ContentType.EVENT_PREVIEW
+    enabled: true
+    data_inputs: [entry_list, manual_entry]
+    template_namespace: universal/event_preview
+    default_autonomy: approval_required
+
+  session_update:                 # maps to ContentType.SESSION_UPDATE
+    enabled: true
+    data_inputs: [manual_entry, partial_results]
+    template_namespace: universal/session_update
+    default_autonomy: approval_required
+
+  free_text:                      # maps to ContentType.FREE_TEXT
+    enabled: true
+    data_inputs: [free_text]
+    template_namespace: universal/free_text
+    default_autonomy: approval_required
 
 notes: >
   Swimming is MediaHub's first reference sport — the deterministic detectors,

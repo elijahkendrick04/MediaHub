@@ -95,8 +95,12 @@ all_profiles = list_sport_profiles()             # every data/sport_profiles/*.y
 ```
 
 Override the directory for tests/ops with `base_dir=...` or the
-`MEDIAHUB_SPORT_PROFILES_DIR` env var. **This package is inert** — nothing in the
-running product imports it yet; later roadmap phases consume it.
+`MEDIAHUB_SPORT_PROFILES_DIR` env var. **This package is live** (P1.3): the
+cross-source planner (`content_engine.planner`) enumerates a sport's post
+types from its profile via `club_platform.post_types.post_types_for()`
+(ADR-0013), and the per-type autonomy policy (P2.4) uses
+`sport_profiles.autonomy.AutonomyLevel` as the canonical publishing-policy
+enum.
 
 ## 4. How to add a new sport (step by step)
 
@@ -131,6 +135,10 @@ parser.
 
 ## 5. Where this is going (roadmap)
 
-Sport profiles are Phase-1 groundwork in [`ROADMAP.md`](ROADMAP.md). The forward
-work: a profile-driven content planner (the strategy brain), then per-type autonomy
-enforcement (Phase 2), then real second-sport ingestion (Phase 3).
+Sport profiles were Phase-1 groundwork in [`ROADMAP.md`](ROADMAP.md); the
+**profile-driven content planner now ships** (P1.3 — see
+[`CONTENT_PLANNER.md`](CONTENT_PLANNER.md)): `/plan` builds a ranked,
+explainable plan from any shipped profile (swimming end-to-end; football on
+profile + direct/external signals until its engine lands). The forward work:
+the remaining per-type autonomy enforcement (Phase 2), then real second-sport
+ingestion (Phase 3).

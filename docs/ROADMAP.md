@@ -117,6 +117,7 @@ linked ADRs and research docs:
   ([ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)).
 
 **Companion docs:** [POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md) ·
+[CONTENT_PLANNER](CONTENT_PLANNER.md) ·
 [AUTONOMY_MODEL](AUTONOMY_MODEL.md) · [SPORT_PROFILES](SPORT_PROFILES.md) ·
 [ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md) ·
 [DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md) · [THEMING](THEMING.md) ·
@@ -317,9 +318,12 @@ Three facts shape the work ahead.
 
 **Not yet shipped (❌)** — the reframe's new surface:
 
-- The content-strategy brain **as the hub** (today's planner is swim-result-centric).
+- ~~The content-strategy brain as the hub~~ → **shipped 2026-06-10 (P1.3):**
+  the cross-source planner fuses own/external/direct signals into a ranked,
+  explainable per-org plan keyed by sport profile (`/plan`); its external
+  spokes stay thin until P3's data sources land.
 - Multi-sport beyond swimming (the `register_sport` seam exists; only swimming is
-  registered; `football.yaml` is config-only).
+  registered; `football.yaml` now *plans* via the profile but has no detector engine).
 - Per-content-type **autonomy toggles in the UI** (the *runner* now exists — see
   below — but the per-post-type toggle and workspace control do not, and the
   `sport_profiles.AutonomyLevel` enum that was meant to drive them is still inert).
@@ -494,31 +498,55 @@ Satori (MPL-2.0) stays on the board for P5.4 as a render fast-path.
 
 ---
 
-## Phase 1 — Strategy brain + post-type taxonomy + sport profiles · P1 · 🔵 **IN PROGRESS**
+## Phase 1 — Strategy brain + post-type taxonomy + sport profiles · P1 · ✅ **COMPLETE (2026-06-10)**
 
 **Goal.** Build the planner that fuses **three-source intelligence** (own + external
 + direct signals) into a ranked content plan; realise the cross-sport **post-type
 taxonomy**; and ship the **sport-profile** config. Ship swimming + one other profile.
 
-**Exit criterion.** A profile-driven planner produces a ranked, explainable content
-plan for **≥2 sport profiles** (swimming + football or basketball), grounded in the
-three sources — not just from a results file.
+**Exit criterion — MET (2026-06-10).** A profile-driven planner produces a ranked,
+explainable content plan for **≥2 sport profiles** (swimming end-to-end; football
+on profile + direct/external signals, honestly noting its missing engine), grounded
+in the three sources — not just from a results file. Pinned by
+`tests/test_cross_source_planner.py`; product surface `/plan`. The external-signal
+spokes are deliberately thin until P3's data sources land (discovered-context +
+calendar today; fixtures/news feeds arrive with the sport spokes).
 
 ### P1.1 — Sport-profile schema + loader + AutonomyLevel + 2 profiles · ✅ **DONE**
-Shipped this rebuild as **inert scaffolding**: `mediahub.sport_profiles`
-(`SportProfile`/`PostTypeConfig`, `AutonomyLevel`), `data/sport_profiles/{swimming,
-football}.yaml`, unit tests. Not wired into runtime yet. See
-[`SPORT_PROFILES.md`](SPORT_PROFILES.md).
+Shipped this rebuild: `mediahub.sport_profiles` (`SportProfile`/`PostTypeConfig`,
+`AutonomyLevel`), `data/sport_profiles/{swimming,football}.yaml`, unit tests.
+Originally inert scaffolding; **now live** — the P1.3 planner enumerates profiles
+at runtime, P2.4's per-type policy uses its `AutonomyLevel` as the canonical
+publishing-policy enum, and both shipped profiles carry every implemented
+universal surface. See [`SPORT_PROFILES.md`](SPORT_PROFILES.md).
 
-### P1.2 — Realise the post-type taxonomy in code · ❌ **NOT STARTED**
-Reconcile the taxonomy ([`POST_TYPE_TAXONOMY.md`](POST_TYPE_TAXONOMY.md)) with the
-existing `club_platform.content_types.ContentType` registry (extend vs. layer —
-Council-gated data-model call).
+### P1.2 — Realise the post-type taxonomy in code · ✅ **DONE (2026-06-10)**
+The Council-gated extend-vs-layer call was pressure-tested (5 advisors + peer
+review, unanimous direction) and decided: **layer, on a slug-canonical spine**
+([`adr/0013-post-type-taxonomy-slug-canonical.md`](adr/0013-post-type-taxonomy-slug-canonical.md)).
+Shipped as `club_platform/post_types.py` — taxonomy slugs are the canonical
+post-type identity (universal slugs in code, sport-specific in profile YAML);
+`ContentType` is demoted to the implemented-surface badge (subset invariant
+test-pinned; never grows an unimplemented member, so no "Coming soon" leakage);
+the two historic mismatches were renamed under the gated 15+15-step process
+(`WEEKEND_PREVIEW`→`EVENT_PREVIEW`, `SPONSOR_POST`→`SPONSOR_ACTIVATION`) with
+read-tolerant legacy aliases at every persistence boundary (per-org autonomy
+policy keys, saved stub packs, the type gate) so operator-set autonomy levels
+survive. `tests/test_post_types.py`.
 
-### P1.3 — Cross-source planner (the strategy brain) · ❌ **NOT STARTED**
-Extend `content_engine` (planner) + `context_engine` to fuse own/external/direct
-signals into a ranked plan keyed by sport profile. The swim newsworthiness ranker
-generalises into the cross-source prioritiser.
+### P1.3 — Cross-source planner (the strategy brain) · ✅ **DONE (2026-06-10)**
+Shipped in `content_engine`: `signals.py` gathers the three sources (own = runs +
+workflow states + draft packs + posting recency; external = discovered meet
+context + calendar anniversaries; direct = operator-entered upcoming events,
+structured goals targeting a post type, blackout dates, sponsor-configured fact),
+and `planner.py` fuses them into a ranked, explainable `ContentPlan` keyed by
+sport profile — the swim newsworthiness ranker's transparent additive-scoring
+pattern, generalised; deterministic (no LLM in the ranking loop), every item
+carrying signal-grounded reasons including the honest negative ("no football
+results ingested yet"). Per-org persistence under `DATA_DIR/content_plans/` and
+an org-scoped product surface: **Plan** in the nav (`/plan`) +
+`/api/plan/{generate,latest,inputs}`. See [`CONTENT_PLANNER.md`](CONTENT_PLANNER.md);
+`tests/test_cross_source_planner.py`.
 
 ### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · ✅ **DONE**
 The asset-quality stream: replace the enum-permutation variation mechanism with an
@@ -539,10 +567,22 @@ the DesignTokens lockup vocabulary, the complete 12-archetype catalog
 the director's catalog, and the docs/ADR refresh — plus the renderer
 self-hosted-font fix, regression-pinned.
 
-### P1.5 — Local brand-DNA-from-URL · ❌ **NOT STARTED**
-Re-implement the Open-Pomelli brand-DNA flow with local scrape + Ollama +
-`material-color-utilities` (no paid MuAPI). Brand-DNA capture partly exists in
-`brand/`; this generalises and de-paid-API-s it.
+### P1.5 — Local brand-DNA-from-URL · ✅ **DONE (2026-06-10)**
+The Open-Pomelli-style flow now runs with **zero paid APIs**: the scrape is
+local and **SSRF-hardened** (public-host gate re-validated per redirect hop on
+page/CSS/image fetches); the colour science is local — `brand/palette_evidence.py`
+quantizes the club's real logo/og-image **pixels** through
+`material-color-utilities` (`QuantizeCelebi` → `Score`, the theming engine's own
+maths) and merges them with site-wide CSS-usage frequencies into
+provenance-carrying evidence; and the one judgement step (semantic role
+assignment + voice) rides `media_ai.llm`, which serves keyless local
+OpenAI-compatible endpoints (Ollama via `MEDIAHUB_LLM_ENDPOINTS`, P0.4) exactly
+like the hosted providers. LLM palette picks are validated against the evidence
+universe (an invented hex is dropped and backfilled from real evidence — the
+`bootstrap_extract` anti-hallucination doctrine); with no provider at all the
+palette stays evidence-grounded and the voice fields stay honestly empty
+(`no_provider`). Per-slot provenance persists to `brand_palette_sources` /
+`brand_palette_reasoning`. `tests/test_brand_dna_local.py`.
 
 **Building blocks.** crewAI / LangGraph **patterns** (free frameworks — *verify
 MIT-family*) paired with **Ollama** (MIT, free) for the planner;
@@ -919,8 +959,9 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    `MEDIAHUB_REEL_ENGINE=ffmpeg` — a zero-license deployment renders reels),
    plus the three Phase-0 guard suites making paid-dep optionality (P0.3),
    local provider slots (P0.4) and AGPL isolation (P0.5) continuously enforced.
-4. **P1.3 — Cross-source planner.** Extend `content_engine` into the three-source
-   strategy brain over sport profiles. *Exit:* a ranked plan for ≥2 profiles.
+4. **P1.3 — Cross-source planner. ✅ done (2026-06-10)** — with P1.2's
+   slug-canonical taxonomy and P1.5's local brand-DNA flow, closing Phase 1.
+   *Exit met:* a ranked, explainable plan for ≥2 profiles at `/plan`.
 5. **P2 — finish autonomy (UI + gate).** The substrate shipped in-process; what's left is
    the per-type toggle (P2.2/P2.4) + the publish gate/kill-switch (P2.3) + resolving the
    two `AutonomyLevel` enums. *Exit:* `fully_autonomous` publishes only when guardrails

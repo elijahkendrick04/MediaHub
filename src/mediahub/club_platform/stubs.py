@@ -97,7 +97,7 @@ def _generate_cards_via_llm(
 # kind of brief this is. Keyed by ContentType value so the regenerate route
 # can reuse the exact same requirements without re-instantiating the stub.
 _TYPE_REQUIREMENTS: dict[str, str] = {
-    "weekend_preview": (
+    "event_preview": (
         "an EVENT PREVIEW. Tease what's coming, build anticipation, no "
         "results yet. Stay factual; only use names and events explicitly given."
     ),
@@ -106,7 +106,7 @@ _TYPE_REQUIREMENTS: dict[str, str] = {
         "truth — do not invent specifics. If a fact isn't in the notes, leave "
         "it out. Identify the strongest 2-3 angles and pick the platform per angle."
     ),
-    "sponsor_post": (
+    "sponsor_activation": (
         "a SPONSOR POST. Respect every brand guideline. Never imply the "
         "sponsor caused the achievement — they support, the athletes perform. "
         "Make sponsor mentions feel natural, not forced."
@@ -195,7 +195,7 @@ class _StubContentType:
 # ---------------------------------------------------------------------------
 
 class WeekendPreviewStub(_StubContentType):
-    _type = ContentType.WEEKEND_PREVIEW
+    _type = ContentType.EVENT_PREVIEW
 
     def render_form_html(self) -> str:
         return """
@@ -289,7 +289,7 @@ class FreeTextStub(_StubContentType):
 # ---------------------------------------------------------------------------
 
 class SponsorPostStub(_StubContentType):
-    _type = ContentType.SPONSOR_POST
+    _type = ContentType.SPONSOR_ACTIVATION
 
     def render_form_html(self) -> str:
         return """
@@ -393,22 +393,30 @@ class SessionUpdateStub(_StubContentType):
 # ---------------------------------------------------------------------------
 
 _STUB_CLASS_BY_TYPE: dict[str, type] = {
-    ContentType.WEEKEND_PREVIEW.value: WeekendPreviewStub,
-    ContentType.FREE_TEXT.value:       FreeTextStub,
-    ContentType.SPONSOR_POST.value:    SponsorPostStub,
-    ContentType.SESSION_UPDATE.value:  SessionUpdateStub,
+    ContentType.EVENT_PREVIEW.value:      WeekendPreviewStub,
+    ContentType.FREE_TEXT.value:          FreeTextStub,
+    ContentType.SPONSOR_ACTIVATION.value: SponsorPostStub,
+    ContentType.SESSION_UPDATE.value:     SessionUpdateStub,
 }
 
 
 def stub_for_type(content_type: str) -> Optional["_StubContentType"]:
-    """Return a stub instance for a ContentType value, or None if unknown."""
-    cls = _STUB_CLASS_BY_TYPE.get(content_type)
+    """Return a stub instance for a post-type slug, or None if unknown.
+
+    Accepts legacy persisted strings ("weekend_preview", "sponsor_post") via
+    canonical_slug so packs saved before ADR-0013 keep regenerating.
+    """
+    from mediahub.club_platform.post_types import canonical_slug
+
+    cls = _STUB_CLASS_BY_TYPE.get(canonical_slug(content_type))
     return cls() if cls else None
 
 
 def requirements_for(content_type: str) -> str:
-    """The engine `requirements` line for a content type ('' if unknown)."""
-    return _TYPE_REQUIREMENTS.get(content_type, "")
+    """The engine `requirements` line for a post-type slug ('' if unknown)."""
+    from mediahub.club_platform.post_types import canonical_slug
+
+    return _TYPE_REQUIREMENTS.get(canonical_slug(content_type), "")
 
 
 # ---------------------------------------------------------------------------
