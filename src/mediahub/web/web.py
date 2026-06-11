@@ -212,7 +212,9 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
     user += (
         "\n\nWrite ONE short sentence (max 25 words) putting this time in "
         "context FOR THIS SWIMMER'S LEVEL. Use research_web if you need "
-        "to verify whether the swimmer is recognisably elite."
+        "to verify whether the swimmer is recognisably elite. If neither "
+        "the details above nor fetched evidence support a concrete "
+        "statement, reply with exactly NO_CONTEXT."
     )
 
     system = (
@@ -221,8 +223,12 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         "no lists, no markdown, no preamble. Reason only from the swim "
         "details I give you and any web evidence you fetch via "
         "research_web. Never invent PBs, ages, clubs, rankings, or "
-        "biographical facts. If you cite a research result, mention the "
-        "domain in parentheses, e.g. '(swimmingresults.org)'."
+        "biographical facts, and never estimate how rare or competitive "
+        "a result is — you have no field data. An unsupported judgement "
+        "is worse than none: reply NO_CONTEXT when you cannot ground the "
+        "sentence in given details or fetched evidence. If you cite a "
+        "research result, mention the domain in parentheses, e.g. "
+        "'(swimmingresults.org)'."
     )
 
     research_tool = [
@@ -295,6 +301,10 @@ def _llm_performance_context(achievement: dict, meet_context: Optional[dict] = N
         ("i need", "i'd need", "please provide", "can you provide", "could you", "i don't have")
     ):
         out = ""
+    # Honest-silence sentinel: the model judged it had nothing grounded to
+    # say. An absent context line is better than a speculative one.
+    if "NO_CONTEXT" in out.upper():
+        out = ""
     _perf_context_cache[cache_key] = out
     return out
 
@@ -364,16 +374,23 @@ def _llm_build_explanation(
         + factors_prose
         + (f"\n\nThis swim ranked #{int(rank)} overall." if isinstance(rank, int) else "")
         + "\n\nPlease emit one `submit_explanation` call with a "
-        "15-25 word headline plus 3-5 short bullets covering the "
-        "reasons. Use ONLY the facts above — never invent ranker "
-        "factors that aren't listed."
+        "headline of at most 14 words plus 2-4 bullets of at most "
+        "12 words each. Every bullet must restate one listed factor or "
+        "stated fact — if there are only two real reasons, write two "
+        "bullets. Never pad."
     )
 
     system = (
-        "You are MediaHub's content-rationale writer. Your job is to "
-        "tell the user, in plain English, why a specific swim got "
-        "selected as a content card. Be specific, grounded, no fluff. "
-        "Never invent achievements or factors. Always emit exactly one "
+        "You are MediaHub's content-rationale writer. Tell the user, in "
+        "plain English, why a specific swim was selected as a content "
+        "card. Hard rules: every claim must come from the facts and "
+        "factors provided — if it isn't in the input, it doesn't exist. "
+        "You have NO data about how rare, difficult, or competitive a "
+        "result is, so never comment on rarity, field strength, or how "
+        "common a time/medal is at this kind of meet. A gold medal or a "
+        "personal best is self-evidently good — state it plainly, don't "
+        "dress it up. Short beats thorough; never say the same thing "
+        "twice in different words. Always emit exactly one "
         "`submit_explanation` tool call."
     )
     tool = [
@@ -1740,18 +1757,25 @@ _WF_STATUS_LABEL = {
 
 
 def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
-    """Render the per-card Approve / Reject / Re-queue action strip.
+    """Render the per-card Approve / Re-queue action strip.
 
     Round-8: shared between /pack/<id>/grouped (where the audit found
     no approval primitive at all) and any other page that wants the
     same workflow control surface. The "Status" strap shows the
     current state and is updated optimistically by the global
     `[data-mh-wf]` click handler in _layout.
+
+    Approve-only flow: a card is either in the queue or approved — there
+    is no reject. Skipping a card simply leaves it in the queue. The
+    approve button reads as an action still to take (outline) until the
+    card is actually approved, then flips to a filled confirmation; the
+    old always-green fill made every card look already approved.
     """
     status_key = (wf_status or "queue").lower()
     label = _WF_STATUS_LABEL.get(
         status_key, status_key.replace("_", " ").capitalize() or "In queue"
     )
+    is_approved = status_key == "approved"
 
     # Visually de-emphasise the action that matches the current state
     # so the user sees "I'm already in this state".
@@ -1762,22 +1786,21 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
             else ""
         )
 
+    approve_cls = "btn mh-wf-approve is-on" if is_approved else "btn secondary mh-wf-approve"
+    approve_label = "Approved ✓" if is_approved else "Approve"
+    approve_pressed = ' aria-pressed="true"' if is_approved else ""
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
         f'<span data-mh-wf-label>{_h(label)}</span></span>'
-        f'<button class="btn" type="button" style="font-size:12px;padding:4px 10px;background:var(--good);color:var(--lane-ink);border:0"'
+        f'<button class="{approve_cls}" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("approved")}'
-        f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">Approve</button>'
-        f'<button class="btn danger" type="button" style="font-size:12px;padding:4px 10px"'
-        f' data-mh-wf="rejected" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("rejected")}'
-        f' title="Reject this card so it\'s kept out of the content builder.">Reject</button>'
+        f"{approve_pressed}"
+        f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f'{_disabled_attrs("queue")}'
-        f' title="Send back to the queue — neither approved nor rejected.">Re-queue</button>'
+        f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
     )
 
 
@@ -2638,7 +2661,7 @@ function generateMotion(btn, motionUrl, cardId) {
   btn.textContent = 'Rendering motion\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Rendering motion graphic&hellip; cached renders return in ~5s, cold renders up to 90s.</div>';
+    'Rendering motion graphic&hellip; the first render can take up to 90 seconds. Repeats are much faster.</div>';
   fetch(motionUrl, {method:'POST'})
     .then(function(r) {
       if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
@@ -2679,7 +2702,9 @@ function generateMotion(btn, motionUrl, cardId) {
     });
 }
 
-// Meet-reel generation: top-3 cards stitched into a 15-second reel.
+// Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
+// far past what front-line proxies tolerate on a held connection \u2014 so the
+// button kicks off a background job and polls until the MP4 is ready.
 function generateReel(btn, reelUrl) {
   var panel = document.getElementById('reel-panel');
   if (!panel) return;
@@ -2689,40 +2714,52 @@ function generateReel(btn, reelUrl) {
   btn.textContent = 'Rendering reel\u2026';
   panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-muted);font-size:13px">' +
     '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
-    'Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
-  fetch(reelUrl, {method:'POST'})
-    .then(function(r) {
-      if (r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('video') !== -1) {
-        return r.blob().then(function(b) { return {ok:true, blob:b}; });
-      }
-      return r.json().then(function(j){ return {ok:false, body:j}; });
-    })
+    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+  var fail = function(msg) {
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  };
+  var success = function(videoUrl) {
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML =
+      '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
+        '<div style="flex:0 0 240px;max-width:260px">' +
+          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '</div>' +
+        '<div style="flex:1;min-width:240px">' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
+          '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  };
+  fetch(reelUrl + '-job', {method:'POST'})
+    .then(function(r) { return r.json().then(function(j){ return {status: r.status, body: j}; }); })
     .then(function(res) {
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
         return;
       }
-      var url = URL.createObjectURL(res.blob);
-      panel.innerHTML =
-        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 240px;max-width:260px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:240px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-            '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;line-height:1.4">Top-3 ranked moments stitched into a branded reel with smooth crossfades, club colours, and the meet headline.</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-              '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
+      var tries = 0;
+      var poll = function() {
+        tries++;
+        if (tries > 80) { fail('timed out waiting for the render \u2014 try again'); return; }
+        fetch(res.body.poll_url)
+          .then(function(r){ return r.json(); })
+          .then(function(j) {
+            if (j.status === 'done' && j.video_url) { success(j.video_url); return; }
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {
+              fail(j.user_message || j.error || 'render failed'); return;
+            }
+            setTimeout(poll, 3000);
+          })
+          .catch(function() { setTimeout(poll, 3000); });
+      };
+      setTimeout(poll, 3000);
     })
-    .catch(function(err) {
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    });
+    .catch(function(err) { fail('Network error: ' + err); });
 }
 
 function regenerateGraphic(btn, createUrl, cardId, assetId, noPhoto) {
@@ -4169,6 +4206,13 @@ p:last-child { margin-bottom: 0; }
 .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); box-shadow: none; }
 .btn.medal { background: var(--medal); color: var(--medal-ink); }
 .btn.medal:hover { background: var(--medal-h); box-shadow: var(--shadow-medal); }
+/* Per-card approve control: outline = still to do, filled = done. The fill
+   only ever appears once the card IS approved, so an untouched card can't
+   read as already approved. */
+.btn.mh-wf-approve { border-color: rgba(61,220,151,0.45); color: var(--good); }
+.btn.mh-wf-approve:hover { border-color: var(--good); background: rgba(61,220,151,0.08); box-shadow: none; }
+.btn.mh-wf-approve.is-on { background: var(--good); color: var(--lane-ink); border-color: var(--good); cursor: default; }
+.btn.mh-wf-approve.is-on:hover { background: var(--good); transform: none; box-shadow: none; }
 .btn.large { padding: 14px 28px; font-size: 14px; }
 /* Mono / scoreboard button — for editorial CTAs like "Open review queue" */
 .btn.mono {
@@ -4423,6 +4467,10 @@ pre code { background: none; padding: 0; color: inherit; }
 
 /* === Animations === */
 @keyframes mh-spin { to { transform: rotate(360deg); } }
+/* Alias used by inline loading indicators rendered from JS strings — must
+   stay global so spinners rotate on every page, not just ones that happen
+   to embed a scoped copy. */
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes mh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes mh-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes mh-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
@@ -7446,7 +7494,16 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       if (labelEl) labelEl.textContent = labelMap[status] || status;
     });
     document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
-      if (b.getAttribute('data-mh-wf') === status) {
+      var on = b.getAttribute('data-mh-wf') === status;
+      if (b.classList.contains('mh-wf-approve')) {
+        // Approve flips between outline ("Approve") and filled
+        // ("Approved ✓") — the fill is the confirmation, never the default.
+        b.classList.toggle('is-on', on);
+        b.classList.toggle('secondary', !on);
+        b.textContent = on ? 'Approved ✓' : 'Approve';
+        if (on) b.setAttribute('aria-pressed', 'true');
+        else b.removeAttribute('aria-pressed');
+      } else if (on) {
         b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
       } else {
         b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
@@ -9049,7 +9106,7 @@ def create_app() -> Flask:
 <div class="mh-next-strip" aria-label="What happens next">
   <div class="cell"><span class="num">2</span><span class="text"><b>Configure</b><br>Pick your club from the parsed list, upload your logo, choose tone, and drop in photos.</span></div>
   <div class="cell"><span class="num">3</span><span class="text"><b>Pipeline runs</b><br>The engine spots PBs, medals, first-times and comebacks. About 30 to 60 seconds.</span></div>
-  <div class="cell"><span class="num">4</span><span class="text"><b>Review &amp; approve</b><br>Approve, edit, or reject each card. Nothing leaves the deployment without you.</span></div>
+  <div class="cell"><span class="num">4</span><span class="text"><b>Review &amp; approve</b><br>Approve and edit the cards you want to post. Nothing leaves the deployment without you.</span></div>
 </div>
 
 <script>
@@ -9302,25 +9359,26 @@ def create_app() -> Flask:
             # logo on your organisation profile" here and the run never
             # received it.
             _uploaded_logo_label = ""
-            if not logo_url:
-                for _lg in getattr(active_prof, "brand_logos", None) or []:
-                    if str(_lg.get("mime", "")).startswith("image/"):
-                        _uploaded_logo_label = (
-                            _lg.get("label") or _lg.get("original_filename") or "uploaded logo"
-                        )
-                        break
-            if logo_url:
+            for _lg in getattr(active_prof, "brand_logos", None) or []:
+                if str(_lg.get("mime", "")).startswith("image/"):
+                    _uploaded_logo_label = (
+                        _lg.get("label") or _lg.get("original_filename") or "uploaded logo"
+                    )
+                    break
+            # Uploads win the display too \u2014 they're an explicit brand
+            # decision, and the run seeding below follows the same order.
+            if _uploaded_logo_label:
+                prof_logo_html = (
+                    f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
+                    f'Logo: <code style="font-size:11px">{_h(_uploaded_logo_label[:80])}</code> '
+                    f"&mdash; flows through to every graphic.</p>"
+                )
+            elif logo_url:
                 _logo_disp = logo_url[:80] + ("\u2026" if len(logo_url) > 80 else "")
                 prof_logo_html = (
                     f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
                     f'Logo: <code style="font-size:11px">'
                     f"{_h(_logo_disp)}</code></p>"
-                )
-            elif _uploaded_logo_label:
-                prof_logo_html = (
-                    f'<p class="dim" style="margin:6px 0 0;font-size:12px">'
-                    f'Logo: <code style="font-size:11px">{_h(_uploaded_logo_label[:80])}</code> '
-                    f"&mdash; flows through to every graphic.</p>"
                 )
             else:
                 prof_logo_html = (
@@ -9669,8 +9727,38 @@ def create_app() -> Flask:
                 profile_logo_bytes = None
                 profile_logo_name = None
                 if active_prof_for_run is not None:
+                    # Logos the user uploaded at /organisation/setup ALWAYS
+                    # beat the one auto-discovered from the club website.
+                    # An uploaded file is an explicit brand decision; the
+                    # scraped brand_logo_url is only a best guess (and has
+                    # picked up university-site logos before).
+                    try:
+                        from mediahub.brand.logos import (
+                            resolve_logo_path as _resolve_logo_path,
+                        )
+
+                        for _lg in getattr(active_prof_for_run, "brand_logos", None) or []:
+                            if not str(_lg.get("mime", "")).startswith("image/"):
+                                continue
+                            _lp = _resolve_logo_path(
+                                active_prof_for_run.profile_id,
+                                _lg.get("logo_id", ""),
+                            )
+                            if not _lp:
+                                continue
+                            _lb = _lp.read_bytes()
+                            if _lb and len(_lb) < 5_000_000:
+                                profile_logo_bytes = _lb
+                                profile_logo_name = _lp.name
+                                break
+                    except Exception:
+                        profile_logo_bytes = None
+                    # Fall back to the website-discovered logo URL only when
+                    # nothing was uploaded.
                     url = (getattr(active_prof_for_run, "brand_logo_url", "") or "").strip()
-                    if url and (url.startswith("http://") or url.startswith("https://")):
+                    if profile_logo_bytes is None and url and (
+                        url.startswith("http://") or url.startswith("https://")
+                    ):
                         try:
                             import requests as _rq
 
@@ -9687,33 +9775,6 @@ def create_app() -> Flask:
                                 if "." not in tail:
                                     tail += ".png"
                                 profile_logo_name = tail
-                        except Exception:
-                            profile_logo_bytes = None
-                    # Fall back to a logo the user uploaded at
-                    # /organisation/setup. Those live on ``brand_logos``
-                    # as local files (the session-gated serve route can't
-                    # be fetched from this server-side context), so read
-                    # the first image variant straight off disk.
-                    if profile_logo_bytes is None:
-                        try:
-                            from mediahub.brand.logos import (
-                                resolve_logo_path as _resolve_logo_path,
-                            )
-
-                            for _lg in getattr(active_prof_for_run, "brand_logos", None) or []:
-                                if not str(_lg.get("mime", "")).startswith("image/"):
-                                    continue
-                                _lp = _resolve_logo_path(
-                                    active_prof_for_run.profile_id,
-                                    _lg.get("logo_id", ""),
-                                )
-                                if not _lp:
-                                    continue
-                                _lb = _lp.read_bytes()
-                                if _lb and len(_lb) < 5_000_000:
-                                    profile_logo_bytes = _lb
-                                    profile_logo_name = _lp.name
-                                    break
                         except Exception:
                             profile_logo_bytes = None
                 _bk_process(
@@ -10230,9 +10291,10 @@ def create_app() -> Flask:
             _wf_states = ws.load(run_id)
 
         # Workflow filter from query param. Triage states only — a malformed
-        # or retired (`posted`) ``?wf=`` value falls back to "show all".
+        # or retired (`posted` / `rejected`) ``?wf=`` value falls back to
+        # "show all". Reject was removed from the review flow entirely.
         _wf_filter = (request.args.get("wf", "") or "").strip().lower()
-        if _wf_filter not in ("", "queue", "approved", "rejected"):
+        if _wf_filter not in ("", "queue", "approved"):
             _wf_filter = ""
 
         # --- Recognition summary band
@@ -10611,13 +10673,11 @@ def create_app() -> Flask:
                 "": len(ranked_achs) or _wf_n_total,
                 "queue": _wf_n_queue if _wf_summary else len(ranked_achs),
                 "approved": _wf_n_approved,
-                "rejected": _wf_n_rejected,
             }
             for _wf_opt in [
                 ("", "All"),
                 ("queue", "Queue"),
                 ("approved", "Approved"),
-                ("rejected", "Rejected"),
             ]:
                 _wf_sel = "selected" if _wf_filter == _wf_opt[0] else ""
                 _wf_opt_url = _review_base + (f"?wf={_wf_opt[0]}" if _wf_opt[0] else "")
@@ -10650,13 +10710,13 @@ def create_app() -> Flask:
   <div style="flex:1;min-width:240px">
     <h2 style="margin-bottom:6px">Step 1 — Review &amp; approve</h2>
     <p class="dim" style="margin:0;font-size:13px;max-width:560px">
-      Approve or reject each achievement below. Approved cards flow into the
+      Approve the achievements you want to post — anything you skip simply
+      stays in the queue. Approved cards flow into the
       <strong>Content builder</strong>, where you pick a caption, create graphics
       and video, then schedule to Buffer or download. Nothing is created until
       you&rsquo;ve approved it.
     </p>
   </div>
-  <a class="btn" href="{_pack_url}" style="align-self:flex-start">Open content builder &rarr;</a>
 </div>
 <div class="mh-progress-strip" role="group" aria-label="Review progress" id="mh-review-progress" data-wf-total="{_wf_grand_total}">
   <span class="mh-progress-strip-label">Reviewed</span>
@@ -10671,7 +10731,6 @@ def create_app() -> Flask:
       <div class="stat-block">
         <div class="stat"><div class="l">Queue</div><div class="v" id="mh-wf-n-queue">{_wf_n_queue or len(ranked_achs)}</div></div>
         <div class="stat good"><div class="l">Approved</div><div class="v" id="mh-wf-n-approved">{_wf_n_approved}</div></div>
-        <div class="stat bad"><div class="l">Rejected</div><div class="v" id="mh-wf-n-rejected">{_wf_n_rejected}</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -10685,7 +10744,7 @@ def create_app() -> Flask:
       {_wf_filter_buttons}
     </nav>
     <span class="mh-kbd-hint" aria-hidden="true">
-      <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>?</kbd> help
+      <kbd>J</kbd><kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>?</kbd> help
     </span>
   </div>
 </div>"""
@@ -10949,7 +11008,6 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn" href="{_pack_url}">Open content builder &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
     <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
       <button class="btn danger" type="submit">Delete run</button>
@@ -11170,7 +11228,6 @@ function copyWhyCard(btn, taId) {{
       <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
       <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
       <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>R</kbd></span><span class="desc">Reject the focused card</span>
       <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
       <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
       <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
@@ -11231,7 +11288,6 @@ function copyWhyCard(btn, taId) {{
       case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
       case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
       case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'r': case 'R': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('rejected'); }} break;
       case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
       case '?': e.preventDefault(); toggleHelp(); break;
       case 'Escape': toggleHelp(false); break;
@@ -11927,8 +11983,13 @@ function copyWhyCard(btn, taId) {{
             _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
             _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
             n_dec = len(sa.get("pb_decisions") or [])
+            # All V7.3 confirmed flavours + the legacy status count as
+            # confirmed here, matching aggregate_run_audit's summary set.
             n_conf = sum(
-                1 for d in (sa.get("pb_decisions") or []) if d.get("status") == "CONFIRMED_PB"
+                1
+                for d in (sa.get("pb_decisions") or [])
+                if d.get("status")
+                in ("CONFIRMED_OFFICIAL_PB", "CONFIRMED_PB_IMPROVEMENT", "CONFIRMED_PB")
             )
             rows += (
                 f'<tr>'
@@ -22690,7 +22751,7 @@ function tiRegenerate() {{
 {win_html}
 {_section_html("Internal notes / nice mentions", grouped.get("internal_notes", []), icon="&#x1F4DD;")}
 {_section_html("Needs review", grouped.get("needs_review", []), icon="&#x26A0;")}
-{_section_html("Rejected / not recommended", grouped.get("rejected", []), icon="&#x2715;")}
+{_section_html("Not recommended", grouped.get("rejected", []), icon="&#x2715;")}
 
 {_schedule_modal_html()}
 
@@ -22721,36 +22782,51 @@ function generateReelGrouped(btn, reelUrl) {{
   var origLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Rendering reel\u2026';
-  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">Producing 15-second reel from the top 3 cards&hellip; cold renders may take up to 90s.</div>';
-  fetch(reelUrl, {{method:'POST'}})
-    .then(function(r) {{
-      var ct = r.headers.get('content-type') || '';
-      if (r.ok && ct.indexOf('video') !== -1) {{ return r.blob().then(function(b){{ return {{ok:true, blob:b}}; }}); }}
-      return r.json().then(function(j){{ return {{ok:false, body:j}}; }});
-    }})
+  panel.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-muted);font-size:13px">' +
+    '<div style="width:24px;height:24px;border:2px solid rgba(244,213,141,0.30);border-top-color:var(--medal);border-radius:50%;margin:0 auto 10px;animation:spin 600ms linear infinite"></div>' +
+    'Producing your 15-second reel from the top 3 cards&hellip; this can take up to 90 seconds the first time.</div>';
+  var fail = function(msg) {{
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+  }};
+  var success = function(videoUrl) {{
+    btn.disabled = false; btn.textContent = origLabel;
+    panel.innerHTML =
+      '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+        '<div style="flex:0 0 220px;max-width:240px">' +
+          '<video src="' + videoUrl + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
+        '</div>' +
+        '<div style="flex:1;min-width:200px">' +
+          '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
+          '<a class="btn secondary" href="' + videoUrl + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
+        '</div>' +
+      '</div>';
+  }};
+  fetch(reelUrl + '-job', {{method:'POST'}})
+    .then(function(r) {{ return r.json().then(function(j){{ return {{status: r.status, body: j}}; }}); }})
     .then(function(res) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      if (!res.ok) {{
-        var msg = (res.body && (res.body.detail || res.body.error)) || 'render failed';
-        panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Reel render error: ' + msg + '</div>';
+      if (res.status !== 202 || !res.body || !res.body.poll_url) {{
+        fail((res.body && (res.body.user_message || res.body.detail || res.body.error)) || 'could not start the render');
         return;
       }}
-      var url = URL.createObjectURL(res.blob);
-      panel.innerHTML =
-        '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
-          '<div style="flex:0 0 220px;max-width:240px">' +
-            '<video src="' + url + '" controls playsinline style="width:100%;border-radius:6px;border:1px solid var(--border);background:#000"></video>' +
-          '</div>' +
-          '<div style="flex:1;min-width:200px">' +
-            '<div style="font-size:11px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:6px">Meet reel &middot; 1080&times;1920 &middot; 15s</div>' +
-            '<a class="btn secondary" href="' + url + '" download="meet-reel.mp4" style="font-size:12px;padding:4px 12px">Download MP4</a>' +
-          '</div>' +
-        '</div>';
+      var tries = 0;
+      var poll = function() {{
+        tries++;
+        if (tries > 80) {{ fail('timed out waiting for the render \u2014 try again'); return; }}
+        fetch(res.body.poll_url)
+          .then(function(r){{ return r.json(); }})
+          .then(function(j) {{
+            if (j.status === 'done' && j.video_url) {{ success(j.video_url); return; }}
+            if (j.status === 'error' || (j.error && j.status !== 'running')) {{
+              fail(j.user_message || j.error || 'render failed'); return;
+            }}
+            setTimeout(poll, 3000);
+          }})
+          .catch(function() {{ setTimeout(poll, 3000); }});
+      }};
+      setTimeout(poll, 3000);
     }})
-    .catch(function(err) {{
-      btn.disabled = false; btn.textContent = origLabel;
-      panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
-    }});
+    .catch(function(err) {{ fail('Network error: ' + err); }});
 }}
 
 // Phase 1.4 — sort the cards within one pack section by a data
@@ -24328,20 +24404,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             str(mp4), mimetype="video/mp4", as_attachment=False, download_name=f"{card_id}.mp4"
         )
 
-    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
-    def api_run_reel(run_id: str):
-        """Render (or serve cached) a multi-card MP4 reel for the meet.
+    def _assemble_reel_inputs(run_id: str):
+        """Shared validation + payload assembly for the reel routes.
 
-        Uses the top 3 ranked achievements by default; caller can override
-        the count with ?n=<int> up to a hard cap of 5.
+        Returns ``(inputs_dict, None)`` on success or ``(None, (response,
+        status))`` so the sync route and the async job route stay
+        behaviourally identical.
         """
-        from flask import send_file
-
-        try:
-            from mediahub.visual import motion as _motion
-        except Exception as e:
-            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
-
         run_data = _load_run(run_id)
         if run_data is None:
             run_dir = RUNS_DIR / run_id
@@ -24350,11 +24419,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 try:
                     run_data = json.loads(run_json.read_text())
                 except Exception as e:
-                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+                    return None, (jsonify({"error": f"run_load_failed: {e}"}), 500)
             else:
-                return jsonify({"error": "run_not_found"}), 404
+                return None, (jsonify({"error": "run_not_found"}), 404)
         if not _can_access_run(run_id, run_data, _active_profile_id()):
-            return jsonify({"error": "run_not_found"}), 404
+            return None, (jsonify({"error": "run_not_found"}), 404)
 
         try:
             n = int(request.args.get("n", "3"))
@@ -24375,7 +24444,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             # Fall back to the cards array if no recognition report.
             top = [{"achievement": c} for c in (run_data.get("cards") or [])[:n]]
         if not top:
-            return jsonify({"error": "no_cards_for_reel"}), 404
+            return None, (jsonify({"error": "no_cards_for_reel"}), 404)
 
         meet_name = (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", "")
         cards: list[dict] = []
@@ -24411,14 +24480,44 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             cid = c.get("id") or c.get("swim_id") or ""
             brief_list.append(_latest_brief_for_card(run_id, cid) if cid else None)
 
+        return (
+            {
+                "n": n,
+                "cards": cards,
+                "brand_kit": brand_kit,
+                "out_path": out_path,
+                "meet_name": meet_name,
+                "briefs": brief_list,
+            },
+            None,
+        )
+
+    @app.route("/api/runs/<run_id>/reel", methods=["POST", "GET"])
+    def api_run_reel(run_id: str):
+        """Render (or serve cached) a multi-card MP4 reel for the meet.
+
+        Uses the top 3 ranked achievements by default; caller can override
+        the count with ?n=<int> up to a hard cap of 5.
+        """
+        from flask import send_file
+
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
         try:
             with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
                 mp4 = _motion.render_meet_reel(
-                    cards,
-                    brand_kit,
-                    out_path,
-                    meet_name=meet_name,
-                    briefs=brief_list,
+                    inputs["cards"],
+                    inputs["brand_kit"],
+                    inputs["out_path"],
+                    meet_name=inputs["meet_name"],
+                    briefs=inputs["briefs"],
                 )
         except _RenderBusy:
             return _render_busy_response("reel")
@@ -24443,6 +24542,138 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             ), 500
         return send_file(
             str(mp4),
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=f"meet_reel_{run_id}.mp4",
+        )
+
+    @app.route("/api/runs/<run_id>/reel-job", methods=["POST"])
+    def api_run_reel_job(run_id: str):
+        """Kick off a background reel render; returns ``{job_id, poll_url}``.
+
+        The synchronous /reel route holds the HTTP connection for the whole
+        30–90s first render, which front-line proxies are happy to kill —
+        from the user's side the button simply "does nothing". Same cure as
+        the V10 graphic-variants job: render in a daemon thread, poll for
+        the outcome, then stream the finished MP4 from the file route.
+        """
+        try:
+            from mediahub.visual import motion as _motion
+        except Exception as e:
+            return jsonify({"error": f"motion_module_unavailable: {e}"}), 503
+
+        inputs, err = _assemble_reel_inputs(run_id)
+        if err is not None:
+            return err
+
+        # url_for needs the request context — resolve before the thread.
+        file_url = url_for("api_run_reel_file", run_id=run_id, n=inputs["n"])
+        job_id = uuid.uuid4().hex
+        job: dict = {
+            "id": job_id,
+            "kind": "reel",
+            "status": "running",
+            "error": "",
+            "user_message": "",
+            "video_url": "",
+            "created_at": time.time(),
+            "owner_pid": _active_profile_id() or "",
+        }
+        _variant_jobs_gc()
+        _variant_job_save(job)
+
+        def _worker() -> None:
+            try:
+                with _render_slot("reel", run_id, timeout=_RENDER_TRY_TIMEOUT):
+                    mp4 = _motion.render_meet_reel(
+                        inputs["cards"],
+                        inputs["brand_kit"],
+                        inputs["out_path"],
+                        meet_name=inputs["meet_name"],
+                        briefs=inputs["briefs"],
+                    )
+                if not Path(mp4).exists():
+                    raise RuntimeError("mp4 missing after render")
+                job["status"] = "done"
+                job["video_url"] = file_url
+            except _RenderBusy:
+                job["status"] = "error"
+                job["error"] = "renderer_busy"
+                job["user_message"] = (
+                    "Another video is rendering right now — try again in a minute."
+                )
+            except Exception as e:
+                _payload = _motion_error_payload(e)
+                job["status"] = "error"
+                job["error"] = str(_payload.get("detail") or e)
+                job["user_message"] = str(_payload.get("user_message") or "")
+            _variant_job_save(job)
+
+        threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "job_id": job_id,
+                    "poll_url": url_for("api_reel_job_status", job_id=job_id),
+                }
+            ),
+            202,
+        )
+
+    @app.route("/api/reel-jobs/<job_id>", methods=["GET"])
+    def api_reel_job_status(job_id: str):
+        """Progress + outcome for a background reel job (same gating as variants)."""
+        job = _variant_job_load(job_id)
+        if job is None or job.get("kind") != "reel":
+            return jsonify({"error": "job_not_found"}), 404
+        if (job.get("owner_pid") or "") != (_active_profile_id() or ""):
+            return jsonify({"error": "job_not_found"}), 404
+        status = job.get("status", "running")
+        error = job.get("error") or None
+        if status == "running" and (
+            time.time() - float(job.get("updated_at") or 0.0) > _VARIANT_JOB_STALL_S
+        ):
+            status = "error"
+            error = "job_lost: the render worker restarted mid-job — try again"
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": status,
+                "video_url": job.get("video_url") or "",
+                "error": error,
+                "user_message": job.get("user_message") or "",
+            }
+        )
+
+    @app.route("/api/runs/<run_id>/reel-file", methods=["GET"])
+    def api_run_reel_file(run_id: str):
+        """Serve an already-rendered reel MP4 — never triggers a render."""
+        from flask import send_file
+
+        run_data = _load_run(run_id)
+        if run_data is None:
+            run_json = RUNS_DIR / run_id / "run.json"
+            if run_json.exists():
+                try:
+                    run_data = json.loads(run_json.read_text())
+                except Exception as e:
+                    return jsonify({"error": f"run_load_failed: {e}"}), 500
+            else:
+                return jsonify({"error": "run_not_found"}), 404
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        try:
+            n = int(request.args.get("n", "3"))
+        except (TypeError, ValueError):
+            n = 3
+        n = max(1, min(5, n))
+        path = RUNS_DIR / run_id / "motion" / f"reel_{n}.mp4"
+        if not path.exists():
+            return jsonify({"error": "reel_not_rendered"}), 404
+        return send_file(
+            str(path),
             mimetype="video/mp4",
             as_attachment=False,
             download_name=f"meet_reel_{run_id}.mp4",

@@ -353,7 +353,14 @@ def run_pipeline_v4(
         step(
             "Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable)."
         )
+    _pb_fetch_started_iso = ""
+    _pb_fetch_start_wall = 0.0
+    _pb_fetch_end_wall = 0.0
     if fetch_pbs and our_results and effective_filter and not _skip_pb_discovery:
+        import time as _time
+
+        _pb_fetch_started_iso = datetime.now(timezone.utc).isoformat()
+        _pb_fetch_start_wall = _time.time()
         try:
             pb_snapshots = _enrich_pbs_via_discovery(
                 meet=meet,
@@ -367,6 +374,7 @@ def run_pipeline_v4(
         except Exception as e:
             step(f"PB discovery failed: {e}")
             meet.add_warning("pb_enrichment_failed", str(e), severity="warn")
+        _pb_fetch_end_wall = _time.time()
 
     # 9. Standards
     standards = load_registry()
@@ -406,6 +414,31 @@ def run_pipeline_v4(
         "n_claims": len(det.claims),
     }
     step(f"V3 detector: {len(det.claims)} claims.")
+
+    # 10.5 Per-swimmer PB audit. The legacy SR scraper built this inside its
+    # own fetch loop; the discovery path never did, so every discovery run
+    # showed "PB data was fetched but the full per-swimmer audit wasn't
+    # saved" on the review page. Assemble it here from what discovery
+    # actually fetched and what the detector actually decided.
+    if pb_snapshots:
+        try:
+            run.pb_audit = _build_pb_audit(
+                run_id=rid,
+                meet=meet,
+                our_swimmer_keys=our_keys,
+                pb_snapshots=pb_snapshots,
+                claims=det.claims,
+                started_at=_pb_fetch_started_iso,
+                fetch_start_wall=_pb_fetch_start_wall,
+                fetch_end_wall=_pb_fetch_end_wall,
+            )
+            step(
+                f"PB audit saved: {len(getattr(run.pb_audit, 'per_swimmer', []) or [])} "
+                f"swimmer audits, {getattr(run.pb_audit, 'pb_decisions_count', 0)} PB decisions."
+            )
+        except Exception as e:
+            step(f"PB audit assembly failed: {e}")
+            meet.add_warning("pb_audit_failed", str(e), severity="warn")
 
     cards = group_claims_into_cards(det.claims, meet_name=meet.name)
     cards = attach_evidence_from_claims(cards)
@@ -585,3 +618,131 @@ def _enrich_pbs_via_discovery(
             continue
         snapshots[rkey] = snap
     return snapshots
+
+
+def _build_pb_audit(
+    *,
+    run_id: str,
+    meet: Meet,
+    our_swimmer_keys: set,
+    pb_snapshots: dict,
+    claims: list,
+    started_at: str,
+    fetch_start_wall: float,
+    fetch_end_wall: float,
+):
+    """Assemble a ``RunPBAudit`` from discovery snapshots + detector decisions.
+
+    Real data only: per-swimmer fetch outcomes, the events each lookup
+    actually returned, the source URLs used, and the PB calls the V3
+    detector actually made. Identity verification isn't part of the
+    discovery flow, so ``identity`` stays None (the audit page then shows
+    0 verified / 0 needs-verification rather than inventing matches).
+    """
+    from swim_content_pb.schema import PBAudit, PBDecision, PreviousPB
+    from swim_content_pb.audit import aggregate_run_audit
+
+    # Detector claim kinds → V7.3 audit decision statuses. "pb_confirmed"
+    # here means "beat the best prior time discovery found", which is the
+    # improvement-proof flavour of confirmation, not the official
+    # time+date match.
+    claim_status = {
+        "pb_confirmed": "CONFIRMED_PB_IMPROVEMENT",
+        "pb_likely": "LIKELY_PB",
+    }
+
+    decisions_by_key: dict[str, list] = {}
+    for c in claims:
+        status = claim_status.get(getattr(c, "kind", ""))
+        if not status:
+            continue
+        key = getattr(c, "swimmer_tiref", None) or ""
+        extra = getattr(c, "extra", None) or {}
+        prev = None
+        prior_sec = extra.get("prior_time_sec")
+        if prior_sec:
+            prev = PreviousPB(
+                swimmer_asa_id=str(key),
+                swimmer_name=c.swimmer_name,
+                event_distance=c.distance,
+                event_stroke=c.stroke,
+                course=c.course,
+                time_seconds=float(prior_sec),
+                time_display=extra.get("prior_time_str") or "",
+                pb_date_iso=extra.get("prior_date_iso"),
+                pb_meet_name=None,
+                source_url=extra.get("source_url") or "",
+                fetched_at=extra.get("retrieved_at") or "",
+            )
+        delta = extra.get("delta_sec")
+        improvement = None
+        if delta is not None and prior_sec:
+            try:
+                improvement = round(100.0 * (-float(delta)) / float(prior_sec), 2)
+            except Exception:
+                improvement = None
+        decisions_by_key.setdefault(str(key), []).append(
+            PBDecision(
+                status=status,
+                swim_id="",
+                swimmer_asa_id=str(key),
+                swimmer_name=c.swimmer_name,
+                event=c.event_label,
+                course=c.course,
+                current_time_seconds=c.time_sec,
+                current_time_display=c.time_str,
+                previous_pb=prev,
+                delta_seconds=float(delta) if delta is not None else None,
+                improvement_percentage=improvement,
+                same_meet_excluded_count=0,
+                reason=(
+                    extra.get("note")
+                    or (
+                        "beat the best prior time found by live PB discovery"
+                        if status == "CONFIRMED_PB_IMPROVEMENT"
+                        else "could not fully verify against prior history"
+                    )
+                ),
+                evidence=[u for u in [extra.get("source_url")] if u],
+                safe_to_post=status == "CONFIRMED_PB_IMPROVEMENT",
+                confidence="high" if status == "CONFIRMED_PB_IMPROVEMENT" else "medium",
+            )
+        )
+
+    per_swimmer: list = []
+    for key in sorted(our_swimmer_keys):
+        sw = meet.swimmers.get(key)
+        name = f"{sw.first_name} {sw.last_name}".strip() if sw is not None else str(key)
+        snap = pb_snapshots.get(key)
+        events = (
+            sorted((getattr(snap, "pb_times", None) or {}).keys()) if snap is not None else []
+        )
+        src = getattr(snap, "source_url", None) if snap is not None else None
+        per_swimmer.append(
+            PBAudit(
+                asa_id=str(key),
+                hy3_name=name,
+                sr_name=None,
+                identity=None,
+                events_fetched=events,
+                pb_decisions=decisions_by_key.get(str(key), []),
+                fetch_ok=bool(getattr(snap, "fetch_ok", False)) if snap is not None else False,
+                fetch_error=(
+                    getattr(snap, "error", None) if snap is not None else "no lookup attempted"
+                ),
+                source_urls=[src] if src else [],
+                fetched_at=getattr(snap, "retrieved_at", None) if snap is not None else None,
+            )
+        )
+
+    return aggregate_run_audit(
+        run_id=run_id,
+        per_swimmer=per_swimmer,
+        # Discovery manages its own per-swimmer caches; there are no
+        # FetchResult objects to count hits/misses from here.
+        fetch_results={},
+        started_at=started_at,
+        fetch_start_wall=fetch_start_wall,
+        fetch_end_wall=fetch_end_wall,
+        budget_exceeded=False,
+    )
