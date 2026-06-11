@@ -27,7 +27,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `bfd88c972` · Merge pull request #331 from elijahkendrick04/claude/funny-dirac-9549g9
+**Last updated:** 2026-06-11 · `7e0142a78` · Merge pull request #329 from elijahkendrick04/claude/upbeat-lovelace-o46ull
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -35,18 +35,18 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `eaf6da84b` | docs(roadmap): absorb the June 2026 ideas backlog into the plan |
 | 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
 | 2026-06-11 | `42ae68f42` | fix: a11y: Documents must have <title> element to aid in navigati (#332) |
 | 2026-06-11 | `001d28a7d` | autotest: close the loop — state-branch memory, fixed lifecycle, deploy grace, judge grounding |
 | 2026-06-11 | `d990843fe` | docs(roadmap): add manual Changelog section + 2026-06-11 daily scan entry |
+| 2026-06-11 | `9b5e37a89` | docs(research): product ideas backlog — June 2026 research pass |
 | 2026-06-11 | `745653965` | Format main's healthz a11y block (ruff 0.8.4) after merging origin/main |
 | 2026-06-11 | `99f3c4601` | Apply ruff 0.8.4 formatting to the files this PR touches (CI hygiene hook) |
 | 2026-06-11 | `281782cc4` | Fix double-wrapped error responses in spotlight caption composer |
 | 2026-06-11 | `5b4b04359` | Add async reel-job endpoint tests (done/error/tenant-gating/file-route contracts) |
 | 2026-06-11 | `b630c9bc6` | Plan tab from org sport, turn-into entry clarity, Event Preview redesign, draft scheduling |
 | 2026-06-11 | `d558ca581` | Spotlight parity with meet recap; per-card photos with athlete memory; run deletion is total |
-| 2026-06-11 | `c1edb9481` | Onboarding: manual build mode, AI-decided fourth colour, working bottom CTA |
-| 2026-06-11 | `b99e85941` | Homepage: centre hero + section titles, drop trust strip, calm fonts, neutral demo copy |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
