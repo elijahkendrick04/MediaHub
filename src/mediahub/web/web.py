@@ -12766,14 +12766,22 @@ Relay team broke club record"></textarea>
         started = _time.monotonic()
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
-        # Return HTML (with a valid <title>) when a browser requests the page so
-        # that axe-core's document-title rule (WCAG 2.4.2) is satisfied; API/
-        # monitoring clients that send Accept: application/json (or no Accept)
-        # get plain JSON — the existing probe contract is unchanged.
-        best = request.accept_mimetypes.best_match(
-            ["text/html", "application/json"], default="application/json"
+        # Return HTML (with a valid <title>) for browser navigations so that
+        # axe-core's document-title rule (WCAG 2.4.2) is satisfied.  Two
+        # complementary signals cover edge cases where a reverse-proxy strips
+        # one or the other:
+        #   • Accept: text/html — standard content-negotiation
+        #   • Sec-Fetch-Dest: document — fetch-metadata sent by Chromium/Firefox
+        #     on top-level page navigations (page.goto in Playwright)
+        # Monitoring tools (curl, urllib, Render's own liveness probe) send
+        # neither, so they continue to receive JSON — the existing contract.
+        wants_html = (
+            request.accept_mimetypes.best_match(
+                ["text/html", "application/json"], default="application/json"
+            ) == "text/html"
+            or request.headers.get("Sec-Fetch-Dest", "") == "document"
         )
-        if best == "text/html":
+        if wants_html:
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -12785,8 +12793,11 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=200, mimetype="text/html")
-        return jsonify(payload)
+            return Response(html, status=200, mimetype="text/html",
+                            headers={"Vary": "Accept, Sec-Fetch-Dest"})
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     @app.route("/healthz/ping")
     def healthz_ping():

@@ -110,3 +110,27 @@ def test_healthz_json_explicit_accept(client):
     assert r.status_code == 200
     assert r.content_type.startswith("application/json")
     assert r.get_json() is not None
+
+
+def test_healthz_sec_fetch_dest_document_returns_html(client):
+    """Sec-Fetch-Dest: document (sent by Chromium/Firefox on page.goto) must
+    trigger the HTML path even when the Accept header is absent or generic —
+    this guards against reverse-proxy stripping of the Accept header."""
+    r = client.get("/healthz", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_vary_header_present(client):
+    """Both HTML and JSON responses from /healthz must carry Vary: Accept,
+    Sec-Fetch-Dest so that caching proxies store separate entries per
+    browser/API client rather than serving a cached JSON to browsers."""
+    html_r = client.get("/healthz", headers={"Accept": "text/html"})
+    json_r = client.get("/healthz", headers={"Accept": "application/json"})
+    for r in (html_r, json_r):
+        vary = r.headers.get("Vary", "")
+        assert "Accept" in vary, f"Vary missing 'Accept': {vary}"
+        assert "Sec-Fetch-Dest" in vary, f"Vary missing 'Sec-Fetch-Dest': {vary}"
