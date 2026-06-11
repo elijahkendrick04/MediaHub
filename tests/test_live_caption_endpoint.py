@@ -1,7 +1,7 @@
 """
 tests_v75/test_live_caption_endpoint.py — V8.1 Live Caption endpoint tests.
 
-UPDATED for V8.1 (NO MASQUERADING). Per V8_1_FIX_SPEC.md Issue 3:
+UPDATED for V8.1 (NO MASQUERADING):
 
   When the AI tab is requested but no Anthropic API key is configured,
   the endpoint must NOT silently render a voice caption and label it AI.

@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-green.svg)](https://flask.palletsprojects.com/)
-[![Tests](https://img.shields.io/badge/tests-2836%20passing-brightgreen.svg)](docs/AUDIT_REPORTS.md)
+[![Tests](https://img.shields.io/badge/tests-3815%20passing-brightgreen.svg)](tests/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 
 > **New here and not a coder?** Start with **[START_HERE.md](START_HERE.md)** — a
@@ -17,7 +17,7 @@
 > medals); more sports and more "decide-and-post-for-me" automation are on the way
 > (see the [roadmap](docs/ROADMAP.md)).
 
-**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack that is **truly free to self-host with no hidden fees**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 0–5); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
+**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 0–5); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
 
 **What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
 
