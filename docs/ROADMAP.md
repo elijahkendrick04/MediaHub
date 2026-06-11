@@ -28,7 +28,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `372b6211a` · Merge pull request #338 from elijahkendrick04/claude/stoic-goldberg-wqpa7b [skip render]
+**Last updated:** 2026-06-11 · `6ff452a86` · Merge pull request #339: Graphic/reel builder — motion ↔ still parity, motion intents, multi-format 
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -36,6 +36,8 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `db4953273` | style: ruff-format (pinned 0.8.4) on touched files |
+| 2026-06-11 | `64ca81ee6` | Motion ↔ still parity: archetype scenes, motion intents, role parity, formats, reel narrative |
 | 2026-06-11 | `fe6e607c3` | docs(roadmap): add Phase 6 — our own creative suite (P6.1–P6.24) |
 | 2026-06-11 | `eaf6da84b` | docs(roadmap): absorb the June 2026 ideas backlog into the plan |
 | 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
@@ -45,8 +47,6 @@ in any commit message to move an item:
 | 2026-06-11 | `9b5e37a89` | docs(research): product ideas backlog — June 2026 research pass |
 | 2026-06-11 | `745653965` | Format main's healthz a11y block (ruff 0.8.4) after merging origin/main |
 | 2026-06-11 | `99f3c4601` | Apply ruff 0.8.4 formatting to the files this PR touches (CI hygiene hook) |
-| 2026-06-11 | `281782cc4` | Fix double-wrapped error responses in spotlight caption composer |
-| 2026-06-11 | `5b4b04359` | Add async reel-job endpoint tests (done/error/tenant-gating/file-route contracts) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
