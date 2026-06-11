@@ -12,6 +12,7 @@ the ADRs and companion docs linked under [Standing context](#standing-context).
 
 Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
 
+- **2026-06-11** — **Phase 6 — Creative-suite breadth added** (maintainer instruction): every content-creation feature in the two checked-in competitor inventories ([Canva](research/CANVA_FEATURE_INVENTORY_2026.md), [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)) now has a MediaHub-shaped build plan — **our own first-party versions, not integrations of theirs** — organised into 24 gated work packages (P6.1–P6.24) with a feature-by-feature coverage index proving nothing was missed. Long-form mapping: [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). Phase 6 sits behind the Phase C gates like P3/P4/P5; standing rules (hosted-only, approval-first, deterministic engine, Gemini-first honest-error AI, GWS exclusion) all hold. [roadmap engine]
 - **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
 
 ## Status (auto-updated)
@@ -69,6 +70,30 @@ are gated behind Phase C's exit criteria (see Standing context).
 - **P5.2** · Phase 5 (gated) — Piper local TTS replaces edge-tts · ❌ **NOT STARTED**
 - **P5.3** · Phase 5 (gated) — whisper.cpp / faster-whisper local ASR for reel captions · ❌ **NOT STARTED**
 - **P5.4** · Phase 5 (gated) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
+- **P6.1** · Phase 6 (gated) — Smart format catalogue + format transformer: every Canva/Adobe-class design type as a data-driven club `FormatSpec` (certificates, posters, programmes, yearbooks, per-channel sizes); `turn_into` v2 re-targets any approved design · ❌ **NOT STARTED**
+- **P6.2** · Phase 6 (gated) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam · ❌ **NOT STARTED**
+- **P6.3** · Phase 6 (gated) — Generative imagery suite behind our own `media_ai` provider seam: generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
+- **P6.4** · Phase 6 (gated) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
+- **P6.5** · Phase 6 (gated) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
+- **P6.6** · Phase 6 (gated) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
+- **P6.7** · Phase 6 (gated) — Typography system: curated self-hosted font catalogue + per-org uploads, AI pairing, deterministic text-effect tokens (shadow/neon/curve/extrude/warp), formatting depth · ❌ **NOT STARTED**
+- **P6.8** · Phase 6 (gated) — Element & stock libraries: brand-token-recolourable sport-editorial packs, own open-collection-seeded stock pools, embedding search, annotate/draw layer · ❌ **NOT STARTED**
+- **P6.9** · Phase 6 (gated) — Charts & insights: deterministic brand-styled stat graphics from canonical results/history + grounded AI takeaways and chart recommendations; diagram formats · ❌ **NOT STARTED**
+- **P6.10** · Phase 6 (gated) — Motion vocabulary: tokenised animation presets/transitions compiled to Remotion + FFmpeg + CSS, shared-element transitions, motion paths, reduce-motion variants · ❌ **NOT STARTED**
+- **P6.11** · Phase 6 (gated) — Brand platform depth: multi-kit (sponsor/event/section co-branding), deterministic brand check + AI auto-fix, token locks, brand home, kit-edit re-render sweep · ❌ **NOT STARTED**
+- **P6.12** · Phase 6 (gated) — Document engine: meet programmes / season reports / sponsor proposals / AGM decks, presenter surface (notes, remote, autoplay), PPTX/DOCX round-trip, PDF utilities · ❌ **NOT STARTED**
+- **P6.13** · Phase 6 (gated) — Club microsites + link-in-bio + forms + QR + vetted interactive widgets (countdowns, medal tally, polls), data-generated and publish-gated · ❌ **NOT STARTED**
+- **P6.14** · Phase 6 (gated) — Email & newsletter composer: email-safe branded HTML auto-assembled from the period's approved content; export-first, send-adapter later · ❌ **NOT STARTED**
+- **P6.15** · Phase 6 (gated) — Data hub + bulk personalisation: user-facing canonical tables with provenance, CSV/XLSX round-trip, deterministic derived columns, review-queued bulk generation ("certificates for all 47 PB swimmers") · ❌ **NOT STARTED**
+- **P6.16** · Phase 6 (gated) — Planner calendar/board: drag-reschedule through the publish gate, club-aware key dates, per-channel previews + safe zones, first-party performance-analytics loop feeding the planner · ❌ **NOT STARTED**
+- **P6.17** · Phase 6 (gated) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
+- **P6.18** · Phase 6 (gated) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
+- **P6.19** · Phase 6 (gated) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
+- **P6.20** · Phase 6 (gated) — MediaHub platform surface: versioned public API + signed webhooks + MCP server (drive MediaHub from Claude/ChatGPT/Gemini-class agents), first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
+- **P6.21** · Phase 6 (gated) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
+- **P6.22** · Phase 6 (gated) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
+- **P6.23** · Phase 6 (gated) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
+- **P6.24** · Phase 6 (gated) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO -->
 
 ## Completed
@@ -127,7 +152,9 @@ linked ADRs and research docs:
 [AUTONOMY_MODEL](AUTONOMY_MODEL.md) · [SPORT_PROFILES](SPORT_PROFILES.md) ·
 [ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md) ·
 [DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md) · [THEMING](THEMING.md) ·
-[GENERATION](GENERATION.md) · research base in
+[GENERATION](GENERATION.md) ·
+[CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) (Phase 6 long-form) ·
+research base in
 [research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md) ·
 new-starter path: [START_HERE](../START_HERE.md) + [GLOSSARY](../GLOSSARY.md).
 
@@ -144,7 +171,7 @@ brain** for sports teams — software that works out *what a team should post*,
 drafts it, and (where a team allows it) publishes it largely on its own. Swimming
 becomes the **first example** of a general pattern, not the whole product.
 
-The plan now has **six stages, Phase 0 to Phase 5**:
+The plan now has **seven stages, Phase 0 to Phase 6**:
 
 - **Phase 0 — De-risk:** make sure nothing in the core forces a hidden fee.
   *(✅ done — 2026-06-10.)*
@@ -156,8 +183,11 @@ The plan now has **six stages, Phase 0 to Phase 5**:
 - **Phase 4 — Post directly:** publish straight to the platforms (and stop needing
   the paid Buffer service).
 - **Phase 5 — Free AI everywhere:** run the AI locally so there are no per-use fees.
+- **Phase 6 — Our own creative suite:** MediaHub's own version of everything
+  Canva and Adobe Express can make — but filled in automatically from the
+  club's data instead of starting from a blank page.
 
-> These six stages **supersede** the previous three-stage plan (*Parity →
+> These stages **supersede** the previous three-stage plan (*Parity →
 > Distinction → Leadership*). That older plan's detailed build prompts are kept in
 > the appendices for reference.
 
@@ -193,7 +223,7 @@ themselves automatically whenever we ship something — you don't edit those by 
 ---
 
 > **Reading this:** the single forward-looking roadmap for MediaHub, organised as
-> **Phase 0–5**. Only *not-yet-done* work is tracked in detail; shipped work is
+> **Phase 0–6**. Only *not-yet-done* work is tracked in detail; shipped work is
 > summarised under **"Where we are today."** The previous spine's build and
 > verification prompts live in the appendices: **Appendix A** (Generative Content
 > Engine v2), **Appendix B** (growth & expansion — *legacy sequence, superseded*),
@@ -1038,6 +1068,208 @@ built around.
 
 ---
 
+## Phase 6 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · ❌ **NOT STARTED (gated)**
+
+**Goal.** Build **MediaHub's own first-party version of every content-creation
+capability Canva and Adobe Express ship** — re-expressed through this product's
+thesis (data in → meaningful, branded, approval-gated content out), never by
+integrating their tools or becoming a blank-template shop. The evidence base is
+two exhaustive competitor inventories checked in at
+[`research/CANVA_FEATURE_INVENTORY_2026.md`](research/CANVA_FEATURE_INVENTORY_2026.md)
+and
+[`research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md`](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md);
+**every bullet in both** is mapped — feature by feature, with a completeness
+index proving none is missed — in the long-form companion
+[`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md) (added 2026-06-11,
+maintainer instruction). The phase essay below is the summary; the companion
+doc is the build depth.
+
+**Gating & order.** Phase 6 sits behind the same two Phase C gates as P3/P4/P5
+(zero-founder onboarding; ≥10 clubs paying annually). Within the phase, order
+is **pull-driven** — build what paying clubs ask for first; the numbering is a
+default sequence, not a promise. Standing rules hold everywhere: hosted-only
+(ADR-0011), approval-first publishing + the P2.3 gate, the deterministic-engine
+boundary, Gemini→Anthropic honest-error AI, self-hosted fonts, and the GWS /
+9router exclusions. External services appear only as optional flag-gated
+provider slots behind our own interfaces where first-party is impossible
+(model hosting, platform APIs, print fulfilment, music rights).
+
+**Exit criterion.** A club can run its **entire content life inside MediaHub**
+— social, print, email, microsite, video, documents — without reaching for
+Canva/Express; measured per-item (each P6 item carries its own exit in the
+companion doc) and in aggregate by wedge clubs actually cancelling their Canva
+habit.
+
+### P6.1 — Smart format catalogue & format transformer · ❌
+Every design type both products offer becomes a data-driven club `FormatSpec`
+(certificates, posters, meet programmes, yearbooks, athlete one-pagers, season
+calendars, carousels, memes, per-channel sizes…) on the existing
+archetype/brief/renderer spine; `turn_into` v2 re-targets any approved design
+to any format/size by re-layout, not scaling. *(Companion §P6.1.)*
+
+### P6.2 — Conversational creative assistant & agentic editing · ❌
+The club content copilot: create/edit/explain by chat (and voice), executed as
+validated **design-spec patches** through `ai_core.ask_with_tools` — the agent
+never paints pixels, every step auditable; Magic-Write-class text tools; org
+assistant memory with inspect/delete. *(Companion §P6.2.)*
+
+### P6.3 — Generative imagery & image-AI services · ❌
+One `media_ai` image-provider seam (Gemini-first, honest errors) for generate /
+edit / fill / expand / remove / subject-lift / text-lift / upscale /
+style-match / mockups — scenery and fix-ups only, never fabricated results
+data; provenance-stamped (P6.22). *(Companion §P6.3.)*
+
+### P6.4 — Photo editor (deterministic recipes) · ❌
+Non-destructive `EditRecipe`s on media-library assets: filters, adjustments,
+crop/perspective/flip, crop-to-shape, frames/collages, blur brush (also the
+safeguarding tool), pool-light auto-enhance, HEIC ingest; pure pixel maths,
+selection maths untouched. *(Companion §P6.4.)*
+
+### P6.5 — Video suite (footage path) · ❌
+Phone clips → branded reels: EDL timeline over the shipped Remotion/FFmpeg
+engines, ASR captions (P5.3 seam), **Clip-Maker-for-sport** (moment detection,
+saliency reframe, caption burn-in), beat sync, browser screen/webcam recorders,
+per-clip recipes; avatars only as a disclosed, explicitly-requested opt-in.
+*(Companion §P6.5.)*
+
+### P6.6 — Audio engine · ❌
+Own licence-clean music/SFX pools with mood tags + a rights ledger
+(fingerprint checks; chart-music rights only via a flag-gated slot), the TTS
+seam grown into a voice layer (catalogue, params, athlete-name pronunciation
+lexicon), denoise/levelling, ducking; voice cloning consent-gated and audited.
+*(Companion §P6.6.)*
+
+### P6.7 — Typography system & text effects · ❌
+Curated **self-hosted** font catalogue + per-org uploads (licence-attested),
+AI pairing with reasons, deterministic text-effect tokens (shadow/lift/hollow/
+splice/echo/glitch/neon/curve/extrude/warp) policed by APCA, formatting depth,
+data-bound dynamic text. *(Companion §P6.7.)*
+
+### P6.8 — Elements, stock & drawing · ❌
+Sport-editorial element packs (SVG with brand-token slots — every element
+auto-on-brand), our own open-collection-seeded stock pools, embedding search +
+context-aware suggestions, telestration/annotate layer, club mascot/emoji
+packs. *(Companion §P6.8.)*
+
+### P6.9 — Charts, infographics & data storytelling · ❌
+The data advantage made visible: deterministic brand-styled stat graphics from
+canonical results + `history/` (progressions, PB drops, medal tables, record
+boards), AI chart recommendation and **grounded** insight takeaways (numbers
+computed first, LLM phrases), diagram formats, scroll-stories. *(Companion §P6.9.)*
+
+### P6.10 — Animation & motion system · ❌
+A tokenised brand motion vocabulary (in/loop/out presets, photo motion, motion
+paths, shared-element "match & move", page transitions, physics-flavoured
+curves) compiled once to Remotion + FFmpeg + CSS; click/step order for decks;
+reduce-motion variants everywhere. *(Companion §P6.10.)*
+
+### P6.11 — Brand platform depth · ❌
+Multi-kit (sponsor co-branding with pairing rules, event/section kits),
+deterministic brand check (ΔE/APCA/clear-space) + AI auto-fix patches, token
+locks, brand home page, kit-edit → re-render sweep across persisted briefs,
+palette-file import. *(Companion §P6.11.)*
+
+### P6.12 — Documents, decks & the PDF suite · ❌
+One paged document engine for the three club documents (meet programme, season
+report, sponsor proposal) + AGM decks: data-grounded outline→draft, presenter
+surface (notes, timer, phone remote, autoplay/kiosk), PPTX/DOCX round-trip,
+deck→MP4, honest bounded PDF utilities. *(Companion §P6.12.)*
+
+### P6.13 — Club microsites, link-in-bio, forms & widgets · ❌
+Data-generated pages (meet microsite, link-in-bio, event RSVP) on platform
+subdomains/BYO domains, forms feeding the data hub (ADR-0003 applies hard),
+vetted sandboxed widget catalogue (countdown, medal tally, polls), SEO layer,
+brand-safe QR generator. *(Companion §P6.13.)*
+
+### P6.14 — Email & newsletter design · ❌
+The `turn_into` newsletter made visual and portable: email-safe branded HTML
+auto-assembled from the period's approved content with an editorial AI pass;
+export/hosted-view first, direct-send adapter later behind the publish gate.
+*(Companion §P6.14.)*
+
+### P6.15 — Data hub, bulk generation & personalisation · ❌
+Canonical tables made user-facing (provenance per cell, CSV/XLSX round-trip,
+deterministic derived columns), club-relevant connectors (Swim England API per
+PC.6a) on `scheduler/` refresh, and review-queued **bulk generation** —
+"certificates for all 47 PB swimmers" in one click; bulk never bypasses
+approval. *(Companion §P6.15.)*
+
+### P6.16 — Planner calendar, board & performance analytics · ❌
+The P1.3 planner gets a calendar/board body (drag-reschedule re-evaluates the
+gate), club-aware key dates, per-channel previews with safe zones, and a
+first-party post-P4 metrics loop (per-type/archetype attribution feeding the
+planner's ranking); sponsor A/B creative sets — prepare, never spend.
+*(Companion §P6.16.)*
+
+### P6.17 — Collaboration & review · ❌
+Committee-shaped review on the workflow spine: anchored comment threads,
+mentions, blocking tasks, version diff/restore, element locks, roles +
+group-approver rules, expiring share tokens for outside reviewers, the
+assistant taggable in threads. *(Companion §P6.17.)*
+
+### P6.18 — Export, conversion & delivery engine · ❌
+One export engine for every surface (adds SVG/GIF/PPTX/DOCX/WAV/print-PDF,
+quality/transparency options, bulk jobs) + the quick-action toolbox on the
+media library (image/video/PDF/GIF utilities) — all deterministic code we own.
+*(Companion §P6.18.)*
+
+### P6.19 — Print & merch pipeline · ❌
+Print-readiness as engineering: physical `FormatSpec`s, CMYK PDF/X with
+bleed/marks, **deterministic preflight with explanations**, merch formats +
+mockups; fulfilment only ever as an optional flag-gated slot — the default
+deliverable is a file any printer accepts. *(Companion §P6.19.)*
+
+### P6.20 — Platform surface: public API, webhooks & MCP · ❌
+A versioned org-scoped API over what the product already does, signed
+webhooks, published iPaaS recipes (their runtimes stay theirs), an **MCP
+server** so agents (Claude/ChatGPT/Gemini-class) drive MediaHub itself,
+first-party file interop (SVG/PSD/palettes), read-only embeds; marketplace
+explicitly long-term; GWS stays excluded. *(Companion §P6.20.)*
+
+### P6.21 — Mobile, PWA & access surfaces · ❌
+Hosted-only stands: an installable PWA with share-target capture to the media
+library (the poolside killer feature), offline-tolerant approval queue,
+mobile-first review/caption/crop; guest views via share tokens; native-store
+apps only if the PWA proves insufficient. *(Companion §P6.21.)*
+
+### P6.22 — AI governance, quotas & provenance · ❌
+The Shield analogue we mostly have, completed: per-org/per-feature quota
+ledger on `observability/` with a live usage panel (tier numbers belong to
+PC.4), moderation on generative surfaces, provenance manifests on AI media
+(C2PA-style where tooling allows), role-based feature permissions.
+*(Companion §P6.22.)*
+
+### P6.23 — Localisation & translation · ❌
+Welsh-first bilingual content (a real Swansea-wedge need): glossary-protected
+translation with layout-aware re-render and autofit absorption, side-by-side
+bilingual approval, bulk per-language variants, AI-dub pipeline (labelled),
+own UI string catalogue. *(Companion §P6.23.)*
+
+### P6.24 — Pro editor & round-trip (the Affinity answer) · ❌
+A fine-control editor as validated spec patches (layers, align/distribute,
+rulers/guides, page management, vector node/boolean ops, curves/levels) — and
+**round-trip, not suite-cloning**: layered SVG/PSD export/import so power
+users finish in their own pro tool; RAW/HDR/DTP explicitly non-goals.
+*(Companion §P6.24.)*
+
+**Building blocks.** Almost entirely seams that already ship: the design-spec
+director + archetypes (P1.4), `graphic_renderer` + autofit + saliency, both
+reel engines (P0.1), the cutout layer, the TTS/ASR/LLM provider slots (P0.4),
+`media_library`, `workflow` + publish gate, `scheduler/`, `notify/`,
+`observability/`, PC.3 tenancy. New heavy deps stay licence-vetted per
+[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) (e.g. `pillow-heif`,
+`pypdf`, `python-pptx`/`docx`, a PSD reader/writer, C2PA tooling — all behind
+our own modules).
+
+**Dependencies.** Gated behind **Phase C** (both exit gates) like P3/P4/P5.
+P6.16's analytics loop and P6.14's send adapter additionally need **P4**
+adapters; P6.2 voice input and P6.5 captions need the **P5.3** ASR seam
+filled (or a cloud provider on the same seam). Feeds back into **PC.4**
+packaging (quotas/tiers) and strengthens the wedge against the
+"volunteer-already-has-Canva" commodity pressure named in the diligence.
+
+---
+
 ## Cross-cutting investments (all phases)
 
 | Investment | Status | Notes |
@@ -1105,6 +1337,12 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    publish to ≥2 platforms incl. one free.
 8. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with no
    cloud keys.
+9. **P6 — Creative-suite breadth.** Our own first-party versions of the full
+   Canva / Adobe Express capability map, MediaHub-shaped (24 work packages,
+   P6.1–P6.24; feature-by-feature mapping + completeness index in
+   [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md)). Pull-driven order
+   once the gates open. *Exit:* a club runs its entire content life inside
+   MediaHub without reaching for Canva/Express.
 
 Run a **pilot** in parallel (one real club, the themed product) to surface UX holes the
 audits can't — see [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md). The pilot now doubles as the
