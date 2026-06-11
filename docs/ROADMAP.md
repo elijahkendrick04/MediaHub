@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `d6e5d5560` · Merge pull request #315 from elijahkendrick04/claude/gracious-carson-hdz1bt
+**Last updated:** 2026-06-11 · `3c6c67f4b` · Merge pull request #317 from elijahkendrick04/claude/gracious-carson-hdz1bt
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `302f11464` | feat(p2): complete Phase 2 — approval signal, single publish gate, guardrails, enum reconciliation |
 | 2026-06-11 | `5ac99091f` | style: apply pre-commit hygiene (ruff-format 0.8.4) to PR-touched files |
 | 2026-06-11 | `e31aaa362` | feat(p1): complete Phase 1 — slug-canonical taxonomy, cross-source planner, local brand-DNA |
 | 2026-06-10 | `dcf746829` | docs(roadmap): fold June 2026 external research pass into the long-form roadmap |
@@ -39,7 +40,6 @@ in any commit message to move an item:
 | 2026-06-10 | `c3f58776d` | autotest: refresh bug report [skip ci] |
 | 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 | 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
-| 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -51,8 +51,6 @@ are gated behind Phase C's exit criteria (see Standing context).
 - **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant · ⚠️ **BLOCKED**
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · ❌ **NOT STARTED**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · ❌ **NOT STARTED**
-- **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) · ❌ **NOT STARTED**
-- **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums · 🔵 **IN PROGRESS**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -86,6 +84,8 @@ are gated behind Phase C's exit criteria (see Standing context).
 - ✅ **P1.2** · Phase 1 — Realise the post-type taxonomy in code (extend vs layer on `club_platform.content_types` — Council-gated data-model call) *(completed 2026-06-11)*
 - ✅ **P1.3** · Phase 1 — Cross-source planner (the strategy brain): fuse own/external/direct signals into a ranked plan keyed by sport profile *(completed 2026-06-11)*
 - ✅ **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) *(completed 2026-06-11)*
+- ✅ **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) *(completed 2026-06-11)*
+- ✅ **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums *(completed 2026-06-11)*
 <!-- /ROADMAP:DONE -->
 
 ## Standing context
