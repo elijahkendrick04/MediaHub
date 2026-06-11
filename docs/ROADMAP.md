@@ -28,7 +28,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `6ff452a86` · Merge pull request #339: Graphic/reel builder — motion ↔ still parity, motion intents, multi-format 
+**Last updated:** 2026-06-12 · `40daecdf6` · Merge pull request #342: Format the whole back-catalogue; make repo hygiene blocking (whole-repo)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -36,6 +36,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `23b91e2ed` | chore: format the whole back-catalogue and make repo hygiene blocking |
 | 2026-06-11 | `db4953273` | style: ruff-format (pinned 0.8.4) on touched files |
 | 2026-06-11 | `64ca81ee6` | Motion ↔ still parity: archetype scenes, motion intents, role parity, formats, reel narrative |
 | 2026-06-11 | `fe6e607c3` | docs(roadmap): add Phase 6 — our own creative suite (P6.1–P6.24) |
@@ -45,8 +46,6 @@ in any commit message to move an item:
 | 2026-06-11 | `001d28a7d` | autotest: close the loop — state-branch memory, fixed lifecycle, deploy grace, judge grounding |
 | 2026-06-11 | `d990843fe` | docs(roadmap): add manual Changelog section + 2026-06-11 daily scan entry |
 | 2026-06-11 | `9b5e37a89` | docs(research): product ideas backlog — June 2026 research pass |
-| 2026-06-11 | `745653965` | Format main's healthz a11y block (ruff 0.8.4) after merging origin/main |
-| 2026-06-11 | `99f3c4601` | Apply ruff 0.8.4 formatting to the files this PR touches (CI hygiene hook) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
