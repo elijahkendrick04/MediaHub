@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-11 · `3803627aa` · Merge pull request #320 from elijahkendrick04/claude/clever-hopper-laousr
+**Last updated:** 2026-06-11 · `5bdf525fd` · Merge pull request #321 from elijahkendrick04/autotest/fix-091768f0d07d
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,8 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `45aa7f2c9` | fix: a11y: Documents must have <title> element to aid in navigati |
+| 2026-06-11 | `61e2e5656` | autotest: refresh bug report [skip ci] |
 | 2026-06-11 | `ab71bef95` | feat(pc): close Phase C's build side — org→workspace multi-tenancy (PC.3) + revealed-WTP and GTM ins |
 | 2026-06-11 | `c627fd4f7` | chore(docs): delete stale V-era build reports and one-time migration audits |
 | 2026-06-11 | `302f11464` | feat(p2): complete Phase 2 — approval signal, single publish gate, guardrails, enum reconciliation |
@@ -37,9 +39,6 @@ in any commit message to move an item:
 | 2026-06-10 | `dcf746829` | docs(roadmap): fold June 2026 external research pass into the long-form roadmap |
 | 2026-06-10 | `5e758bced` | docs: regenerate ENV_INVENTORY for MEDIAHUB_FFMPEG + MEDIAHUB_TTS_PROVIDER |
 | 2026-06-10 | `cc255f513` | docs(roadmap): fold the archive back in — one in-depth document |
-| 2026-06-10 | `e3b227c51` | feat(p0): complete Phase 0 — free reel engine, paid-dep guards, provider slots, AGPL isolation |
-| 2026-06-10 | `c6aea1433` | fix: a11y: Documents must have <title> element to aid in navigati |
-| 2026-06-10 | `c3f58776d` | autotest: refresh bug report [skip ci] |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
