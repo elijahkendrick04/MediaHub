@@ -21,7 +21,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-10 · `0d7bd81ca` · Merge pull request #311 from elijahkendrick04/claude/friendly-mayer-3tbeyn
+**Last updated:** 2026-06-11 · `d6e5d5560` · Merge pull request #315 from elijahkendrick04/claude/gracious-carson-hdz1bt
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -29,6 +29,8 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-11 | `5ac99091f` | style: apply pre-commit hygiene (ruff-format 0.8.4) to PR-touched files |
+| 2026-06-11 | `e31aaa362` | feat(p1): complete Phase 1 — slug-canonical taxonomy, cross-source planner, local brand-DNA |
 | 2026-06-10 | `dcf746829` | docs(roadmap): fold June 2026 external research pass into the long-form roadmap |
 | 2026-06-10 | `5e758bced` | docs: regenerate ENV_INVENTORY for MEDIAHUB_FFMPEG + MEDIAHUB_TTS_PROVIDER |
 | 2026-06-10 | `cc255f513` | docs(roadmap): fold the archive back in — one in-depth document |
@@ -38,8 +40,6 @@ in any commit message to move an item:
 | 2026-06-10 | `52e212ef9` | docs(roadmap): restructure into To-do / Completed lists; auto-updater now moves items |
 | 2026-06-10 | `ce77df9f3` | feat(gen-v2): complete the PAR bucket against the shipped SEQ-0-4 spine |
 | 2026-06-10 | `cc928922d` | fix(roadmap): merge directly when the bot PR is already clean |
-| 2026-06-10 | `f141579f6` | fix(roadmap): land auto-updates via auto-merge PR + catch up the missed range |
-| 2026-06-10 | `f3bc87b3a` | docs(build): SEQ-3 gate A/B review — v2 beats the old engine; cutover approved |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -51,9 +51,6 @@ are gated behind Phase C's exit criteria (see Standing context).
 - **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant · ⚠️ **BLOCKED**
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · ❌ **NOT STARTED**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · ❌ **NOT STARTED**
-- **P1.2** · Phase 1 — Realise the post-type taxonomy in code (extend vs layer on `club_platform.content_types` — Council-gated data-model call) · ❌ **NOT STARTED**
-- **P1.3** · Phase 1 — Cross-source planner (the strategy brain): fuse own/external/direct signals into a ranked plan keyed by sport profile · ❌ **NOT STARTED**
-- **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) · ❌ **NOT STARTED**
 - **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) · ❌ **NOT STARTED**
 - **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums · 🔵 **IN PROGRESS**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
@@ -86,6 +83,9 @@ are gated behind Phase C's exit criteria (see Standing context).
 - ✅ **P0.3** · Phase 0 — Every paid dependency provably optional behind a flag with a free default wired — pinned by `tests/test_paid_deps_optional.py` against the DEPENDENCY_LICENSING §2 register *(completed 2026-06-10)*
 - ✅ **P0.4** · Phase 0 — Local-capable provider slot on every AI surface: LLM (OpenAI-compatible endpoints incl. Ollama, both wrappers), TTS (`MEDIAHUB_TTS_PROVIDER` with the `piper` slot), ASR (guarded — none may land unslotted), graphics (server-side stills + ffmpeg reel engine + cutout `server` default) — pinned by `tests/test_local_provider_slots.py` *(completed 2026-06-10)*
 - ✅ **P0.5** · Phase 0 — AGPL isolation enforced: SearXNG stays a stock, venv-isolated, HTTP-only sidecar; `tests/test_agpl_isolation.py` fails the build on any in-process AGPL import, manifest entry, or Dockerfile drift *(completed 2026-06-10)*
+- ✅ **P1.2** · Phase 1 — Realise the post-type taxonomy in code (extend vs layer on `club_platform.content_types` — Council-gated data-model call) *(completed 2026-06-11)*
+- ✅ **P1.3** · Phase 1 — Cross-source planner (the strategy brain): fuse own/external/direct signals into a ranked plan keyed by sport profile *(completed 2026-06-11)*
+- ✅ **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) *(completed 2026-06-11)*
 <!-- /ROADMAP:DONE -->
 
 ## Standing context
