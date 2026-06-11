@@ -1,13 +1,20 @@
 # Autonomous tester — the primary, cloud-based bug finder + fixer.
 #
 # Runs entirely in GitHub Actions (no desktop / Cowork). On each tick it:
-#   1. boots MediaHub from `main` and runs the full tester (finder + AI
+#   1. restores the bot's memory (ledger.json + BUGS.md) from the unprotected
+#      `autotest/state` branch — `main` is branch-protected (PRs required), so
+#      the old direct commit-back was rejected with GH006 on every run and the
+#      dedup/fixer memory silently never persisted (the same failure mode that
+#      stalled the roadmap bot). The state branch is bot-owned: no PR noise, no
+#      required-CI cycles burned on a ledger refresh, and protection on `main`
+#      stays intact;
+#   2. boots MediaHub from `main` and runs the full tester (finder + AI
 #      subagents + LLM council), producing a deduped, fix-ready BUGS.md;
-#   2. commits BUGS.md + ledger.json back to `main` so the dedup memory and the
-#      report PERSIST across these stateless runs (without this, every run
-#      re-reports the same bugs);
-#   3. runs the fixer — turns new bugs into fix PRs (and merges them when armed)
-#      with the shared gitops gates (protected-engine guard, scope cap, green-test gate).
+#   3. runs the fixer — reconciles in-flight fixes against GitHub (merged PR →
+#      `fixed`, starting the deploy-grace clock), then turns open bugs into fix
+#      PRs (merged on green CI when armed) with the shared gitops gates
+#      (protected-engine guard, scope cap, green-test gate);
+#   4. pushes the updated state back to `autotest/state`.
 #
 # Secret: CLAUDE_CODE_OAUTH_TOKEN only — NO API keys. The finder's subagents +
 #         council AND the fixer's Claude Code all run on a flat Pro/Max
@@ -30,7 +37,7 @@ concurrency:
 
 jobs:
   sweep:
-    name: Test sweep + commit report + fix
+    name: Test sweep + fix + persist state
     runs-on: ubuntu-latest
     timeout-minutes: 70
     steps:
@@ -43,7 +50,15 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install MediaHub + Chromium + Claude CLI (judges run on it)
+      # The Chromium download is ~275 MB per run, 4× a day — cache it. The key
+      # tracks pyproject.toml so a Playwright version bump refreshes the build.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install MediaHub + Chromium + Claude CLI (judges + fixer run on it)
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,render]"
@@ -52,6 +67,21 @@ jobs:
           # B2: axe-core for the deterministic accessibility pass. autotest/a11y.py
           # finds it under node_modules and honest-skips if this ever fails to install.
           npm install axe-core || echo "::warning::axe-core not installed — a11y pass will skip"
+
+      - name: Restore bot memory from the state branch
+        run: |
+          # The ledger + report live on `autotest/state` (bot-owned, unprotected).
+          # Without this restore every run starts amnesiac: findings lose their
+          # confirm/decay history and the fixer re-fixes bugs it already fixed.
+          if git fetch origin autotest/state 2>/dev/null; then
+            # Per-path: a missing path on an early state branch must not void the rest.
+            git checkout origin/autotest/state -- autotest/reports 2>/dev/null || true
+            git checkout origin/autotest/state -- autotest/calibration 2>/dev/null || true
+            git reset -q -- autotest/reports autotest/calibration || true
+            echo "Restored state from autotest/state ($(git rev-parse --short origin/autotest/state))"
+          else
+            echo "No autotest/state branch yet — first run starts from the committed snapshot."
+          fi
 
       - name: Run the finder + subagents + council (against the LIVE site)
         env:
@@ -77,6 +107,9 @@ jobs:
           AUTOTEST_DECAY_SWEEPS_DETERMINISTIC: "6"
           AUTOTEST_A11Y: "1"
           AUTOTEST_VISUAL: "1"
+          # Skip the AI judges when every judged surface is unchanged since the
+          # last sweep (subjective lifecycles freeze) — saves quota for the fixer.
+          AUTOTEST_JUDGE_SKIP_UNCHANGED: "1"
         run: python -m autotest.run
 
       - name: Judge-trust metrics (A5)
@@ -86,15 +119,13 @@ jobs:
           # labels are human-curated (else stays null → live system keeps its defaults).
           python -m autotest.metrics || echo "::notice::metrics step skipped"
 
-      - name: Commit the bug report back (persists dedup memory)
+      - name: Snapshot state (fix-pass crash insurance)
         run: |
-          git config user.name "mediahub-autotest[bot]"
-          git config user.email "mediahub-autotest[bot]@users.noreply.github.com"
-          git add autotest/reports/BUGS.md autotest/reports/ledger.json \
-                  autotest/reports/METRICS.md autotest/calibration/precision.json 2>/dev/null || true
-          git commit -m "autotest: refresh bug report [skip ci]" || echo "no change"
-          git pull --rebase --autostash origin main || true
-          git push origin main || echo "::warning::could not push report"
+          # The fix pass does `git reset --hard` per bug, which clobbers the
+          # working-tree reports. The snapshot is the finder's authoritative
+          # output; _persist_to_main re-applies the fixer's journal onto it.
+          mkdir -p /tmp/autotest-state-snap
+          cp -a autotest/reports/. /tmp/autotest-state-snap/
 
       - name: Autonomous fix pass (Claude coder, subscription token)
         env:
@@ -104,10 +135,15 @@ jobs:
           AUTOTEST_FIX_APPLY: "1"
           AUTOTEST_BUILD_MERGE: "1"   # fully autonomous: auto-merge fix PRs on green CI
           AUTOTEST_CODER: "claude"
-          # Time budget: one careful, root-caused fix per tick. These bound the
-          # Claude coder so the fix pass finishes inside the job's wall clock
-          # instead of being hard-killed (which marks the whole run red).
-          AUTOTEST_FIX_MAX: "1"            # one bug per tick; the next tick takes the next
+          # Where _persist_to_main finds the finder's fresh ledger after the
+          # per-bug git resets (see the snapshot step above).
+          AUTOTEST_STATE_SNAPSHOT: /tmp/autotest-state-snap
+          # Throughput: the xdist gate cut the local full-suite run from ~20 min
+          # to ~6 min (3,896 tests, verified 2026-06-11), so one tick now affords
+          # TWO careful, root-caused fixes inside the same wall clock that used
+          # to fit one. Bounds below keep the pass inside the job timeout.
+          AUTOTEST_FIX_MAX: "2"            # two bugs per tick; the next tick takes the next
+          AUTOTEST_GATE_XDIST: "1"         # run the local test gate on all cores
           AUTOTEST_GATE_MAX_ITERS: "2"     # implement + one root-cause retry, then stop
           AUTOTEST_CODER_TIMEOUT: "900"    # 15 min per coder call — real fixes need exploring
           AUTOTEST_CODER_REVIEW: "0"       # skip the 2nd review call; the green-test gate is the bar
@@ -116,11 +152,63 @@ jobs:
             echo "No CLAUDE_CODE_OAUTH_TOKEN secret — skipping the autonomous fix pass."
             exit 0
           fi
-          npm install -g @anthropic-ai/claude-code
           # Soft wall (45 min) BELOW the job timeout so a long fix stops CLEANLY and
           # the run stays green — the bug simply carries over to the next tick.
-          timeout 2700 python -m autotest.fix_loop \
+          timeout 2700 python -m autotest.fix_loop | tee /tmp/fix-results.json \
             || echo "::notice::fix pass stopped at its time budget; continues next tick"
+          if [ -s /tmp/fix-results.json ]; then
+            {
+              echo "### 🔧 Fix pass"
+              echo '```json'
+              tail -c 4000 /tmp/fix-results.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Persist bot memory to the state branch
+        if: always()
+        run: |
+          # Reconstruct the freshest reports: the snapshot is authoritative for
+          # everything except ledger.json, which the fix pass updates in place
+          # (journal re-applied by _persist_to_main). If the fix pass died
+          # mid-reset the tree ledger is STALE — detect via generated_at and
+          # fall back to the snapshot so the finder's output is never lost.
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          snap, tree = Path("/tmp/autotest-state-snap"), Path("autotest/reports")
+          if snap.is_dir():
+              def gen(d):
+                  try:
+                      return json.loads((d / "ledger.json").read_text()).get("generated_at") or ""
+                  except Exception:
+                      return ""
+              keep_tree_ledger = gen(tree) >= gen(snap)
+              for f in snap.rglob("*"):
+                  if not f.is_file():
+                      continue
+                  dest = tree / f.relative_to(snap)
+                  if dest.name == "ledger.json" and keep_tree_ledger:
+                      continue
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(f, dest)
+              print(f"reports reconstructed (tree ledger kept: {keep_tree_ledger})")
+          PY
+          # Land on the bot-owned state branch via a temp worktree (shares the
+          # checkout's auth). Direct push is fine: the branch is unprotected and
+          # carries only bot state — no PR, no required checks, no GH006.
+          BASE=$(git rev-parse -q --verify origin/autotest/state || git rev-parse HEAD)
+          git worktree add --detach /tmp/state-wt "$BASE"
+          rm -rf /tmp/state-wt/autotest/reports
+          mkdir -p /tmp/state-wt/autotest/calibration
+          cp -a autotest/reports /tmp/state-wt/autotest/reports
+          cp -a autotest/calibration/precision.json /tmp/state-wt/autotest/calibration/ 2>/dev/null || true
+          cd /tmp/state-wt
+          git config user.name "mediahub-autotest[bot]"
+          git config user.email "mediahub-autotest[bot]@users.noreply.github.com"
+          git add -A autotest/reports autotest/calibration
+          git commit -m "autotest: state @ sweep ${{ github.run_number }} [skip ci]" || { echo "no state change"; exit 0; }
+          git push origin HEAD:refs/heads/autotest/state || echo "::warning::could not push state"
 
       - name: Upload evidence
         if: always()

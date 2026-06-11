@@ -26,9 +26,12 @@ inside the runner, so nothing needs to "escape a sandbox".
    is denied, the loop reports `fix-pushed-no-pr` (branch pushed, **not** merged)
    and notifies you — it no longer silently claims success.
 3. That's it. `.github/workflows/autotest.yml` (every 6h) finds + reports bugs,
-   commits `BUGS.md` + `ledger.json` back to `main` so the dedup memory persists,
-   then runs the fixer to turn new bugs into fix PRs (auto-merged on green CI when
-   armed).
+   persists `BUGS.md` + `ledger.json` to the bot-owned **`autotest/state`** branch
+   (the dedup/fixer memory — `main` is branch-protected, so a direct commit-back
+   was GH006-rejected and the memory silently never persisted), then runs the
+   fixer to turn new bugs into fix PRs (auto-merged on green CI when armed).
+   **The live bug report is `autotest/reports/BUGS.md` on `autotest/state`** —
+   the copy on `main` is a stale snapshot.
 
 The `loop.py` "run forever" driver below is an OPTIONAL always-on worker (e.g. a
 cloud VM) if you ever want continuous rather than scheduled — the cloud default
@@ -151,6 +154,11 @@ between a bad AI change and production, and they are strict:
 | `AUTOTEST_CONTRACT` | `1` | B5: Schemathesis API contract tests for `/api` (deterministic, pytest-native) |
 | `AUTOTEST_BROWSER` | `chromium` | B1: `chromium` \| `firefox` \| `webkit` |
 | `AUTOTEST_DEVICE` | _(unset)_ | B1: optional Playwright device name for a mobile pass (e.g. `iPhone 13`, `Pixel 7`) |
+| `AUTOTEST_DEPLOY_GRACE_HOURS` | `24` | a `fixed` finding re-seen on the live site within this window stays `fixed` (deploy lag ≠ regression); after it → `regressed` + fixer retry. `0` disables |
+| `AUTOTEST_JUDGE_SKIP_UNCHANGED` | `1` | skip the AI judges when every judged surface is byte-identical to the last judged sweep (subjective lifecycles freeze — no decay without information) |
+| `AUTOTEST_GATE_XDIST` | `0` | run the fixer's local full-suite gate with `pytest -n auto` (all cores; ~6 min vs ~20 serial, verified 2026-06-11) |
+| `AUTOTEST_CODER_MODEL_CLAUDE` | _(unset)_ | pin the Claude coder's model (e.g. `opus` for hard bugs, `sonnet` for throughput); unset = CLI/subscription default |
+| `AUTOTEST_STATE_SNAPSHOT` | _(set by CI)_ | dir holding the finder's reports snapshot; `_persist_to_main` re-applies the fixer journal onto it (the workflow pushes the result to `autotest/state`) |
 
 ### Finding lifecycle (Tier A — trust)
 
@@ -163,9 +171,22 @@ new finding ───► pending ──confirm×N──► open ◄────�
                     │                     │
               (absent×K) decay      fix loop picks it up
                     │                     ▼
-                    ▼                  fixing ──► fixed ──recurs──► regressed (top of BUGS.md)
-              auto-closed ──recurs──► regressed        verified-fixed (terminal, never reopened)
+                    ▼                  fixing ──PR merged (reconcile)──► fixed
+              auto-closed                 │                               │ recurs
+                    │ recurs              └─PR closed unmerged──► open    │
+                    ▼                                          ┌──────────┴──────────┐
+                regressed                            within deploy grace      after grace
+              (top of BUGS.md)                       → stays fixed            → regressed
+                                                       (deploy lag)             (fixer retries)
+              verified-fixed (terminal, never reopened)
 ```
+
+The ``fixing → fixed`` edge is the **reconcile** step (`fix_loop.reconcile_in_flight`,
+first thing every fix pass): it asks GitHub what happened to each in-flight PR, so a
+merged fix is counted, starts its **deploy-grace clock** (`AUTOTEST_DEPLOY_GRACE_HOURS`,
+default 24h — the live site lags the merge), and a closed-unmerged PR releases its bug
+for retry. A regression after grace releases the in-flight claim (`fix_pr` →
+`last_fix_pr`) so the fixer may attempt a deeper root-cause fix.
 
 - **Subjective** findings (`semantic:*`, `vision:*`, `council:*`) enter **`pending`**
   and only become **`open`** after recurring `AUTOTEST_CONFIRM_SWEEPS` times — a single

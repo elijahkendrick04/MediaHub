@@ -252,7 +252,12 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any],
             f"Candidate issues (by id):\n{issues_txt}\n\nChairman verdict:\n{verdict}\n\n"
             'Output: {"decisions":[{"id":<int>,"keep":true|false,"severity":"low|medium|high",'
             '"reason":"short"}],"new_issues":[{"title":"...","severity":"...","area":"...",'
-            '"expected":"...","actual":"...","evidence":"..."}]}')
+            '"expected":"...","actual":"...","evidence":"..."}]}\n'
+            "Rules: keep=true ONLY where the verdict clearly confirms a real, "
+            "evidence-backed defect — when the verdict hedges or is ambiguous, "
+            "keep=false (a false bug wastes the team's time). new_issues are for "
+            "GENUINE missed defects only, never coverage commentary, and each "
+            "evidence field MUST quote the verdict or a candidate issue verbatim.")
         raw = _ask(clerk_system, clerk_user, 900)
         triage = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
     except Exception:
@@ -282,8 +287,15 @@ def adjudicate(candidates: list[Finding], artifacts: dict[str, Any],
         out.append(c)
     out += candidates[10:]
 
+    from autotest.semantic import evidence_grounded
     for ni in triage.get("new_issues", [])[:5]:
         if not isinstance(ni, dict):
+            continue
+        # Grounding gate (same as the judges'): a blind-spot whose evidence quotes
+        # neither the verdict nor a candidate issue is the clerk inventing — drop
+        # it before it pollutes the ledger as a HIGH "open bug".
+        if not evidence_grounded(str(ni.get("evidence", "")),
+                                 f"{verdict}\n{issues_txt}"):
             continue
         sev = str(ni.get("severity", "medium")).lower()
         out.append(Finding(

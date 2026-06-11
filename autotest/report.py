@@ -70,6 +70,55 @@ _REGRESSION_REOPEN_FROM = {"fixed", "auto-closed"}
 # Only actionable states decay (A2); terminal / fix-owned / quarantine states never do.
 _DECAYABLE = {"open", "pending"}
 
+# Findings about the tester / AI-judge / sweep-coverage itself, not the product.
+# The fixer must not pick them (the coder can't fix "the judge over-flags" in
+# product code) and the report must not present them as product bugs. Two classes:
+# text that names the harness (the markers) and the ENTIRE ``council:blind_spot``
+# category — the council theorising about sweep coverage gaps, whose ``route`` is
+# an invented area label, not a crawl-verified product route (council ruling,
+# RULE A — see fix_loop._is_meta_finding's original rationale).
+_META_MARKERS = (
+    "testing framework", "testing infrastructure", "test framework",
+    "test harness", "automated testing", "autotest", "ai judge", "ai/testing",
+)
+
+
+def is_meta_entry(bug: dict[str, Any]) -> bool:
+    """True for a harness/coverage meta-finding (not a fixable product defect)."""
+    if str(bug.get("category", "")).lower().startswith("council:blind_spot"):
+        return True
+    blob = f"{bug.get('route', '')} {bug.get('title', '')}".lower()
+    return any(m in blob for m in _META_MARKERS)
+
+
+def _deploy_grace_hours() -> float:
+    """Deploy-grace window (hours) after a fix PR merges, during which the live
+    target may still serve the PRE-fix build (Render deploy lag). A ``fixed``
+    finding re-seen INSIDE the window stays ``fixed`` (annotated) instead of
+    regressing — without this the sweep re-opens every just-merged fix and the
+    fixer burns its tick re-fixing code that is already on main. 0 disables."""
+    try:
+        return max(0.0, float(os.environ.get("AUTOTEST_DEPLOY_GRACE_HOURS", "24")))
+    except (TypeError, ValueError):
+        return 24.0
+
+
+def _within_deploy_grace(entry: dict[str, Any], now_iso: str) -> bool:
+    """True while a ``fixed`` entry's merge is younger than the grace window.
+    No ``fixed_at`` (legacy entry) → no grace, regress as before."""
+    grace = _deploy_grace_hours()
+    fixed_at = entry.get("fixed_at")
+    if not grace or not fixed_at:
+        return False
+    try:
+        dt_fixed = datetime.fromisoformat(str(fixed_at).replace("Z", "+00:00"))
+        dt_now = datetime.fromisoformat(now_iso)
+        if dt_fixed.tzinfo is None:
+            dt_fixed = dt_fixed.replace(tzinfo=timezone.utc)
+        return (dt_now - dt_fixed).total_seconds() < grace * 3600
+    except (ValueError, TypeError):
+        return False
+
 # Ledger fields added in schema v2 (A1–A3). ``load_ledger`` backfills these onto
 # every pre-v2 entry, so an old ledger.json loads unchanged.
 _V2_DEFAULTS: dict[str, Any] = {
@@ -153,6 +202,18 @@ def normalise(text: str) -> str:
     t = _ADDR.sub("<addr>", t)
     t = _HEX.sub("<id>", t)
     t = _NUM.sub("<n>", t)
+    return " ".join(t.split()).strip().lower()
+
+
+def normalise_volatile(text: str) -> str:
+    """Like ``normalise`` but KEEPS plain numbers — for the judge-input digest,
+    where "3 cards became 4 cards" is a real content change that must re-trigger
+    the judges, while run ids / timestamps must not."""
+    t = text or ""
+    t = _UUID.sub("<id>", t)
+    t = _TS.sub("<ts>", t)
+    t = _ADDR.sub("<addr>", t)
+    t = _HEX.sub("<id>", t)
     return " ".join(t.split()).strip().lower()
 
 
@@ -263,7 +324,8 @@ def save_ledger(ledger: dict[str, Any]) -> None:
     LEDGER_PATH.write_text(json.dumps(ledger, indent=2, sort_keys=False) + "\n", encoding="utf-8")
 
 
-def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
+def merge_findings(findings: list[Finding], run_id: str, *,
+                   judges_ran: bool = True) -> dict[str, int]:
     """Fold this run's findings into the ledger. Returns summary counts.
 
     Finding lifecycle (Tier A — trust):
@@ -277,7 +339,17 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
         KEPT, never deleted, so a recurrence can reopen it). Terminal / fix-owned
         states never decay.
       * A3 regression — a fingerprint in ``fixed``/``auto-closed`` that recurs is
-        reopened as ``regressed`` and surfaced at the top of BUGS.md.
+        reopened as ``regressed`` and surfaced at the top of BUGS.md. A ``fixed``
+        finding re-seen INSIDE the deploy-grace window stays ``fixed`` (the live
+        target may not have redeployed yet); only a recurrence AFTER the window
+        is a real regression — and it clears ``fix_pr`` → ``last_fix_pr`` so the
+        fixer is allowed to pick it up again.
+
+    ``judges_ran=False`` means the AI judges did not evaluate this sweep (CLI
+    missing, judges disabled, or the judge inputs were unchanged so they were
+    skipped). Subjective findings then carry NO information either way, so their
+    absent/decay clocks are FROZEN — a subjective finding must never decay, or
+    fail to confirm, merely because no judge looked.
 
     Fix-owned statuses are never downgraded by the finder (only ``fixed`` and
     ``auto-closed`` reopen, as regressions — ``verified-fixed`` stays terminal).
@@ -317,9 +389,22 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
             # --- lifecycle transitions on recurrence (bugs only) ---
             if f.is_bug:
                 status = entry.get("status")
-                if status in _REGRESSION_REOPEN_FROM:
+                if status == "fixed" and _within_deploy_grace(entry, now):
+                    # The fix is merged but the live target may not carry it yet
+                    # (deploy lag). Not a regression — note it and wait.
+                    entry["reseen_during_grace"] = True
+                elif status in _REGRESSION_REOPEN_FROM:
                     entry["status"] = "regressed"          # A3: it came back
                     entry["regressed_at"] = now
+                    # The prior fix demonstrably didn't hold — release the
+                    # in-flight claim so the fixer may attempt it again, but
+                    # keep the history for the report's "Prior fix" line.
+                    if entry.get("fix_pr"):
+                        entry["last_fix_pr"] = entry.pop("fix_pr")
+                        entry["fix_pr"] = None
+                    if entry.get("fix_branch"):
+                        entry["last_fix_branch"] = entry.pop("fix_branch")
+                        entry["fix_branch"] = None
                 elif status == "pending":
                     entry["confirmations"] = int(entry.get("confirmations", 0)) + 1
                     if entry["confirmations"] >= confirm_target:
@@ -362,10 +447,13 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
 
     # Mark everything not seen this run, then decay (A2) the ones that have been
     # absent too long. The record is kept (status flips to ``auto-closed``), so a
-    # later recurrence reopens it as a regression (A3).
+    # later recurrence reopens it as a regression (A3). When the judges did NOT
+    # run, subjective entries carry no signal — freeze their clocks entirely.
     for bucket in ("bugs", "skipped"):
         for fp, entry in ledger[bucket].items():
             if fp in seen_fps:
+                continue
+            if not judges_ran and is_subjective(entry.get("category", "")):
                 continue
             entry["present_last_run"] = False
             entry["absent_streak"] = int(entry.get("absent_streak", 0)) + 1
@@ -385,8 +473,14 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
     def _n(status: str) -> int:
         return sum(1 for b in ledger["bugs"].values() if b.get("status") == status)
 
+    # ``open`` counts PRODUCT-actionable bugs only; harness/coverage meta-findings
+    # (which the fixer must never pick) are reported separately as ``meta_open`` so
+    # the headline number is the one a human should act on.
+    meta_open = sum(1 for b in ledger["bugs"].values()
+                    if b.get("status") == "open" and is_meta_entry(b))
     return {
-        "open": _n("open"),
+        "open": _n("open") - meta_open,
+        "meta_open": meta_open,
         "pending": _n("pending"),
         "regressed": _n("regressed"),
         "auto_closed": _n("auto-closed"),
@@ -398,6 +492,39 @@ def merge_findings(findings: list[Finding], run_id: str) -> dict[str, int]:
         "skipped": len(ledger["skipped"]),
         "total_bugs": len(ledger["bugs"]),
     }
+
+
+# --- judge-input digest (skip-unchanged) --------------------------------------
+def get_judge_inputs_digest() -> str:
+    """The digest of the judge-facing surfaces from the LAST sweep (ledger root).
+    Empty when never recorded."""
+    return str(load_ledger().get("judge_inputs_digest") or "")
+
+
+def set_judge_inputs_digest(digest: str) -> None:
+    """Record the judge-input digest for the next sweep's skip-unchanged check."""
+    ledger = load_ledger()
+    ledger["judge_inputs_digest"] = digest
+    save_ledger(ledger)
+
+
+def mark_fixed(fingerprint: str, *, merged_at: str | None = None,
+               note: str = "") -> bool:
+    """Transition a ``fixing`` entry to ``fixed`` once its PR has actually MERGED
+    (the reconcile step asks GitHub). Records ``fixed_at`` — the anchor for the
+    deploy-grace window — and keeps ``fix_pr`` so the (category, route) surface
+    stays claimed while the deploy catches up. Returns False for an unknown
+    fingerprint."""
+    ledger = load_ledger()
+    entry = ledger["bugs"].get(fingerprint)
+    if not entry:
+        return False
+    entry["status"] = "fixed"
+    entry["fixed_at"] = merged_at or _now_iso()
+    if note:
+        entry["fixed_note"] = note[:500]
+    save_ledger(ledger)
+    return True
 
 
 def retire_verified_fixed(fingerprint: str, *, commit: str, tests: str, note: str,
@@ -502,7 +629,9 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
     ledger = load_ledger()
     bugs = list(ledger["bugs"].values())
     regressed = sorted((b for b in bugs if b.get("status") == "regressed"), key=_sev_rank)
-    open_bugs = sorted((b for b in bugs if b.get("status") == "open"), key=_sev_rank)
+    open_all = [b for b in bugs if b.get("status") == "open"]
+    open_bugs = sorted((b for b in open_all if not is_meta_entry(b)), key=_sev_rank)
+    meta_open = sorted((b for b in open_all if is_meta_entry(b)), key=_sev_rank)
     pending = sorted((b for b in bugs if b.get("status") == "pending"),
                      key=lambda b: (_sev_rank(b), -int(b.get("confirmations", 0))))
     auto_closed = sorted((b for b in bugs if b.get("status") == "auto-closed"),
@@ -539,6 +668,7 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                f"**Regressed:** {len(regressed)} · **Pending confirmation:** {len(pending)} · "
                f"**In progress:** {len(fixing)} · **Fixed:** {len(fixed)} · "
                f"**Verified-fixed (retired):** {len(verified)} · "
+               f"**Coverage gaps (meta):** {len(meta_open)} · "
                f"**Auto-closed (decayed):** {len(auto_closed)} · "
                f"**Needs-disproof (quarantined):** {len(needs_disproof)} · "
                f"**Skipped (expected/infra):** {len(skipped)}")
@@ -557,7 +687,8 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
                    "A recurrence after closure is the highest-signal finding here._")
         out.append("")
         for b in regressed:
-            prior = b.get("fix_pr") or b.get("fix_branch")
+            prior = (b.get("last_fix_pr") or b.get("fix_pr")
+                     or b.get("last_fix_branch") or b.get("fix_branch"))
             out.append(_render_bug(b))
             if prior:
                 out.append(f"- **Prior fix:** `{prior}` (regressed {b.get('regressed_at', '?')})")
@@ -570,6 +701,19 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
             out.append(_render_bug(b))
     else:
         out.append("_No open bugs detected in the latest run._")
+        out.append("")
+
+    if meta_open:
+        out.append("## 🧭 Coverage gaps & harness notes (meta — not product bugs)")
+        out.append("")
+        out.append("_Findings ABOUT the tester/judges/sweep coverage (e.g. council "
+                   "blind-spots naming untested paths). The fixer never picks these — "
+                   "they are input for improving the harness, not defects in MediaHub._")
+        out.append("")
+        for b in meta_open:
+            out.append(f"- [{b.get('severity', '?').upper()}] {b.get('title', '?')} · "
+                       f"`{b['fingerprint']}` ({b.get('category', '?')}) — seen "
+                       f"{b.get('seen_count', 1)}×, last `{b.get('last_seen', '?')}`")
         out.append("")
 
     if pending:
@@ -597,11 +741,15 @@ def render_markdown(run_meta: dict[str, Any]) -> str:
         out.append("")
 
     if fixed:
-        out.append("<details><summary>✅ Fixed (audit trail)</summary>")
+        out.append("<details><summary>✅ Fixed — PR merged "
+                   f"({len(fixed)}; re-sightings inside the deploy-grace window do "
+                   "not regress these)</summary>")
         out.append("")
         for b in fixed[:50]:
-            pr = b.get("fix_pr") or "?"
-            out.append(f"- {b['title']} · `{b['fingerprint']}` → PR {pr} (fixed {b.get('last_seen', '?')})")
+            pr = b.get("fix_pr") or b.get("last_fix_pr") or "?"
+            grace = " · re-seen during deploy grace" if b.get("reseen_during_grace") else ""
+            out.append(f"- {b['title']} · `{b['fingerprint']}` → PR {pr} "
+                       f"(merged {b.get('fixed_at') or b.get('last_seen', '?')}{grace})")
         out.append("")
         out.append("</details>")
         out.append("")

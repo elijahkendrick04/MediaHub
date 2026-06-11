@@ -22,6 +22,7 @@ Safety gates (the only things between a bad AI change and prod, so strict):
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -106,7 +107,14 @@ def _touches_protected(files: list[str]) -> list[str]:
 
 
 def _test_gate() -> tuple[bool, str]:
-    p = subprocess.run(["python", "-m", "pytest", "tests/", "-q"],
+    # AUTOTEST_GATE_XDIST=1 runs the gate suite on all cores (pytest-xdist, a dev
+    # extra) — same tests, same pass bar, ~3-4× faster wall clock on a CI runner.
+    # That speed is what lets one fix tick afford more than one bug. Default off
+    # so local/serial behaviour is unchanged unless the operator opts in.
+    cmd = ["python", "-m", "pytest", "tests/", "-q"]
+    if os.environ.get("AUTOTEST_GATE_XDIST") == "1":
+        cmd += ["-n", "auto"]
+    p = subprocess.run(cmd,
                        cwd=str(REPO_ROOT), capture_output=True, text=True,
                        timeout=float(os.environ.get("AUTOTEST_BUILD_TEST_TIMEOUT", "1800")))
     tail = (p.stdout or "")[-800:]
@@ -178,6 +186,30 @@ def _open_pr(branch: str, title: str, body: str) -> tuple[str, str]:
     return "", _classify_pr_error(err)
 
 
+def pr_state(pr_ref: str) -> tuple[str, str]:
+    """What actually happened to a PR: ("merged"|"closed"|"open"|"unknown",
+    merged_at_iso). ``pr_ref`` is a URL, number, or branch (anything `gh pr view`
+    takes). "unknown" on any error — callers must treat that as "leave it alone"
+    (never reconcile ledger state off a failed lookup)."""
+    import shutil
+    if not shutil.which("gh") or not pr_ref:
+        return "unknown", ""
+    p = subprocess.run(["gh", "pr", "view", str(pr_ref), "--json", "state,mergedAt"],
+                       cwd=str(REPO_ROOT), capture_output=True, text=True)
+    if p.returncode != 0:
+        return "unknown", ""
+    try:
+        data = json.loads(p.stdout or "{}")
+    except ValueError:
+        return "unknown", ""
+    state = str(data.get("state", "")).lower()
+    if state == "merged":
+        return "merged", str(data.get("mergedAt") or "")
+    if state in ("open", "closed"):
+        return state, ""
+    return "unknown", ""
+
+
 def count_open_fix_prs() -> int:
     """How many autotest fix PRs (`autotest/fix-*` head branches) are currently OPEN —
     i.e. awaiting a merge. Used as backpressure so the loop doesn't pile up duplicate
@@ -226,8 +258,19 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
     m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch"],
                        cwd=str(REPO_ROOT), capture_output=True, text=True)
     if m.returncode != 0:
-        return "auto-merge NOT armed: " + ((m.stderr or m.stdout or "").strip()[:300]
-                                           or "gh pr merge failed")
+        err = (m.stderr or m.stdout or "").strip()
+        # GitHub refuses to ARM auto-merge on a PR whose checks are already green
+        # ("clean status") — the PR is mergeable RIGHT NOW, so merge it directly.
+        # Without this fallthrough every fast-CI fix PR was left unmerged for a
+        # human (the roadmap workflow hit the identical failure mode).
+        if "clean status" in err.lower():
+            direct = subprocess.run(
+                ["gh", "pr", "merge", branch, "--squash", "--delete-branch"],
+                cwd=str(REPO_ROOT), capture_output=True, text=True)
+            if direct.returncode == 0:
+                return "merged directly (PR was already clean — checks green)"
+            err = (direct.stderr or direct.stdout or "").strip() or err
+        return "auto-merge NOT armed: " + (err[:300] or "gh pr merge failed")
     return "auto-merge to main enabled (will land when CI is green)"
 
 
