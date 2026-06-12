@@ -44,6 +44,16 @@ from mediahub.brand.context import brand_context_for_llm  # noqa: E402
 # E1. AI integration audit — every brand-relevant module exposes an LLM seam
 # ---------------------------------------------------------------------------
 
+
+def _with_csrf(client, data: dict) -> dict:
+    """These audits run with TESTING unset, so CSRF enforcement is live
+    (security/web-hardening) — mint a session token and carry it."""
+    token = "audit-csrf-token-0123456789abcdef"
+    with client.session_transaction() as sess:
+        sess["_csrf"] = token
+    return {**data, "csrf_token": token}
+
+
 def test_link_handlers_pipeline_is_llm_driven():
     """Every link-handler delegate (strategy, block_detector,
     endpoint_discoverer, content_extractor) MUST consult the LLM
@@ -163,7 +173,7 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
                                         "merged_dna": {}})
     app = create_app()
     client = app.test_client()
-    resp = client.post("/organisation/setup/capture", data={
+    resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
         "display_name": "Test Aquatics",
         "org_type": "swimming_club",
         "country": "United Kingdom",
@@ -174,7 +184,7 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
         "social_twitter": "https://x.com/test.aquatics",
         "social_tiktok": "https://tiktok.com/@test.aquatics",
         "social_linkedin": "https://linkedin.com/company/test-aquatics",
-    })
+    }))
     assert resp.status_code in (302, 303)
     prof = load_profile("test-aquatics")
     assert prof is not None
@@ -325,10 +335,10 @@ def test_capture_pins_profile_into_session(monkeypatch, tmp_path):
                          lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}})
     app = create_app()
     with app.test_client() as client:
-        resp = client.post("/organisation/setup/capture", data={
+        resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
             "display_name": "Pinned Org",
             "country": "United Kingdom",
-        })
+        }))
         assert resp.status_code in (302, 303)
         # Session now carries the new active profile id
         with client.session_transaction() as sess:

@@ -61,8 +61,10 @@ def test_wall_embed_keeps_frame_permission(client):
     # whatever the status (404 for a bogus token), the embed surface must
     # not carry the global frame refusal
     assert r.headers.get("X-Frame-Options") != "DENY"
+    assert "frame-ancestors *" in r.headers.get("Content-Security-Policy", "")
     r2 = client.get("/privacy")
     assert r2.headers.get("X-Frame-Options") == "DENY"
+    assert "frame-ancestors 'none'" in r2.headers.get("Content-Security-Policy", "")
 
 
 # ------------------------------------------------------------------ CSRF

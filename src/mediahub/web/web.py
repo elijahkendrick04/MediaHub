@@ -7963,17 +7963,21 @@ def create_app() -> Flask:
         # style/script idiom; the CSP still blocks every remote script,
         # object embedding, and base/form hijack. Tightening to nonces is
         # tracked in the residual register.
+        # The public wall embed is DESIGNED to be iframed by club websites;
+        # everything else refuses framing (clickjacking). frame-ancestors
+        # has no default-src fallback, so it must be set explicitly (ZAP
+        # baseline finding, 2026-06-12).
+        _embeddable = request.path.startswith("/wall/") and request.path.endswith("/embed")
         h.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
             "font-src 'self'; connect-src 'self'; media-src 'self' blob:; "
-            "object-src 'none'; base-uri 'self'; form-action 'self'",
+            "object-src 'none'; base-uri 'self'; form-action 'self'; "
+            + ("frame-ancestors *" if _embeddable else "frame-ancestors 'none'"),
         )
         h.setdefault("X-Content-Type-Options", "nosniff")
-        # The public wall embed is DESIGNED to be iframed; everything else
-        # refuses framing (clickjacking).
-        if not (request.path.startswith("/wall/") and request.path.endswith("/embed")):
+        if not _embeddable:
             h.setdefault("X-Frame-Options", "DENY")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")

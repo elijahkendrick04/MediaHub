@@ -27,7 +27,18 @@ from mediahub.web.club_profile import ClubProfile, save_profile, load_profile  #
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+def _with_csrf(client, data: dict) -> dict:
+    """These audits run with TESTING unset, so CSRF enforcement is live
+    (security/web-hardening) — mint a session token and carry it."""
+    token = "audit-csrf-token-0123456789abcdef"
+    with client.session_transaction() as sess:
+        sess["_csrf"] = token
+    return {**data, "csrf_token": token}
+
+
 @pytest.fixture
+
+
 def iso_root(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     yield tmp_path
@@ -94,10 +105,10 @@ class TestM2OptionalSection:
         the form. <details> doesn't strip its contained inputs from
         the POST body — verify by submitting with no link data."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-        resp = client.post("/organisation/setup/capture", data={
+        resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
             "display_name": "No Links Org",
             "country": "France",
-        })
+        }))
         assert resp.status_code in (302, 303)
         prof = load_profile("no-links-org")
         assert prof is not None
@@ -302,7 +313,11 @@ class TestM5StatusAndReread:
             with c.session_transaction() as sess:
                 sess["active_profile_id"] = "m5c"
                 sess["login_seen_at"] = int(time.time())
-            r = c.post("/organisation/setup/reread/instagram")
+                sess["_csrf"] = "audit-csrf-token-0123456789abcdef"
+            r = c.post(
+                "/organisation/setup/reread/instagram",
+                data={"csrf_token": "audit-csrf-token-0123456789abcdef"},
+            )
             assert r.status_code in (302, 303)
 
         assert called["n"] == 1
@@ -316,7 +331,12 @@ class TestM5StatusAndReread:
         from mediahub.web.web import create_app
         app = create_app()
         with app.test_client() as c:
-            r = c.post("/organisation/setup/reread/instagram")
+            with c.session_transaction() as sess:
+                sess["_csrf"] = "audit-csrf-token-0123456789abcdef"
+            r = c.post(
+                "/organisation/setup/reread/instagram",
+                data={"csrf_token": "audit-csrf-token-0123456789abcdef"},
+            )
             assert r.status_code in (302, 303)
             assert r.headers["Location"].endswith("/organisation/setup")
 
@@ -360,17 +380,20 @@ class TestV1FullSignupFlow:
             assert r1.status_code == 200
 
             # 2. POST capture with the full form
-            r2 = c.post("/organisation/setup/capture", data={
+            r2 = c.post("/organisation/setup/capture", data=_with_csrf(c, {
                 "display_name": "Verify Club",
                 "org_type": "swimming_club",
                 "country": "United Kingdom",
                 "website_url": "https://verify.example",
                 "social_instagram": "https://instagram.com/verify",
-            })
+            }))
             assert r2.status_code in (302, 303)
 
             # 3. Re-read the instagram link
-            r3 = c.post("/organisation/setup/reread/instagram")
+            r3 = c.post(
+                "/organisation/setup/reread/instagram",
+                data=_with_csrf(c, {}),
+            )
             assert r3.status_code in (302, 303)
 
             # 4. Profile carries everything
