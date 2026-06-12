@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `548096e9e` · fix: a11y: Select element must have an accessible name (select-na (#422)
+**Last updated:** 2026-06-12 · `46d3616e7` · fix: a11y: Documents must have <title> element to aid in navigati (#424)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -692,6 +692,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `46d3616e7` | fix: a11y: Documents must have <title> element to aid in navigati (#424) |
 | 2026-06-12 | `548096e9e` | fix: a11y: Select element must have an accessible name (select-na (#422) |
 | 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
 | 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
@@ -700,7 +701,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `0c85734c3` | Make the home-page developer-login footer link clearly visible |
 | 2026-06-12 | `19947ecf2` | fix: a11y: Form elements must have labels (label) (#409) |
 | 2026-06-12 | `24191c7a0` | fix: a11y: Documents must have <title> element to aid in navigati (#407) |
-| 2026-06-12 | `cfffa6c81` | docs(roadmap): add F.13 — the process to take the GitHub repo private again |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
