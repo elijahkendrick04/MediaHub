@@ -1,11 +1,14 @@
 """
 context_engine/cache.py — Persistent cache layer for discovered context data.
 
-Stores JSON blobs under data/discovered/ with simple key-based lookup.
+Stores JSON blobs under <DATA_DIR>/discovered/ with simple key-based lookup.
 Cache files are stored as:
-  data/discovered/meets/<key>.json
-  data/discovered/swimmers/<key>.json
-  data/discovered/pbs/<run_id>/<swimmer_key>.json
+  discovered/meets/<key>.json
+  discovered/swimmers/<key>.json
+  discovered/pbs/<run_id>/<swimmer_key>.json
+
+``_discovered_root()`` is the single resolver for this tree — pb_discovery's
+cache delegates here so both packages always share one store.
 """
 
 from __future__ import annotations
@@ -18,7 +21,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-def _repo_root() -> Path:
+def _data_root() -> Path:
+    """The writable data root: ``DATA_DIR`` when set (Render's persistent
+    disk), else the same ``src/mediahub`` dev default ``web.py`` uses."""
     env = os.environ.get("DATA_DIR")
     if env:
         return Path(env)
@@ -26,7 +31,24 @@ def _repo_root() -> Path:
 
 
 def _discovered_root() -> Path:
-    root = _repo_root() / "data" / "discovered"
+    """``<data root>/discovered``, consistent with the other DATA_DIR
+    siblings (runs_v4, research, …).
+
+    Earlier versions wrote to ``<data root>/data/discovered`` (a doubled
+    ``data`` segment); migrate that tree once, by rename, so warm caches
+    and trust history survive the path fix. If the rename fails (e.g.
+    cross-device), keep using the legacy root rather than splitting the
+    store across two trees.
+    """
+    base = _data_root()
+    root = base / "discovered"
+    legacy = base / "data" / "discovered"
+    if not root.exists() and legacy.is_dir():
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            legacy.rename(root)
+        except OSError:
+            root = legacy
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -81,7 +81,9 @@ def consent_block_reason(
         return None
 
     if rec is None or rec.status != "granted":
-        return f"no recorded consent for {name} — this club requires opt-in consent before publication"
+        return (
+            f"no recorded consent for {name} — this club requires opt-in consent before publication"
+        )
 
     # Under-18 (or unknown age — treated as under-18, the conservative read)
     minor = (age is not None and age < 18) or (age is None and rec.under_18 is not False)

@@ -281,3 +281,47 @@ def test_render_activity_escapes_pipes_and_handles_empty():
     assert "| Date | Commit | Summary |" in rows
     empty = ru.render_activity([])
     assert "no recent activity" in empty
+
+
+# --- sentinel block (production findings) ------------------------------------
+
+def test_render_sentinel_block_empty():
+    out = ru.render_sentinel_block([])
+    assert "No open production findings" in out
+
+
+def test_render_sentinel_block_items_strip_prefix_and_escape():
+    out = ru.render_sentinel_block(
+        [
+            {
+                "number": 42,
+                "html_url": "https://github.com/o/r/issues/42",
+                "title": "[sentinel] Gunicorn worker timeout | wedged",
+                "created_at": "2026-06-12T09:30:00Z",
+            }
+        ]
+    )
+    assert out == (
+        "- [#42](https://github.com/o/r/issues/42) · "
+        "Gunicorn worker timeout \\| wedged *(opened 2026-06-12)*"
+    )
+
+
+def test_sentinel_block_replace_round_trip():
+    text = (
+        "intro prose\n\n<!-- ROADMAP:SENTINEL -->\n_old_\n<!-- /ROADMAP:SENTINEL -->\n\ntail"
+    )
+    new, changed = ru.replace_block(
+        text, "SENTINEL", ru.render_sentinel_block([])
+    )
+    assert changed is True
+    assert "_old_" not in new
+    assert "No open production findings" in new
+    assert new.startswith("intro prose") and new.endswith("tail")
+
+
+def test_fetch_sentinel_issues_inert_without_env(monkeypatch):
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    assert ru._fetch_sentinel_issues() is None

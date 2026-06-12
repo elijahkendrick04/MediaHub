@@ -92,12 +92,21 @@ class BridgedSnapshot:
 
     Fields mirror `swim_content.enrichment_swimmingresults.SwimmerPBSnapshot`
     closely enough that the history wrapper sees no difference.
+
+    ``fetch_ok`` means the lookup *completed* — we reached the web and either
+    found a baseline or established there was nothing verifiable to find.
+    ``no_history`` separates "completed, nothing found" from a transport
+    failure so the audit never reports a swimmer without an online profile
+    as a failed fetch. ``from_cache`` carries pb_discovery's cache_hit flag
+    through to the run audit's cache-hit/miss counters.
     """
 
     tiref: str
     pb_times: dict[str, list[dict]] = field(default_factory=dict)
     fetch_ok: bool = True
     error: Optional[str] = None
+    no_history: bool = False
+    from_cache: bool = False
     source_url: Optional[str] = None
     retrieved_at: Optional[str] = None
     source_domain: Optional[str] = None  # learned at runtime by pb_discovery
@@ -126,10 +135,27 @@ def discovery_to_snapshot(
             or None
         )
 
+    # Classify the lookup outcome honestly. "Found nothing" is only a
+    # *failure* when we never actually saw the web (no search candidates,
+    # or every candidate page failed to fetch); a swimmer with no online
+    # history is a completed lookup, not a failed one.
+    sources = discovery.sources_tried or []
+    fetched_any = any(getattr(s, "fetch_success", True) for s in sources)
+    if discovery.pbs:
+        fetch_ok, error, no_history = True, None, False
+    elif not sources:
+        fetch_ok, error, no_history = False, "web search returned no candidate pages", False
+    elif not fetched_any:
+        fetch_ok, error, no_history = False, "could not fetch any candidate page", False
+    else:
+        fetch_ok, error, no_history = True, None, True
+
     snap = BridgedSnapshot(
         tiref=swimmer_key,
-        fetch_ok=discovery.confidence > 0 and bool(discovery.pbs),
-        error=None if discovery.pbs else "no PBs found",
+        fetch_ok=fetch_ok,
+        error=error,
+        no_history=no_history,
+        from_cache=bool(getattr(discovery, "cache_hit", False)),
         source_url=source_url,
         retrieved_at=retrieved_at,
         source_domain=source_domain,

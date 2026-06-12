@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `f30170f5b` · Merge pull request #346: UK/EU data-protection compliance + ASVS L2 security hardening (Phases 0–4)
+**Last updated:** 2026-06-12 · `c3e4446ff` · Merge pull request #389: Auto-merge Dependabot GitHub-Actions bumps on all-green checks
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -258,9 +258,12 @@ The boring decisions a paying customer silently assumes someone has made.
 4. Decide reels: buy the Remotion company licence, **or** set
    `MEDIAHUB_REEL_ENGINE=ffmpeg` (the free engine). Don't ship for-profit on
    unlicensed Remotion.
-5. Open the bundled demo sample (`samples/MISM-2024-Results.pdf`) and confirm
-   you are comfortable it contains no real children's data you lack a basis
-   to show; if not, have Fable 5 swap in a synthetic file.
+5. ~~Open the bundled demo sample and confirm it contains no real children's
+   data~~ **Done (PC.12, 2026-06-12):** the public demo sample is now the
+   synthetic `samples/demo-meet-results.pdf` (fictional swimmers, generated
+   by `scripts/make_demo_sample.py`); the real meet PDF survives only as a
+   parser-regression fixture in `sample_data/`, which no route serves. See
+   [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md).
 6. Confirm Render disk snapshots are on (the off-site backup + rehearsed
    restore is PC.14's code half).
 
@@ -304,11 +307,11 @@ are review-free, sell-supporting **pull-forward candidates** at your
 discretion.
 
 <!-- ROADMAP:TODO -->
-- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder: a guard test pinning the subprocessor register to the env-flag surface, and resolve the two unlicensed `vendor/` reference dirs (founder half = F.2/F.3/F.4) · 🔵 **IN PROGRESS**
-- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder: surface W.2 consent state on the public wall + a documented Children's-Code pass over `/wall`, the embed, the feeds and `/try` · 🔵 **IN PROGRESS**
-- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder: whole-org deletion cascade + org-level takeout ZIP (runs, media, captions, consent state, audit log) · 🔵 **IN PROGRESS**
-- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder: transactional-email seam (password reset, verification, member invites, breach notice), off-site `DATA_DIR` backup + rehearsed restore, incident runbook, invoice/VAT hygiene (founder half = F.1/F.6) · 🔵 **IN PROGRESS**
-- **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
+- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: subprocessor register pinned to the env-flag surface by a guard test (`legal.SUBPROCESSORS` + `tests/test_subprocessor_register_guard.py` — caught two undisclosed flows on day one), the two unlicensed `vendor/` dirs removed (`tests/test_vendor_licences.py` keeps it that way). Founder half open = F.2/F.3/F.4
+- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: W.2 consent enforced on every public-wall exit (page, embed, feeds, card PNGs — blocked athletes unreachable, settings page explains why) + the Children's-Code pass recorded ([CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md)); the `/try` demo sample is now synthetic (finding F1)
+- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: whole-org deletion cascade (`privacy/org_lifecycle.py`, POST `/organisation/delete`) + org takeout ZIP (GET `/organisation/export` — runs, media, captions, consent state, ledgers, audit log) under the ADR-0003/0014 isolation invariants
+- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: transactional-email seam (`notify/email.py`, honest-503) driving password reset, verification, invite delivery and `/operator/notify-users` breach channel; daily `backup_sweep` + restore rehearsed on every test run (`tests/test_backup_restore.py`) + [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md); invoice/receipt surfacing on `/billing`. Founder half open = F.1/F.6
+- **PC.9** · Phase C 🥇 — In-product referral engine · ✅ **BUILT (2026-06-12)**: per-org shareable codes (`/signup?ref=`), code-tracked leads in the PC.6 funnel, amount-verified payment auto-grants the referrer a free month (Stripe coupon at the referrer's own annual/12; honest `pending_manual` fallbacks), live readout on `/operator/commercial`
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -359,6 +362,7 @@ list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-12 | **Sell-gate code remainders + referral engine shipped (PC.9, PC.11–PC.14 code halves):** subprocessor-register guard test (caught 3 undisclosed flows) + unlicensed vendor dirs removed; W.2 consent enforced on the public wall + Children's-Code pass recorded (synthetic `/try` sample replaces real minors' data); whole-org deletion + takeout ZIP; transactional-email seam (password reset / verification / invites / breach channel), daily backups + rehearsed restore, incident runbook; in-product referral engine with auto-granted Stripe rewards. Remaining on the sell gate is founder-only (F.1–F.8). | Phase C section · [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) · [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) |
 | 2026-06-12 | **UK legal compliance baseline shipped (PR #352):** in-product Terms / accurate Privacy Notice / Cookie Policy / Art. 28 DPA with versioned, recorded acceptance; erasure cascades, account deletion + export; correction/takedown workflow; retention sweep; CCR/DMCCA pre-contract checkout; auth rate-limiting + security headers; DPIA draft. PC.11/PC.13 mostly delivered, PC.12/PC.14 started; the founder half became the F.* list above. | [COMPLIANCE_AUDIT](COMPLIANCE_AUDIT.md) · [COMPLIANCE_HANDOVER](COMPLIANCE_HANDOVER.md) |
 | 2026-06-12 | **Compliance-readiness audit:** Phase C had been pushing "go sell" with zero legal surface — compliance had no owning channel because Phase C was composed from a revenue diligence. Fix: a third **lawful-to-sell exit gate** + four sell-gate items **PC.11–PC.14**; no paid contract before gate 3 holds. | [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) |
 | 2026-06-11 | **Phase C build-out:** PC.7 try-before-signup demo, PC.8 sponsor manager + exposure reports, PC.10 public achievements wall shipped; `/pricing` now enforces PC.4's revealed-WTP gate (≥5 paid annual); PC.6 audited build-complete. What remains on PC.4/PC.6 is the founder's selling motion. | Phase C section |
@@ -370,17 +374,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
-| 2026-06-12 | `f015dddd5` | Final check green: 4,465 passed, 1 skip, 0 failures on the merged tree |
-| 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
-| 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
-| 2026-06-12 | `8e03f502d` | Fix full-suite cross-test pollution: lockout re-keyed to per-account |
-| 2026-06-12 | `414b4a0a7` | Post-merge fixes: erasure ordering, test adaptations, runtime-ledger hygiene |
-| 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
-| 2026-06-12 | `ae5f4f794` | Phase 4 final: definitive suite green — 4,153 passed, 1 skip, 0 failures |
-| 2026-06-12 | `13b778673` | OPEN_LEGAL_QUESTIONS: Q13 — real children's data in repo test fixtures |
-| 2026-06-12 | `27bc3963f` | Phase 4 verification: ZAP frame-ancestors fix + CSRF adaptation of non-TESTING suites |
-| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
+| 2026-06-12 | `c3d4f2763` | Auto-merge Dependabot GitHub-Actions bumps on all-green checks |
+| 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
+| 2026-06-12 | `8129ca971` | Apply CI-pinned ruff format to test_dev_login.py |
+| 2026-06-12 | `d11cf8c38` | Add opt-in passwordless developer sign-in + home-page footer link |
+| 2026-06-12 | `b58c21fcd` | Disclose log-sentinel providers in the register (guard catch #4 and #5) |
+| 2026-06-12 | `aae3242f3` | Align the DSR erasure test with the canonical discovered-cache root |
+| 2026-06-12 | `ef5e3112c` | Fix the PB auditor in the meet-recap pipeline: real decisions, honest lookups, run guards |
+| 2026-06-12 | `9bacf51fe` | docs: regenerate inventories on the merged tree |
+| 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
+| 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
@@ -476,16 +479,17 @@ Completed phases (0, 1, 2, W) and shipped Phase C items live under
 **Goal.** Make MediaHub sellable without the founder in the loop — and lawful
 to sell.
 
-**State (2026-06-12).** The engineering is essentially done: signup/auth
-(PC.1), Stripe billing code (PC.2), org→workspace multi-tenancy (PC.3,
-[ADR-0014](adr/0014-org-workspace-multitenancy-schema.md)), the revealed-WTP
-pricing machinery and warm-first funnel tooling on `/operator/commercial`
-(PC.4/PC.6 build halves), the `/try` demo (PC.7), the sponsor manager (PC.8),
-the public wall (PC.10) and the UK legal-compliance baseline (PR #352) have
-all shipped — condensed records under "Done". Still open: the four
-**sell-gate code remainders** (PC.11–PC.14 — Fable 5 list) and the founder's
-selling + paperwork motion (F.1–F.8, PC.4, PC.6 — founder list). **Zero
-paying clubs today; code is no longer the excuse.**
+**State (2026-06-12, second pass).** The engineering is essentially done:
+signup/auth (PC.1), Stripe billing code (PC.2), org→workspace multi-tenancy
+(PC.3, [ADR-0014](adr/0014-org-workspace-multitenancy-schema.md)), the
+revealed-WTP pricing machinery and warm-first funnel tooling on
+`/operator/commercial` (PC.4/PC.6 build halves), the `/try` demo (PC.7), the
+sponsor manager (PC.8), the public wall (PC.10), the UK legal-compliance
+baseline (PR #352), **and now the four sell-gate code remainders
+(PC.11–PC.14 code halves) plus the referral engine (PC.9)** — all shipped.
+Still open: only the founder's selling + paperwork motion (F.1–F.8, PC.4,
+PC.6 — founder list). **Zero paying clubs today; code is no longer the
+excuse.**
 
 **Exit criteria (three hard gates).**
 
@@ -551,20 +555,26 @@ application is drafted and submission-ready (F.5). The channel evidence:
   solo). Realistic timeline **~3–6+ months**. The *outcome* is unproven and
   IS the validation — it also closes PC.4.
 
-#### PC.9 — In-product referral engine · ❌ **NOT STARTED** (Fable 5)
+#### PC.9 — In-product referral engine · ✅ **BUILT (2026-06-12)**
 
 Runs PC.6's compounding mechanism (2 named intros per signed club) inside
-the product instead of operator ledgers. **Build:** referral codes per org;
-signup accepts a code and records the lead in `commercial/pipeline.py` with
-source=referral; the reward (a free month as a Stripe coupon via
-`web/billing.py`) auto-grants when the referred club's first annual payment
-lands amount-verified in `commercial/wtp.py` (the idempotent webhook hook
-already exists); the referral-debt readout on `/operator/commercial` switches
-from manual entries to live code-tracked state. **Exit:** a signed club has a
-shareable code; a paid referral auto-grants the reward and updates the funnel
-ledger with zero operator typing.
+the product instead of operator ledgers. **Shipped:**
+`commercial/referrals.py` — per-org shareable codes (Organisation page +
+`/signup?ref=CODE`), referred signups recorded as `source=referral` leads
+with the referrer attributed; the reward (one free month as a Stripe
+amount-off coupon via `billing.grant_referral_reward`, valued at the
+referrer's own verified annual price / 12 — never an invented figure)
+auto-grants when the referred club's first annual payment lands
+amount-verified in `commercial/wtp.py` (the idempotent webhook hook **and**
+the operator manual-payment path), with honest `pending_manual` records when
+the value or the Stripe customer can't be resolved; the referral-debt
+readout on `/operator/commercial` counts code-tracked signups as delivered
+intros and a live referral section shows codes/signups/rewards. **Exit
+met:** a signed club has a shareable code; a paid referral auto-grants the
+reward and updates the funnel ledger with zero operator typing
+(`tests/test_referrals.py` pins the whole flow end to end).
 
-#### PC.11 — Legal & privacy pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.11 — Legal & privacy pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
 
 The contractual minimum to take a club's money: MediaHub is a **processor**
 for clubs (the controllers) over personal data that is largely **children's**.
@@ -572,16 +582,24 @@ for clubs (the controllers) over personal data that is largely **children's**.
 `/cookies`, `/dpa`; versioned signup acceptance recorded in
 `legal_acceptances.jsonl` with forced re-acceptance on a `TERMS_VERSION`
 bump; per-workspace DPA acceptance + lawful-basis attestation; subprocessor +
-transfer disclosures. **Remaining — code:** a guard test pinning the
-subprocessor register to the env-flag surface (a new provider can't ship
-undisclosed); resolve the two unlicensed `vendor/` reference dirs.
-**Remaining — founder:** ICO registration + identity placeholders (F.2),
-solicitor sign-off (F.3), vendor DPAs (F.4). **Exit:** an account cannot be
-created without recorded acceptance of a versioned ToS + Privacy Notice; an
-org owner has a recorded DPA acceptance; the subprocessor guard test is
-green; ICO registration is logged on the operator console.
+transfer disclosures. **Shipped (2026-06-12, code remainder):** the
+subprocessor register is now a data structure (`legal.SUBPROCESSORS`) the
+DPA table renders from, pinned to the env-flag surface by
+`tests/test_subprocessor_register_guard.py` — a provider-shaped env key not
+in the register (or the reasoned-exclusion list) turns the build red. The
+guard immediately surfaced two undisclosed flows (operator-configured
+OpenAI-compatible endpoints; edge-tts voiceover → Microsoft), now disclosed,
+and later caught the backup-upload target the same day — working as
+designed. The two unlicensed `vendor/` dirs (`agent-skills-main`,
+`bencium-marketplace-main`) are removed; `tests/test_vendor_licences.py`
+keeps vendor/ licence-clean. **Remaining — founder:** ICO registration +
+identity placeholders (F.2), solicitor sign-off (F.3), vendor DPAs (F.4).
+**Exit:** an account cannot be created without recorded acceptance of a
+versioned ToS + Privacy Notice; an org owner has a recorded DPA acceptance;
+the subprocessor guard test is green ✅; ICO registration is logged on the
+operator console.
 
-#### PC.12 — Minors' consent & safeguarding gate · 🔵 **IN PROGRESS** *(sell gate — W.2 promoted 2026-06-12)*
+#### PC.12 — Minors' consent & safeguarding gate · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — W.2 promoted 2026-06-12)*
 
 The product's core output is *publishing children's achievements*; consent
 handling stops being optional the day money changes hands. **Shipped:** W.2
@@ -589,15 +607,23 @@ itself — the per-athlete consent registry (photo OK / full name / initials-
 only / do-not-feature; most-restrictive default; CSV import) enforced
 deterministically at generation, in photo scoring and at the publish gate
 (see "Done" → W.2) — plus workspace-setup parental-consent attestation
-(PR #352). **Remaining — code:** surface W.2 consent state on the public
-wall (beyond the initials-first default), and a documented
-**Children's-Code (Age Appropriate Design) pass** over the public surfaces
-(`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a no-consent
+(PR #352). **Shipped (2026-06-12, code remainder):** W.2 consent is enforced
+on every public-wall exit — wall text, embed, JSON/RSS feeds and the card
+PNG route. A blocked athlete (do-not-feature, or no consent on file under an
+active regime) is unreachable, an initials-only athlete is initialled even
+with the blanket toggle off (most restrictive always wins), and the
+members-only settings page explains each consent-hidden card. The
+**Children's-Code pass** over `/wall`, embed, feeds and `/try` is recorded
+at [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) with both
+findings fixed — including replacing the real-meet `/try` sample (real named
+under-18s) with a synthetic deterministic one
+(`scripts/make_demo_sample.py`). **Exit met:** a card for a no-consent
 athlete cannot render a name/photo, cannot pass the gate, and cannot appear
-on the wall; the review UI explains why; the Children's-Code pass is
-recorded; the NGB application's safeguarding claims are all true in code.
+on the wall; the settings UI explains why; the Children's-Code pass is
+recorded; the NGB application's safeguarding claims are all true in code
+(`tests/test_wall_consent.py`, `tests/test_childrens_code_public_surfaces.py`).
 
-#### PC.13 — Data lifecycle & rights · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.13 — Data lifecycle & rights · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — ADR-0015)*
 
 The data-subject-rights plumbing a controller club will ask its processor
 for. **Shipped (PR #352):** self-serve account deletion (compacting,
@@ -605,42 +631,61 @@ tombstone-free), athlete erasure cascading through runs / rendered assets /
 PB + research caches / caption memory / posting-log excerpts (test-pinned),
 account export, a correction/takedown workflow, and the retention schedule
 published in the Privacy Notice + enforced by the `MEDIAHUB_RETENTION_DAYS`
-sweep. **Remaining — code:** whole-org deletion cascading runs, media,
-content packs, wall token, sponsor/exposure ledgers and the consent registry
-(Stripe customer handled per the DPA), plus an org-level **takeout ZIP**
-(runs JSON, media, captions, consent state, audit log — serves SARs and
-portability in one mechanism). **Exit:** a club owner can delete their org or
-export everything it holds without founder involvement; deletion verifiably
-removes the data from `DATA_DIR` (pinned under the ADR-0003/0014 isolation
-invariants); the published schedule matches what the code does.
+sweep. **Shipped (2026-06-12, code remainder):**
+`privacy/org_lifecycle.py` — whole-org deletion (POST `/organisation/delete`,
+owner-or-operator with typed-id + password re-verify) cascading runs (through
+the per-run erasure cascade), media library, uploaded logos, content packs,
+the wall token (structurally — the profile dies), sponsor/exposure ledgers,
+the consent + athletes registries, club records, corrections, posting/
+telemetry logs, caption memory and memberships, with the Stripe customer and
+org-scoped acceptance evidence retained per the DPA and said so; plus the
+org-level **takeout ZIP** (GET `/organisation/export` — profile, runs JSON +
+workflow states, media blobs, captions, consent CSV, athletes, ledgers,
+audit log, manifest) serving SARs and portability in one mechanism. **Exit
+met:** a club owner can delete their org or export everything it holds
+without founder involvement; deletion verifiably removes the data from
+`DATA_DIR` under the ADR-0003/0014 isolation invariants
+(`tests/test_org_lifecycle.py` — a second org stays byte-intact); the
+published schedule matches what the code does.
 
-#### PC.14 — Operational trust pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.14 — Operational trust pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
 
 The boring things a paying customer silently assumes. **Shipped (PR #352):**
 the CCR/DMCCA pre-contract checkout (`/billing/confirm`: price honesty,
 auto-renewal disclosure, cancellation parity, recorded cooling-off
 acknowledgement) and the support contact surfaced in footer/ToS (placeholder
-until F.2). **Remaining — code:**
+until F.2). **Shipped (2026-06-12, code remainder):**
 
-- **Transactional-email seam** (Resend-style HTTP API behind an env key,
-  honest-503 unconfigured — pulls P4.5's seam forward without the digest
-  product): password reset (signed expiring token), email verification,
-  member-invite delivery, and an operator "notify all users" path for breach
-  notification — the ICO's 72-hour clock needs a working channel, not a plan
-  to build one.
-- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
-  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs), and a
-  *documented, rehearsed* restore — an unrestored backup is a hypothesis.
-- **Support + incident runbook** checked into `docs/` (detect → contain →
-  assess → notify ICO/clubs).
-- **Billing hygiene:** Checkout emits an invoice/receipt a volunteer
-  treasurer can file; VAT decision implemented per F.1.
+- **Transactional-email seam** (`notify/email.py` — Resend-style HTTP API
+  behind `RESEND_API_KEY` + `MEDIAHUB_EMAIL_FROM`, honest-503 unconfigured,
+  P4.5's seam pulled forward): password reset (`/password/forgot` +
+  `/password/reset/<token>` — signed expiring single-use tokens, no account
+  enumeration), email verification (`/verify-email/<token>`), member-invite
+  delivery from the members page, and `/operator/notify-users` — the breach
+  channel, every send recorded with per-recipient counts in
+  `operator_notices.jsonl` (the ICO 72-hour evidence trail). Resend joined
+  the subprocessor register the same day (the PC.11 guard enforced it).
+- **Backups + restore drill:** daily `backup_sweep` scheduler task —
+  `data.db`/`memory.db` via the SQLite online-backup API, every root JSONL
+  ledger, profiles + logos, commercial/sponsor/audit ledgers, runs JSON +
+  workflow states (renders/caches excluded as re-derivable) — pruned, with
+  optional off-site HTTP PUT; restore via `python -m mediahub.backup
+  restore` with a traversal guard, **rehearsed automatically on every test
+  run** (`tests/test_backup_restore.py`), state surfaced on the operator
+  console.
+- **Support + incident runbook:**
+  [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) (intake, detect →
+  contain → assess → notify ICO/clubs, backup/restore procedure, drill log).
+- **Billing hygiene:** `/billing` and `/billing/confirm` state where every
+  payment's invoice/receipt lives (Stripe customer portal).
 
 **Remaining — founder:** renewal reminders + VAT decision (F.1), breach owner
-+ insurance (F.6). **Exit:** a user can reset their password unaided; an
-invite email actually arrives; a restore from backup has been performed and
-documented; the support contact and runbook exist; a test payment produces an
-expensable invoice.
++ insurance (F.6), confirm Render disk snapshots + point the backup target
+off-site. **Exit:** a user can reset their password unaided ✅; an invite
+email actually arrives ✅; a restore from backup has been performed and
+documented ✅ (automated drill); the support contact and runbook exist ✅;
+a test payment produces an expensable invoice (Stripe portal — verify with
+the first test payment, F.1).
 
 #### Strategy notes — the three credible £1M+ routes (context, *not* build items)
 
@@ -938,6 +983,19 @@ ADRs, build reports and tests.
 - ✅ **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) *(completed 2026-06-12)*
 - ✅ **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") *(completed 2026-06-12)*
 <!-- /ROADMAP:DONE -->
+
+**Production findings (auto-filed by the log sentinel)**
+
+Open problems the in-app log sentinel spotted in production logs and filed as
+GitHub issues (label `sentinel`) — each is a real, evidenced fault waiting for
+a code fix, so treat this list as roadmap to-do items sourced from production
+rather than from planning. The block refreshes with the rest of this Status
+section; **closing the issue clears it from here**. How the bot works:
+[`LOG_SENTINEL.md`](LOG_SENTINEL.md).
+
+<!-- ROADMAP:SENTINEL -->
+_No open production findings — the log sentinel has nothing filed._
+<!-- /ROADMAP:SENTINEL -->
 
 ### What's live today (verified against the code)
 

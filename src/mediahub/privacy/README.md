@@ -17,6 +17,16 @@ cascades, and account export.
 - **`export.py`** — `account_export()`: the Art. 15/20 JSON bundle for one
   account (profile of stored fields, acceptances, memberships). Run-level
   data export already exists at `/api/runs/<id>/export`.
+- **`org_lifecycle.py`** (PC.13) — the whole-workspace versions of both:
+  `delete_org()` cascades an organisation out of every store under
+  `DATA_DIR` (runs through the run cascade, media, logos, consent +
+  athletes registries, records, corrections, posting/telemetry logs,
+  caption memory, sponsor + audit ledgers, memberships, the profile — which
+  kills the public-wall link), keeping the Stripe customer and acceptance
+  evidence per the DPA and saying so; `org_export_zip()` is the one-ZIP
+  takeout (profile, runs + approval states, media, consent CSV, athletes,
+  ledgers, audit log) that serves SARs and portability. Routes:
+  `/organisation/export` and `/organisation/delete` (owner/operator).
 
 Everything here is deliberately conservative: erasure prefers removing too
 much of a matched athlete's content (a whole card) over leaving fragments

@@ -778,7 +778,6 @@ def generate_caption_bundle(
         contract += " " + " ".join(lang_rules)
     system = system + "\n\n" + contract
 
-
     nonce = random.randint(10_000, 99_999)
     user_prose = user_prose + f"\n\n[Generate a fresh caption. seed={nonce}]"
 

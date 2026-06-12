@@ -187,11 +187,15 @@ def test_erasure_propagates_to_every_store(data_dir, media_store):
     wf = json.loads((data_dir / "runs_v4" / "runE__workflow.json").read_text())
     assert "cardA" not in wf and "cardB" in wf
 
-    # PB caches (incl. raw search HTML) deleted; other athlete's kept
-    discovered = data_dir / "data" / "discovered"
-    assert not (discovered / "swimmers" / "abc123.json").exists()
-    assert not (discovered / "search_cache" / "deadbeef.json").exists()
-    assert (discovered / "swimmers" / "def456.json").exists()
+    # PB caches (incl. raw search HTML) deleted; other athlete's kept. The
+    # discovered store migrates from the legacy doubled "data/discovered"
+    # path to the canonical <DATA_DIR>/discovered on first access, so the
+    # erased athlete must be gone from BOTH roots and the kept athlete's
+    # cache survives at the canonical one.
+    for discovered in (data_dir / "data" / "discovered", data_dir / "discovered"):
+        assert not (discovered / "swimmers" / "abc123.json").exists()
+        assert not (discovered / "search_cache" / "deadbeef.json").exists()
+    assert (data_dir / "discovered" / "swimmers" / "def456.json").exists()
 
     # turn-into pack redacted
     pack = json.loads((data_dir / "turn_into_packs" / "runE" / "pack1.json").read_text())
