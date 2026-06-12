@@ -2645,6 +2645,65 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
   setTimeout(function(){ try { document.body.removeChild(inp); } catch(e) {} }, 60000);
 }
 
+// Venue backdrops: CC-licensed public photos of the meet's pool/venue,
+// searched server-side (venue_search), imported into the org's library with
+// licence + attribution preserved, then attached to this graphic.
+var _venueResults = {};
+function mhVenueSearchOpen(btn, createUrl, cardId, fmt) {
+  var slot = document.querySelector('.mh-venue-results[data-card="' + cardId + '"]');
+  if (!slot) return;
+  if (slot.dataset.open === '1') { slot.style.display = 'none'; slot.dataset.open = ''; return; }
+  slot.dataset.open = '1'; slot.style.display = '';
+  slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">Searching public venue photos&hellip;</span>';
+  var base = createUrl.replace(/\/cards\/[^/]*\/create-graphic$/, '');
+  fetch(base + '/venue-search')
+    .then(function(r){ return r.json(); })
+    .then(function(j) {
+      var res = (j && j.results) || [];
+      if (!res.length) {
+        slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">No public venue photos found' + (j && j.query ? ' for “' + j.query + '”' : '') + '.</span>';
+        return;
+      }
+      _venueResults[cardId] = res;
+      var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Venue backdrops' + (j.query ? ' · ' + j.query : '') + ' · CC-licensed, attribution saved with the asset</div>';
+      res.forEach(function(ph, i) {
+        html += '<button type="button" title="' + ((ph.title || '') + (ph.licence ? ' · ' + ph.licence : '')).replace(/"/g, '&quot;') + '"' +
+          ' onclick=' + _attrEsc('mhVenueImport(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(fmt) + ', ' + i + ')') +
+          ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid var(--border);background:var(--bg);line-height:0;margin:0 4px 4px 0">' +
+          '<img src="' + ph.thumb_url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+      });
+      slot.innerHTML = html;
+    })
+    .catch(function() {
+      slot.innerHTML = '<span style="font-size:11px;color:var(--bad)">Venue search failed.</span>';
+    });
+}
+function mhVenueImport(btn, createUrl, cardId, fmt, idx) {
+  var ph = (_venueResults[cardId] || [])[idx];
+  if (!ph) return;
+  var base = createUrl.replace(/\/cards\/[^/]*\/create-graphic$/, '');
+  btn.disabled = true;
+  fetch(base + '/venue-import', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(ph)
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(j) {
+      btn.disabled = false;
+      if (!j.ok || !j.asset) {
+        if (window.MH && MH.toast) MH.toast('Venue photo import failed: ' + (j.error || 'unknown'), 'error', 4000);
+        return;
+      }
+      if (window.MH && MH.toast) MH.toast('Venue photo saved to your library — rendering with it now', 'success', 2500);
+      createGraphic(btn, createUrl, cardId, fmt, j.asset.id, false);
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      if (window.MH && MH.toast) MH.toast('Venue photo import failed: ' + e, 'error', 4000);
+    });
+}
+
 function _renderVisualPanel(panel, data, cardId, createUrl) {
   var visuals = data.visuals || [];
   if (!visuals.length) {
@@ -2691,10 +2750,13 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var firstName = athlete ? athlete.split(' ')[0] : '';
   var upOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
+  var venueOc = 'mhVenueSearchOpen(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
+  var venueBtn = '<button type="button" onclick=' + _attrEsc(venueOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">Venue backdrop&hellip;</button>';
   var pickerHtml =
     '<div style="margin-bottom:8px">' +
       '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
-      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn +
+      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + venueBtn +
+      '<div class="mh-venue-results" data-card="' + cardId.replace(/"/g, '&quot;') + '" style="display:none;margin-top:6px"></div>' +
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
@@ -2780,13 +2842,32 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
             '</div>' +
+            '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
           '</div>' +
         '</div>';
+      _loadMotionWhy(panel, motionUrl, fmt);
     })
     .catch(function(err) {
       btn.disabled = false; btn.textContent = origLabel;
       panel.innerHTML = '<div style="padding:14px;color:var(--bad);font-size:13px">Network error: ' + err + '</div>';
     });
+}
+
+// "Why this motion design" \u2014 the render's explainability sidecar, fetched
+// after the MP4 lands. Absence is fine (legacy renders predate manifests).
+function _loadMotionWhy(panel, motionUrl, fmt) {
+  var slot = panel.querySelector('.mh-motion-why');
+  if (!slot) return;
+  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
+    if (!m || !m.card) return;
+    var bits = [];
+    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
+    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ');
+  }).catch(function(){});
 }
 
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
@@ -14061,7 +14142,113 @@ Relay team broke club record"></textarea>
       .catch(function(){});
   });
 })();
+window.mhBufferDisconnect = function(btn) {
+  if (!window.confirm('Disconnect Buffer for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
+  btn.disabled = true;
+  fetch('REPLACE_DISCONNECT_URL', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok) { window.location.reload(); }
+      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect Buffer.', 'error'); }
+    })
+    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect Buffer.', 'error'); });
+};
+window.mhAutonomySweepNow = function(btn) {
+  var out = document.getElementById('mh-sweep-result');
+  btn.disabled = true; out.textContent = 'Checking recent runs against the publish gate…';
+  fetch('REPLACE_SWEEP_URL', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false;
+      if (j && j.ok) {
+        out.textContent = 'Swept ' + (j.swept_runs || 0) + ' recent run(s) · ' + (j.published || 0) + ' card(s) published. Details land in the activity log below after a refresh.';
+      } else { out.textContent = (j && j.error) || 'Sweep failed.'; }
+    })
+    .catch(function(){ btn.disabled = false; out.textContent = 'Sweep failed.'; });
+};
 </script>"""
+        js_html = js_html.replace(
+            "REPLACE_DISCONNECT_URL", url_for("api_disconnect_buffer")
+        ).replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
+
+        # Buffer connection + on-demand sweep + cadence state — the operational
+        # half of autonomy: the policy table above decides *if*, this shows
+        # *whether it can actually run* (token, cadence) and lets a human
+        # trigger one cycle now instead of waiting for the hourly task.
+        cadence_on = False
+        try:
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
+
+            cadence_on = any(
+                t.task_type == "approval_signal"
+                and (t.params or {}).get("org_id") == prof.profile_id
+                and t.enabled
+                for t in _sched_list_tasks2()
+            )
+        except Exception:
+            pass
+        buffer_status = (
+            '<span style="color:var(--mh-prim-success-400)">Buffer connected</span>'
+            '<button type="button" class="btn secondary" onclick="mhBufferDisconnect(this)" '
+            'style="font-size:11px;padding:3px 10px;margin-left:10px">Disconnect</button>'
+            if has_buffer
+            else '<span class="dim">Buffer not connected — connect inside any card’s schedule modal.</span>'
+        )
+        cadence_status = (
+            '<span style="color:var(--mh-prim-success-400)">active</span> — recent runs are '
+            "checked against the publish gate every hour"
+            if cadence_on
+            else '<span class="dim">off</span> — turns on automatically while any type above '
+            "is <em>Fully autonomous</em>"
+        )
+        ops_html = (
+            '<div class="card" style="margin-top:14px;padding:16px 18px">'
+            '<div style="font-weight:600;margin-bottom:6px">Autonomy operations</div>'
+            f'<p style="font-size:13px;margin:0 0 6px 0">{buffer_status}</p>'
+            f'<p style="font-size:13px;margin:0 0 10px 0">Hourly cadence: {cadence_status}.</p>'
+            '<button type="button" class="btn secondary" onclick="mhAutonomySweepNow(this)" '
+            'style="font-size:12px">Run autonomy check now</button>'
+            '<div id="mh-sweep-result" class="dim" style="font-size:12px;margin-top:8px"></div>'
+            "</div>"
+        )
+
+        # The audit ledger, surfaced — every gate verdict, auto-approval and
+        # publish attempt for this org, newest first. Append-only JSONL via
+        # workflow.autonomy.AuditLog; this is its read surface.
+        audit_rows = ""
+        try:
+            from mediahub.workflow.autonomy import AuditLog as _AuditLog
+
+            entries = _AuditLog().read(prof.profile_id, limit=12)
+            for e in reversed(entries):
+                ts = _h(_humanize_when(str(e.get("ts") or "")))
+                kind = _h(str(e.get("kind") or ""))
+                tool = _h(str(e.get("tool") or ""))
+                result = _h(str(e.get("result") or ""))
+                audit_rows += (
+                    f"<tr><td style='white-space:nowrap;font-size:12px'>{ts}</td>"
+                    f"<td style='font-size:12px'><code>{kind}</code></td>"
+                    f"<td style='font-size:12px'>{tool}</td>"
+                    f"<td style='font-size:12px;color:var(--ink-dim)'>{result}</td></tr>"
+                )
+        except Exception:
+            audit_rows = ""
+        audit_html = (
+            '<div class="card" style="margin-top:14px;padding:16px 18px">'
+            '<div style="font-weight:600;margin-bottom:6px">Autonomy activity log</div>'
+            '<p class="dim" style="font-size:12px;margin:0 0 10px 0">The immutable audit trail '
+            "behind every autonomous decision for this organisation: gate verdicts, "
+            "auto-approvals, publish attempts and blocked actions.</p>"
+            + (
+                f'<div style="overflow-x:auto"><table class="mh-table-stack" style="width:100%">'
+                f"<thead><tr><th>When</th><th>Event</th><th>Tool</th><th>Detail</th></tr></thead>"
+                f"<tbody>{audit_rows}</tbody></table></div>"
+                if audit_rows
+                else '<div class="card empty" style="margin:0">No autonomous activity yet — '
+                "entries appear here once the approval signal runs.</div>"
+            )
+            + "</div>"
+        )
 
         return (
             f"{section_header}"
@@ -14070,6 +14257,8 @@ Relay team broke club record"></textarea>
             f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
             f"without your explicit opt-in.</p>"
             f"{form_html}"
+            f"{ops_html}"
+            f"{audit_html}"
             f"{js_html}"
         )
 
@@ -14324,6 +14513,15 @@ Relay team broke club record"></textarea>
             merged = dict(existing)
             merged.update(levels)
             _save_policy(pid, merged)
+            # Reconcile the org's approval-signal cadence with the new policy:
+            # any fully_autonomous type gets the hourly scheduled sweep that
+            # actually drives auto-approval; reverting to fully gated removes it.
+            try:
+                from mediahub.workflow.approval import ensure_approval_signal_cadence
+
+                ensure_approval_signal_cadence(pid)
+            except Exception:
+                app.logger.exception("approval-signal cadence reconciliation failed")
             if thresholds:
                 from mediahub.publishing.publish_gate import save_thresholds as _save_thresholds
 
@@ -14353,17 +14551,28 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         body = request.get_json(silent=True) or {}
         run_id = str(body.get("run_id") or request.form.get("run_id") or "").strip()
-        if not run_id:
-            return jsonify({"error": "run_id is required."}), 400
         try:
-            from mediahub.workflow.approval import apply_approval_signal
+            from mediahub.workflow.approval import _recent_run_ids, apply_approval_signal
 
-            summary = apply_approval_signal(pid, run_id)
+            if run_id:
+                summary = apply_approval_signal(pid, run_id)
+                status = 200 if summary.get("ok") else 404
+                return jsonify(summary), status
+            # No run_id: sweep the org's recent finished runs — the same
+            # scope the scheduled cadence covers, triggered on demand.
+            run_ids = _recent_run_ids(pid)
+            summaries = [apply_approval_signal(pid, rid) for rid in run_ids]
+            return jsonify(
+                {
+                    "ok": True,
+                    "swept_runs": len(summaries),
+                    "published": sum(int(s.get("published") or 0) for s in summaries),
+                    "runs": summaries,
+                }
+            )
         except Exception as exc:
             app.logger.exception("autonomy sweep failed")
             return jsonify({"error": str(exc)}), 500
-        status = 200 if summary.get("ok") else 404
-        return jsonify(summary), status
 
     # ---- Content plan (P1.3 cross-source planner) ---------------------
     #
@@ -23991,6 +24200,94 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             }
         )
 
+    @app.route("/api/runs/<run_id>/venue-import", methods=["POST"])
+    def api_venue_import(run_id: str):
+        """Save one venue-search result into the org's media library.
+
+        The venue picker (per-graphic photo chips) calls this with a chosen
+        ``venue_search.VenueImageResult``; the image is downloaded once,
+        stored as a venue asset with its licence/attribution preserved, and
+        returned in the same shape as a card photo upload so the UI can
+        attach it to the graphic immediately.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        direct_url = str(body.get("direct_url") or "").strip()
+        if not direct_url.startswith(("http://", "https://")):
+            return jsonify({"error": "bad_image_url"}), 400
+        title = str(body.get("title") or "").strip()
+        licence = str(body.get("licence") or "").strip()
+        source_url = str(body.get("source_url") or "").strip()
+        attribution = str(body.get("attribution") or "").strip()
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+
+        import requests as _requests
+
+        try:
+            resp = _requests.get(direct_url, timeout=15, stream=True)
+            resp.raise_for_status()
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            if not ctype.startswith("image/"):
+                return jsonify({"error": "not_an_image"}), 400
+            data = resp.raw.read(15 * 1024 * 1024 + 1, decode_content=True)
+        except Exception as e:
+            return jsonify({"error": f"download_failed: {e}"}), 502
+        if len(data) > 15 * 1024 * 1024:
+            return jsonify({"error": "image_too_large", "max_mb": 15}), 400
+
+        ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(
+            ctype.split(";")[0].strip(), ".jpg"
+        )
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest = upload_dir / f"asset_{uuid.uuid4().hex[:12]}{ext}"
+        dest.write_bytes(data)
+
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        meet = run_data.get("meet") or {}
+        venue = str(meet.get("venue") or run_data.get("venue") or "").strip()
+        asset = MediaAsset(
+            id="",
+            filename=dest.name,
+            path=str(dest),
+            type="venue_photo",
+            description_raw=title or (venue and f"Venue photo — {venue}") or "venue photo",
+            profile_id=profile_id,
+            linked_venue=venue or None,
+            linked_meet_ids=[run_id],
+            source_url=source_url or direct_url,
+            source_attribution=attribution or None,
+            source_licence=licence or None,
+            permission_status=str(body.get("permission_status") or "approved_public"),
+            approval_status="approved",
+        )
+        asset = store.save(asset)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "url": url_for("api_media_library_file", asset_id=asset.id),
+                    "label": title or venue or "venue photo",
+                },
+            }
+        )
+
     @app.route("/api/media-library/list.json")
     def api_media_library_list_json():
         """Return media assets for the active profile as JSON.
@@ -26315,6 +26612,33 @@ voice, and queues them for one-click approval.</p>
             str(mp4), mimetype="video/mp4", as_attachment=False, download_name=out_name
         )
 
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion/manifest", methods=["GET"])
+    def api_card_motion_manifest(run_id: str, card_id: str):
+        """The motion render's explainability record — archetype, motion
+        intent, mood, colour source, seed — written as a JSON sidecar beside
+        every rendered MP4. 404 until the matching cut has been rendered."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        try:
+            from mediahub.visual import motion as _motion
+
+            fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+            valid = fmt in _motion.MOTION_FORMATS
+        except Exception:
+            fmt, valid = "story", True
+        if not valid:
+            return jsonify({"error": "bad_format"}), 400
+        name = f"{card_id}.json" if fmt == "story" else f"{card_id}_{fmt}.json"
+        sidecar = RUNS_DIR / run_id / "motion" / name
+        if not sidecar.exists():
+            return jsonify(
+                {"error": "manifest_not_found", "detail": "render this cut first"}
+            ), 404
+        try:
+            return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
+        except Exception as e:
+            return jsonify({"error": f"manifest_unreadable: {e}"}), 500
+
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.
 
@@ -26854,11 +27178,22 @@ voice, and queues them for one-click approval.</p>
 
         q = _req.args.get("q", "").strip()
         if not q:
-            return jsonify({"results": []})
+            # Default to the run's own venue / meet name so the picker can
+            # offer backdrops with zero typing.
+            run_data = _load_run(run_id) or {}
+            meet = run_data.get("meet") or {}
+            q = str(
+                meet.get("venue") or run_data.get("venue") or meet.get("name") or ""
+            ).strip()
+        if not q:
+            return jsonify({"results": [], "query": ""})
         try:
             results = _v8_search_venue(q, limit=8)
             return jsonify(
-                {"results": [r.__dict__ if hasattr(r, "__dict__") else r for r in results]}
+                {
+                    "query": q,
+                    "results": [r.to_dict() if hasattr(r, "to_dict") else r for r in results],
+                }
             )
         except Exception as e:
             return jsonify({"error": str(e), "results": []}), 500
@@ -27034,6 +27369,12 @@ voice, and queues them for one-click approval.</p>
         # card just reports awaiting_human); a fully_autonomous type's cards
         # ride the publish gate on a cadence.
         register_approval_signal_task()
+        # Make each org's cadence task match its saved policy (covers orgs
+        # that opted into fully_autonomous before policy-save reconciliation
+        # existed; policy saves keep it in sync from here on).
+        from mediahub.workflow.approval import reconcile_all_approval_signal_cadences
+
+        reconcile_all_approval_signal_cadences()
         # PC.7: the demo-run sweep — demo previews are self-cleaning. The
         # task type is registered unconditionally (cheap no-op when there
         # are no demo runs); the daily schedule row is ensured once.

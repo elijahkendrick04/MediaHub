@@ -470,9 +470,89 @@ def register_approval_signal_task() -> None:
         log.warning("could not register approval_signal task type: %s", e)
 
 
+# The cadence that makes fully_autonomous real: one hourly scheduled task per
+# opted-in org. Hourly keeps "skip the human wait" timely without hammering
+# the gate; the rate caps inside evaluate_publish_gate still bound output.
+APPROVAL_SIGNAL_CADENCE = ("cron", "0 * * * *")
+
+
+def _org_has_autonomous_type(org_id: str) -> bool:
+    try:
+        policy = load_policy(org_id)
+    except Exception:
+        return False
+    return any(
+        AutonomyLevel.from_str(level) is AutonomyLevel.FULLY_AUTONOMOUS
+        for level in policy.values()
+    )
+
+
+def ensure_approval_signal_cadence(org_id: str) -> bool:
+    """Reconcile the org's ``approval_signal`` scheduled task with its policy.
+
+    Any ``fully_autonomous`` type → ensure exactly one hourly task exists for
+    the org; none → delete the org's task so a fully-gated org runs no cycles
+    at all. Idempotent and safe to call on every policy save and at startup.
+    Returns True when a cadence task exists after reconciliation.
+    """
+    org_id = (org_id or "").strip()
+    if not org_id:
+        return False
+    try:
+        from mediahub.workflow.schedule import create_task, delete_task, list_tasks
+    except Exception as e:
+        log.warning("approval-signal cadence unavailable: %s", e)
+        return False
+
+    wanted = _org_has_autonomous_type(org_id)
+    existing = [
+        t
+        for t in list_tasks()
+        if t.task_type == "approval_signal" and (t.params or {}).get("org_id") == org_id
+    ]
+    if wanted and not existing:
+        kind, expr = APPROVAL_SIGNAL_CADENCE
+        create_task(
+            name=f"Autonomy approval signal ({org_id})",
+            task_type="approval_signal",
+            schedule_kind=kind,
+            schedule_expr=expr,
+            params={"org_id": org_id},
+        )
+        return True
+    if not wanted:
+        for t in existing:
+            delete_task(t.id)
+        return False
+    # Collapse duplicates (two workers can race the startup reconciliation);
+    # the per-slot atomic claim already de-dupes firing, this de-dupes rows.
+    for t in sorted(existing, key=lambda t: t.created_at)[1:]:
+        delete_task(t.id)
+    return True
+
+
+def reconcile_all_approval_signal_cadences() -> None:
+    """Startup pass: make every org's cadence match its saved policy (covers
+    orgs that opted into fully_autonomous before cadence wiring existed)."""
+    try:
+        from mediahub.web.club_profile import list_profiles  # noqa: PLC0415
+
+        org_ids = [p.profile_id for p in list_profiles()]
+    except Exception as e:
+        log.warning("could not list orgs for approval-signal reconciliation: %s", e)
+        return
+    for org_id in org_ids:
+        try:
+            ensure_approval_signal_cadence(org_id)
+        except Exception as e:  # one org's failure must not stop the rest
+            log.warning("approval-signal reconciliation failed for %s: %s", org_id, e)
+
+
 __all__ = [
     "ApprovalOutcome",
     "apply_approval_signal",
+    "ensure_approval_signal_cadence",
+    "reconcile_all_approval_signal_cadences",
     "register_approval_signal_task",
     "RUN_CONTENT_TYPE",
 ]

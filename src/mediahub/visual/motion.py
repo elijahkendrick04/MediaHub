@@ -454,6 +454,18 @@ def _write_render_manifest(cached: Path, manifest: dict) -> None:
         pass
 
 
+def _publish_sidecar(cached: Path, out_path: Path) -> None:
+    """Ship the explainability manifest with the MP4 it explains. Cache hits
+    carry the sidecar from the original render; best-effort like the write."""
+    try:
+        src = cached.with_suffix(".json")
+        dst = out_path.with_suffix(".json")
+        if src.exists() and src.resolve() != dst.resolve():
+            shutil.copyfile(src, dst)
+    except Exception:
+        pass
+
+
 def _card_manifest_axes(card_props: dict) -> dict:
     """The per-card explainability axes worth recording (no photo bytes)."""
     return {
@@ -636,6 +648,7 @@ def render_story_card(
         if cached.resolve() != out_path.resolve():
             out_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(cached, out_path)
+            _publish_sidecar(cached, out_path)
             return out_path
         return cached
 
@@ -662,6 +675,7 @@ def render_story_card(
     if cached.resolve() != out_path.resolve():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(cached, out_path)
+        _publish_sidecar(cached, out_path)
     return out_path if out_path.exists() else cached
 
 
@@ -791,6 +805,7 @@ def render_meet_reel(
         if cached.resolve() != out_path.resolve():
             out_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(cached, out_path)
+            _publish_sidecar(cached, out_path)
             return out_path
         return cached
 
@@ -816,6 +831,7 @@ def render_meet_reel(
     if cached.resolve() != out_path.resolve():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(cached, out_path)
+        _publish_sidecar(cached, out_path)
     return out_path if out_path.exists() else cached
 
 

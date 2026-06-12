@@ -10,8 +10,19 @@ runtime) and creates a high-confidence achievement.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from swim_content_v5.achievements.base import AchievementDetector
 from swim_content_v5.schema import Achievement, AchievementEvidence
+
+
+def _parse_iso_date(value) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
 
 
 def _cs_to_str(cs) -> str:
@@ -60,7 +71,7 @@ class OfficialPBDetector(AchievementDetector):
             return []
 
         # Look for CONFIRMED_OFFICIAL_PB in the PB audit
-        pb_decision = self._get_pb_decision(swim, history)
+        pb_decision = self._get_pb_decision(swim, history, ctx=ctx)
         if not pb_decision:
             return []
 
@@ -139,12 +150,14 @@ class OfficialPBDetector(AchievementDetector):
             )
         ]
 
-    def _get_pb_decision(self, swim, history) -> dict | None:
+    def _get_pb_decision(self, swim, history, ctx=None) -> dict | None:
         """Extract the PBDecision dict from the history object."""
         # history may have a pb_decision attribute set by the pipeline
         pb_decision = getattr(history, "pb_decision", None)
         if pb_decision is None:
-            return None
+            # Production path: derive the decision from the swimmer's PB
+            # snapshot (pb_discovery via pb_bridge) — V7.3 Rule 0.
+            return self._derive_decision(swim, history, ctx)
         if hasattr(pb_decision, "status"):
             # It's a PBDecision dataclass — convert to dict-like access
             return {
@@ -156,8 +169,57 @@ class OfficialPBDetector(AchievementDetector):
             return pb_decision
         return None
 
+    def _derive_decision(self, swim, history, ctx) -> dict | None:
+        """V7.3 Rule 0 over the discovery-bridged snapshot.
+
+        The swimmer's listed all-time PB matches this swim by time (within
+        0.005s) and date (within the meet window ±1 day) — i.e. the source
+        the PB lookup chose already records THIS swim as the official PB.
+        Deterministic; returns None unless every condition holds. The plain
+        PBConfirmedDetector cannot fire in this scenario (the swim equals,
+        not beats, the listed best), so without this rule a genuine PB
+        produces no achievement at all.
+        """
+        if not getattr(history, "has_data", False):
+            return None
+        meet_start = _parse_iso_date(getattr(ctx, "start_date", None))
+        meet_end = _parse_iso_date(getattr(ctx, "end_date", None)) or meet_start
+        if meet_start is None:
+            return None
+        try:
+            entries = history._pb_times_for(swim.distance, swim.stroke, swim.course)
+        except Exception:
+            return None
+        current_sec = swim.finals_time_cs / 100.0
+        for entry in entries or []:
+            time_sec = entry.get("time_sec")
+            if time_sec is None or abs(float(time_sec) - current_sec) > 0.005:
+                continue
+            entry_date = _parse_iso_date(entry.get("date_iso") or entry.get("date"))
+            if entry_date is None:
+                continue
+            window_start = meet_start - timedelta(days=1)
+            window_end = meet_end + timedelta(days=1)
+            if not (window_start <= entry_date <= window_end):
+                continue
+            source_url = entry.get("source_url") or ""
+            source_name = ""
+            try:
+                source_name = history.source_name() or ""
+            except Exception:
+                pass
+            return {
+                "status": "CONFIRMED_OFFICIAL_PB",
+                "reason": (
+                    "Time and date match the swimmer's listed all-time PB — "
+                    "this swim is their official PB."
+                ),
+                "evidence": [{"source_url": source_url, "source_name": source_name}],
+            }
+        return None
+
     def _no_fire_reason(self, swim, ctx, history, all_results=None, extra=None) -> str:
-        pb_decision = self._get_pb_decision(swim, history)
+        pb_decision = self._get_pb_decision(swim, history, ctx=ctx)
         if pb_decision is None:
             return "no PB decision data on history object"
         status = (
