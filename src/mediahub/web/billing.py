@@ -265,6 +265,62 @@ def create_quote_checkout_session(
     return url
 
 
+def grant_referral_reward(
+    customer_id: str,
+    *,
+    amount_off_pence: int,
+    currency: str = "gbp",
+    referred_club: str = "",
+) -> str:
+    """Grant the PC.9 referral reward: one free month off the referrer's
+    next renewal, as a single-use Stripe coupon. Returns the coupon id.
+
+    The amount is the referrer's own verified annual price / 12, computed by
+    the caller from the WTP ledger — this function never invents a figure.
+    Applied to the referrer's active subscription when one exists, else as a
+    customer-level discount (consumed by their next invoice).
+    """
+    stripe = _stripe()
+    cid = (customer_id or "").strip()
+    if not cid:
+        raise BillingError("missing referrer customer id")
+    try:
+        amount = int(amount_off_pence)
+    except (TypeError, ValueError):
+        raise BillingError("reward amount must be an integer number of pence")
+    if amount <= 0:
+        raise BillingError("reward amount must be positive")
+    # Stripe caps coupon names at 40 chars.
+    name = f"Referral reward — {referred_club}".strip()[:40] or "Referral reward"
+    try:
+        coupon = stripe.Coupon.create(
+            amount_off=amount,
+            currency=(currency or "gbp").lower(),
+            duration="once",
+            name=name,
+            metadata={"mediahub_referred_club": referred_club or ""},
+        )
+        coupon_id = getattr(coupon, "id", None) or (
+            coupon.get("id") if isinstance(coupon, dict) else None
+        )
+        if not coupon_id:
+            raise BillingError("Stripe did not return a coupon id")
+        subs = stripe.Subscription.list(customer=cid, status="active", limit=1)
+        data = getattr(subs, "data", None) or (
+            subs.get("data") if isinstance(subs, dict) else []
+        )
+        if data:
+            sub_id = getattr(data[0], "id", None) or data[0].get("id")
+            stripe.Subscription.modify(sub_id, coupon=coupon_id)
+        else:
+            stripe.Customer.modify(cid, coupon=coupon_id)
+    except BillingError:
+        raise
+    except Exception as exc:
+        raise BillingError(f"could not grant referral reward: {exc}") from exc
+    return coupon_id
+
+
 def create_customer_portal_session(*, customer_id: str, return_url: str) -> str:
     """Create a Stripe Customer Portal session and return its URL."""
     stripe = _stripe()

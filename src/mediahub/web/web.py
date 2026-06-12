@@ -19307,6 +19307,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<a class="btn secondary" href="{url_for("organisation_members_page")}">'
                 "Manage members &rarr;</a></div>"
             )
+            # PC.9 — the club's shareable referral code (the 2-named-intros
+            # mechanism, in-product).
+            try:
+                from mediahub.commercial.referrals import ReferralCodeStore
+
+                _rc = ReferralCodeStore().get_or_create(
+                    profile.profile_id, profile.display_name
+                )
+                _share_url = url_for("signup_page", ref=_rc.code, _external=True)
+                body += (
+                    '<div class="card" style="margin-top:20px;padding:20px 24px">'
+                    '<h2 style="margin-top:0;font-size:16px">Refer a club</h2>'
+                    '<p class="dim" style="font-size:13px;margin:0 0 12px">'
+                    "Know a club that should be using MediaHub? Share your link — "
+                    "when they sign up through it and pay for a year, your club "
+                    "gets <strong>a free month</strong> credited automatically.</p>"
+                    f'<p style="font-size:13px;margin:0 0 6px">Your code: '
+                    f"<code>{_h(_rc.code)}</code></p>"
+                    '<pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);'
+                    'padding:10px;border-radius:8px;border:1px solid var(--border);margin:0">'
+                    f"{_h(_share_url)}</pre></div>"
+                )
+            except Exception:
+                log.warning("referral code card failed", exc_info=True)
             # PC.13 — org takeout + whole-org deletion (owner/operator only).
             if _org_admin_allowed(profile.profile_id):
                 body += f"""
@@ -19544,6 +19568,28 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             'style="color:var(--accent)">Privacy Notice</a>.</span></label>'
         )
 
+    def _referral_field_html(prefill: str = "") -> str:
+        """PC.9 — the optional referral-code control on the signup form.
+
+        Arriving via a shared ``/signup?ref=CODE`` link pre-fills it (with a
+        visible note); otherwise it's a small optional input.
+        """
+        code = (prefill or "").strip()
+        if code:
+            return (
+                f'<input type="hidden" name="ref" value="{_h(code)}" />'
+                '<p class="dim" style="font-size:12px;margin-top:14px">'
+                f"Referred by a MediaHub club (code <code>{_h(code)}</code>) "
+                "&mdash; thanks, we'll credit them when you subscribe.</p>"
+            )
+        return (
+            '<label style="display:block;margin-top:14px;font-size:12px;'
+            'text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted)">'
+            "Referral code (optional)"
+            '<input type="text" name="ref" autocomplete="off" '
+            'style="width:100%;margin-top:6px" placeholder="e.g. aB3xY9" /></label>'
+        )
+
     @app.route("/signup", methods=["GET"])
     def signup_page():
         # Already signed in? Send them on to the app.
@@ -19563,7 +19609,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="color:var(--accent);font-weight:600">Log in</a>.'
             ),
             min_password=True,
-            extra_fields_html=_terms_checkbox_html(),
+            extra_fields_html=(
+                _referral_field_html(request.args.get("ref") or "") + _terms_checkbox_html()
+            ),
         )
 
     @app.route("/signup", methods=["POST"])
@@ -19588,7 +19636,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     prefill_email=email,
                     error=message,
                     min_password=True,
-                    extra_fields_html=_terms_checkbox_html(),
+                    extra_fields_html=(
+                        _referral_field_html(request.form.get("ref") or "")
+                        + _terms_checkbox_html()
+                    ),
                 ),
                 status,
             )
@@ -19620,6 +19671,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # PC.14: verification mail (best-effort; only when the email seam
         # is configured — signup never blocks on it).
         _send_verification_email(user.email)
+        # PC.9: a referral code records the new club as a code-tracked lead
+        # in the PC.6 funnel — zero operator typing. Best-effort: a bad
+        # code must never break a signup.
+        ref_code = (request.form.get("ref") or "").strip()
+        if ref_code:
+            try:
+                from mediahub.commercial.referrals import record_referred_signup
+
+                record_referred_signup(ref_code, user.email)
+            except Exception:
+                log.warning("referral signup recording failed", exc_info=True)
         # Land new users on the create surface (Step 7: redirect to /add-input).
         return redirect(url_for("make_page"))
 
@@ -20354,13 +20416,89 @@ what you're doing, what they should do.</p>
         debt_html = ""
         if debt:
             items = "".join(
-                f"<li>{_h(d['club_name'])} — {d['intros_recorded']}/2 intros recorded</li>"
+                f"<li>{_h(d['club_name'])} — {d['intros_recorded']}/2 intros "
+                f"({d.get('intros_code_tracked', 0)} code-tracked, "
+                f"{d['intros_recorded'] - d.get('intros_code_tracked', 0)} typed)</li>"
                 for d in debt
             )
             debt_html = (
-                '<p class="tag warn" style="margin:10px 0 4px">Referral debt — ask each '
-                f"signed club for 2 named intros:</p><ul style='font-size:12px'>{items}</ul>"
+                '<p class="tag warn" style="margin:10px 0 4px">Referral debt — each '
+                "signed club owes 2 named intros (code-tracked signups count "
+                f"automatically):</p><ul style='font-size:12px'>{items}</ul>"
             )
+        # PC.9 — live referral state: codes, code-tracked signups, rewards.
+        referral_html = ""
+        try:
+            from mediahub.commercial.referrals import (
+                ReferralCodeStore,
+                ReferralRewardStore,
+            )
+
+            _codes = ReferralCodeStore()._by_profile()
+            _rewards = ReferralRewardStore().list_all()
+            referred = [ld for ld in leads if ld.source == "referral"]
+            code_rows = "".join(
+                f"<tr><td style='padding:6px 10px'><code>{_h(rc.code)}</code></td>"
+                f"<td style='padding:6px 10px'>{_h(rc.club_name or rc.profile_id)}</td>"
+                f"<td style='padding:6px 10px;font-size:11px;color:var(--ink-muted)'>"
+                f"{_h(url_for('signup_page', ref=rc.code, _external=True))}</td></tr>"
+                for rc in sorted(_codes.values(), key=lambda r: r.club_name.lower())
+            ) or (
+                "<tr><td colspan='3' style='padding:10px;color:var(--ink-muted)'>"
+                "No codes minted yet — each org gets one the first time its "
+                "Organisation page renders.</td></tr>"
+            )
+            referred_rows = "".join(
+                f"<tr><td style='padding:6px 10px'>{_h(ld.club_name)}</td>"
+                f"<td style='padding:6px 10px'>{_h(ld.referrer_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(ld.status)}</td></tr>"
+                for ld in referred
+            ) or (
+                "<tr><td colspan='3' style='padding:10px;color:var(--ink-muted)'>"
+                "No code-tracked signups yet.</td></tr>"
+            )
+            reward_rows = "".join(
+                f"<tr><td style='padding:6px 10px'>{_h(rw.referrer_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(rw.referred_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(rw.status)}"
+                + (
+                    f"<div style='font-size:11px;color:var(--ink-muted)'>{_h(rw.reason)}</div>"
+                    if rw.reason
+                    else ""
+                )
+                + "</td>"
+                f"<td style='padding:6px 10px'>{_pence_str(rw.amount_off_pence) if rw.amount_off_pence else '—'}</td></tr>"
+                for rw in _rewards
+            ) or (
+                "<tr><td colspan='4' style='padding:10px;color:var(--ink-muted)'>"
+                "No rewards yet — the first verified referred payment grants one "
+                "automatically.</td></tr>"
+            )
+            referral_html = (
+                '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+                '<h2 style="margin-top:0;font-size:16px">Referral engine (PC.9)</h2>'
+                '<p class="dim" style="font-size:12px;margin:0 0 10px">Codes are shared '
+                "by clubs from their Organisation page; signups through a code land in "
+                "the pipeline automatically and a verified annual payment grants the "
+                "referrer one free month (Stripe coupon) with zero typing.</p>"
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Code</th>"
+                "<th style='padding:6px 10px'>Org</th><th style='padding:6px 10px'>Share link</th></tr></thead>"
+                f"<tbody>{code_rows}</tbody></table>"
+                '<h3 style="font-size:13px;margin:14px 0 4px">Code-tracked signups</h3>'
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Lead</th>"
+                "<th style='padding:6px 10px'>Referred by</th><th style='padding:6px 10px'>Stage</th></tr></thead>"
+                f"<tbody>{referred_rows}</tbody></table>"
+                '<h3 style="font-size:13px;margin:14px 0 4px">Rewards</h3>'
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Referrer</th>"
+                "<th style='padding:6px 10px'>Referred club</th><th style='padding:6px 10px'>Status</th>"
+                "<th style='padding:6px 10px'>Value</th></tr></thead>"
+                f"<tbody>{reward_rows}</tbody></table></div>"
+            )
+        except Exception:
+            log.warning("referral console section failed", exc_info=True)
         l_rows = ""
         for lead in leads:
             sel = "".join(
@@ -20505,6 +20643,7 @@ what you're doing, what they should do.</p>
             + gates_html
             + quotes_html
             + pipeline_html
+            + referral_html
             + ngb_html
             + bind_html
         )
@@ -20557,6 +20696,14 @@ what you're doing, what they should do.</p>
                         f"({_pence_str(q.paid_amount_pence)} vs quoted {_pence_str(q.amount_pence)})."
                     )
                 )
+                # PC.9: an attested verified payment settles referrals the
+                # same way the webhook does (idempotent per quote).
+                try:
+                    from mediahub.commercial.referrals import on_verified_quote_payment
+
+                    on_verified_quote_payment(q)
+                except Exception:
+                    log.warning("referral settlement failed", exc_info=True)
             elif op == "checkout":
                 q = store.get(quote_id)
                 if q is None:
@@ -21094,12 +21241,23 @@ what you're doing, what they should do.</p>
             try:
                 from mediahub.commercial.wtp import QuoteStore
 
-                QuoteStore().record_stripe_payment(
+                paid_quote = QuoteStore().record_stripe_payment(
                     update.quote_id,
                     amount_total_pence=update.amount_total_pence,
                     currency=update.currency,
                     event_id=update.event_id,
                 )
+                # PC.9: a verified payment settles any referral attached to
+                # this club — the reward auto-grants (or records honestly
+                # as pending) and the funnel ledger advances itself.
+                # Idempotent per quote, so webhook retries change nothing.
+                if paid_quote is not None:
+                    try:
+                        from mediahub.commercial.referrals import on_verified_quote_payment
+
+                        on_verified_quote_payment(paid_quote)
+                    except Exception:
+                        log.warning("referral settlement failed", exc_info=True)
             except Exception:
                 log.warning("quote payment recording failed", exc_info=True)
 
