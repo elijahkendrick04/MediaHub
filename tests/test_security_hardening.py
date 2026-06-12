@@ -45,16 +45,27 @@ def test_signup_rate_limited_after_budget(app):
 
 
 def test_rate_limit_is_per_ip(app):
+    """The two auth defences are layered and key on DIFFERENT things:
+    the request limiter is per-IP, the failure lockout is per-account."""
     c = app.test_client()
     for _ in range(12):
         c.post("/login", data={"email": "x@club.org", "password": "wrong-pass"})
-    # A different source address still gets through (401, not 429).
+    # The per-IP limiter does NOT follow to a different source address:
+    # a DIFFERENT account from a fresh IP still gets a normal 401.
+    r = c.post(
+        "/login",
+        data={"email": "someone-else@club.org", "password": "wrong-pass"},
+        headers={"X-Forwarded-For": "203.0.113.99"},
+    )
+    assert r.status_code == 401
+    # But the per-ACCOUNT lockout DOES follow across IPs — rotating
+    # addresses must not unlock a hammered account.
     r = c.post(
         "/login",
         data={"email": "x@club.org", "password": "wrong-pass"},
         headers={"X-Forwarded-For": "203.0.113.99"},
     )
-    assert r.status_code == 401
+    assert r.status_code == 429
 
 
 # ---- security headers --------------------------------------------------------
