@@ -9,6 +9,7 @@ output has parity with the HY3/SDIF path (canonical stroke names,
 Fixtures are hand-crafted per the Lenex 3.0 public spec structure under
 tests/fixtures/lenex/ so every expected value is exact and assertable.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -56,7 +57,7 @@ class TestDetectLenex:
         assert detect_lenex(b'<LENEX version="3.0"><MEETS/></LENEX>') is True
 
     def test_utf8_bom_tolerated(self) -> None:
-        assert detect_lenex(b"\xef\xbb\xbf<?xml version=\"1.0\"?><LENEX version=\"3.0\"/>") is True
+        assert detect_lenex(b'\xef\xbb\xbf<?xml version="1.0"?><LENEX version="3.0"/>') is True
 
     def test_hy3_bytes_not_lenex(self) -> None:
         assert detect_lenex(b"A107SystemHeader        Hy-Tek MM 7.0\nB1Spring Meet") is False

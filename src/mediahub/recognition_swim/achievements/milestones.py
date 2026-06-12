@@ -70,9 +70,7 @@ class MilestoneDetector(AchievementDetector):
         if not ctx_map:
             return []  # no registry history for this workspace
 
-        swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(
-            history, "swimmer_name", ""
-        )
+        swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(history, "swimmer_name", "")
         alias = normalise_name(swimmer_name)
         athlete_ctx = ctx_map.get(alias)
 

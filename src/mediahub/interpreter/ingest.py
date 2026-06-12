@@ -773,9 +773,7 @@ def ingest(
 
             result = _ocr.ocr_pdf_pages(data)
             if result.ok and result.lines:
-                log.info(
-                    "Scanned PDF OCR'd via %s: %d lines", result.engine, len(result.lines)
-                )
+                log.info("Scanned PDF OCR'd via %s: %d lines", result.engine, len(result.lines))
                 return _stream_from_ocr(result)
             ocr_unavailable_note = f"Scanned PDF; {result.error or 'OCR recognised no text'}"
             log.warning(

@@ -1,5 +1,6 @@
 """Phase W output-layer tests — W.9 magic links, W.11/W.13 caption bundle,
 W.14 approval telemetry."""
+
 from __future__ import annotations
 
 import json
@@ -106,7 +107,10 @@ class TestCaptionBundle:
         calls = self._patch(
             monkeypatch,
             json.dumps(
-                {"caption": "Maya flies to 1:05.32!", "alt_text": "Maya Patel, 100m Freestyle, 1:05.32 — a new PB."}
+                {
+                    "caption": "Maya flies to 1:05.32!",
+                    "alt_text": "Maya Patel, 100m Freestyle, 1:05.32 — a new PB.",
+                }
             ),
         )
         out = generate_caption_bundle(_ACH)
@@ -167,7 +171,9 @@ class TestCaptionBundle:
 class TestApprovalTelemetry:
     def test_record_and_summary(self, db):
         for _ in range(3):
-            record_event(ORG, "r1", "c1", "approved", post_angle="club_record", tone="warm-club", db_path=db)
+            record_event(
+                ORG, "r1", "c1", "approved", post_angle="club_record", tone="warm-club", db_path=db
+            )
         record_event(ORG, "r1", "c2", "rejected", post_angle="recap_mention", db_path=db)
         record_event(ORG, "r1", "c2", "rejected", post_angle="recap_mention", db_path=db)
         record_event(ORG, "r1", "c3", "rejected", post_angle="recap_mention", db_path=db)

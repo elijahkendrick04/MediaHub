@@ -49,9 +49,7 @@ def _ra(atype, swimmer, event, *, priority, rank, raw=None, headline=""):
     }
 
 
-def _write_snapshot(
-    runs_dir, run_id, profile_id, meet_name, start_date, ranked, swim_traces=None
-):
+def _write_snapshot(runs_dir, run_id, profile_id, meet_name, start_date, ranked, swim_traces=None):
     rr = {"ranked_achievements": ranked}
     if swim_traces is not None:
         rr["swim_traces"] = swim_traces
@@ -260,9 +258,7 @@ def test_monthly_draft_title_id_window_and_highlights_order(runs_dir):
 
 
 def test_season_draft_shape(runs_dir):
-    draft = build_season_draft(
-        ORG_A, runs_dir, season_start="2025-09-01", season_end="2026-07-31"
-    )
+    draft = build_season_draft(ORG_A, runs_dir, season_start="2025-09-01", season_end="2026-07-31")
     assert draft["title"] == "Season wrap 2025-09-01–2026-07-31"
     assert draft["id"] == "season-2025-09-01-2026-07-31"
     # The July org-A meet is inside the season window.
@@ -313,9 +309,7 @@ class _CaptureChannel:
         return True
 
 
-def test_monthly_task_handler_writes_draft_and_notifies(
-    runs_dir, tmp_path, monkeypatch
-):
+def test_monthly_task_handler_writes_draft_and_notifies(runs_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     sent = []
     from mediahub.notify import channels

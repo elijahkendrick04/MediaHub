@@ -70,9 +70,7 @@ class ClubRecordDetector(AchievementDetector):
         if not distance or not stroke or not course:
             return []
 
-        meta = ((extra or {}).get("swimmer_meta") or {}).get(
-            getattr(swim, "swimmer_key", ""), {}
-        )
+        meta = ((extra or {}).get("swimmer_meta") or {}).get(getattr(swim, "swimmer_key", ""), {})
         gender = (getattr(swim, "gender", "") or meta.get("gender") or "").upper()[:1]
         age = meta.get("age")
         if not gender:
@@ -105,9 +103,7 @@ class ClubRecordDetector(AchievementDetector):
         broken.sort(key=lambda item: item[0])
         specificity, key, rec, age_group = broken[0]
 
-        swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(
-            history, "swimmer_name", ""
-        )
+        swimmer_name = (extra or {}).get("swimmer_name", "") or getattr(history, "swimmer_name", "")
         evt_label = _event_label(swim)
         old_str = format_time_cs(int(rec["time_cs"]))
         new_str = format_time_cs(time_cs)

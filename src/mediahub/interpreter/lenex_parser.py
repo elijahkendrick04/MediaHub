@@ -62,9 +62,7 @@ log = logging.getLogger(__name__)
 _ONTOLOGY = OntologyLoader()
 _STROKE_MAP: dict[str, str] = _ONTOLOGY.canonical_map("strokes")
 _COURSE_MAP: dict[str, str] = _ONTOLOGY.canonical_map("courses")
-_HY3_STROKE_CODES: dict[str, str] = (_ONTOLOGY["hytek_codes"] or {}).get(
-    "hy3_stroke_codes", {}
-)
+_HY3_STROKE_CODES: dict[str, str] = (_ONTOLOGY["hytek_codes"] or {}).get("hy3_stroke_codes", {})
 # Relay stroke names ride on the existing hytek ontology entries
 # (A=individual free → F=free relay, E=individual medley → G=medley relay)
 # so relays canonicalise without new vocabulary literals here.
@@ -285,9 +283,7 @@ def _unwrap_lxf(data: bytes) -> Optional[bytes]:
         safe_by_name = {i.filename: i for i in safe}
         lef_named = [i.filename for i in all_files if i.filename.lower().endswith(".lef")]
         if lef_named and not any(n in safe_by_name for n in lef_named):
-            raise UnsafeZipError(
-                "all .lef members were rejected by ZIP safety limits"
-            )
+            raise UnsafeZipError("all .lef members were rejected by ZIP safety limits")
         # Prefer .lef-named members, then any other safe member that
         # sniffs as LENEX XML (some exporters use odd extensions).
         ordered = [safe_by_name[n] for n in lef_named if n in safe_by_name]
@@ -350,9 +346,7 @@ def _index_rankings(meet_el: ET.Element) -> dict[str, int]:
 
 def _count_elements(meet_el: ET.Element, tag: str) -> int:
     upper = tag.upper()
-    return sum(
-        1 for el in meet_el.iter() if isinstance(el.tag, str) and el.tag.upper() == upper
-    )
+    return sum(1 for el in meet_el.iter() if isinstance(el.tag, str) and el.tag.upper() == upper)
 
 
 def _empty_meet(needs_review: list[dict]) -> InterpretedMeet:
@@ -402,9 +396,7 @@ def _load_meet_element(
         return None, [{"reason": "lenex-xml-malformed", "detail": str(exc)}]
     meets = _collect(root, "MEETS", "MEET")
     if not meets:
-        return None, [
-            {"reason": "lenex-no-meet", "detail": "no MEETS/MEET element in document"}
-        ]
+        return None, [{"reason": "lenex-no-meet", "detail": "no MEETS/MEET element in document"}]
     flags: list[dict] = []
     if len(meets) > 1:
         flags.append(

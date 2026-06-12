@@ -121,7 +121,7 @@ def normalise_name(name: str) -> str:
 
 
 def initials_of(name: str) -> str:
-    """"Maya Patel" → "M.P." — used by the consent initials-only rendering."""
+    """ "Maya Patel" → "M.P." — used by the consent initials-only rendering."""
     parts = [p for p in normalise_name(name).split(" ") if p]
     if not parts:
         return ""
@@ -160,9 +160,7 @@ def _row_to_record(row: sqlite3.Row) -> AthleteRecord:
 # ---------------------------------------------------------------------------
 
 
-def resolve(
-    profile_id: str, name: str, db_path: Optional[Path] = None
-) -> Optional[AthleteRecord]:
+def resolve(profile_id: str, name: str, db_path: Optional[Path] = None) -> Optional[AthleteRecord]:
     """Look an athlete up by any known alias. None when unknown."""
     if not profile_id or not name:
         return None
@@ -438,8 +436,7 @@ def list_athletes(profile_id: str, db_path: Optional[Path] = None) -> list[Athle
                 ).fetchall()
             ]
             cnt = conn.execute(
-                "SELECT COUNT(*) AS c FROM athlete_swims"
-                " WHERE profile_id = ? AND athlete_id = ?",
+                "SELECT COUNT(*) AS c FROM athlete_swims WHERE profile_id = ? AND athlete_id = ?",
                 (profile_id, rec.athlete_id),
             ).fetchone()
             rec.race_count = int(cnt["c"]) if cnt else 0

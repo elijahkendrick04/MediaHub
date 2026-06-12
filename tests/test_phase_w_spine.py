@@ -5,6 +5,7 @@ Everything here is deterministic by rule (CLAUDE.md): identity, milestone
 and record logic never touch an LLM. All stores run against a throwaway
 SQLite db via the ``db_path`` parameter.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -158,7 +159,9 @@ class TestRegistry:
     def test_merge_moves_swims_and_aliases_and_persists(self, db):
         a = get_or_create(ORG, "Maya Patel", db_path=db)
         b = get_or_create(ORG, "M. Patel", db_path=db)
-        record_run_swims(ORG, "run1", [{"name": "M. Patel", "event": "100FRLC", "time_cs": 1}], db_path=db)
+        record_run_swims(
+            ORG, "run1", [{"name": "M. Patel", "event": "100FRLC", "time_cs": 1}], db_path=db
+        )
         assert merge_athletes(ORG, a.athlete_id, b.athlete_id, actor="coach", db_path=db)
         roster = list_athletes(ORG, db_path=db)
         assert [r.athlete_id for r in roster] == [a.athlete_id]
@@ -176,16 +179,42 @@ class TestRegistry:
             "meet": {
                 "start_date": "2026-06-06",
                 "swimmers": {
-                    "k1": {"first_name": "Maya", "last_name": "Patel", "club_code": "SUNY", "dob": "2010-04-01"},
+                    "k1": {
+                        "first_name": "Maya",
+                        "last_name": "Patel",
+                        "club_code": "SUNY",
+                        "dob": "2010-04-01",
+                    },
                     "k2": {"first_name": "Rival", "last_name": "Swimmer", "club_code": "OTHR"},
                 },
                 "results": [
-                    {"swimmer_key": "k1", "club_code": "SUNY", "distance": 100, "stroke": "FR",
-                     "course": "LC", "finals_time_cs": 6532, "dq": False},
-                    {"swimmer_key": "k2", "club_code": "OTHR", "distance": 100, "stroke": "FR",
-                     "course": "LC", "finals_time_cs": 6000, "dq": False},
-                    {"swimmer_key": "k1", "club_code": "SUNY", "distance": 50, "stroke": "FR",
-                     "course": "LC", "finals_time_cs": None, "dq": True},
+                    {
+                        "swimmer_key": "k1",
+                        "club_code": "SUNY",
+                        "distance": 100,
+                        "stroke": "FR",
+                        "course": "LC",
+                        "finals_time_cs": 6532,
+                        "dq": False,
+                    },
+                    {
+                        "swimmer_key": "k2",
+                        "club_code": "OTHR",
+                        "distance": 100,
+                        "stroke": "FR",
+                        "course": "LC",
+                        "finals_time_cs": 6000,
+                        "dq": False,
+                    },
+                    {
+                        "swimmer_key": "k1",
+                        "club_code": "SUNY",
+                        "distance": 50,
+                        "stroke": "FR",
+                        "course": "LC",
+                        "finals_time_cs": None,
+                        "dq": True,
+                    },
                 ],
             },
         }
@@ -212,7 +241,9 @@ class TestMilestoneDetector:
         swim = _swim()
         extra = {
             "swimmer_name": "Maya Patel",
-            "athlete_milestones": {"someone else": {"athlete_id": "x", "prior_races": 3, "prior_events": []}},
+            "athlete_milestones": {
+                "someone else": {"athlete_id": "x", "prior_races": 3, "prior_events": []}
+            },
         }
         achs = det.detect(swim, _ctx(), _history(), [swim], extra)
         assert [a.type for a in achs] == ["club_debut"]
@@ -226,7 +257,11 @@ class TestMilestoneDetector:
         extra = {
             "swimmer_name": "Maya Patel",
             "athlete_milestones": {
-                "maya patel": {"athlete_id": "a1", "prior_races": 48, "prior_events": ["50FRLC", "100FRLC"]}
+                "maya patel": {
+                    "athlete_id": "a1",
+                    "prior_races": 48,
+                    "prior_events": ["50FRLC", "100FRLC"],
+                }
             },
         }
         # ordinal sorts by event key: "100FRLC" < "50FRLC" — s2 is race 49, s1 race 50
@@ -284,8 +319,14 @@ class TestRecordsStore:
 
     def test_apply_approved_card_monotonic(self, db):
         upsert_record(
-            ORG, distance=100, stroke="FR", course="LC", gender="F",
-            time_cs=6210, holder="Erin Jones", db_path=db,
+            ORG,
+            distance=100,
+            stroke="FR",
+            course="LC",
+            gender="F",
+            time_cs=6210,
+            holder="Erin Jones",
+            db_path=db,
         )
         card = {
             "run_id": "runZ",
@@ -293,15 +334,22 @@ class TestRecordsStore:
                 "type": "club_record",
                 "swimmer_name": "Maya Patel",
                 "raw_facts": {
-                    "distance": 100, "stroke": "FR", "course": "LC", "gender": "F",
-                    "age_group": "open", "new_time_cs": 6150, "swim_date": "2026-06-06",
+                    "distance": 100,
+                    "stroke": "FR",
+                    "course": "LC",
+                    "gender": "F",
+                    "age_group": "open",
+                    "new_time_cs": 6150,
+                    "swim_date": "2026-06-06",
                 },
             },
         }
         assert apply_approved_card(ORG, card, db_path=db)
         rmap = records_map(ORG, db_path=db)
         assert rmap[(100, "FR", "LC", "F", "open")] == {
-            "time_cs": 6150, "holder": "Maya Patel", "set_date": "2026-06-06",
+            "time_cs": 6150,
+            "holder": "Maya Patel",
+            "set_date": "2026-06-06",
         }
         # Re-approval (or a slower later card) never regresses the table.
         assert not apply_approved_card(ORG, card, db_path=db)
@@ -321,8 +369,16 @@ class TestRecordsStore:
 class TestClubRecordDetector:
     def _records(self):
         return {
-            (100, "FR", "LC", "F", "open"): {"time_cs": 6210, "holder": "Erin Jones", "set_date": "2019-05-01"},
-            (100, "FR", "LC", "F", "13-14"): {"time_cs": 6500, "holder": "Cara Lewis", "set_date": "2021-03-02"},
+            (100, "FR", "LC", "F", "open"): {
+                "time_cs": 6210,
+                "holder": "Erin Jones",
+                "set_date": "2019-05-01",
+            },
+            (100, "FR", "LC", "F", "13-14"): {
+                "time_cs": 6500,
+                "holder": "Cara Lewis",
+                "set_date": "2021-03-02",
+            },
         }
 
     def test_silent_without_records(self):
@@ -363,7 +419,16 @@ class TestClubRecordDetector:
         det = ClubRecordDetector()
         extra = {"swimmer_name": "Maya Patel", "club_records": self._records(), "swimmer_meta": {}}
         slow = _swim(time_cs=6500)
-        assert det.detect(slow, _ctx(), _history(), [slow], dict(extra, swimmer_meta={"maya-patel-2010": {"gender": "F"}})) == []
+        assert (
+            det.detect(
+                slow,
+                _ctx(),
+                _history(),
+                [slow],
+                dict(extra, swimmer_meta={"maya-patel-2010": {"gender": "F"}}),
+            )
+            == []
+        )
         fast_no_gender = _swim(time_cs=6000)
         assert det.detect(fast_no_gender, _ctx(), _history(), [fast_no_gender], extra) == []
 
@@ -379,8 +444,14 @@ class TestClubRecordDetector:
 
         def _ach(t):
             return Achievement(
-                type=t, swim_id=f"s:{t}", swimmer_id="s", swimmer_name="Maya Patel",
-                event="100m Freestyle (LC)", headline=t, angle_hint="", confidence=0.95,
+                type=t,
+                swim_id=f"s:{t}",
+                swimmer_id="s",
+                swimmer_name="Maya Patel",
+                event="100m Freestyle (LC)",
+                headline=t,
+                angle_hint="",
+                confidence=0.95,
                 confidence_label="high",
             )
 
@@ -471,7 +542,9 @@ class TestConsent:
         assert not any(r.startswith("hero") or r == "headshot" for r in res.matched)
 
         # Same card with full consent does match the photo.
-        item_ok = dict(item, consent={"level": "full", "photo_ok": True, "name_ok": True, "blocked": False})
+        item_ok = dict(
+            item, consent={"level": "full", "photo_ok": True, "name_ok": True, "blocked": False}
+        )
         res_ok = evaluate(item_ok, library_assets=[asset])
         assert any(r.startswith("hero") or r == "headshot" for r in res_ok.matched)
 

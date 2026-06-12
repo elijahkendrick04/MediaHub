@@ -163,8 +163,7 @@ def preference_summary(
         return (c["approved"] / decided) if decided else None
 
     angles = [
-        {"post_angle": k, **v, "approval_rate": _rate(v)}
-        for k, v in sorted(by_angle.items())
+        {"post_angle": k, **v, "approval_rate": _rate(v)} for k, v in sorted(by_angle.items())
     ]
     tones = [{"tone": k, **v, "approval_rate": _rate(v)} for k, v in sorted(by_tone.items())]
 
@@ -185,8 +184,7 @@ def preference_summary(
             )
         elif rate <= 0.25:
             reasons.append(
-                f"This club usually rejects {label} cards "
-                f"({row['rejected']}/{decided} rejected)."
+                f"This club usually rejects {label} cards ({row['rejected']}/{decided} rejected)."
             )
     for row in (t for t in tones if (t["approved"] + t["rejected"]) >= min_events):
         rate = row["approval_rate"]

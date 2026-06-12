@@ -19,9 +19,7 @@ def production_detectors() -> list:
     then the V5 detector suite, then the Phase W registry-fed detectors
     (milestones, club records — silent without workspace context)."""
     return (
-        [OfficialPBDetector()]
-        + get_all_detectors()
-        + [MilestoneDetector(), ClubRecordDetector()]
+        [OfficialPBDetector()] + get_all_detectors() + [MilestoneDetector(), ClubRecordDetector()]
     )
 
 

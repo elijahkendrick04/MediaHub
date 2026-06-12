@@ -284,7 +284,7 @@ def _build_explanation(
     parts = []
     if matched.get("hero_athlete"):
         a = matched["hero_athlete"][0]
-        parts.append(f"Athlete photo found ({a.get('reason_summary','')}).")
+        parts.append(f"Athlete photo found ({a.get('reason_summary', '')}).")
     if matched.get("venue"):
         parts.append("Venue image available.")
     if missing_req:

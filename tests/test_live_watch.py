@@ -284,18 +284,24 @@ class TestPollWatch:
         w = self._watch(db)
         runner, notifier = RecordingRunner(), RecordingNotifier()
         res = lw.poll_watch(
-            w.id, fetcher=_fetcher(SESSION_1), runner=runner, notifier=notifier,
-            now=NOW, db_path=db,
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=notifier,
+            now=NOW,
+            db_path=db,
         )
         assert res.changed is True
         assert res.error == ""
         assert res.swim_count == 2
         assert len(res.new_swim_keys) == 2
         # Keys are name|gender,distance,stroke,course|time
-        assert any(k.startswith("calum reid|M,100,") and k.endswith("|55.43")
-                   for k in res.new_swim_keys)
-        assert any(k.startswith("mhairi watt|F,50,") and k.endswith("|41.07")
-                   for k in res.new_swim_keys)
+        assert any(
+            k.startswith("calum reid|M,100,") and k.endswith("|55.43") for k in res.new_swim_keys
+        )
+        assert any(
+            k.startswith("mhairi watt|F,50,") and k.endswith("|41.07") for k in res.new_swim_keys
+        )
         # Runner called exactly once, with the raw bytes and ALL new keys
         assert len(runner.calls) == 1
         _, data, keys = runner.calls[0]
@@ -313,10 +319,17 @@ class TestPollWatch:
     def test_second_poll_same_content_no_runner_call(self, db):
         w = self._watch(db)
         runner, notifier = RecordingRunner(), RecordingNotifier()
-        lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                      notifier=notifier, now=NOW, db_path=db)
-        res = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                            notifier=notifier, now=NOW + timedelta(minutes=5), db_path=db)
+        lw.poll_watch(
+            w.id, fetcher=_fetcher(SESSION_1), runner=runner, notifier=notifier, now=NOW, db_path=db
+        )
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=notifier,
+            now=NOW + timedelta(minutes=5),
+            db_path=db,
+        )
         assert res.changed is False
         assert res.new_swim_keys == []
         assert len(runner.calls) == 1  # still just the first poll
@@ -328,11 +341,22 @@ class TestPollWatch:
     def test_incremental_poll_cards_exactly_the_one_new_swim(self, db):
         w = self._watch(db)
         runner = RecordingRunner()
-        lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                      notifier=RecordingNotifier(), now=NOW, db_path=db)
-        res = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1_PLUS_ONE), runner=runner,
-                            notifier=RecordingNotifier(),
-                            now=NOW + timedelta(minutes=5), db_path=db)
+        lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=RecordingNotifier(),
+            now=NOW,
+            db_path=db,
+        )
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1_PLUS_ONE),
+            runner=runner,
+            notifier=RecordingNotifier(),
+            now=NOW + timedelta(minutes=5),
+            db_path=db,
+        )
         assert res.changed is True
         assert res.swim_count == 3
         assert len(res.new_swim_keys) == 1
@@ -344,8 +368,14 @@ class TestPollWatch:
         w = self._watch(db)
         failing = RecordingRunner(fail=True)
         notifier = RecordingNotifier()
-        res = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=failing,
-                            notifier=notifier, now=NOW, db_path=db)
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=failing,
+            notifier=notifier,
+            now=NOW,
+            db_path=db,
+        )
         assert res.changed is False
         assert "runner failed" in res.error
         assert notifier.calls == []  # nothing committed → nothing announced
@@ -355,8 +385,14 @@ class TestPollWatch:
         assert got.last_digest == "" and got.new_swims_total == 0
         # Next poll retries the SAME diff and succeeds
         runner = RecordingRunner()
-        res2 = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                             notifier=notifier, now=NOW + timedelta(minutes=5), db_path=db)
+        res2 = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=notifier,
+            now=NOW + timedelta(minutes=5),
+            db_path=db,
+        )
         assert res2.changed is True
         assert len(res2.new_swim_keys) == 2
         assert runner.calls[0][2] == res2.new_swim_keys
@@ -376,20 +412,31 @@ class TestPollWatch:
         got = lw.get_watch(w.id, db_path=db)
         assert got.status == "active" and "fetch failed" in got.last_error
         # None-returning fetcher is the same transient story
-        res2 = lw.poll_watch(w.id, fetcher=_fetcher(None), runner=runner,
-                             now=NOW + timedelta(minutes=5), db_path=db)
+        res2 = lw.poll_watch(
+            w.id, fetcher=_fetcher(None), runner=runner, now=NOW + timedelta(minutes=5), db_path=db
+        )
         assert res2.status == "active" and "fetch failed" in res2.error
         # And the watch recovers fully once the site comes back
-        res3 = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                             notifier=RecordingNotifier(),
-                             now=NOW + timedelta(minutes=10), db_path=db)
+        res3 = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=RecordingNotifier(),
+            now=NOW + timedelta(minutes=10),
+            db_path=db,
+        )
         assert res3.changed is True and len(res3.new_swim_keys) == 2
 
     def test_parse_failure_never_emits_partial_rows(self, db):
         w = self._watch(db)
         runner = RecordingRunner()
-        res = lw.poll_watch(w.id, fetcher=_fetcher(b"\x00\x01 not results at all"),
-                            runner=runner, now=NOW, db_path=db)
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(b"\x00\x01 not results at all"),
+            runner=runner,
+            now=NOW,
+            db_path=db,
+        )
         assert res.status == "active" and not res.changed
         assert "parse failed; will retry" in res.error
         assert runner.calls == []
@@ -401,23 +448,41 @@ class TestPollWatch:
         w = self._watch(db)
         runner, notifier = RecordingRunner(), RecordingNotifier()
         late = datetime.now(timezone.utc) + timedelta(hours=13)
-        res = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                            notifier=notifier, now=late, db_path=db)
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=notifier,
+            now=late,
+            db_path=db,
+        )
         assert res.status == "expired" and not res.changed
         assert runner.calls == []  # no fetch, no runner past expiry
         assert notifier.calls == [(w.id, "expired", [])]  # "watch ended"
         assert lw.get_watch(w.id, db_path=db).status == "expired"
         # Already-expired watches are inert thereafter
-        res2 = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                             notifier=notifier, now=late, db_path=db)
+        res2 = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=notifier,
+            now=late,
+            db_path=db,
+        )
         assert res2.status == "expired"
         assert len(notifier.calls) == 1
 
     def test_notifier_failure_never_fails_the_poll(self, db):
         w = self._watch(db)
         runner = RecordingRunner()
-        res = lw.poll_watch(w.id, fetcher=_fetcher(SESSION_1), runner=runner,
-                            notifier=RecordingNotifier(fail=True), now=NOW, db_path=db)
+        res = lw.poll_watch(
+            w.id,
+            fetcher=_fetcher(SESSION_1),
+            runner=runner,
+            notifier=RecordingNotifier(fail=True),
+            now=NOW,
+            db_path=db,
+        )
         assert res.changed is True
         assert res.error == ""
         assert lw.get_watch(w.id, db_path=db).new_swims_total == 2
@@ -438,9 +503,7 @@ class TestSchedulerTask:
 
         w = lw.create_watch("org-a", URL, run_id="run-9", db_path=db)
         runner, notifier = RecordingRunner(), RecordingNotifier()
-        lw.register_live_watch_task(
-            runner=runner, fetcher=_fetcher(SESSION_1), notifier=notifier
-        )
+        lw.register_live_watch_task(runner=runner, fetcher=_fetcher(SESSION_1), notifier=notifier)
         assert lw.TASK_TYPE in scheduler.registered_task_types()
         handler = scheduler._REGISTRY[lw.TASK_TYPE]
         handler({"db_path": str(db)})
@@ -467,9 +530,9 @@ class TestSchedulerTask:
             return real_poll(watch_id, **kw)
 
         monkeypatch.setattr(lw, "poll_watch", flaky)
-        lw.register_live_watch_task(runner=RecordingRunner(),
-                                    fetcher=_fetcher(SESSION_1),
-                                    notifier=RecordingNotifier())
+        lw.register_live_watch_task(
+            runner=RecordingRunner(), fetcher=_fetcher(SESSION_1), notifier=RecordingNotifier()
+        )
         scheduler._REGISTRY[lw.TASK_TYPE]({"db_path": str(db)})
         assert len(polled) == 2  # second watch still polled
         assert lw.get_watch(b.id, db_path=db).polls == 1

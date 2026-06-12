@@ -440,9 +440,7 @@ def interpret_document(
     elif getattr(stream, "ocr_unavailable_detail", None):
         # Scanned PDF with no OCR engine installed: honest review flag,
         # everything else about the (empty) pipeline result stays as-is.
-        needs_review.append(
-            {"reason": "image-needs-ocr", "detail": stream.ocr_unavailable_detail}
-        )
+        needs_review.append({"reason": "image-needs-ocr", "detail": stream.ocr_unavailable_detail})
 
     if overall_conf < _LOW_CONF_THRESHOLD and stream.text:
         # Low confidence overall — run hypothesis on whole-doc sample

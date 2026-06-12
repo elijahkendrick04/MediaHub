@@ -156,9 +156,7 @@ def set_consent(
     return True
 
 
-def get_consent(
-    profile_id: str, athlete_id: str, db_path: Optional[Path] = None
-) -> Optional[str]:
+def get_consent(profile_id: str, athlete_id: str, db_path: Optional[Path] = None) -> Optional[str]:
     ensure_schema(db_path)
     conn = _connect(db_path)
     try:
@@ -365,7 +363,7 @@ def import_csv(
         name = row[0].strip()
         if i == 1 and name.lower() in ("name", "athlete", "swimmer"):
             continue  # header row
-        raw_level = (row[1].strip().lower() if len(row) > 1 else "")
+        raw_level = row[1].strip().lower() if len(row) > 1 else ""
         level = _CSV_LEVEL_ALIASES.get(raw_level)
         if level is None:
             skipped.append({"row": i, "name": name, "reason": f"unrecognised level {raw_level!r}"})
@@ -376,7 +374,12 @@ def import_csv(
             skipped.append({"row": i, "name": name, "reason": "unusable name"})
             continue
         set_consent(
-            profile_id, rec.athlete_id, level, actor=actor or "csv-import", note=note, db_path=db_path
+            profile_id,
+            rec.athlete_id,
+            level,
+            actor=actor or "csv-import",
+            note=note,
+            db_path=db_path,
         )
         ok += 1
     return {"imported": ok, "skipped": skipped}
@@ -393,7 +396,13 @@ def export_csv(profile_id: str, db_path: Optional[Path] = None) -> str:
         row = consent.get(rec.athlete_id)
         if row:
             w.writerow(
-                [rec.canonical_name, row["level"], row["note"], row["updated_at"], row["updated_by"]]
+                [
+                    rec.canonical_name,
+                    row["level"],
+                    row["note"],
+                    row["updated_at"],
+                    row["updated_by"],
+                ]
             )
         else:
             w.writerow([rec.canonical_name, "unknown", "", "", ""])

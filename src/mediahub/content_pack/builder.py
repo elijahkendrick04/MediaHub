@@ -204,8 +204,7 @@ def build_grouped_pack(
 
             if regime_active(profile_id):
                 names = {
-                    (ra.get("achievement") or {}).get("swimmer_name", "")
-                    for ra in ranked_achs
+                    (ra.get("achievement") or {}).get("swimmer_name", "") for ra in ranked_achs
                 }
                 for name in names:
                     if name:

@@ -29,11 +29,21 @@ log = logging.getLogger(__name__)
 STROKES = ("FR", "BK", "BR", "FL", "IM")
 
 _STROKE_ALIASES = {
-    "fr": "FR", "free": "FR", "freestyle": "FR",
-    "bk": "BK", "back": "BK", "backstroke": "BK",
-    "br": "BR", "breast": "BR", "breaststroke": "BR",
-    "fl": "FL", "fly": "FL", "butterfly": "FL",
-    "im": "IM", "medley": "IM", "individual medley": "IM",
+    "fr": "FR",
+    "free": "FR",
+    "freestyle": "FR",
+    "bk": "BK",
+    "back": "BK",
+    "backstroke": "BK",
+    "br": "BR",
+    "breast": "BR",
+    "breaststroke": "BR",
+    "fl": "FL",
+    "fly": "FL",
+    "butterfly": "FL",
+    "im": "IM",
+    "medley": "IM",
+    "individual medley": "IM",
 }
 
 _COURSE_ALIASES = {"lc": "LC", "lcm": "LC", "sc": "SC", "scm": "SC", "y": "Y", "scy": "Y"}
@@ -100,7 +110,7 @@ _TIME_RE = re.compile(r"^(?:(\d+):)?(\d{1,2})[.,](\d{1,2})$")
 
 
 def parse_time_cs(text: str) -> Optional[int]:
-    """"1:05.32" / "31.24" → centiseconds. None when unparseable."""
+    """ "1:05.32" / "31.24" → centiseconds. None when unparseable."""
     s = (text or "").strip()
     m = _TIME_RE.match(s)
     if not m:
@@ -311,7 +321,9 @@ def import_csv(
         if i == 1 and first in ("event", "race"):
             continue  # header row
         if len(row) < 6:
-            skipped.append({"row": i, "reason": "expected event,course,gender,age_group,time,holder"})
+            skipped.append(
+                {"row": i, "reason": "expected event,course,gender,age_group,time,holder"}
+            )
             continue
         m = re.match(r"^(\d{2,4})\s*[mx]?\s+(.+)$", row[0].strip(), flags=re.IGNORECASE)
         stroke = _norm_stroke(m.group(2)) if m else None
@@ -319,7 +331,14 @@ def import_csv(
         gender = _norm_gender(row[2])
         time_cs = parse_time_cs(row[4])
         holder = (row[5] or "").strip()
-        if not m or stroke is None or course is None or gender is None or time_cs is None or not holder:
+        if (
+            not m
+            or stroke is None
+            or course is None
+            or gender is None
+            or time_cs is None
+            or not holder
+        ):
             skipped.append({"row": i, "reason": "unparseable event/course/gender/time/holder"})
             continue
         upsert_record(
@@ -366,9 +385,7 @@ def apply_approved_card(profile_id: str, card: dict, db_path: Optional[Path] = N
     gender = str(facts["gender"])
     age_group = _norm_age_group(str(facts.get("age_group") or "open"))
     new_cs = int(facts["new_time_cs"])
-    current = records_map(profile_id, db_path).get(
-        (distance, stroke, course, gender, age_group)
-    )
+    current = records_map(profile_id, db_path).get((distance, stroke, course, gender, age_group))
     if current is not None and current["time_cs"] <= new_cs:
         return False  # table already carries an equal-or-better mark
     upsert_record(
@@ -379,8 +396,7 @@ def apply_approved_card(profile_id: str, card: dict, db_path: Optional[Path] = N
         gender=gender,
         age_group=age_group,
         time_cs=new_cs,
-        holder=str(ach.get("swimmer_name") or facts.get("swimmer_name") or "").strip()
-        or "Unknown",
+        holder=str(ach.get("swimmer_name") or facts.get("swimmer_name") or "").strip() or "Unknown",
         set_date=str(facts.get("swim_date") or ""),
         source=f"approved:{card.get('run_id', '') or ach.get('swim_id', '')}",
         db_path=db_path,

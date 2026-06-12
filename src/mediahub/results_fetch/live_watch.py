@@ -367,8 +367,7 @@ def list_watches(profile_id: str, db_path: Optional[Path] = None) -> list[Watch]
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT * FROM live_watches WHERE profile_id = ?"
-            " ORDER BY created_at DESC, id",
+            "SELECT * FROM live_watches WHERE profile_id = ? ORDER BY created_at DESC, id",
             (profile_id,),
         ).fetchall()
         return [_row_to_watch(r) for r in rows]
@@ -386,9 +385,7 @@ def get_watch(
     ensure_schema(db_path)
     conn = _connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT * FROM live_watches WHERE id = ?", (watch_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM live_watches WHERE id = ?", (watch_id,)).fetchone()
     finally:
         conn.close()
     if row is None:
@@ -415,9 +412,7 @@ def stop_watch(profile_id: str, watch_id: str, db_path: Optional[Path] = None) -
         conn.close()
 
 
-def due_watches(
-    now: Optional[datetime] = None, db_path: Optional[Path] = None
-) -> list[Watch]:
+def due_watches(now: Optional[datetime] = None, db_path: Optional[Path] = None) -> list[Watch]:
     """Active watches whose poll interval has elapsed (or never polled).
 
     A watch past its ``expires_at`` but still marked active IS returned —

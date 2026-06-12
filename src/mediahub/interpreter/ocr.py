@@ -184,9 +184,7 @@ def ocr_image(data: bytes) -> OcrResult:
                 engine=_TEST_ENGINE_NAME, ok=False, error=f"injected test engine failed: {exc}"
             )
         if not lines:
-            return OcrResult(
-                engine=_TEST_ENGINE_NAME, ok=False, error="OCR recognised no text"
-            )
+            return OcrResult(engine=_TEST_ENGINE_NAME, ok=False, error="OCR recognised no text")
         return OcrResult(engine=_TEST_ENGINE_NAME, lines=lines, ok=True)
 
     engines = available_engines()

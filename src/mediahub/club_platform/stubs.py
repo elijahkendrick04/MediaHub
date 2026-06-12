@@ -657,7 +657,7 @@ def render_cards_html(
   <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
-  {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ''}
+  {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ""}
   {notes_html}
   <div class="mh-card-actions">
     <button type="button" class="primary" onclick='(function(b){{
@@ -716,12 +716,12 @@ def render_cards_html(
 """
 
     return (
-        f'<h1>{_h(title)}</h1>'
+        f"<h1>{_h(title)}</h1>"
         f'<p class="dim" style="margin-bottom:20px">{len(cards)} draft '
-        f'{"card" if len(cards) == 1 else "cards"} generated. Review, edit, approve, and post.</p>'
-        f'{cards_html}'
-        f'{pill_js}'
+        f"{'card' if len(cards) == 1 else 'cards'} generated. Review, edit, approve, and post.</p>"
+        f"{cards_html}"
+        f"{pill_js}"
         f'<div style="margin-top:24px;display:flex;gap:10px">'
         f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
-        f'</div>'
+        f"</div>"
     )

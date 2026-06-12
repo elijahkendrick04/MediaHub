@@ -5,6 +5,7 @@ pages (athletes/consent, records, live meet, wraps), magic-link mobile
 approvals, the approval-seam hooks (telemetry + records-on-approval), the
 W.11/W.13 caption bundle response, and org isolation on every new surface.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -107,9 +108,7 @@ def env(tmp_path, monkeypatch):
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    save_profile(
-        ClubProfile(profile_id="org-alpha", display_name="Org Alpha", club_codes=["ALPH"])
-    )
+    save_profile(ClubProfile(profile_id="org-alpha", display_name="Org Alpha", club_codes=["ALPH"]))
     save_profile(ClubProfile(profile_id="org-beta", display_name="Org Beta"))
 
     run_id = "run-w-" + uuid.uuid4().hex[:8]
@@ -245,8 +244,13 @@ class TestRecordsFlow:
         from mediahub.club_records import records_map, upsert_record
 
         upsert_record(
-            "org-alpha", distance=100, stroke="FR", course="LC", gender="F",
-            time_cs=6210, holder="Erin Jones",
+            "org-alpha",
+            distance=100,
+            stroke="FR",
+            course="LC",
+            gender="F",
+            time_cs=6210,
+            holder="Erin Jones",
         )
         r = c.post(
             f"/api/workflow/{env['run_id']}/swim-1",

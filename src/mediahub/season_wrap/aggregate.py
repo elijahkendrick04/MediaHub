@@ -228,7 +228,9 @@ def aggregate_window(profile_id: str, runs_dir: Path, *, start: str, end: str) -
         if timed:
             pick = min(timed, key=lambda r: (r["time_cs"], r["swimmer"], r["event"]))
         else:
-            pick = sorted(club_records, key=lambda r: (-r["_priority"], r["swimmer"], r["event"]))[0]
+            pick = sorted(club_records, key=lambda r: (-r["_priority"], r["swimmer"], r["event"]))[
+                0
+            ]
         stats.fastest_club_record = {k: v for k, v in pick.items() if k != "_priority"}
 
     stats.leaderboard = [

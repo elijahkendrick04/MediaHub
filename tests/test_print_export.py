@@ -33,9 +33,7 @@ def _have_playwright() -> bool:
         return False
 
 
-_PLAYWRIGHT = pytest.mark.skipif(
-    not _have_playwright(), reason="Playwright/Chromium not available"
-)
+_PLAYWRIGHT = pytest.mark.skipif(not _have_playwright(), reason="Playwright/Chromium not available")
 
 
 BRAND = {"primary": "#0E5BFF", "secondary": "#101820", "accent": "#FFD24A"}
@@ -146,8 +144,14 @@ class TestPosterHtml:
 
     def test_escapes_injected_script(self):
         html = _poster_html(
-            rows=[{"swimmer": "<script>boom()</script>", "event": "<i>50 Free</i>",
-                   "time": "29.99", "note": 'a"b<c>'}],
+            rows=[
+                {
+                    "swimmer": "<script>boom()</script>",
+                    "event": "<i>50 Free</i>",
+                    "time": "29.99",
+                    "note": 'a"b<c>',
+                }
+            ],
             title="<script>t()</script>",
         )
         assert "<script>" not in html
