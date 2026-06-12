@@ -1832,6 +1832,16 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
 def _delete_run(run_id: str) -> bool:
     p = RUNS_DIR / f"{run_id}.json"
     existed = p.exists()
+    # Erasure cascade (UK GDPR Art. 17) — the stores OUTSIDE the run files:
+    # per-run PB cache, caption memory, posting-log excerpts, motion cache.
+    # Resolved before the JSON disappears (it carries the owning profile_id),
+    # and never allowed to abort the file/DB deletion below.
+    try:
+        from mediahub.privacy import run_deletion_cascade  # noqa: PLC0415
+
+        run_deletion_cascade(run_id, _run_owner_profile_id(run_id) or "")
+    except Exception:  # noqa: BLE001
+        log.warning("run deletion cascade failed for %s", run_id, exc_info=True)
     if existed:
         p.unlink()
     # Also drop any per-run sidecar directory (visuals, motion, briefs,
@@ -8019,6 +8029,10 @@ def create_app() -> Flask:
             "dpa_page",
             "legal_accept_page",
             "legal_accept_post",
+            # Account-level data rights (Art. 15/17) — must work without an
+            # active organisation; athlete erasure stays org-gated.
+            "account_export_route",
+            "account_delete",
             "pricing_page",
             "billing_page",
             "billing_checkout",
@@ -12582,7 +12596,42 @@ Relay team broke club record"></textarea>
             n_cache = 0
         # The deployment inventory (counts + cache-clear action) is only for
         # signed-in sessions — the notice text itself is public (Art. 13).
-        signed_in = bool(_auth.current_user_email() or _active_profile_id())
+        account_email = _auth.current_user_email() or ""
+        active_org = _active_profile_id() or ""
+        signed_in = bool(account_email or active_org)
+        _rights_tools_html = ""
+        if active_org:
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Erase an athlete</h2>
+  <p class="muted">Removes a named athlete from this organisation's runs, rendered
+  files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  <form method="post" action="{url_for('privacy_athlete_erase')}"
+        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
+      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
+    <button class="btn secondary" type="submit">Erase athlete</button>
+  </form>
+</div>"""
+        if account_email:
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Your account</h2>
+  <p class="muted">Signed in as <strong>{_h(account_email)}</strong>.</p>
+  <a class="btn secondary" href="{url_for('account_export_route')}">Export my account data (JSON)</a>
+  <form method="post" action="{url_for('account_delete')}" style="margin-top:14px"
+        onsubmit="return confirm('Delete your account? This removes your sign-in, acceptances and workspace memberships, and cannot be undone.')">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);max-width:280px">Confirm your password
+      <input type="password" name="password" required autocomplete="current-password" /></label>
+    <button class="btn secondary" type="submit" style="margin-top:10px;border-color:rgba(255,107,107,0.4)">Delete my account</button>
+  </form>
+  <p class="muted" style="margin-top:8px">Deleting your account does not delete your club's
+  shared workspace data &mdash; other members keep access. Billing records held by Stripe
+  are retained by Stripe under its legal obligations.</p>
+</div>"""
         inventory_html = f"""
 <div class="card">
   <h2>Your data on this deployment</h2>
@@ -12597,6 +12646,7 @@ Relay team broke club record"></textarea>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
 </div>
+{_rights_tools_html}
 """
         body = _legal.privacy_html(
             terms_url=url_for("terms_page"),
@@ -12677,6 +12727,84 @@ Relay team broke club record"></textarea>
                     except Exception:
                         pass
         return redirect(url_for("privacy_page"))
+
+    # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
+
+    @app.route("/privacy/athlete/erase", methods=["POST"])
+    def privacy_athlete_erase():
+        """Erase one named athlete across everything the active org holds."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        name = (request.form.get("athlete_name") or "").strip()
+        club = (request.form.get("athlete_club") or "").strip()
+        if not name:
+            return redirect(url_for("privacy_page"))
+        from mediahub.privacy import erase_athlete
+
+        report = erase_athlete(active, name, club)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
+            '<div class="card"><h2>What was removed</h2><ul>'
+            f"<li>{report.cards_removed} card(s) and {report.swims_removed} result "
+            f"row(s) across {len(report.runs_touched)} run(s)</li>"
+            f"<li>{report.assets_removed} rendered file(s)</li>"
+            f"<li>{report.pb_cache_files} PB-cache and "
+            f"{report.research_cache_files} research-cache file(s)</li>"
+            f"<li>{report.memory_rows} caption-memory row(s)</li>"
+            f"<li>{report.posting_excerpts} posting-log excerpt(s) blanked</li>"
+            "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
+            "were replaced with [removed]. Content already published to social "
+            "platforms must be deleted there too &mdash; use the correction tools "
+            "on the run page.</p>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Athlete erased", body, active="privacy")
+
+    @app.route("/account/export")
+    def account_export_route():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page", next=url_for("account_export_route")))
+        from mediahub.privacy import account_export
+
+        payload = account_export(email)
+        resp = jsonify(payload)
+        resp.headers["Content-Disposition"] = 'attachment; filename="mediahub-account-export.json"'
+        return resp
+
+    @app.route("/account/delete", methods=["POST"])
+    def account_delete():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        # Deleting an account is irreversible — re-verify the password so a
+        # hijacked session can't silently destroy the account.
+        password = request.form.get("password") or ""
+        try:
+            _user_store().authenticate(email, password)
+        except _auth.AuthError:
+            return (
+                _layout(
+                    "Account not deleted",
+                    '<div class="card"><p class="tag bad">Password check failed '
+                    "&mdash; account NOT deleted.</p>"
+                    f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+                    "&larr; Back</a></p></div>",
+                    active="privacy",
+                ),
+                403,
+            )
+        from mediahub.privacy import erase_account
+
+        erase_account(email)
+        _auth.logout_user()
+        session.clear()
+        return redirect(url_for("home"))
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"

@@ -371,6 +371,46 @@ def attempts_summary_for_run(profile_id: str, run_id: str) -> dict:
     }
 
 
+def scrub_run_excerpts(run_id: str) -> int:
+    """Blank the caption excerpts of every attempt for one run (erasure
+    cascade — the attempt row itself stays, it's the club's posting history,
+    but the personal data inside it goes). Returns rows updated."""
+    if not (run_id or "").strip():
+        return 0
+    _ensure_schema()
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE posting_attempts SET caption_excerpt='' "
+            "WHERE run_id=? AND caption_excerpt != ''",
+            (str(run_id),),
+        )
+        conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    finally:
+        conn.close()
+
+
+def scrub_matching_excerpts(profile_id: str, needle: str) -> int:
+    """Blank a profile's caption excerpts that mention ``needle``
+    (case-insensitive) — the athlete-level erasure cascade."""
+    frag = (needle or "").strip().lower()
+    if not (profile_id or "").strip() or not frag:
+        return 0
+    _ensure_schema()
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE posting_attempts SET caption_excerpt='' "
+            "WHERE profile_id=? AND LOWER(caption_excerpt) LIKE ?",
+            (str(profile_id), f"%{frag}%"),
+        )
+        conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
@@ -409,6 +449,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 __all__ = [
     "record_attempt",
+    "scrub_run_excerpts",
+    "scrub_matching_excerpts",
     "recent_attempts",
     "attempts_summary_for_run",
     "_ensure_schema",
