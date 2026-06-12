@@ -1,12 +1,16 @@
 """
 pb_discovery/cache.py — Per-swimmer-per-run cache layer.
 
-Cache layout:
-  data/discovered/pbs/<run_id>/<swimmer_key>.json  — per-run (no TTL, scoped to run)
-  data/discovered/swimmers/<swimmer_key>.json       — warm long-lived cache (7 days TTL)
+Cache layout (under ``<DATA_DIR>/discovered``, shared with context_engine):
+  discovered/pbs/<run_id>/<swimmer_key>.json  — per-run (no TTL, scoped to run)
+  discovered/swimmers/<swimmer_key>.json       — warm long-lived cache (7 days TTL)
 
 The per-run cache ensures that within a single recognition run, each swimmer
 is researched only once, even if they appear in multiple achievements.
+
+Empty discoveries (no PBs found) are warm-cached with a much shorter TTL:
+a throttled or offline run must not poison a swimmer's lookup for a week —
+re-running the meet an hour later genuinely re-researches them.
 """
 
 from __future__ import annotations
@@ -19,23 +23,26 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-def _repo_root() -> Path:
-    env = os.environ.get("DATA_DIR")
-    if env:
-        return Path(env)
-    return Path(__file__).resolve().parent.parent
-
-
 def _discovered_root() -> Path:
-    root = _repo_root() / "data" / "discovered"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    """Shared ``discovered/`` store. Late lookup so tests can patch either
+    this name or context_engine's."""
+    from mediahub.context_engine import cache as _ctx_cache
+
+    return _ctx_cache._discovered_root()
 
 
 def make_swimmer_key(name: str, club: str) -> str:
     """Create a stable, filesystem-safe key for a swimmer."""
     raw = f"{name.lower().strip()}|{club.lower().strip()}"
     return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()[:20]
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    """Write JSON via tmp + os.replace so a concurrent reader (another
+    gunicorn worker mid-run) can never see a half-written file."""
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 class RunCache:
@@ -62,10 +69,7 @@ class RunCache:
     def set(self, swimmer_key: str, payload: Any) -> None:
         p = self._base / f"{swimmer_key}.json"
         try:
-            p.write_text(
-                json.dumps({"_saved_at": _now(), "payload": payload}, indent=2),
-                encoding="utf-8",
-            )
+            _write_json_atomic(p, {"_saved_at": _now(), "payload": payload})
         except Exception:
             pass
 
@@ -77,13 +81,22 @@ class WarmCache:
     """
     Warm long-lived swimmer cache (7-day TTL).
     Keyed by swimmer_key; shared across runs.
+
+    Entries whose payload found no PBs expire after ``EMPTY_TTL`` instead:
+    "nothing found" is often transient (search throttled, site down), so it
+    must never be served for a week.
     """
 
     TTL = 7 * 24 * 3600
+    EMPTY_TTL = 3600
 
     def __init__(self):
         self._base = _discovered_root() / "swimmers"
         self._base.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _is_empty_payload(payload: Any) -> bool:
+        return not (isinstance(payload, dict) and payload.get("pbs"))
 
     def get(self, swimmer_key: str) -> Optional[dict]:
         p = self._base / f"{swimmer_key}.json"
@@ -92,21 +105,20 @@ class WarmCache:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             saved_at = data.get("_saved_at_ts", 0)
-            if time.time() - saved_at > self.TTL:
+            payload = data.get("payload")
+            ttl = self.EMPTY_TTL if self._is_empty_payload(payload) else self.TTL
+            if time.time() - saved_at > ttl:
                 return None
-            return data.get("payload")
+            return payload
         except Exception:
             return None
 
     def set(self, swimmer_key: str, payload: Any) -> None:
         p = self._base / f"{swimmer_key}.json"
         try:
-            p.write_text(
-                json.dumps(
-                    {"_saved_at": _now(), "_saved_at_ts": time.time(), "payload": payload},
-                    indent=2,
-                ),
-                encoding="utf-8",
+            _write_json_atomic(
+                p,
+                {"_saved_at": _now(), "_saved_at_ts": time.time(), "payload": payload},
             )
         except Exception:
             pass

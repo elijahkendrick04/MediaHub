@@ -177,24 +177,69 @@ def _make_discovery(
     *,
     confidence: float = 0.9,
     chosen_source: PBSource | None = None,
+    sources_tried: list[PBSource] | None = None,
+    cache_hit: bool = False,
 ) -> PBDiscovery:
     return PBDiscovery(
         swimmer_query="Test Swimmer",
-        sources_tried=[],
+        sources_tried=sources_tried or [],
         chosen_source=chosen_source,
         pbs=pbs or [],
         confidence=confidence,
+        cache_hit=cache_hit,
+    )
+
+
+def _make_source(*, fetch_success: bool = True, parse_confidence: float = 0.0) -> PBSource:
+    return PBSource(
+        url="https://example.org/swimmers/test",
+        domain="example.org",
+        fetched_at="2024-05-21T12:00:00Z",
+        parse_confidence=parse_confidence,
+        pbs=[],
+        fetch_success=fetch_success,
     )
 
 
 class TestDiscoveryToSnapshot:
-    def test_empty_discovery_marks_error(self) -> None:
+    def test_no_candidates_is_a_failed_lookup(self) -> None:
+        # No sources were even tried — the search produced nothing (throttle,
+        # network down). That IS a fetch failure, never "no PBs".
         snap = discovery_to_snapshot(_make_discovery([]), "swimmer:1")
         assert isinstance(snap, BridgedSnapshot)
         assert snap.tiref == "swimmer:1"
         assert snap.pb_times == {}
         assert snap.fetch_ok is False
-        assert snap.error == "no PBs found"
+        assert snap.no_history is False
+        assert snap.error == "web search returned no candidate pages"
+
+    def test_all_fetches_failed_is_a_failed_lookup(self) -> None:
+        snap = discovery_to_snapshot(
+            _make_discovery([], sources_tried=[_make_source(fetch_success=False)]),
+            "swimmer:1",
+        )
+        assert snap.fetch_ok is False
+        assert snap.no_history is False
+        assert snap.error == "could not fetch any candidate page"
+
+    def test_pages_reached_but_nothing_found_is_no_history_not_failure(self) -> None:
+        # We saw the web and found nothing verifiable for this athlete — a
+        # completed lookup with an honest empty answer, not a failed fetch.
+        snap = discovery_to_snapshot(
+            _make_discovery([], sources_tried=[_make_source(fetch_success=True)]),
+            "swimmer:1",
+        )
+        assert snap.fetch_ok is True
+        assert snap.no_history is True
+        assert snap.error is None
+
+    def test_cache_hit_propagates_to_from_cache(self) -> None:
+        snap = discovery_to_snapshot(
+            _make_discovery([_make_pbrow()], cache_hit=True), "swimmer:1"
+        )
+        assert snap.from_cache is True
+        fresh = discovery_to_snapshot(_make_discovery([_make_pbrow()]), "swimmer:1")
+        assert fresh.from_cache is False
 
     def test_single_pb_populates_pb_times(self) -> None:
         snap = discovery_to_snapshot(
@@ -250,8 +295,8 @@ class TestDiscoveryToSnapshot:
         rows = [_make_pbrow(time_canonical="DNF")]
         snap = discovery_to_snapshot(_make_discovery(rows), "swimmer:1")
         assert snap.pb_times == {}
-        # discovery had a non-empty pbs list, so confidence > 0 makes fetch_ok True
-        # but no parseable PBs were extracted.
+        # Discovery returned PB rows (an identity-gated page listed them), so
+        # the lookup completed even though no row was parseable into a time.
         assert snap.fetch_ok is True
 
     def test_pb_with_unknown_stroke_is_skipped(self) -> None:
@@ -279,13 +324,16 @@ class TestDiscoveryToSnapshot:
         assert entry["source_url"] == "https://example.org/swimmers/test"
         assert entry["retrieved_at"] == "2024-05-21T12:00:00Z"
 
-    def test_confidence_zero_marks_fetch_failed(self) -> None:
+    def test_pbs_found_count_as_completed_even_at_zero_confidence(self) -> None:
+        # The identity gate already vetted any page whose PBs were chosen;
+        # a low stored confidence must not reclassify a found baseline as a
+        # failed fetch (the audit would then overcount "lookups failed").
         snap = discovery_to_snapshot(
             _make_discovery([_make_pbrow()], confidence=0.0),
             "swimmer:1",
         )
-        # With zero confidence, fetch_ok should be False even though pbs are non-empty.
-        assert snap.fetch_ok is False
+        assert snap.fetch_ok is True
+        assert snap.error is None
 
 
 # ---------------------------------------------------------------------------
