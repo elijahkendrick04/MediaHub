@@ -1,0 +1,67 @@
+# Dependabot auto-merge — GitHub-Actions bumps only.
+#
+# Scope is deliberately narrow: ONLY PRs in the `github-actions` ecosystem
+# (workflow `uses:` version bumps). Their blast radius is CI itself, and the
+# PR's own check runs exercise exactly that surface — so "all checks green"
+# is a meaningful gate. pip / npm / docker bumps stay a human-reviewed
+# stream (see .github/dependabot.yml): the PR checks do NOT run the full
+# pytest suite, so a green tick on a dependency bump proves much less than
+# it appears to, and main auto-deploys.
+#
+# Implemented as a polling sweep rather than GitHub's native auto-merge:
+# native auto-merge requires branch protection with required status checks,
+# and required checks would dead-lock the remote-session (claude/*) PRs,
+# whose pushes come from an app token that never triggers `pull_request`
+# workflows. The sweep mirrors the autotest fixer's green-CI merge gate.
+name: Dependabot auto-merge (Actions bumps)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-automerge
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Merge green Actions bumps
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Merge dependabot github-actions PRs whose checks are all green
+        env:
+          GH_TOKEN: ${{ secrets.AUTOTEST_GH_PAT || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$REPO" --author 'app/dependabot' --state open \
+            --json number,title,isDraft,labels,mergeable,headRefOid \
+            --jq '.[]
+                  | select(.isDraft | not)
+                  | select([.labels[].name] | index("github_actions"))
+                  | select(.mergeable != "CONFLICTING")
+                  | "\(.number)\t\(.headRefOid)\t\(.title)"' \
+          | while IFS=$'\t' read -r num sha title; do
+              # Every check run on the head commit must be completed and
+              # green (success/neutral/skipped) — and there must be at least
+              # one, so a PR whose checks haven't started yet is never merged.
+              runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --paginate \
+                     --jq '[.check_runs[] | {s: .status, c: .conclusion}]')
+              total=$(jq 'length' <<<"$runs")
+              not_green=$(jq '[.[] | select(.s != "completed"
+                              or ((.c == "success" or .c == "neutral" or .c == "skipped") | not))]
+                              | length' <<<"$runs")
+              if [ "$total" -eq 0 ] || [ "$not_green" -ne 0 ]; then
+                echo "skip  #$num ($title): $total checks, $not_green not green"
+                continue
+              fi
+              echo "merge #$num ($title): all $total checks green"
+              gh pr merge "$num" --repo "$REPO" --merge \
+                || echo "::warning::merge of #$num failed (race/conflict) — next sweep retries"
+            done
