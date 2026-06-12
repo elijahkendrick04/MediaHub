@@ -8017,6 +8017,8 @@ def create_app() -> Flask:
             "terms_page",
             "cookies_page",
             "dpa_page",
+            "legal_accept_page",
+            "legal_accept_post",
             "pricing_page",
             "billing_page",
             "billing_checkout",
@@ -8271,6 +8273,65 @@ def create_app() -> Flask:
         if prof is None and list_profiles():
             return redirect(url_for("sign_in_page"))
         return redirect(url_for("organisation_setup"))
+
+    # ---- Versioned ToS re-acceptance gate (UK legal baseline) -----------
+    #
+    # When TERMS_VERSION moves, every signed-in account must accept the new
+    # version once before continuing. The session marker keeps this to one
+    # ledger read per session; the ledger (legal_acceptances.jsonl) is the
+    # source of truth. Signed-out traffic is untouched — acceptance is
+    # collected at signup.
+    _TERMS_GATE_EXEMPT = frozenset(
+        {
+            "legal_accept_page",
+            "legal_accept_post",
+            "terms_page",
+            "privacy_page",
+            "cookies_page",
+            "dpa_page",
+            "login_page",
+            "login_post",
+            "signup_page",
+            "signup_post",
+            "logout",
+            "static",
+            "favicon",
+            "web_manifest",
+            "service_worker",
+            "healthz",
+            "healthz_ping",
+            "status_page",
+            "stripe_webhook",
+        }
+    )
+
+    @app.before_request
+    def _gate_until_terms_accepted():
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_TERMS_GATE"):
+            return None
+        ep = request.endpoint or ""
+        if ep in _TERMS_GATE_EXEMPT:
+            return None
+        email = _auth.current_user_email()
+        if not email:
+            return None
+        if session.get("terms_ok_version") == _legal.TERMS_VERSION:
+            return None
+        if _legal.AcceptanceStore().needs_terms_reacceptance(email):
+            if (request.path or "").startswith("/api/"):
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "terms_reacceptance_required",
+                            "accept_url": url_for("legal_accept_page"),
+                        }
+                    ),
+                    403,
+                )
+            return redirect(url_for("legal_accept_page", next=request.path))
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        return None
 
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
@@ -18591,6 +18652,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prefill_email: str = "",
         error: str = "",
         min_password: bool = False,
+        extra_fields_html: str = "",
     ) -> str:
         err_html = ""
         if error:
@@ -18632,12 +18694,27 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             + 'style="width:100%" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             f"{pw_hint}"
+            f"{extra_fields_html}"
             f'<button type="submit" class="btn" style="margin-top:20px;width:100%">{_h(submit_label)}</button>'
             "</form>"
             f'<div class="dim" style="font-size:13px;margin-top:18px;text-align:center">{alt_html}</div>'
             "</div>"
         )
         return _layout(title, body, active="signin")
+
+    def _terms_checkbox_html() -> str:
+        """The required Terms/Privacy acceptance control on the signup form."""
+        return (
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'margin-top:16px;font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I agree to the "
+            f'<a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">Terms of Service</a> and have read the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</span></label>'
+        )
 
     @app.route("/signup", methods=["GET"])
     def signup_page():
@@ -18658,16 +18735,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="color:var(--accent);font-weight:600">Log in</a>.'
             ),
             min_password=True,
+            extra_fields_html=_terms_checkbox_html(),
         )
 
     @app.route("/signup", methods=["POST"])
     def signup_post():
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
-        store = _user_store()
-        try:
-            user = store.create(email, password)
-        except _auth.AuthError as exc:
+
+        def _signup_error(message: str, status: int):
             return (
                 _auth_form_page(
                     title="Create account",
@@ -18680,11 +18756,29 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'style="color:var(--accent);font-weight:600">Log in</a>.'
                     ),
                     prefill_email=email,
-                    error=str(exc),
+                    error=message,
                     min_password=True,
+                    extra_fields_html=_terms_checkbox_html(),
                 ),
+                status,
+            )
+
+        # Versioned ToS acceptance is a hard requirement at signup — the
+        # browser's `required` attribute is convenience, this is the gate.
+        if (request.form.get("accept_terms") or "") != "1":
+            return _signup_error(
+                "Please accept the Terms of Service and Privacy Notice to create an account.",
                 400,
             )
+        store = _user_store()
+        try:
+            user = store.create(email, password)
+        except _auth.AuthError as exc:
+            return _signup_error(str(exc), 400)
+        # Record the timestamped, versioned acceptance before the session
+        # starts; the session marker spares the ledger a read per request.
+        _legal.AcceptanceStore().record(user.email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         _auth.login_user(user)
         # PC.3 (ADR-0014): activate any operator-issued workspace invites for
         # this email — the zero-founder-involvement first-claim path. The org
@@ -18747,12 +18841,75 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         _auth.login_user(user)
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        # Re-acceptance check: accounts whose recorded Terms acceptance
+        # predates TERMS_VERSION (or legacy accounts with no record) are
+        # routed through /legal/accept before they continue.
+        if _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
+            return redirect(url_for("legal_accept_page", next=nxt) if nxt else url_for("legal_accept_page"))
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
         _auth.logout_user()
+        session.pop("terms_ok_version", None)
         return redirect(url_for("home"))
+
+    # ---- /legal/accept (versioned ToS re-acceptance) -------------------
+
+    @app.route("/legal/accept", methods=["GET"])
+    def legal_accept_page():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        nxt = _safe_next(request.args.get("next"))
+        action = url_for("legal_accept_post", next=nxt) if nxt else url_for("legal_accept_post")
+        prior = _legal.AcceptanceStore().latest(email, _legal.DOC_TERMS)
+        prior_line = (
+            f"You last accepted version {_h(prior.version)} on {_h(prior.accepted_at)}."
+            if prior
+            else "Your account predates recorded acceptance, so we're asking once now."
+        )
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Legal</span>'
+            '<h1>Updated <em class="editorial">terms</em>.</h1>'
+            f'<p class="lede">The Terms of Service changed (version {_legal.TERMS_VERSION}). '
+            "Please review and accept to continue.</p></section>"
+            '<div class="card">'
+            f"<p>{prior_line}</p>"
+            f'<p>Read the <a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">current Terms of Service</a> and the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</p>'
+            f'<form method="post" action="{action}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            f"<span>I accept the Terms of Service (version {_legal.TERMS_VERSION}).</span>"
+            "</label>"
+            '<button type="submit" class="btn" style="margin-top:16px">Accept and continue</button>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Don\'t agree? You can '
+            f'<a href="{url_for("privacy_page")}">export your data</a> and '
+            f'<a href="{url_for("logout")}">sign out</a>.</p>'
+            "</div>"
+        )
+        return _layout("Accept updated terms", body, active="")
+
+    @app.route("/legal/accept", methods=["POST"])
+    def legal_accept_post():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        if (request.form.get("accept_terms") or "") != "1":
+            return redirect(url_for("legal_accept_page"))
+        _legal.AcceptanceStore().record(email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        return redirect(nxt or url_for("make_page"))
 
     def _safe_next(target: Optional[str]) -> str:
         """Only allow same-site relative redirects (open-redirect guard)."""
@@ -20073,6 +20230,61 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         return _layout("Workspace members", body, active="organisation")
 
+    # ---- DPA + lawful-basis attestation at workspace setup (UK legal) ----
+
+    def _org_attestation_recorded(profile_id: str) -> bool:
+        return _legal.AcceptanceStore().org_has_acceptance(
+            profile_id, _legal.DOC_DPA, _legal.DPA_VERSION
+        )
+
+    def _org_attestation_form_html(prof) -> str:
+        """The DPA-acceptance + lawful-basis attestation block for both org
+        setup forms. Hidden once this workspace has a current-version record."""
+        if prof is not None and _org_attestation_recorded(prof.profile_id):
+            return ""
+        return (
+            '<div class="card" style="margin:18px 0">'
+            "<h2>Athlete data &amp; processing terms</h2>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin-bottom:10px">'
+            '<input type="checkbox" name="accept_dpa" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I accept the "
+            f'<a href="{url_for("dpa_page")}" target="_blank" '
+            'style="color:var(--accent)">Data Processing Agreement</a> on behalf of '
+            "this organisation.</span></label>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="confirm_lawful_basis" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I confirm this organisation is entitled to process the athlete "
+            "and member data it uploads, and holds the necessary consents &mdash; "
+            "including <strong>parental consent for under-18s</strong> where "
+            "required &mdash; for the content it publishes.</span></label>"
+            "</div>"
+        )
+
+    def _require_org_data_attestation(profile_id: str):
+        """Server-side gate for both setup POSTs: record (or require) the
+        DPA + lawful-basis attestation before a workspace is created or
+        updated. Returns a redirect response when blocked, else None.
+
+        Tests bypass by default (same pattern as _gate_until_org_ready);
+        attestation-specific tests set ENFORCE_ATTESTATION_GATE."""
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_ATTESTATION_GATE"):
+            return None
+        if _org_attestation_recorded(profile_id):
+            return None
+        if (request.form.get("accept_dpa") or "") != "1" or (
+            request.form.get("confirm_lawful_basis") or ""
+        ) != "1":
+            return redirect(url_for("organisation_setup"))
+        email = _auth.current_user_email() or ""
+        store = _legal.AcceptanceStore()
+        store.record(email, _legal.DOC_DPA, _legal.DPA_VERSION, org_id=profile_id)
+        store.record(email, _legal.DOC_DATA_ATTESTATION, _legal.DPA_VERSION, org_id=profile_id)
+        return None
+
     # into session so the user never sees this page again unless they
     # ask to re-run it.
     @app.route("/organisation/setup", methods=["GET"])
@@ -20854,6 +21066,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
 
         capture_url = url_for("organisation_setup_capture")
+        # UK legal baseline: DPA acceptance + lawful-basis attestation block,
+        # rendered in BOTH setup forms until this workspace has a record.
+        _attestation_html = _org_attestation_form_html(prof)
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
@@ -21008,6 +21223,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_logos_grid_html}
 </div>
 
+{_attestation_html}
 {_bottom_cta_html}
 </form>
 </div>
@@ -21100,6 +21316,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
          accept="image/*,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.svg,.eps,.ai,.pdf"/>
 </div>
 
+{_attestation_html}
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">
   <button type="submit" class="btn">Create my organisation &rarr;</button>
   <span class="muted" style="font-size:12px">
@@ -21412,6 +21629,10 @@ function mhSetupMode(mode) {{
                 # workspace this session may not touch (PC.3): either way,
                 # set up a fresh profile instead of clobbering it.
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _setup_is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
@@ -21744,6 +21965,10 @@ function mhSetupMode(mode) {{
                 or not _session_can_use_profile(profile_id)
             ):
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(

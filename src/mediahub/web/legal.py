@@ -203,6 +203,21 @@ class AcceptanceStore:
                 return True
         return False
 
+    def org_has_acceptance(self, org_id: str, doc: str, version: str) -> bool:
+        """True when ANY account has accepted ``doc``@``version`` for this
+        workspace — the DPA/attestation is per-workspace, recorded by the
+        officer who set it up."""
+        if not (org_id or "").strip():
+            return False
+        for row in self._rows():
+            if (
+                row.get("doc") == doc
+                and row.get("version") == version
+                and (row.get("org_id") or "") == org_id
+            ):
+                return True
+        return False
+
     def needs_terms_reacceptance(self, email: str) -> bool:
         """True when the account has accepted *some* Terms version but not
         the current one. Accounts with no record at all are legacy accounts
