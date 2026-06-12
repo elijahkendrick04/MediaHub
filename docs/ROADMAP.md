@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `030bc35eb` · Merge pull request #352: UK legal compliance — audit + remediation baseline
+**Last updated:** 2026-06-12 · `8d1b55059` · Merge pull request #363: Multilingual captions — top-10 world languages + Irish (W.13 generalised)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,6 +370,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
 | 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 | 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
 | 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
@@ -380,8 +381,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
 | 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
 | 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
-| 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
-| 2026-06-12 | `81d6ee69e` | docs(compliance): handover — commit map, placeholder list, operational checklist, closing verdict |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
@@ -1059,7 +1058,9 @@ What each item shipped:
   batch export on the pack; BrandKit tokens reused; W.2 consent honoured.
 - **W.13 — Bilingual captions (Welsh first):** per-workspace language setting
   (en / cy / bilingual); both variants in one provider call; review shows and
-  edits both; gate length checks account for doubled text.
+  edits both; gate length checks account for doubled text. *Generalised
+  2026-06-12 (PR #363): registry-driven, now covering the top-10 world
+  languages + Irish.*
 - **W.14 — Engagement feedback loop, phase 1:** per-club approval/edit/reject
   telemetry feeding the caption few-shot store, `memory/` and the planner's
   explainable reasons. *Phase 2 (platform metrics) waits for P4.2.*
