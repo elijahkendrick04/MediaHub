@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `7e56545b5` · Merge pull request #404 from elijahkendrick04/claude/jolly-mayer-lzc59j
+**Last updated:** 2026-06-12 · `24191c7a0` · fix: a11y: Documents must have <title> element to aid in navigati (#407)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -623,6 +623,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `24191c7a0` | fix: a11y: Documents must have <title> element to aid in navigati (#407) |
 | 2026-06-12 | `2e72597c4` | Roadmap bot: sweep completed items off the to-do lists automatically |
 | 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
 | 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
