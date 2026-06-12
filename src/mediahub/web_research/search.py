@@ -56,7 +56,7 @@ def _get_cache_dir() -> Path:
 
 
 def _cache_key(query: str) -> str:
-    return hashlib.md5(query.lower().strip().encode()).hexdigest()[:16]
+    return hashlib.md5(query.lower().strip().encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 def _load_cache(key: str) -> Optional[list[dict]]:

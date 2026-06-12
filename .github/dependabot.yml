@@ -1,0 +1,26 @@
+# Dependency update PRs (security/supply-chain-ci). Weekly, grouped, so the
+# stream is reviewable; the security workflow gates every PR anyway.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      python-deps:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/src/mediahub/remotion"
+    schedule:
+      interval: weekly
+    groups:
+      remotion-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly

@@ -52,6 +52,7 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | Watching the **server's own logs** for trouble (and safe auto-fixes) | `src/mediahub/log_sentinel/` |
 | **Month / season recap** numbers | `src/mediahub/season_wrap/` |
 | The founder's **selling notebook** (quotes, leads) | `src/mediahub/commercial/` |
+| **Consent, "delete me", privacy rules** | `src/mediahub/compliance/` (the law paperwork: `docs/compliance/`) |
 
 ## If you're joining the team
 

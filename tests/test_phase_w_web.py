@@ -355,37 +355,63 @@ class TestCertificates:
 
 
 class TestCaptionBundleEndpoint:
-    def test_alt_text_and_welsh_in_response(self, env, monkeypatch):
-        c = env["client"]
-        _pin(c, "org-alpha")
-        from mediahub.web.club_profile import load_profile, save_profile
-
-        prof = load_profile("org-alpha")
-        prof.language = "bilingual"
-        save_profile(prof)
-
+    def _arm(self, monkeypatch, payload: dict):
         import mediahub.media_ai.llm as llm
         import mediahub.web.ai_caption as ac
 
         monkeypatch.setattr(llm, "is_available", lambda: True)
-        monkeypatch.setattr(
-            ac,
-            "call_claude",
-            lambda **kw: json.dumps(
-                {
-                    "caption": "Record smashed by Maya!",
-                    "alt_text": "Maya Patel, 100m Freestyle, 1:01.50 — new club record.",
-                    "caption_cy": "Record y clwb wedi'i chwalu gan Maya!",
-                }
-            ),
+        monkeypatch.setattr(ac, "call_claude", lambda **kw: json.dumps(payload))
+
+    def _set_language(self, language: str):
+        from mediahub.web.club_profile import load_profile, save_profile
+
+        prof = load_profile("org-alpha")
+        prof.language = language
+        save_profile(prof)
+
+    def test_alt_text_and_welsh_in_response(self, env, monkeypatch):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        # Legacy persisted value: pre-registry profiles stored "bilingual".
+        self._set_language("bilingual")
+        self._arm(
+            monkeypatch,
+            {
+                "caption": "Record smashed by Maya!",
+                "alt_text": "Maya Patel, 100m Freestyle, 1:01.50 — new club record.",
+                "caption_secondary": "Record y clwb wedi'i chwalu gan Maya!",
+            },
         )
         r = c.post(f"/api/runs/{env['run_id']}/swim/swim-1/caption?tone=ai")
         body = r.get_json()
         assert r.status_code == 200, body
         assert body["caption"] == "Record smashed by Maya!"
         assert "1:01.50" in body["alt_text"]
-        assert body["caption_cy"].startswith("Record y clwb")
-        assert body["language"] == "bilingual"
+        assert body["caption_secondary"].startswith("Record y clwb")
+        assert body["secondary_language"] == "cy"
+        assert body["secondary_language_label"] == "Cymraeg"
+        assert body["secondary_rtl"] is False
+        assert body["language"] == "en+cy"  # legacy value normalised
+
+    def test_rtl_bilingual_response_metadata(self, env, monkeypatch):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        self._set_language("en+ur")
+        self._arm(
+            monkeypatch,
+            {
+                "caption": "Maya storms to 1:01.50!",
+                "alt_text": "Maya Patel, 100m Freestyle, 1:01.50.",
+                "caption_secondary": "مایا نے 1:01.50 کا ریکارڈ بنایا!",
+            },
+        )
+        r = c.post(f"/api/runs/{env['run_id']}/swim/swim-1/caption?tone=ai")
+        body = r.get_json()
+        assert r.status_code == 200, body
+        assert body["secondary_language"] == "ur"
+        assert body["secondary_language_label"] == "اردو"
+        assert body["secondary_rtl"] is True
+        assert body["language"] == "en+ur"
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +441,38 @@ class TestOrganisationFormFields:
         assert prof.language == "cy"
         assert prof.important_standards == ["BUCS_LC_2026_27_CT"]
 
+    def test_bilingual_pair_roundtrip(self, env):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        c.post(
+            "/organisation",
+            data={
+                "action": "save",
+                "profile_id": "org-alpha",
+                "display_name": "Org Alpha",
+                "language": "en+bn",
+            },
+        )
+        from mediahub.web.club_profile import load_profile
+
+        assert load_profile("org-alpha").language == "en+bn"
+
+    def test_legacy_bilingual_value_normalised_on_save(self, env):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        c.post(
+            "/organisation",
+            data={
+                "action": "save",
+                "profile_id": "org-alpha",
+                "display_name": "Org Alpha",
+                "language": "bilingual",
+            },
+        )
+        from mediahub.web.club_profile import load_profile
+
+        assert load_profile("org-alpha").language == "en+cy"
+
     def test_bad_language_falls_back(self, env):
         c = env["client"]
         _pin(c, "org-alpha")
@@ -430,3 +488,14 @@ class TestOrganisationFormFields:
         from mediahub.web.club_profile import load_profile
 
         assert load_profile("org-alpha").language == "en"
+
+    def test_settings_picker_lists_registry_languages(self, env):
+        c = env["client"]
+        _pin(c, "org-alpha")
+        html = c.get("/organisation").data.decode("utf-8")
+        # Single languages and English-led bilingual pairs, registry-driven.
+        assert 'value="ga"' in html and "Gaeilge (Irish)" in html
+        assert 'value="en+cy"' in html and "English + Cymraeg (Welsh)" in html
+        assert 'value="zh"' in html and "中文" in html
+        # The legacy non-registry value is no longer offered as an option.
+        assert 'value="bilingual"' not in html

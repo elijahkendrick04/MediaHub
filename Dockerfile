@@ -59,8 +59,9 @@ RUN python -c "import sqlite3, sqlite_vec; db=sqlite3.connect(':memory:'); db.en
 # to a silent passthrough (the user gets the original photo back as
 # if it were a cutout). Failing the build here is the right loud
 # signal; quiet runtime failures are not.
+ENV U2NET_HOME=/opt/u2net
 RUN python -c "from rembg import new_session; new_session('u2net')" \
- && test -f /root/.u2net/u2net.onnx
+ && test -f /opt/u2net/u2net.onnx
 
 # Install Playwright + Chromium for graphic_renderer's HTML→PNG step.
 #
@@ -124,6 +125,17 @@ RUN python -m venv "$SEARXNG_VENV" \
 # Create runtime dirs (mounted volumes will overlay these).
 RUN mkdir -p /app/runs_v4 /app/uploads_v4 /app/.cache \
  && chmod +x /app/scripts/docker-entrypoint.sh
+
+# Run as a non-root user (THREAT_MODEL §7): a compromised worker must not
+# own the container. Only the runtime-writable paths are chowned; the code
+# tree stays root-owned/read-only to the app user. A mounted persistent
+# disk (DATA_DIR) must be writable by uid 10001 — Render mounts disks
+# writable by the container user; for plain `docker run -v`, chown the
+# host dir once (`chown -R 10001 ./data`).
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin mediahub \
+ && chown -R mediahub:mediahub /app/runs_v4 /app/uploads_v4 /app/.cache /app/data \
+ && mkdir -p /home/mediahub/.cache && chown -R mediahub:mediahub /home/mediahub
+USER mediahub
 
 EXPOSE 5000
 

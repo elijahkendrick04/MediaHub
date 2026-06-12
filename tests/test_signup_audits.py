@@ -46,6 +46,14 @@ from mediahub.brand.context import brand_context_for_llm  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
+def _with_csrf(client, data: dict) -> dict:
+    """These audits run with TESTING unset, so CSRF enforcement is live
+    (security/web-hardening) — mint a session token and carry it."""
+    token = "audit-csrf-token-0123456789abcdef"
+    with client.session_transaction() as sess:
+        sess["_csrf"] = token
+    return {**data, "csrf_token": token}
+
 def test_link_handlers_pipeline_is_llm_driven():
     """Every link-handler delegate (strategy, block_detector,
     endpoint_discoverer, content_extractor) MUST consult the LLM
@@ -186,23 +194,20 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
     )
     app = create_app()
     client = app.test_client()
-    resp = client.post(
-        "/organisation/setup/capture",
-        data={
-            "accept_dpa": "1",
-            "confirm_lawful_basis": "1",
-            "display_name": "Test Aquatics",
-            "org_type": "swimming_club",
-            "country": "United Kingdom",
-            "governing_body": "Swim England",
-            "website_url": "https://test-aquatics.example",
-            "social_instagram": "https://instagram.com/test.aquatics",
-            "social_facebook": "https://facebook.com/test.aquatics",
-            "social_twitter": "https://x.com/test.aquatics",
-            "social_tiktok": "https://tiktok.com/@test.aquatics",
-            "social_linkedin": "https://linkedin.com/company/test-aquatics",
-        },
-    )
+    resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
+        "accept_dpa": "1",
+        "confirm_lawful_basis": "1",
+        "display_name": "Test Aquatics",
+        "org_type": "swimming_club",
+        "country": "United Kingdom",
+        "governing_body": "Swim England",
+        "website_url": "https://test-aquatics.example",
+        "social_instagram": "https://instagram.com/test.aquatics",
+        "social_facebook": "https://facebook.com/test.aquatics",
+        "social_twitter": "https://x.com/test.aquatics",
+        "social_tiktok": "https://tiktok.com/@test.aquatics",
+        "social_linkedin": "https://linkedin.com/company/test-aquatics",
+    }))
     assert resp.status_code in (302, 303)
     prof = load_profile("test-aquatics")
     assert prof is not None
@@ -381,15 +386,12 @@ def test_capture_pins_profile_into_session(monkeypatch, tmp_path):
     )
     app = create_app()
     with app.test_client() as client:
-        resp = client.post(
-            "/organisation/setup/capture",
-            data={
-                "accept_dpa": "1",
-                "confirm_lawful_basis": "1",
-                "display_name": "Pinned Org",
-                "country": "United Kingdom",
-            },
-        )
+        resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
+        "accept_dpa": "1",
+        "confirm_lawful_basis": "1",
+            "display_name": "Pinned Org",
+            "country": "United Kingdom",
+        }))
         assert resp.status_code in (302, 303)
         # Session now carries the new active profile id
         with client.session_transaction() as sess:

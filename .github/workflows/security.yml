@@ -1,0 +1,60 @@
+# Security gates (security/supply-chain-ci, THREAT_MODEL §7).
+# Every job is a HARD gate — calibrated green at introduction (2026-06-12):
+#   pip-audit: 0 known vulns · bandit: 0 high-severity · semgrep p/python: 0 ERROR
+#   gitleaks: full history clean (allowlist in .gitleaks.toml)
+# A red job blocks merge; fix or explicitly triage (allowlist/ignore with a
+# comment explaining why) — never delete the gate.
+
+name: security
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - name: Audit pinned production dependencies
+        run: pip-audit -r requirements.txt --skip-editable
+
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit
+      - name: Bandit (gate on HIGH severity)
+        run: bandit -r src/mediahub -x src/mediahub/legacy -q -lll
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep (gate on ERROR severity)
+        run: >-
+          semgrep scan --config p/python --severity ERROR --error
+          --exclude legacy --exclude vendor --exclude node_modules src/
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — a secret in any commit is a leak
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

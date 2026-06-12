@@ -40,7 +40,12 @@ class ClubProfile:
     country: str = ""
     notes: str = ""
 
-    # W.13: caption language — "en" | "cy" (Welsh) | "bilingual" (both)
+    # W.13 (generalised): caption language — a web.languages registry code
+    # ("en", "cy", "ga", "zh", …: top-10 world languages + Welsh + Irish)
+    # or an English-led bilingual pair ("en+cy", "en+hi", …). The legacy
+    # value "bilingual" (= "en+cy") still loads; web.languages
+    # .normalise_language_setting() is the single validator and is applied
+    # on every read, so old JSON needs no migration.
     language: str = "en"
 
     # ---- V7 extensions (all optional with defaults so old JSON still loads) ----
@@ -227,6 +232,33 @@ class ClubProfile:
     public_wall_token: str = ""
     public_wall_initials_only: bool = True
     public_wall_excluded_cards: list[str] = field(default_factory=list)
+
+    # ---- Compliance: lawful basis + consent posture (all optional) ----
+    # The club (controller) records which UK GDPR Art 6 basis it relies on
+    # for publication and for the PB enrichment, and how consent gating
+    # behaves. consent_mode: "" (legacy → behaves as opt_out) | "opt_out" |
+    # "opt_in". Which basis/mode a club SHOULD pick is a legal-judgment
+    # call — docs/compliance/OPEN_LEGAL_QUESTIONS.md Q2. The registry and
+    # the enforcement points live in mediahub.compliance.
+    lawful_basis_publication: str = ""  # consent | legitimate_interests | other
+    lawful_basis_enrichment: str = ""  # basis for the PB-history enrichment
+    lawful_basis_notes: str = ""
+    consent_mode: str = ""
+    consent_require_parental_for_minors: bool = True
+    # Per-tenant opt-in for the swimmingresults.org PB enrichment (Art 14
+    # duty sits with the club — see DATA_MAP E4 / OPEN_LEGAL_QUESTIONS Q4).
+    pb_enrichment_enabled: bool = True
+    # Per-tenant retention overrides {artifact_class: days}; a club can
+    # TIGHTEN the deployment window, never extend it (compliance.retention).
+    retention_overrides: dict = field(default_factory=dict)
+    # Children's Code content controls (compliance.child_policy): how
+    # identifiable under-18 athletes are in generated content. Dataclass
+    # defaults stay False so legacy profiles keep their behaviour; NEW
+    # profiles created through organisation setup default them ON
+    # (privacy-high by default — Code standard 7).
+    child_surname_initial: bool = False
+    child_suppress_age: bool = False
+    child_exclude_photos: bool = False
 
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).

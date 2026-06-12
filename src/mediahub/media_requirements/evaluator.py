@@ -136,6 +136,7 @@ def evaluate(
     *,
     profile_logo_present: bool = False,
     content_type_override: Optional[str] = None,
+    exclude_athlete_photos: bool = False,
 ) -> EvaluationResult:
     """Compute readiness + best-fit assets per role."""
     item_id = (
@@ -203,9 +204,11 @@ def evaluate(
             continue
 
         _athlete_role = req.role.startswith("hero") or req.role == "headshot"
-        if _athlete_role and not _photo_ok:
-            # Photo consent withheld (or unknown under an active regime) —
-            # never select an athlete photo for this card.
+        if _athlete_role and (not _photo_ok or exclude_athlete_photos):
+            # Photo blocked by EITHER control: the W.2 per-athlete consent
+            # level (photo consent withheld/unknown under an active regime)
+            # or the tenant's Children's Code policy (no photos on under-18
+            # content). The artefact renders text-led instead.
             if req.required:
                 missing_required.append(req.role)
             else:

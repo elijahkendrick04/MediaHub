@@ -76,6 +76,8 @@ Upload  →  Interpreter  →  Pipeline  →  Recognition  →  Content Pack
 | [`DEPENDENCY_LICENSING.md`](docs/DEPENDENCY_LICENSING.md) | No-hidden-fees register + free substitutes |
 | [`KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Current rough edges |
 | [`TECHNICAL_DEBT.md`](docs/TECHNICAL_DEBT.md) | Legacy modules + cleanup priorities |
+| [`compliance/`](docs/compliance/README.md) | UK/EU data-protection programme: legal framework, data map, ROPA, gap analysis, consent/DSR/retention capabilities, Children's Code, DPIA, breach playbook — legal docs are DRAFT, for solicitor review |
+| [`security/`](docs/security/README.md) | Threat model (STRIDE + LLM Top 10), TLS/at-rest/backup posture, ASVS L2 report with scan results and the honest residual-risk register |
 | [`CHANGELOG.md`](docs/CHANGELOG.md) | V1 → V8.2 release notes |
 
 Inventories under `docs/`: `INVENTORY.md`, `ROUTE_INVENTORY.md`, `API_INVENTORY.md`, `ENV_INVENTORY.md`, `DETECTOR_INVENTORY.md`, `PROMPT_INVENTORY.md`, `SYSTEM_MAP.md`, `DEPENDENCY_MAP.md`, `FEATURE_INVENTORY.md`.

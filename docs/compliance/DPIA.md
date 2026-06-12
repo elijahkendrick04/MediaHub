@@ -77,7 +77,16 @@ communications cover this processing; pilot-club feedback to be recorded here.]
   auto-publishes** (`publishing/publish_gate.py`).
 - **Rights support:** in-product erasure (run, athlete, account — cascading through
   caches, caption memory, rendered assets), export, rectification + post-publication
-  correction/takedown workflow.
+  correction/takedown workflow; Art 12A request log with stop-the-clock metadata
+  (`/organisation/athlete-rights`); s.164A complaints intake with 30-day
+  acknowledgement (`/complaints`).
+- **Consent gating (two registries, one answer):** the W.2 per-athlete consent
+  levels (photo/name/initials/do-not-feature) AND the compliance ledger
+  (refusals/revocations, Art 18 restriction, opt-in mode with parental flags,
+  erasure suppression) — a card is blocked at approval, pack build, the publish
+  route, and the autonomous gate if EITHER blocks. Tenant-level Children's Code
+  controls (surname initialisation, age suppression, photo exclusion) apply on
+  top for under-18s, ON by default for new workspaces.
 
 **Legitimate interests assessment (PB verification).** Purpose: prevent publishing a
 false "personal best" claim about a named child — an accuracy duty. Necessity: the
@@ -101,6 +110,7 @@ confirmation**.
 | R6 | Breach of `DATA_DIR` (unencrypted SQLite at rest) | Unlikely | Significant | Medium |
 | R7 | Public wall / demo exposes identifiable minors | Unlikely | Moderate | Low-Medium |
 | R8 | Future para-swimming support leaks disability data | N/A today | Severe | Trigger |
+| R9 | Prompt-injected results file manipulates captions about a child | Possible | Moderate | Medium |
 
 ## Step 6 — Mitigations
 
@@ -114,6 +124,7 @@ confirmation**.
 | R6 | Hosting-level disk encryption; 0600 file modes; secrets in env | **Operational** (platform) |
 | R7 | Wall is opt-in, token-scoped, approved-cards-only, initials-by-default; demo skips PB lookups and purges at 24h | Done |
 | R8 | Standing rule: re-run DPIA + Art. 9 condition before para support ships | Recorded |
+| R9 | Untrusted prose rides inside data delimiters with a hardened system prompt; instruction-shaped text is detected, logged (`prompt_injection_suspected`) and flagged — never silently rewritten; LLM output is inert text and the approval gate is server-side state a caption cannot reach | Done |
 
 ## Step 7 — Sign-off
 
