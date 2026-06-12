@@ -12531,6 +12531,11 @@ Relay team broke club record"></textarea>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
 </div>
+
+<div class="card">
+  <h2>Complaints</h2>
+  <p>Think we've handled personal data wrongly? <a href="{url_for('complaints_form')}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
+</div>
 """
         return _layout("Privacy", body, active="privacy")
 
@@ -12586,6 +12591,195 @@ Relay team broke club record"></textarea>
                     except Exception:
                         pass
         return redirect(url_for("privacy_page"))
+
+    # ---- DATA-PROTECTION COMPLAINTS (s.164A DPA 2018) -------------------
+    # From 19 June 2026 controllers must facilitate data-protection
+    # complaints via an electronic form and acknowledge within 30 days.
+    # The form is public on purpose: complainants (athletes, parents) are
+    # usually NOT platform users. Engine: mediahub.compliance.complaints.
+
+    _complaint_recent_posts: dict = {}
+
+    def _complaints_throttled(remote: str) -> bool:
+        # Tiny per-IP throttle so the public form can't be flooded:
+        # 5 submissions per hour per address.
+        import time as _time
+
+        now = _time.time()
+        window = [t for t in _complaint_recent_posts.get(remote, []) if now - t < 3600]
+        _complaint_recent_posts[remote] = window
+        if len(window) >= 5:
+            return True
+        window.append(now)
+        return False
+
+    def _complaints_form_body(error: str = "") -> str:
+        err_html = (
+            f'<p class="tag bad">{_h(error)}</p>' if error else ""
+        )
+        return f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Make a <em class="editorial">complaint.</em></h1>
+  <p class="lede">If you think this service has handled your (or your child's) personal data wrongly, tell us here. We will acknowledge your complaint within 30 days and respond as soon as we can. You can also complain to the ICO at any time at ico.org.uk.</p>
+</section>
+<div class="card">
+  {err_html}
+  <form method="post" action="{url_for('complaints_submit')}">
+    <label>Your name<br><input type="text" name="name" maxlength="200" required></label><br>
+    <label>How can we reach you? (email or phone)<br><input type="text" name="contact" maxlength="300" required></label><br>
+    <label>You are…<br>
+      <select name="relationship">
+        <option value="parent/guardian">A parent or guardian of an athlete</option>
+        <option value="athlete">An athlete</option>
+        <option value="club member">A club member or volunteer</option>
+        <option value="other">Other</option>
+      </select>
+    </label><br>
+    <label>Club (if relevant)<br><input type="text" name="club" maxlength="120"></label><br>
+    <label>What happened?<br><textarea name="details" rows="8" maxlength="8000" required></textarea></label><br>
+    <button class="btn" type="submit">Send complaint</button>
+  </form>
+</div>
+"""
+
+    @app.route("/complaints")
+    def complaints_form():
+        return _layout("Complaints", _complaints_form_body(), active="privacy")
+
+    @app.route("/complaints", methods=["POST"])
+    def complaints_submit():
+        from mediahub.compliance.complaints import ComplaintsStore
+
+        remote = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+        if _complaints_throttled(remote):
+            return _layout(
+                "Complaints",
+                _complaints_form_body("Too many submissions from this address — please try again later."),
+                active="privacy",
+            ), 429
+        details = (request.form.get("details") or "").strip()
+        contact = (request.form.get("contact") or "").strip()
+        if not details or not contact:
+            return _layout(
+                "Complaints",
+                _complaints_form_body("Please tell us what happened and how to reach you."),
+                active="privacy",
+            ), 400
+        complaint = ComplaintsStore().submit(
+            name=request.form.get("name") or "",
+            contact=contact,
+            details=details,
+            relationship=request.form.get("relationship") or "",
+            club=request.form.get("club") or "",
+        )
+        log.info("complaint received id=%s", complaint.id)  # no contact details in logs
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Complaint <em class="editorial">received.</em></h1>
+  <p class="lede">Thank you. Your reference is <strong>{_h(complaint.id)}</strong> — keep it. We will acknowledge your complaint within 30 days (by {_h(complaint.ack_due_at[:10])}) using the contact details you gave.</p>
+</section>
+<div class="card"><p class="muted">You can also raise this with the Information Commissioner's Office at any time: ico.org.uk/make-a-complaint.</p></div>
+"""
+        return _layout("Complaint received", body, active="privacy")
+
+    @app.route("/admin/compliance")
+    def admin_compliance():
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.complaints import ComplaintsStore
+        from mediahub.compliance.incidents import IncidentRegister
+
+        store = ComplaintsStore()
+        complaints = store.all()
+        overdue_ids = {c.id for c in store.overdue()}
+        rows = []
+        for c in complaints:
+            badge = {
+                "received": '<span class="tag">received</span>',
+                "acknowledged": '<span class="tag ok">acknowledged</span>',
+                "responded": '<span class="tag ok">responded</span>',
+                "closed": '<span class="tag">closed</span>',
+            }.get(c.status, _h(c.status))
+            late = ' <span class="tag bad">ACK OVERDUE</span>' if c.id in overdue_ids else ""
+            ack_form = ""
+            if c.status == "received":
+                ack_form = (
+                    f'<form method="post" action="{url_for("admin_compliance_ack", complaint_id=c.id)}" style="display:inline">'
+                    '<input type="text" name="via" placeholder="how (e.g. email sent)" maxlength="300">'
+                    '<button class="btn secondary" type="submit">Mark acknowledged</button></form>'
+                )
+            rows.append(
+                f"<tr><td><code>{_h(c.id)}</code></td><td>{_h(c.received_at[:10])}<br>"
+                f"<span class='muted'>ack by {_h(c.ack_due_at[:10])}</span>{late}</td>"
+                f"<td>{_h(c.name)}<br><span class='muted'>{_h(c.relationship)} — {_h(c.contact)}</span></td>"
+                f"<td>{_h(c.club)}</td><td style='max-width:420px'>{_h(c.details[:600])}</td>"
+                f"<td>{badge}{ack_form}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Ref</th><th>Received</th><th>From</th><th>Club</th>"
+            "<th>Details</th><th>Status</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="6" class="muted">No complaints.</td></tr>')
+            + "</tbody></table>"
+        )
+        incidents = IncidentRegister().all()
+        inc_rows = "".join(
+            f"<tr><td><code>{_h(i.id)}</code></td><td>{_h(i.opened_at[:10])}</td>"
+            f"<td>{_h(i.title)}</td><td>{_h(i.severity)}</td>"
+            f"<td>{'yes' if i.personal_data_involved else 'no'}</td>"
+            f"<td>{_h(i.status)}</td></tr>"
+            for i in incidents
+        ) or '<tr><td colspan="6" class="muted">No incidents recorded.</td></tr>'
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Operator</span>
+  <h1>Compliance <em class="editorial">desk.</em></h1>
+  <p class="lede">Data-protection complaints (acknowledge within 30 days — s.164A DPA 2018) and the incident register (Art 33(5)). Breach process: docs/compliance/BREACH_PLAYBOOK.md.</p>
+</section>
+<div class="card"><h2>Complaints</h2>{table}</div>
+<div class="card"><h2>Incident register</h2>
+<table><thead><tr><th>Ref</th><th>Opened</th><th>Title</th><th>Severity</th><th>Personal data</th><th>Status</th></tr></thead>
+<tbody>{inc_rows}</tbody></table>
+<form method="post" action="{url_for('admin_compliance_incident')}" style="margin-top:12px">
+  <input type="text" name="title" placeholder="Incident title" maxlength="300" required>
+  <select name="severity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select>
+  <label><input type="checkbox" name="personal_data" value="1"> personal data involved</label>
+  <button class="btn secondary" type="submit">Open incident</button>
+</form>
+</div>
+"""
+        return _layout("Compliance desk", body, active="privacy")
+
+    @app.route("/admin/compliance/complaints/<complaint_id>/ack", methods=["POST"])
+    def admin_compliance_ack(complaint_id):
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.complaints import ComplaintsStore
+
+        ComplaintsStore().acknowledge(complaint_id, via=request.form.get("via") or "")
+        return redirect(url_for("admin_compliance"))
+
+    @app.route("/admin/compliance/incidents", methods=["POST"])
+    def admin_compliance_incident():
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.incidents import IncidentRegister
+
+        title = (request.form.get("title") or "").strip()
+        if title:
+            IncidentRegister().open(
+                title=title,
+                severity=request.form.get("severity") or "medium",
+                personal_data_involved=bool(request.form.get("personal_data")),
+            )
+        return redirect(url_for("admin_compliance"))
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
