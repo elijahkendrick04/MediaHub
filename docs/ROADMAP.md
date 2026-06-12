@@ -31,7 +31,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `030bc35eb` · Merge pull request #352: UK legal compliance — audit + remediation baseline
+**Last updated:** 2026-06-12 · `8d1b55059` · Merge pull request #363: Multilingual captions — top-10 world languages + Irish (W.13 generalised)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -39,6 +39,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
 | 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 | 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
 | 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
@@ -49,8 +50,6 @@ in any commit message to move an item:
 | 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
 | 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
 | 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
-| 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
-| 2026-06-12 | `81d6ee69e` | docs(compliance): handover — commit map, placeholder list, operational checklist, closing verdict |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
