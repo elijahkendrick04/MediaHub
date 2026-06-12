@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `19947ecf2` · fix: a11y: Form elements must have labels (label) (#409)
+**Last updated:** 2026-06-12 · `e777953ec` · Merge pull request #406 from elijahkendrick04/claude/wizardly-mendel-0mlqoa
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -694,13 +694,12 @@ list and the auto table below, not here.
 |---|---|---|
 | 2026-06-12 | `19947ecf2` | fix: a11y: Form elements must have labels (label) (#409) |
 | 2026-06-12 | `24191c7a0` | fix: a11y: Documents must have <title> element to aid in navigati (#407) |
+| 2026-06-12 | `cfffa6c81` | docs(roadmap): add F.13 — the process to take the GitHub repo private again |
 | 2026-06-12 | `2e72597c4` | Roadmap bot: sweep completed items off the to-do lists automatically |
 | 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
 | 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
 | 2026-06-12 | `68d386a49` | Docker image: Node 20 -> 22 LTS, and fail loudly if the NodeSource setup fails |
 | 2026-06-12 | `19ed2f0fb` | Migrate Remotion tsconfig to moduleResolution=bundler |
-| 2026-06-12 | `be40c4da4` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
-| 2026-06-12 | `1443cf581` | build(deps): bump actions/setup-python from 5 to 6 |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
