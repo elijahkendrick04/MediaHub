@@ -258,9 +258,12 @@ The boring decisions a paying customer silently assumes someone has made.
 4. Decide reels: buy the Remotion company licence, **or** set
    `MEDIAHUB_REEL_ENGINE=ffmpeg` (the free engine). Don't ship for-profit on
    unlicensed Remotion.
-5. Open the bundled demo sample (`samples/MISM-2024-Results.pdf`) and confirm
-   you are comfortable it contains no real children's data you lack a basis
-   to show; if not, have Fable 5 swap in a synthetic file.
+5. ~~Open the bundled demo sample and confirm it contains no real children's
+   data~~ **Done (PC.12, 2026-06-12):** the public demo sample is now the
+   synthetic `samples/demo-meet-results.pdf` (fictional swimmers, generated
+   by `scripts/make_demo_sample.py`); the real meet PDF survives only as a
+   parser-regression fixture in `sample_data/`, which no route serves. See
+   [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md).
 6. Confirm Render disk snapshots are on (the off-site backup + rehearsed
    restore is PC.14's code half).
 

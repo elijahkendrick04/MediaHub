@@ -26290,7 +26290,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
         from mediahub.web import public_wall as _pw
 
         enabled = bool(prof.public_wall_enabled and prof.public_wall_token)
-        cards = _pw.wall_cards(prof) if enabled else []
+        consent_hidden: list[dict] = []
+        cards = _pw.wall_cards(prof, consent_hidden=consent_hidden) if enabled else []
         excluded = set(prof.public_wall_excluded_cards or [])
 
         if enabled:
@@ -26324,6 +26325,28 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                     '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Show again</button>'
                     "</form></td></tr>"
                 )
+            consent_hidden_rows = ""
+            for h_item in consent_hidden:
+                from mediahub.safeguarding.consent import LEVEL_LABELS as _cl
+
+                label = _cl.get(h_item["level"], h_item["level"])
+                consent_hidden_rows += (
+                    f"<tr><td>{_h(h_item['athlete'])}</td>"
+                    f"<td class='dim'>{_h(label)}</td>"
+                    f"<td class='dim'>{_h(h_item['reason'])}</td></tr>"
+                )
+            consent_hidden_block = ""
+            if consent_hidden_rows:
+                consent_hidden_block = f"""
+<div class="card" style="margin-bottom:20px;border-left:3px solid var(--warn)">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Held off the wall by consent ({len(consent_hidden)})</h3>
+  <p class="dim" style="font-size:13px">These approved cards never appear on the public wall,
+  the embed or the feeds because the athlete's recorded consent does not allow it. Update the
+  consent registry to change this — the wall follows it automatically.</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+  <thead><tr style="text-align:left"><th>Athlete</th><th>Consent</th><th>Why hidden</th></tr></thead>
+  <tbody>{consent_hidden_rows}</tbody></table>
+</div>"""
             initials_checked = "checked" if prof.public_wall_initials_only else ""
             status_block = f"""
 <div class="card" style="margin-bottom:20px">
@@ -26335,7 +26358,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   <form method="post" action="{url_for("public_wall_update")}" style="display:flex;gap:14px;align-items:center;margin-top:10px">
     <input type="hidden" name="action" value="settings">
     <label style="font-size:13px"><input type="checkbox" name="initials_only" {initials_checked}>
-      Initials-only names (recommended until per-athlete consent tracking exists)</label>
+      Initials-only names for everyone (per-athlete consent from your registry is always
+      enforced on top &mdash; this blanket setting can only tighten it further)</label>
     <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
   </form>
   <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
@@ -26349,6 +26373,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   {card_rows or '<tr><td class="dim" style="padding:12px">No approved, rendered cards yet — approve cards in the review queue and generate their graphics.</td></tr>'}
   </tbody></table>
 </div>
+{consent_hidden_block}
 <div class="card">
   <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Hidden cards</h3>
   <table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>
@@ -26574,7 +26599,11 @@ ever appear; queued, edited and rejected cards never do.</p>
     # converting club keeps its preview.
     # ------------------------------------------------------------------
 
-    _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "MISM-2024-Results.pdf"
+    # The bundled sample is SYNTHETIC (scripts/make_demo_sample.py): every
+    # swimmer, club and meet is fictional. The public demo must never ship
+    # real children's data — Children's-Code pass, PC.12
+    # (docs/compliance/CHILDRENS_CODE_PASS.md).
+    _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "demo-meet-results.pdf"
 
     def _demo_client_ip() -> str:
         fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
