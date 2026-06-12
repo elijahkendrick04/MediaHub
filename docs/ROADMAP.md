@@ -98,7 +98,10 @@ letters, the Swim England application) embeds that identity and would have to
 be re-done, and re-paid, under a rename. Then **F.1–F.4** make the first sale
 lawful (the [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) sell gate —
 no club pays before these hold), **F.5 / PC.4 / PC.6** are the selling motion
-itself, **F.6–F.8** are housekeeping that runs alongside. **F.12** (the
+itself, **F.6–F.8** are housekeeping that runs alongside, and **F.13** (take
+the GitHub repo private again) lands at the latest **before the first club
+pays** — the children's-data fixtures' documented justification assumes a
+private repo. **F.12** (the
 cheaper-hosting move off Render) is deliberately sequenced *after* F.11 —
 once your own domain fronts the app, changing host is an invisible DNS flip —
 and it must never displace a selling week.
@@ -118,6 +121,7 @@ and it must never displace a selling week.
 - **F.6** · Production ops decisions: retention period, breach owner named in the runbook, insurance, Remotion licence (or the free ffmpeg engine), Render snapshots + off-site backup target · ❌ **NOT STARTED**
 - **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
 - **F.8** · When direct Instagram/Facebook posting nears (P4.2): start the Meta Business Verification + App Review paperwork early · ❌ **NOT STARTED**
+- **F.13** · Take the GitHub repo private again (public today; the children's-data fixtures' lawful-basis note assumes a private repo): pre-flight sweep, CI-minutes plan, the Settings flip, integration re-checks — at the latest before the first club pays · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO_FOUNDER -->
 
 ### Step-by-step guides (one per item above)
@@ -540,6 +544,70 @@ no review at all.
 3. Expect ~2–4 weeks per permission; one review covers Facebook Pages +
    Instagram (Threads is scoped separately).
 
+#### F.13 — Take the GitHub repo private again
+
+The repo (`github.com/elijahkendrick04/MediaHub`) is **public today** and
+needs to return to private; the only open questions are *when* and *what to
+check on the way*. Why it matters, in weight order: (1) **compliance** — the
+parser fixtures hold real children's personal data from published meets
+(`samples/MISM-2024-Results.pdf`, `samples/learning_corpus/level1/*`), and
+the documented justification for keeping them
+([OPEN_LEGAL_QUESTIONS Q13](compliance/OPEN_LEGAL_QUESTIONS.md),
+[DATA_MAP §6](compliance/DATA_MAP.md)) rests on "access control (private
+repo)" — a defence that does not hold while the repo is public;
+(2) **commercial** — hosted-only
+([ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md)) treats the
+source as the product, and a public repo is a free self-host path that also
+hands competitors the pricing strategy and sales playbook committed in
+`docs/`; (3) **the clock runs one way** — flipping private recalls nothing,
+so everything pushed while public stays permanently clonable by anyone who
+took a copy (the full-history gitleaks audit found no real secrets, so the
+exposure is the fixtures + strategy, not credentials). **Latest sensible
+deadline: before the first club pays** — the sell gate's compliance posture
+leans on Q13's "repo stays private". Do it earlier the moment whatever
+needed the repo public is finished.
+
+1. Confirm the reason it is public has expired and nobody external still
+   needs read access — anyone who does becomes a collaborator instead (repo
+   Settings → Collaborators).
+2. Ask Fable 5 for the **pre-flight sweep** (one session): re-check forks —
+   **0 as of 2026-06-12**; a fork made while public survives the flip as an
+   independent public copy, so any that appeared need a decision before
+   flipping — and re-confirm nothing fetches this repo's files
+   unauthenticated at runtime (none today: the README badges are static
+   shields.io, and the Dockerfile's raw.githubusercontent fetch targets the
+   SearXNG repo, not ours).
+3. **Decide the Actions-minutes plan — the one real cost.** Public repos run
+   GitHub-hosted CI free; a private repo on the Free plan gets
+   **2,000 min/month**, and today's schedules (autotest every 6 h, nightly
+   Lighthouse + cross-browser sweeps, the daily contract suite, the
+   half-hourly dependabot-automerge sweep, plus every push/PR) would burn
+   that in days. Cheapest first: have Fable 5 trim the schedules (autotest
+   6 h → daily, automerge 30 min → 2–6 h, consolidate the nightlies) and
+   ship the trim *before* the flip so the quota never silently stalls CI;
+   GitHub Pro (~$4/mo, 3,000 min) if trimming isn't enough; heavy jobs onto
+   a self-hosted runner (the F.12 box) later if both fall short.
+4. Flip it: repo → Settings → General → Danger Zone → **Change visibility →
+   Make private** (type the repo name to confirm). Only you can do this
+   (admin). Going private permanently drops stars/watchers (currently 0) and
+   turns off GitHub's free public-repo secret scanning / push protection —
+   the CI security workflow's own scanners keep running.
+5. Re-verify everything that reads the repo: trigger a manual Render deploy
+   (the Render GitHub App keeps its access to private repos it was granted),
+   open a Claude Code session on the repo, push a trivial commit and watch
+   CI + the roadmap-autoupdate bot go green, and confirm Dependabot still
+   files PRs.
+6. Ask Fable 5 to record the public window honestly in the compliance docs
+   (Q13 in `OPEN_LEGAL_QUESTIONS.md` + `DATA_MAP` §6): pin the make-public
+   date from your account security log (github.com/settings/security-log,
+   filter `repo.access` — 90-day retention), or state repo creation
+   (2026-05-08) as the conservative start. "Repo stays private" must read
+   true again, with its history accurate.
+7. **Verify:** a logged-out browser gets a 404 on
+   `github.com/elijahkendrick04/MediaHub`; CI is green on the next push; a
+   Render deploy succeeded after the flip; Settings → Billing shows the
+   month's Actions usage tracking inside budget.
+
 ## To do — things Fable 5 can build
 
 Ask in any session ("build PC.15"). The four **sell-gate code remainders**
@@ -609,6 +677,7 @@ list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-12 | **Repo privacy queued as founder work (F.13):** the GitHub repo is public today and must return to private — at the latest before the first club pays, because the lawful-basis note for the real-children's-data parser fixtures (OPEN_LEGAL_QUESTIONS Q13 / DATA_MAP §6) assumes a private repo, and ADR-0011's hosted-only stance treats the source as the product. The new guide covers the one real cost (private-repo Actions minutes — trim the CI schedules or GitHub Pro), the visibility flip, integration re-verification (Render, Claude Code, CI, Dependabot), and recording the public window honestly in the compliance docs. | Founder guide F.13 · [Q13](compliance/OPEN_LEGAL_QUESTIONS.md) |
 | 2026-06-12 | **Sell-gate items closed out + the roadmap now keeps itself honest:** PC.9 and PC.11–PC.14 verified fully shipped on the code side (all 55 pinning tests green) and moved to Completed; their remaining halves are founder-only and live on the founder list with updated step-by-step guides (F.6 gains the breach-owner + off-site-backup steps). The auto-update bot gained a **completed-item sweep**: any to-do item marked ✅ moves itself to Completed on the next push to `main`, and a declared human remainder is kept on — or filed into — the founder list, so finished items can no longer squat on a to-do list. | *Status* section · [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py) |
 | 2026-06-12 | **Business identity, own domain & cheaper hosting prioritised (F.9–F.12 + PC.15/PC.16):** the real company name comes before any further filings (MediaHub is an indefensible filler), then Companies House registration (£100 digital; director ID-verification mandatory since Nov 2025), then the .co.uk domain wired to the live app — so Stripe/ICO/solicitor/Swim England paperwork files **once**, under the real name, and every printed/shared link survives any future host. The Render→VPS move (≈£20/mo → ≈£4–8/mo, prices verified June 2026) is sequenced last, as a DNS flip, and must never displace selling. | Founder guides F.9–F.12 · Phase C section |
 | 2026-06-12 | **Sell-gate code remainders + referral engine shipped (PC.9, PC.11–PC.14 code halves):** subprocessor-register guard test (caught 3 undisclosed flows) + unlicensed vendor dirs removed; W.2 consent enforced on the public wall + Children's-Code pass recorded (synthetic `/try` sample replaces real minors' data); whole-org deletion + takeout ZIP; transactional-email seam (password reset / verification / invites / breach channel), daily backups + rehearsed restore, incident runbook; in-product referral engine with auto-granted Stripe rewards. Remaining on the sell gate is founder-only (F.1–F.8). | Phase C section · [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) · [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) |
@@ -735,7 +804,7 @@ revealed-WTP pricing machinery and warm-first funnel tooling on
 sponsor manager (PC.8), the public wall (PC.10), the UK legal-compliance
 baseline (PR #352), **and now the four sell-gate code remainders
 (PC.11–PC.14 code halves) plus the referral engine (PC.9)** — all shipped.
-Still open: the founder's identity + selling + paperwork motion (F.1–F.12,
+Still open: the founder's identity + selling + paperwork motion (F.1–F.13,
 PC.4, PC.6 — founder list) and the two code halves the new identity items
 unlock (PC.15 rebrand sweep, PC.16 hosting cutover). **Zero paying clubs
 today; code is no longer the excuse.**
