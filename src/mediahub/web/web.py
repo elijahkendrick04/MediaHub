@@ -20157,12 +20157,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Comma-separated codes that identify your members in results files.</p>
     </div>
     <div>
-      <label>Primary colour</label>
+      <label for="org-brand-primary">Primary colour</label>
       <input id="org-brand-primary" type="color" name="brand_primary" value="{_h(_org_pri)}"
              style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
     </div>
     <div>
-      <label>Secondary colour</label>
+      <label for="org-brand-secondary">Secondary colour</label>
       <input id="org-brand-secondary" type="color" name="brand_secondary" value="{_h(_org_sec)}"
              style="height:38px;width:80px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer"/>
     </div>
