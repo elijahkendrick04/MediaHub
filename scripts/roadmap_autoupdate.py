@@ -1,12 +1,20 @@
 """Auto-update ``docs/ROADMAP.md`` on each push to ``main``.
 
 Driven by ``.github/workflows/roadmap-autoupdate.yml``. Given the commits in
-a push it does three things, all idempotent and confined to marker blocks so
+a push it does four things, all idempotent and confined to marker blocks so
 hand-written prose is never touched:
 
-  1. **Last-updated stamp** — date + short SHA + subject of the pushed tip.
-  2. **Recent-activity feed** — the last N non-bot commits as a small table.
-  3. **Status directives** — any ``roadmap: <ID> <status>`` line found in the
+  1. **Completed-item sweep** — any to-do item already carrying a ✅ badge
+     (a session marked it shipped in place instead of issuing a directive)
+     is **moved off its to-do list into the Completed list**, date-stamped
+     from the badge. If the item's line declares a human remainder
+     (``Founder half open = F.1/F.6`` or ``founder remainder: <text>``),
+     the named ``F.*`` items are kept on the founder list and referenced
+     from the completion annotation; a free-text remainder is filed as a
+     **new** ``F.*`` founder item flagged as needing its step-by-step guide.
+  2. **Last-updated stamp** — date + short SHA + subject of the pushed tip.
+  3. **Recent-activity feed** — the last N non-bot commits as a small table.
+  4. **Status directives** — any ``roadmap: <ID> <status>`` line found in the
      pushed commit messages updates the matching item in the roadmap's three
      lists: ``done`` **moves the item from its to-do list to the Completed
      list** (date-stamped); ``wip``/``blocked``/``todo`` set the badge in
@@ -242,6 +250,120 @@ def set_item_status(text: str, ident: str, status_kw: str, *, today: str | None 
     return new_text, new_text != text
 
 
+# A ✅ badge wherever it sits on a to-do line (`· ✅ **LABEL**`). Open items
+# carry ❌/🔵/⚠️ badges; a ✅ on a to-do line means a session marked the work
+# shipped in place without moving the item — the sweep finishes the move.
+_DONE_BADGE_ANYWHERE_RE = re.compile(r"\s*·\s*✅\s*\*\*([^*]+)\*\*")
+
+# A `(YYYY-MM-DD)` stamp inside a badge label, e.g. `**BUILT (2026-06-12)**`.
+_BADGE_DATE_RE = re.compile(r"\((\d{4}-\d{2}-\d{2})\)")
+
+# A declared human remainder on a completed item's line, e.g.
+# "Founder half open = F.1/F.6" or "founder remainder: chase the printer".
+_REMAINDER_RE = re.compile(
+    r"(?:founder|human)\s+(?:half(?:\s+open)?|remainder|part)\s*[:=]\s*([^·\n]+)",
+    re.IGNORECASE,
+)
+
+_F_ID_RE = re.compile(r"^F\.\d+$", re.IGNORECASE)
+
+
+def _next_f_number(bodies) -> int:
+    """The next free ``F.<n>`` id across every list body given."""
+    nums = [0]
+    for body in bodies:
+        nums.extend(int(n) for n in re.findall(r"\*\*F\.(\d+)\*\*", body))
+    return max(nums) + 1
+
+
+def sweep_completed(text: str, *, today: str | None = None):
+    """Move every to-do item already hand-marked ✅ into the Completed list.
+
+    Sessions sometimes record a ship by editing the badge in place
+    (``· ✅ **BUILT (2026-06-12)**: …``) instead of issuing a
+    ``roadmap: <ID> done`` directive — the finished item then squats on its
+    to-do list forever. This sweep moves each such item to Completed, dated
+    from the badge's ``(YYYY-MM-DD)`` stamp when it carries one (else
+    ``today``/today's date). A human remainder declared on the line
+    (``Founder half open = F.1/F.6``) keeps its named ``F.*`` items on the
+    founder list and is referenced from the completion annotation — a named
+    id that exists nowhere is warned about; a free-text remainder
+    (``founder remainder: <text>``) is filed as a new ``F.*`` founder item
+    flagged as needing its step-by-step guide. Returns
+    ``(new_text, moved_ids)``; idempotent — a second run is a no-op.
+    """
+    bodies = {}
+    for name in (*_TODO_BLOCKS, "DONE"):
+        m = _block_re(name).search(text)
+        if m:
+            bodies[name] = m.group(1)
+    if "TODO" not in bodies or "DONE" not in bodies:
+        return text, []
+
+    moved = []
+    new_bodies = dict(bodies)
+    for name in _TODO_BLOCKS:
+        if name not in bodies:
+            continue
+        for item in re.finditer(r"^- \*\*([^*]+)\*\*.*$", bodies[name], re.MULTILINE):
+            line, ident = item.group(0), item.group(1)
+            badge = _DONE_BADGE_ANYWHERE_RE.search(line)
+            if not badge:
+                continue
+            core = _item_core(line[: badge.start()])
+            stamp = _BADGE_DATE_RE.search(badge.group(1))
+            done_date = stamp.group(1) if stamp else (today or date.today().isoformat())
+
+            suffix = ""
+            remainder = _REMAINDER_RE.search(line)
+            if remainder:
+                rem_text = remainder.group(1).strip().rstrip(".")
+                tokens = [t for t in re.split(r"[\s/,+&]+", rem_text) if t]
+                if tokens and all(_F_ID_RE.match(t) for t in tokens):
+                    ids = [t.upper() for t in tokens]
+                    for fid in ids:
+                        if not any(
+                            _find_item(new_bodies[b], fid)
+                            for b in ("TODO_FOUNDER", "DONE", "TODO")
+                            if b in new_bodies
+                        ):
+                            print(
+                                f"warning: {ident} names remainder {fid} "
+                                "but no such list item exists",
+                                file=sys.stderr,
+                            )
+                    suffix = f" — founder remainder: {'/'.join(ids)}"
+                else:
+                    target = "TODO_FOUNDER" if "TODO_FOUNDER" in new_bodies else "TODO"
+                    fid = f"F.{_next_f_number(new_bodies.values())}"
+                    new_bodies[target] = _append_line(
+                        new_bodies[target],
+                        f"- **{fid}** · {rem_text} — filed by the roadmap sweep as "
+                        f"the human half of {ident}; needs its step-by-step guide "
+                        "written (ask in any Fable 5 session) · ❌ **NOT STARTED**",
+                    )
+                    suffix = f" — founder remainder filed as {fid}"
+
+            new_bodies[name] = _remove_line(new_bodies[name], line)
+            new_bodies["DONE"] = _append_line(
+                new_bodies["DONE"],
+                f"- ✅ **{ident}** · {core} *(completed {done_date}{suffix})*",
+            )
+            moved.append(ident)
+
+    if not moved:
+        return text, []
+    new_text = text
+    for name, body in new_bodies.items():
+        if body != bodies.get(name):
+            new_text = _block_re(name).sub(
+                lambda _m, n=name, b=body: f"<!-- ROADMAP:{n} -->{b}<!-- /ROADMAP:{n} -->",
+                new_text,
+                count=1,
+            )
+    return new_text, moved
+
+
 def replace_block(text: str, name: str, content: str):
     """Replace text between ``<!-- ROADMAP:NAME -->`` and ``<!-- /ROADMAP:NAME -->``.
 
@@ -371,9 +493,15 @@ def main() -> int:
     text = ROADMAP.read_text(encoding="utf-8")
     original = text
 
-    # 1. status directives from this push → update/move list items
+    # 1. completed-item sweep: anything hand-marked ✅ on a to-do list moves
+    #    to Completed (no directive needed); declared human remainders are
+    #    kept on / filed into the founder list.
+    text, swept = sweep_completed(text)
+    applied = [f"{ident}=done(sweep)" for ident in swept]
+
+    # 2. status directives from this push → update/move list items (after the
+    #    sweep, so an explicit directive in this push wins over it)
     directives = parse_directives(_commits_in_range(before, after))
-    applied = []
     for ident, status_kw in directives:
         text, changed = set_item_status(text, ident, status_kw)
         if changed:
@@ -381,15 +509,15 @@ def main() -> int:
         else:
             print(f"note: no list item matched directive id {ident!r}", file=sys.stderr)
 
-    # 2. last-updated stamp
+    # 3. last-updated stamp
     tip = _git("show", "-s", "--format=%cs\x1f%H\x1f%s", after).strip().split("\x1f")
     date, sha, subject = (tip + ["", "", ""])[:3]
     text, _ = replace_block(text, "LAST_UPDATED", render_stamp(date, sha, subject))
 
-    # 3. recent-activity feed
+    # 4. recent-activity feed
     text, _ = replace_block(text, "ACTIVITY", render_activity(_recent_commits()))
 
-    # 4. production findings — open `sentinel` issues (docs/LOG_SENTINEL.md).
+    # 5. production findings — open `sentinel` issues (docs/LOG_SENTINEL.md).
     # None => API unavailable; keep the existing block rather than blank it.
     sentinel_issues = _fetch_sentinel_issues()
     if sentinel_issues is not None:

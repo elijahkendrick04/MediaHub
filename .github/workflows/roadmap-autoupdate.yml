@@ -1,9 +1,15 @@
 # Roadmap auto-update — keeps docs/ROADMAP.md current on every push to main.
 #
 # On each push to `main` this workflow runs scripts/roadmap_autoupdate.py, which:
-#   1. refreshes the "Last updated" stamp (date · short SHA · subject),
-#   2. refreshes the "Recent code activity" feed (last ~12 non-bot commits),
-#   3. applies any `roadmap: <ID> <status>` directives found in the pushed
+#   1. sweeps completed items: any to-do item already hand-marked with a ✅
+#      badge is MOVED off its to-do list into the Completed list (dated from
+#      the badge), no directive needed. A human remainder declared on the
+#      line ("Founder half open = F.1/F.6", "founder remainder: <text>") is
+#      kept on the founder list — free-text remainders are filed as NEW F.*
+#      founder items flagged as needing their step-by-step guide,
+#   2. refreshes the "Last updated" stamp (date · short SHA · subject),
+#   3. refreshes the "Recent code activity" feed (last ~12 non-bot commits),
+#   4. applies any `roadmap: <ID> <status>` directives found in the pushed
 #      commit messages (e.g. `roadmap: P1.2 done`, `roadmap: F.2 done`):
 #      `done` MOVES the item from its to-do list (founder or Fable 5) into
 #      the Completed list (date-stamped); any other status sets the item's
