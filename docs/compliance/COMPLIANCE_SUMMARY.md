@@ -1,5 +1,17 @@
 # Compliance Summary — gap → capability → evidence
 
+> **Post-merge note (PR #352 + Phase W reconciliation):** a parallel
+> UK-legal baseline (`docs/COMPLIANCE_AUDIT.md`, in-product legal pages at
+> `/terms` `/privacy` `/cookies` `/dpa`, ToS/DPA acceptance ledgers,
+> CCR/DMCCA checkout) and the Phase W safeguarding registry landed on main
+> during this programme. The two systems are now **unified**: one consent
+> answer (W.2 levels + the compliance ledger — blocked if either blocks),
+> one erasure engine (`compliance.dsr` delegating to the `privacy` cascade
+> + its extras, suppression recorded in both registries), one retention job
+> (per-class engine honouring `MEDIAHUB_RETENTION_DAYS` as a ceiling), one
+> security-headers hook, and two deliberate auth layers (per-IP limiter +
+> failure lockout).
+>
 > Phase 4 deliverable: every Critical/High gap from
 > [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md), the capability that closed it, and
 > the evidence a regulator or club would ask for. Open legal-judgment items

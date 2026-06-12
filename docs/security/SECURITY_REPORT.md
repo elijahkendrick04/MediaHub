@@ -12,7 +12,7 @@
 | ASVS chapter | Items | Control | Evidence (tests) |
 |---|---|---|---|
 | **V1 Architecture** | 1.1.2 threat modelling | STRIDE threat model incl. OWASP LLM Top 10; every threat mapped to a capability or accepted | `THREAT_MODEL.md` |
-| **V2 Authentication** | 2.2.1 anti-automation | Login throttling: 5 failures/15 min per email AND per client address, checked before verification; lockouts logged | `test_authn_hardening.py` (lockout trio) |
+| **V2 Authentication** | 2.2.1 anti-automation | Two layers: per-IP request limiter on auth endpoints (PR #352) + failure lockout (5 failures/15 min per email AND per client address, checked before verification); lockouts logged | `test_authn_hardening.py` (lockout trio) |
 | | 2.4.x password storage | **argon2id** (argon2-cffi defaults) for new + rehashed; legacy bcrypt verifies and upgrades on next login; constant-time, timing-equalised unknown-email path | `test_authn_hardening.py`, `test_auth.py` |
 | | 2.7/2.8 MFA | Optional **TOTP 2FA** (RFC 6238, stdlib): enable/disable with valid code; password alone never grants a session when enabled; failures share lockout counters | `test_authn_hardening.py::test_2fa_*` |
 | **V3 Session** | 3.2.1 rotation | `session.clear()` before login/signup grants | `test_session_rotated_on_login` |
@@ -24,7 +24,7 @@
 | | 5.3 output encoding | `_h()` (markupsafe) on user-influenced output; complaint-content XSS test; LLM output treated as inert text | `test_compliance_complaints.py::test_complaint_content_is_escaped`, `test_llm_pipeline_security.py::test_no_llm_output_reaches_eval_or_exec` |
 | **V8 Data protection** | 8.1/8.3 | Minimised LLM payloads (no IDs/DOB); pseudonymised security log; 0600 sensitive files; retention purge; encrypted restore-tested backups | `test_retention_minimisation.py`, `test_dsr_rights.py`; `DATA_PROTECTION.md` |
 | **V9/V10 Comms & malicious code** | | TLS per target documented; SSRF guard (public-IP-only, per-hop redirect revalidation, fail-closed); renderer **no-network lockdown** (live-tested) | `test_input_handling_security.py` SSRF + renderer tests |
-| **V11 Business logic** | 11.1.5 | **Unbypassable publish gate**: the schedule route enforces tenant + recorded human approval + consent server-side; autonomous path passes an 8-check gate (kill switch → rate caps) with minors always excluded | `test_llm_pipeline_security.py`, `test_autonomous_publishing.py`, `test_consent_gating.py` |
+| **V11 Business logic** | 11.1.5 | **Unbypassable publish gate**: the schedule route enforces tenant + recorded human approval + consent server-side; the consent answer unifies the W.2 safeguarding levels AND the compliance ledger (blocked if either blocks, fail-closed); autonomous path passes an 8-check gate with minors always excluded | `test_llm_pipeline_security.py`, `test_autonomous_publishing.py`, `test_consent_gating.py` |
 | **V12 Files** | | Uploads stored as opaque bytes under random run ids; never served raw; media file route profile-scoped | `test_input_handling_security.py`, media isolation suite |
 | **V13 API** | | JSON APIs tenant-scoped; IDOR tests on privacy delete; non-enumerable ids (random hex) | `test_privacy_delete_idor.py`, complaints id test |
 | **V14 Config** | 14.1 build | Non-root Docker (uid 10001), pinned slim base, healthcheck; CI gates: pip-audit, bandit (0 high), semgrep p/python (0 ERROR), gitleaks (history clean); dependabot | `.github/workflows/security.yml`; bandit/semgrep runs below |

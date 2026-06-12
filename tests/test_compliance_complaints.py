@@ -128,7 +128,8 @@ def test_complaint_content_is_escaped_in_admin_page(operator_client):
     assert b"&lt;script&gt;" in page.data
 
 
-def test_overdue_detection():
+def test_overdue_detection(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))  # never write into the source tree
     from mediahub.compliance.complaints import Complaint, ComplaintsStore
 
     store = ComplaintsStore()
@@ -163,7 +164,8 @@ def test_incident_register_roundtrip(operator_client, tmp_path):
     assert IncidentRegister().get(inc.id).status == "closed"
 
 
-def test_complaint_ids_not_guessable_sequential():
+def test_complaint_ids_not_guessable_sequential(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))  # never write into the source tree
     from mediahub.compliance.complaints import ComplaintsStore
 
     store = ComplaintsStore()

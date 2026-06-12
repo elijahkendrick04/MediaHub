@@ -33,7 +33,11 @@ def client(app):
 
 
 def _signup(client, email="coach@club.org", password="twelvechars1"):
-    return client.post("/signup", data={"email": email, "password": password})
+    # accept_terms: the UK-legal baseline records versioned ToS acceptance
+    # at signup (web/legal.py) — signup is refused without it.
+    return client.post(
+        "/signup", data={"email": email, "password": password, "accept_terms": "1"}
+    )
 
 
 # ------------------------------------------------------------- hashing

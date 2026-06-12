@@ -269,7 +269,14 @@ def test_erasure_in_memory_db_when_available(data_dir):
     from mediahub.compliance.dsr import erase_athlete
 
     report = erase_athlete("clubx", ATHLETE)
-    assert report["memory_rows_deleted"] == 1
+    # either layer may do the deletion (the privacy cascade sweeps caption
+    # memory too) — what matters is the row is GONE
+    cascade_rows = (report.get("cascade") or {}).get("memory_rows", 0)
+    assert report["memory_rows_deleted"] + cascade_rows >= 1
+    from mediahub.compliance.dsr import _memory_rows_matching
+    from mediahub.compliance.consent import athlete_key
+
+    assert _memory_rows_matching(memory_store, "clubx", athlete_key(ATHLETE)) == []
 
 
 # ------------------------------------------------------------ rectification

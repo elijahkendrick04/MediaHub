@@ -403,18 +403,6 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
         ],
     }
 
-    # 0. UK-legal cascade first (privacy.erasure): runs + rendered assets,
-    # PB caches, research caches, caption memory, posting-log excerpts.
-    try:
-        from mediahub.privacy import erase_athlete as _cascade_erase
-
-        cascade = _cascade_erase(profile_id, athlete_name)
-        report["cascade"] = (
-            cascade.to_dict() if hasattr(cascade, "to_dict") else dict(getattr(cascade, "__dict__", {}))
-        )
-    except Exception as e:
-        report["residuals"].append(f"privacy cascade unavailable: {e}")
-
     # 1. Runs: drop the athlete's achievements/cards, redact remaining mentions.
     for path in _tenant_runs(profile_id):
         try:
@@ -497,6 +485,21 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                             f.unlink()
                         except OSError:
                             report["residuals"].append(f"could not clean pack file {f}")
+
+    # 1e. UK-legal cascade (privacy.erasure) AFTER the name-keyed walkers
+    # above — the cascade redacts residual mentions to "[removed]", which
+    # would defeat name matching if it ran first. It adds the stores this
+    # module doesn't walk: research caches, posting-log excerpts, motion
+    # cache, plus a second sweep of runs/caches/caption memory.
+    try:
+        from mediahub.privacy import erase_athlete as _cascade_erase
+
+        cascade = _cascade_erase(profile_id, athlete_name)
+        report["cascade"] = (
+            cascade.to_dict() if hasattr(cascade, "to_dict") else dict(getattr(cascade, "__dict__", {}))
+        )
+    except Exception as e:
+        report["residuals"].append(f"privacy cascade unavailable: {e}")
 
     # 2. PB caches (per-run, warm, and raw search HTML).
     for cache_root in (_data_dir() / "data" / "discovered", _data_dir() / "discovered"):
