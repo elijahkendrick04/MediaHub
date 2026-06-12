@@ -77,6 +77,58 @@ narrow tool registry. It **vendors no third-party agent / loop source** — no
 external agent framework is copied or linked — so no upstream notice is
 required for it.
 
+## Bundled fonts (self-hosted `.woff2`)
+
+All bundled typefaces were obtained from Google Fonts and are licensed under
+the **SIL Open Font License 1.1** (OFL), which permits bundling and
+commercial use. Self-hosted first-party on every surface (Council decision
+2026-05-31; see `src/mediahub/web/static/fonts/README.md`).
+
+| Family | Copyright | Surfaces |
+|---|---|---|
+| Big Shoulders Display | © The Big Shoulders Project Authors | web UI |
+| Fraunces | © The Fraunces Project Authors | web UI |
+| Hanken Grotesk | © The Hanken Grotesk Project Authors | web UI |
+| JetBrains Mono | © 2020 JetBrains (OFL) | web UI, renderer, reels |
+| Anton | © The Anton Project Authors | renderer, reels |
+| Bebas Neue | © The Bebas Neue Project Authors | renderer, reels |
+| Bowlby One | © The Bowlby One Project Authors | renderer, reels |
+| Inter | © The Inter Project Authors | renderer, reels |
+| Space Grotesk | © The Space Grotesk Project Authors | renderer, reels |
+
+OFL text: https://openfontlicense.org. Refresh via `scripts/fetch_fonts.py`
+(web) and `scripts/fetch_renderer_fonts.py` (renderer + reels).
+
+## `vendor/` reference material — licence status
+
+The `vendor/` directory holds **reference material** (skills, examples) that
+is not imported by the MediaHub runtime. Attribution status, audited
+2026-06-12 (docs/COMPLIANCE_AUDIT.md finding 7.2):
+
+| Directory | Licence found | Status |
+|---|---|---|
+| `skills-main/` | Apache-2.0 | OK — notices intact |
+| `claude-marketplace-main/` | MIT | OK |
+| `matt-pocock-skills/` | MIT | OK |
+| `taste-skill-main/` | MIT | OK |
+| `ui-ux-pro-max-skill-main/` | MIT | OK |
+| `agent-skills-main/` | **none found** | ⚠ UNRESOLVED — do not redistribute or derive product code from this directory until its upstream licence is confirmed (or remove it) |
+| `bencium-marketplace-main/` | **none found** | ⚠ UNRESOLVED — same constraint |
+
+## Scraper conduct (results fetching & PB verification)
+
+MediaHub's fetchers identify themselves and behave politely by design:
+
+- Identified User-Agents — `SwimPBDiscovery/7.5` (`pb_discovery/fetch_profile.py`)
+  and `MediaHubResults/1.0` (`results_fetch/fetch.py`); never browser-spoofed.
+- `robots.txt` fetched and respected by default (`results_fetch/crawl.py`).
+- 0.3 s politeness delay between requests; hard budgets per crawl
+  (400 pages / 50 MiB / 180 s / depth 3).
+- Caching to avoid re-fetching: per-run PB cache plus a 7-day warm cache per
+  swimmer; 30-day search cache.
+- PB verification reads **already-public** results pages only, and the
+  try-it demo surface never triggers third-party lookups.
+
 ---
 
 _When a future change vendors third-party source (as opposed to a registry

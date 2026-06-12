@@ -481,7 +481,7 @@ class TestInviteFirstClaimPath:
 
         # The pilot signs up — no operator involved — and the org binds.
         with app.test_client() as c:
-            r = c.post("/signup", data={"email": PILOT_EMAIL, "password": PASSWORD})
+            r = c.post("/signup", data={"email": PILOT_EMAIL, "password": PASSWORD, "accept_terms": "1"})
             assert r.status_code in (302, 303)
         assert ms.is_bound("org-beta") is True
         assert ms.is_active_owner(PILOT_EMAIL, "org-beta") is True
@@ -574,7 +574,7 @@ class TestMembersPage:
         assert m.invited_by == OWNER_EMAIL
         assert m.invited_via_profile_id == "org-alpha"
         with app.test_client() as c:
-            c.post("/signup", data={"email": "volunteer@cluba.org", "password": PASSWORD})
+            c.post("/signup", data={"email": "volunteer@cluba.org", "password": PASSWORD, "accept_terms": "1"})
         assert ms.is_active_member("volunteer@cluba.org", "org-alpha") is True
         # The new member can now pin the bound org.
         with app.test_client() as c:

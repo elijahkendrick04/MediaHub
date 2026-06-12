@@ -106,7 +106,7 @@ def test_webhook_quote_payment_also_updates_plan_when_account_exists(monkeypatch
     app = _make_app(monkeypatch, tmp_path)
     q = _seed_quote(tmp_path)
     c = app.test_client()
-    c.post("/signup", data={"email": "chair@club.org", "password": PASSWORD})
+    c.post("/signup", data={"email": "chair@club.org", "password": PASSWORD, "accept_terms": "1"})
     payload = _checkout_completed_event(q.quote_id, 58800)
     r = c.post("/webhooks/stripe", data=payload, headers=_signed_headers(payload))
     assert r.status_code == 200

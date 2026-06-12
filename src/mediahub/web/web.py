@@ -75,6 +75,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import legal as _legal
 from . import tenancy as _tenancy
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
@@ -1849,6 +1850,16 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
 def _delete_run(run_id: str) -> bool:
     p = RUNS_DIR / f"{run_id}.json"
     existed = p.exists()
+    # Erasure cascade (UK GDPR Art. 17) — the stores OUTSIDE the run files:
+    # per-run PB cache, caption memory, posting-log excerpts, motion cache.
+    # Resolved before the JSON disappears (it carries the owning profile_id),
+    # and never allowed to abort the file/DB deletion below.
+    try:
+        from mediahub.privacy import run_deletion_cascade  # noqa: PLC0415
+
+        run_deletion_cascade(run_id, _run_owner_profile_id(run_id) or "")
+    except Exception:  # noqa: BLE001
+        log.warning("run deletion cascade failed for %s", run_id, exc_info=True)
     if existed:
         p.unlink()
     # Also drop any per-run sidecar directory (visuals, motion, briefs,
@@ -7106,9 +7117,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
       <span class="mh-footer-sep">/</span>
-      <a href="{{ url_for('privacy_page') }}">Data &amp; privacy</a>
+      <a href="{{ url_for('privacy_page') }}">Privacy</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('terms_page') }}">Terms</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('cookies_page') }}">Cookies</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+    </div>
+    <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
+      {{ provider_identity }}
     </div>
   </div>
 </footer>
@@ -7872,6 +7892,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
         theme_seed_style=_theme_seed_style_block(),
+        provider_identity=(
+            f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
+        ),
     )
 
 
@@ -8126,8 +8149,24 @@ def create_app() -> Flask:
             "login_page",
             "login_post",
             "logout",
+            # UK legal baseline — the legal documents must be readable by
+            # anyone BEFORE they sign up or set up an organisation (UK GDPR
+            # Art. 13 requires the privacy notice at the point of
+            # collection; CCR 2013 requires pre-contract information).
+            # The privacy ACTIONS (cache clear / run delete) stay gated.
+            "privacy_page",
+            "terms_page",
+            "cookies_page",
+            "dpa_page",
+            "legal_accept_page",
+            "legal_accept_post",
+            # Account-level data rights (Art. 15/17) — must work without an
+            # active organisation; athlete erasure stays org-gated.
+            "account_export_route",
+            "account_delete",
             "pricing_page",
             "billing_page",
+            "billing_confirm",
             "billing_checkout",
             "billing_portal",
             "stripe_webhook",
@@ -8385,6 +8424,83 @@ def create_app() -> Flask:
         if prof is None and list_profiles():
             return redirect(url_for("sign_in_page"))
         return redirect(url_for("organisation_setup"))
+
+    # ---- Versioned ToS re-acceptance gate (UK legal baseline) -----------
+    #
+    # When TERMS_VERSION moves, every signed-in account must accept the new
+    # version once before continuing. The session marker keeps this to one
+    # ledger read per session; the ledger (legal_acceptances.jsonl) is the
+    # source of truth. Signed-out traffic is untouched — acceptance is
+    # collected at signup.
+    _TERMS_GATE_EXEMPT = frozenset(
+        {
+            "legal_accept_page",
+            "legal_accept_post",
+            "terms_page",
+            "privacy_page",
+            "cookies_page",
+            "dpa_page",
+            "login_page",
+            "login_post",
+            "signup_page",
+            "signup_post",
+            "logout",
+            "static",
+            "favicon",
+            "web_manifest",
+            "service_worker",
+            "healthz",
+            "healthz_ping",
+            "status_page",
+            "stripe_webhook",
+        }
+    )
+
+    @app.before_request
+    def _gate_until_terms_accepted():
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_TERMS_GATE"):
+            return None
+        ep = request.endpoint or ""
+        if ep in _TERMS_GATE_EXEMPT:
+            return None
+        email = _auth.current_user_email()
+        if not email:
+            return None
+        if session.get("terms_ok_version") == _legal.TERMS_VERSION:
+            return None
+        if _legal.AcceptanceStore().needs_terms_reacceptance(email):
+            if (request.path or "").startswith("/api/"):
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "terms_reacceptance_required",
+                            "accept_url": url_for("legal_accept_page"),
+                        }
+                    ),
+                    403,
+                )
+            return redirect(url_for("legal_accept_page", next=request.path))
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        return None
+
+    # ---- security headers (Art. 32 / audit finding 1.10) -----------------
+
+    @app.after_request
+    def _security_headers(resp):
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # Clickjacking protection everywhere EXCEPT the public-wall embed,
+        # whose whole purpose is to be iframed into club websites.
+        if (request.endpoint or "") != "public_wall_embed":
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+        # HSTS only when we know we're behind TLS (same signals as the
+        # Secure-cookie flag): never teach a plain-HTTP dev setup to pin.
+        if request.is_secure or os.environ.get("RENDER"):
+            resp.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return resp
 
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
@@ -12708,43 +12824,130 @@ Relay team broke club record"></textarea>
             )
         except Exception:
             n_cache = 0
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>What we <em class="editorial">keep.</em></h1>
-  <p class="lede">Everything MediaHub stores on this deployment, and exactly how to delete it. No data leaves the box except to fetch public PB-lookup pages from the configured source.</p>
-</section>
+        # The deployment inventory (counts + cache-clear action) is only for
+        # signed-in sessions — the notice text itself is public (Art. 13).
+        account_email = _auth.current_user_email() or ""
+        active_org = _active_profile_id() or ""
+        signed_in = bool(account_email or active_org)
+        from mediahub.privacy.retention import retention_days
 
+        _rd = retention_days()
+        _retention_line = (
+            f"runs, uploads and packs older than {_rd} days are deleted daily."
+            if _rd > 0
+            else "disabled on this deployment — runs are kept until you delete them."
+        )
+        _rights_tools_html = ""
+        if active_org:
+            _rights_tools_html += f"""
 <div class="card">
-  <h2>Inventory</h2>
+  <h2>Erase an athlete</h2>
+  <p class="muted">Removes a named athlete from this organisation's runs, rendered
+  files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  <form method="post" action="{url_for("privacy_athlete_erase")}"
+        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
+      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
+    <button class="btn secondary" type="submit">Erase athlete</button>
+  </form>
+</div>"""
+            from mediahub.privacy import list_corrections
+
+            open_corrections = list_corrections(active_org, status="open")
+            rows_html = "".join(
+                "<li style='margin-bottom:8px'>"
+                f"<strong>#{int(c['id'])}</strong> &mdash; run <code>{_h(str(c['run_id']))}</code>, "
+                f"card <code>{_h(str(c['card_id']))}</code>: {_h(str(c['reason']))} "
+                f"<form method='post' action='{url_for('privacy_correction_resolve', correction_id=int(c['id']))}' style='display:inline'>"
+                "<button class='btn secondary' type='submit' style='padding:2px 10px;font-size:11px'>Mark resolved</button>"
+                "</form></li>"
+                for c in open_corrections
+            )
+            open_list = (
+                f"<ul style='margin-top:10px'>{rows_html}</ul>"
+                if rows_html
+                else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
+            )
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Correct a published card</h2>
+  <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
+  correction: it's recorded, the card is pulled from the public wall, and you get the
+  takedown checklist for the social platforms.</p>
+  <form method="post" action="{url_for("privacy_correction_open")}"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
+      <input type="text" name="run_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
+      <input type="text" name="card_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+    <button class="btn secondary" type="submit">Open correction</button>
+  </form>
+  {open_list}
+</div>"""
+        if account_email:
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Your account</h2>
+  <p class="muted">Signed in as <strong>{_h(account_email)}</strong>.</p>
+  <a class="btn secondary" href="{url_for("account_export_route")}">Export my account data (JSON)</a>
+  <form method="post" action="{url_for("account_delete")}" style="margin-top:14px"
+        onsubmit="return confirm('Delete your account? This removes your sign-in, acceptances and workspace memberships, and cannot be undone.')">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);max-width:280px">Confirm your password
+      <input type="password" name="password" required autocomplete="current-password" /></label>
+    <button class="btn secondary" type="submit" style="margin-top:10px;border-color:rgba(255,107,107,0.4)">Delete my account</button>
+  </form>
+  <p class="muted" style="margin-top:8px">Deleting your account does not delete your club's
+  shared workspace data &mdash; other members keep access. Billing records held by Stripe
+  are retained by Stripe under its legal obligations.</p>
+</div>"""
+        inventory_html = f"""
+<div class="card">
+  <h2>Your data on this deployment</h2>
   <div class="stat-block">
     <div class="stat"><div class="l">Runs (DB)</div><div class="v">{n_runs}</div></div>
     <div class="stat"><div class="l">Run JSON files</div><div class="v">{n_files}</div></div>
     <div class="stat"><div class="l">Upload temp files</div><div class="v">{n_uploads}</div></div>
     <div class="stat"><div class="l">PB cache entries</div><div class="v">{n_cache}</div></div>
   </div>
-</div>
-
-<div class="card">
-  <h2>What we store</h2>
-  <ul>
-    <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
-    <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
-    <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
-  </ul>
-  <p class="muted">No data is sent to third parties beyond fetching public PB-lookup pages from the configured PB source.</p>
-</div>
-
-<div class="card">
-  <h2>Actions</h2>
   <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
+  <p class="muted" style="margin-top:8px">Automatic retention: {_retention_line}</p>
 </div>
+{_rights_tools_html}
 """
-        return _layout("Privacy", body, active="privacy")
+        body = _legal.privacy_html(
+            terms_url=url_for("terms_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+            deployment_inventory_html=inventory_html if signed_in else "",
+        )
+        return _layout("Privacy Notice", body, active="privacy")
+
+    @app.route("/terms")
+    def terms_page():
+        body = _legal.terms_html(
+            privacy_url=url_for("privacy_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+        )
+        return _layout("Terms of Service", body, active="")
+
+    @app.route("/cookies")
+    def cookies_page():
+        body = _legal.cookies_html(privacy_url=url_for("privacy_page"))
+        return _layout("Cookie Policy", body, active="")
+
+    @app.route("/dpa")
+    def dpa_page():
+        body = _legal.dpa_html(privacy_url=url_for("privacy_page"))
+        return _layout("Data Processing Agreement", body, active="")
 
     @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
     def privacy_delete_run(run_id):
@@ -12798,6 +13001,150 @@ Relay team broke club record"></textarea>
                     except Exception:
                         pass
         return redirect(url_for("privacy_page"))
+
+    # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
+
+    @app.route("/privacy/athlete/erase", methods=["POST"])
+    def privacy_athlete_erase():
+        """Erase one named athlete across everything the active org holds."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        name = (request.form.get("athlete_name") or "").strip()
+        club = (request.form.get("athlete_club") or "").strip()
+        if not name:
+            return redirect(url_for("privacy_page"))
+        from mediahub.privacy import erase_athlete
+
+        report = erase_athlete(active, name, club)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
+            '<div class="card"><h2>What was removed</h2><ul>'
+            f"<li>{report.cards_removed} card(s) and {report.swims_removed} result "
+            f"row(s) across {len(report.runs_touched)} run(s)</li>"
+            f"<li>{report.assets_removed} rendered file(s)</li>"
+            f"<li>{report.pb_cache_files} PB-cache and "
+            f"{report.research_cache_files} research-cache file(s)</li>"
+            f"<li>{report.memory_rows} caption-memory row(s)</li>"
+            f"<li>{report.posting_excerpts} posting-log excerpt(s) blanked</li>"
+            "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
+            "were replaced with [removed]. Content already published to social "
+            "platforms must be deleted there too &mdash; use the correction tools "
+            "on the Privacy page.</p>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Athlete erased", body, active="privacy")
+
+    @app.route("/privacy/correction", methods=["POST"])
+    def privacy_correction_open():
+        """Open a correction/takedown for a published-but-wrong card.
+
+        Does everything MediaHub controls: records the request and pulls the
+        card off the public wall. The response is honest about the manual
+        remainder (deleting the post on the platform itself)."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        run_id = (request.form.get("run_id") or "").strip()
+        card_id = (request.form.get("card_id") or "").strip()
+        reason = (request.form.get("reason") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
+            and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
+            and reason
+        ):
+            return redirect(url_for("privacy_page"))
+        from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
+
+        cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
+        # Pull the card off the public wall immediately.
+        try:
+            from mediahub.web.public_wall import card_key
+
+            prof = load_profile(active)
+            if prof is not None:
+                current = set(prof.public_wall_excluded_cards or [])
+                key = card_key(run_id, card_id)
+                if key not in current:
+                    current.add(key)
+                    prof.public_wall_excluded_cards = sorted(current)
+                    save_profile(prof)
+        except Exception:
+            log.warning("correction: wall exclusion failed", exc_info=True)
+        checklist = "".join(f"<li>{_h(item)}</li>" for item in TAKEDOWN_CHECKLIST)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Correction <em class="editorial">opened.</em></h1></section>'
+            '<div class="card">'
+            f"<p>Correction #{cid} recorded for card <code>{_h(card_id)}</code> "
+            f"in run <code>{_h(run_id)}</code>. The card has been removed from the "
+            "public wall.</p>"
+            "<h2>Still to do (outside MediaHub)</h2>"
+            f"<ul>{checklist}</ul>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Correction opened", body, active="privacy")
+
+    @app.route("/privacy/correction/<int:correction_id>/resolve", methods=["POST"])
+    def privacy_correction_resolve(correction_id: int):
+        active = _active_profile_id() or ""
+        if active:
+            from mediahub.privacy import resolve_correction
+
+            resolve_correction(
+                profile_id=active,
+                correction_id=correction_id,
+                resolution=(request.form.get("resolution") or "").strip(),
+            )
+        return redirect(url_for("privacy_page"))
+
+    @app.route("/account/export")
+    def account_export_route():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page", next=url_for("account_export_route")))
+        from mediahub.privacy import account_export
+
+        payload = account_export(email)
+        resp = jsonify(payload)
+        resp.headers["Content-Disposition"] = 'attachment; filename="mediahub-account-export.json"'
+        return resp
+
+    @app.route("/account/delete", methods=["POST"])
+    def account_delete():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        # Deleting an account is irreversible — re-verify the password so a
+        # hijacked session can't silently destroy the account.
+        password = request.form.get("password") or ""
+        try:
+            _user_store().authenticate(email, password)
+        except _auth.AuthError:
+            return (
+                _layout(
+                    "Account not deleted",
+                    '<div class="card"><p class="tag bad">Password check failed '
+                    "&mdash; account NOT deleted.</p>"
+                    f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+                    "&larr; Back</a></p></div>",
+                    active="privacy",
+                ),
+                403,
+            )
+        from mediahub.privacy import erase_account
+
+        erase_account(email)
+        _auth.logout_user()
+        session.clear()
+        return redirect(url_for("home"))
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -19027,6 +19374,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prefill_email: str = "",
         error: str = "",
         min_password: bool = False,
+        extra_fields_html: str = "",
     ) -> str:
         err_html = ""
         if error:
@@ -19068,12 +19416,70 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             + 'style="width:100%" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             f"{pw_hint}"
+            f"{extra_fields_html}"
             f'<button type="submit" class="btn" style="margin-top:20px;width:100%">{_h(submit_label)}</button>'
             "</form>"
             f'<div class="dim" style="font-size:13px;margin-top:18px;text-align:center">{alt_html}</div>'
             "</div>"
         )
         return _layout(title, body, active="signin")
+
+    # ---- auth rate limiting (Art. 32 / audit finding 1.10) ---------------
+    #
+    # Fixed-window, per-IP, per-endpoint, in-process. Two gunicorn workers
+    # means an attacker gets at most 2× the budget — still a hard brake on
+    # online guessing, with zero shared state to corrupt.
+    _AUTH_WINDOW_SECONDS = 600
+    _AUTH_MAX_ATTEMPTS = 10
+    _auth_attempts: dict = {}
+    _auth_attempts_lock = threading.Lock()
+
+    def _client_ip() -> str:
+        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return fwd or (request.remote_addr or "unknown")
+
+    def _auth_rate_limited(bucket: str) -> bool:
+        """Record an attempt; True when this IP exceeded the window budget."""
+        now = time.time()
+        key = (bucket, _client_ip())
+        with _auth_attempts_lock:
+            window = [t for t in _auth_attempts.get(key, []) if now - t < _AUTH_WINDOW_SECONDS]
+            window.append(now)
+            _auth_attempts[key] = window
+            # Opportunistic cleanup so the dict can't grow unbounded.
+            if len(_auth_attempts) > 10_000:
+                for k in [
+                    k
+                    for k, v in _auth_attempts.items()
+                    if not v or now - v[-1] > _AUTH_WINDOW_SECONDS
+                ]:
+                    _auth_attempts.pop(k, None)
+            return len(window) > _AUTH_MAX_ATTEMPTS
+
+    def _auth_rate_limit_response():
+        return (
+            _layout(
+                "Too many attempts",
+                '<div class="card"><p class="tag bad">Too many attempts from your '
+                "network &mdash; wait a few minutes and try again.</p></div>",
+                active="signin",
+            ),
+            429,
+        )
+
+    def _terms_checkbox_html() -> str:
+        """The required Terms/Privacy acceptance control on the signup form."""
+        return (
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'margin-top:16px;font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I agree to the "
+            f'<a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">Terms of Service</a> and have read the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</span></label>'
+        )
 
     @app.route("/signup", methods=["GET"])
     def signup_page():
@@ -19094,16 +19500,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="color:var(--accent);font-weight:600">Log in</a>.'
             ),
             min_password=True,
+            extra_fields_html=_terms_checkbox_html(),
         )
 
     @app.route("/signup", methods=["POST"])
     def signup_post():
+        if _auth_rate_limited("signup"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
-        store = _user_store()
-        try:
-            user = store.create(email, password)
-        except _auth.AuthError as exc:
+
+        def _signup_error(message: str, status: int):
             return (
                 _auth_form_page(
                     title="Create account",
@@ -19116,11 +19523,29 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'style="color:var(--accent);font-weight:600">Log in</a>.'
                     ),
                     prefill_email=email,
-                    error=str(exc),
+                    error=message,
                     min_password=True,
+                    extra_fields_html=_terms_checkbox_html(),
                 ),
+                status,
+            )
+
+        # Versioned ToS acceptance is a hard requirement at signup — the
+        # browser's `required` attribute is convenience, this is the gate.
+        if (request.form.get("accept_terms") or "") != "1":
+            return _signup_error(
+                "Please accept the Terms of Service and Privacy Notice to create an account.",
                 400,
             )
+        store = _user_store()
+        try:
+            user = store.create(email, password)
+        except _auth.AuthError as exc:
+            return _signup_error(str(exc), 400)
+        # Record the timestamped, versioned acceptance before the session
+        # starts; the session marker spares the ledger a read per request.
+        _legal.AcceptanceStore().record(user.email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         _auth.login_user(user)
         # PC.3 (ADR-0014): activate any operator-issued workspace invites for
         # this email — the zero-founder-involvement first-claim path. The org
@@ -19159,6 +19584,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/login", methods=["POST"])
     def login_post():
+        if _auth_rate_limited("login"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
         store = _user_store()
@@ -19183,12 +19610,77 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         _auth.login_user(user)
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        # Re-acceptance check: accounts whose recorded Terms acceptance
+        # predates TERMS_VERSION (or legacy accounts with no record) are
+        # routed through /legal/accept before they continue.
+        if _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
+            return redirect(
+                url_for("legal_accept_page", next=nxt) if nxt else url_for("legal_accept_page")
+            )
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
         _auth.logout_user()
+        session.pop("terms_ok_version", None)
         return redirect(url_for("home"))
+
+    # ---- /legal/accept (versioned ToS re-acceptance) -------------------
+
+    @app.route("/legal/accept", methods=["GET"])
+    def legal_accept_page():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        nxt = _safe_next(request.args.get("next"))
+        action = url_for("legal_accept_post", next=nxt) if nxt else url_for("legal_accept_post")
+        prior = _legal.AcceptanceStore().latest(email, _legal.DOC_TERMS)
+        prior_line = (
+            f"You last accepted version {_h(prior.version)} on {_h(prior.accepted_at)}."
+            if prior
+            else "Your account predates recorded acceptance, so we're asking once now."
+        )
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Legal</span>'
+            '<h1>Updated <em class="editorial">terms</em>.</h1>'
+            f'<p class="lede">The Terms of Service changed (version {_legal.TERMS_VERSION}). '
+            "Please review and accept to continue.</p></section>"
+            '<div class="card">'
+            f"<p>{prior_line}</p>"
+            f'<p>Read the <a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">current Terms of Service</a> and the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</p>'
+            f'<form method="post" action="{action}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            f"<span>I accept the Terms of Service (version {_legal.TERMS_VERSION}).</span>"
+            "</label>"
+            '<button type="submit" class="btn" style="margin-top:16px">Accept and continue</button>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Don\'t agree? You can '
+            f'<a href="{url_for("privacy_page")}">export your data</a> and '
+            f'<a href="{url_for("logout")}">sign out</a>.</p>'
+            "</div>"
+        )
+        return _layout("Accept updated terms", body, active="")
+
+    @app.route("/legal/accept", methods=["POST"])
+    def legal_accept_post():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        if (request.form.get("accept_terms") or "") != "1":
+            return redirect(url_for("legal_accept_page"))
+        _legal.AcceptanceStore().record(email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        return redirect(nxt or url_for("make_page"))
 
     def _safe_next(target: Optional[str]) -> str:
         """Only allow same-site relative redirects (open-redirect guard)."""
@@ -19257,6 +19749,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def developer_login_post():
         if not _auth.dev_login_enabled():
             abort(404)
+        if _auth_rate_limited("developer"):
+            return _auth_rate_limit_response()
         if _auth.verify_dev_key(request.form.get("dev_key")):
             _auth.login_dev_operator()
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
@@ -19861,11 +20355,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
+                    # CCR 2013: route through the pre-contract information
+                    # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<form method="post" action="{url_for("billing_checkout")}" style="margin:0">'
-                        f'<input type="hidden" name="plan" value="{_h(tier.plan)}">'
-                        f'<button type="submit" class="btn" style="width:100%">'
-                        f"Upgrade to {_h(tier.name)}</button></form>"
+                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'href="{url_for("billing_confirm", plan=tier.plan)}">'
+                        f"Upgrade to {_h(tier.name)}</a>"
                     )
 
             highlight = (
@@ -19979,6 +20474,87 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         return _layout("Billing", body, active="signin")
 
+    @app.route("/billing/confirm", methods=["GET"])
+    def billing_confirm():
+        """Pre-contract information page (CCR 2013 / DMCCA) shown BEFORE the
+        Stripe checkout: what you're buying, renewal terms, how to cancel,
+        and the 14-day cooling-off acknowledgement."""
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("pricing_page")))
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        plan = (request.args.get("plan") or "").strip().lower()
+        tier = next((t for t in _billing.TIERS if t.plan == plan), None)
+        if tier is None or plan not in (_auth.PLAN_CLUB, _auth.PLAN_FEDERATION):
+            return redirect(url_for("pricing_page"))
+        # Price line: evidence-gated list price when it exists (PC.4), else
+        # the honest statement that the exact total shows at checkout before
+        # any commitment to pay.
+        price_line = (
+            "The exact total price and billing interval are shown on the secure "
+            "Stripe checkout page before you confirm payment."
+        )
+        try:
+            from mediahub.commercial.wtp import QuoteStore, public_list_price
+
+            lp = public_list_price(QuoteStore().list_all())
+            if plan == _auth.PLAN_CLUB and lp is not None:
+                symbol = {"gbp": "£", "usd": "$", "eur": "€"}.get(lp["currency"], "")
+                amount = lp["amount_pence"]
+                figure = (
+                    f"{symbol}{amount // 100}"
+                    if amount % 100 == 0
+                    else f"{symbol}{amount / 100:.2f}"
+                )
+                price_line = (
+                    f"{figure} per year (billed annually). The total is also shown "
+                    "on the secure Stripe checkout page before you confirm payment."
+                )
+        except Exception:
+            pass
+        features = "".join(f"<li>{_h(f)}</li>" for f in tier.features)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Subscribe</span>'
+            f'<h1>Before you <em class="editorial">subscribe</em>.</h1>'
+            f'<p class="lede">The {_h(tier.name)} plan, in plain terms.</p></section>'
+            '<div class="card">'
+            f"<h2>What you get</h2><p>{_h(tier.blurb)}</p><ul>{features}</ul>"
+            f"<p><strong>Price:</strong> {price_line}</p>"
+            "<p><strong>Renewal:</strong> your subscription renews automatically at "
+            "the interval shown at checkout until you cancel. For annual plans we "
+            "send a reminder before renewal.</p>"
+            "<p><strong>Cancelling:</strong> as easy as subscribing — open "
+            "<em>Billing &rarr; Manage billing</em> any time; cancelling stops future "
+            "renewals and you keep access for the period already paid.</p>"
+            "<p><strong>Your 14-day cancellation right:</strong> you can cancel within "
+            "14 days of purchase for a refund. Because the service starts immediately, "
+            "if you use it and then cancel within the 14 days we may deduct a "
+            "proportionate amount for the service already supplied. Email "
+            f"<a href='mailto:{_legal.CONTACT_EMAIL}'>{_legal.CONTACT_EMAIL}</a> to "
+            "cancel within the cooling-off period.</p>"
+            f'<form method="post" action="{url_for("billing_checkout")}">'
+            f'<input type="hidden" name="plan" value="{_h(plan)}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin:14px 0">'
+            '<input type="checkbox" name="immediate_supply" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I expressly request that the service starts immediately, and I "
+            "acknowledge that if I cancel within 14 days I may be charged a "
+            "proportionate amount for what has already been supplied &mdash; and that "
+            "for digital content already downloaded, the cancellation right is "
+            "lost once supply has begun with my consent.</span></label>"
+            f'<button type="submit" class="btn">Continue to secure checkout &rarr;</button> '
+            f'<a class="btn secondary" href="{url_for("pricing_page")}">Cancel</a>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Full terms: '
+            f'<a href="{url_for("terms_page")}">Terms of Service</a>.</p>'
+            "</div>"
+        )
+        return _layout("Before you subscribe", body, active="signin")
+
     @app.route("/billing/checkout", methods=["POST"])
     def billing_checkout():
         user = _auth.current_user(_user_store())
@@ -19993,6 +20569,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _billing_error_body("That plan can&rsquo;t be purchased."),
                 active="signin",
             ), 400
+        # CCR 2013: no checkout without the recorded immediate-supply /
+        # cooling-off acknowledgement from the pre-contract page.
+        if (request.form.get("immediate_supply") or "") != "1":
+            return redirect(url_for("billing_confirm", plan=plan))
+        _legal.AcceptanceStore().record(
+            user.email, _legal.DOC_COOLING_OFF, _legal.TERMS_VERSION, org_id=plan
+        )
         try:
             checkout_url = _billing.create_checkout_session(
                 plan=plan,
@@ -20506,6 +21089,61 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
         return _layout("Workspace members", body, active="organisation")
+
+    # ---- DPA + lawful-basis attestation at workspace setup (UK legal) ----
+
+    def _org_attestation_recorded(profile_id: str) -> bool:
+        return _legal.AcceptanceStore().org_has_acceptance(
+            profile_id, _legal.DOC_DPA, _legal.DPA_VERSION
+        )
+
+    def _org_attestation_form_html(prof) -> str:
+        """The DPA-acceptance + lawful-basis attestation block for both org
+        setup forms. Hidden once this workspace has a current-version record."""
+        if prof is not None and _org_attestation_recorded(prof.profile_id):
+            return ""
+        return (
+            '<div class="card" style="margin:18px 0">'
+            "<h2>Athlete data &amp; processing terms</h2>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin-bottom:10px">'
+            '<input type="checkbox" name="accept_dpa" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I accept the "
+            f'<a href="{url_for("dpa_page")}" target="_blank" '
+            'style="color:var(--accent)">Data Processing Agreement</a> on behalf of '
+            "this organisation.</span></label>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="confirm_lawful_basis" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I confirm this organisation is entitled to process the athlete "
+            "and member data it uploads, and holds the necessary consents &mdash; "
+            "including <strong>parental consent for under-18s</strong> where "
+            "required &mdash; for the content it publishes.</span></label>"
+            "</div>"
+        )
+
+    def _require_org_data_attestation(profile_id: str):
+        """Server-side gate for both setup POSTs: record (or require) the
+        DPA + lawful-basis attestation before a workspace is created or
+        updated. Returns a redirect response when blocked, else None.
+
+        Tests bypass by default (same pattern as _gate_until_org_ready);
+        attestation-specific tests set ENFORCE_ATTESTATION_GATE."""
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_ATTESTATION_GATE"):
+            return None
+        if _org_attestation_recorded(profile_id):
+            return None
+        if (request.form.get("accept_dpa") or "") != "1" or (
+            request.form.get("confirm_lawful_basis") or ""
+        ) != "1":
+            return redirect(url_for("organisation_setup"))
+        email = _auth.current_user_email() or ""
+        store = _legal.AcceptanceStore()
+        store.record(email, _legal.DOC_DPA, _legal.DPA_VERSION, org_id=profile_id)
+        store.record(email, _legal.DOC_DATA_ATTESTATION, _legal.DPA_VERSION, org_id=profile_id)
+        return None
 
     # into session so the user never sees this page again unless they
     # ask to re-run it.
@@ -21288,6 +21926,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
 
         capture_url = url_for("organisation_setup_capture")
+        # UK legal baseline: DPA acceptance + lawful-basis attestation block,
+        # rendered in BOTH setup forms until this workspace has a record.
+        _attestation_html = _org_attestation_form_html(prof)
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
@@ -21442,6 +22083,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_logos_grid_html}
 </div>
 
+{_attestation_html}
 {_bottom_cta_html}
 </form>
 </div>
@@ -21534,6 +22176,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
          accept="image/*,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.svg,.eps,.ai,.pdf"/>
 </div>
 
+{_attestation_html}
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">
   <button type="submit" class="btn">Create my organisation &rarr;</button>
   <span class="muted" style="font-size:12px">
@@ -21846,6 +22489,10 @@ function mhSetupMode(mode) {{
                 # workspace this session may not touch (PC.3): either way,
                 # set up a fresh profile instead of clobbering it.
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _setup_is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
@@ -22178,6 +22825,10 @@ function mhSetupMode(mode) {{
                 or not _session_can_use_profile(profile_id)
             ):
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
@@ -28885,6 +29536,27 @@ and can be revoked by the club.</p>
                     task_type="demo_sweep",
                     schedule_kind="daily",
                     schedule_expr="03:30",
+                )
+        # UK legal baseline: retention enforcement. The task type is always
+        # registered (no-op when MEDIAHUB_RETENTION_DAYS is 0/unset); the
+        # daily schedule row is ensured once when retention is enabled.
+        from mediahub.privacy.retention import retention_days as _retention_days
+        from mediahub.privacy.retention import sweep_expired as _retention_sweep
+
+        def _retention_handler(params: dict) -> None:
+            _retention_sweep(_delete_run)
+
+        _register_task_type("retention_sweep", _retention_handler)
+        if _retention_days() > 0:
+            from mediahub.workflow.schedule import create_task as _sched_create_task2
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
+
+            if not any(t.task_type == "retention_sweep" for t in _sched_list_tasks2()):
+                _sched_create_task2(
+                    name="Retention sweep (Privacy Notice §8)",
+                    task_type="retention_sweep",
+                    schedule_kind="daily",
+                    schedule_expr="03:50",
                 )
         start_scheduler()
     except Exception:

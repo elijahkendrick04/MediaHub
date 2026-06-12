@@ -290,6 +290,51 @@ class MembershipStore:
             self._append(m)
         return m
 
+    def erase_email(self, email: str) -> int:
+        """Physically erase every membership row for an email (UK GDPR
+        Art. 17 account deletion).
+
+        Deliberately different from :meth:`remove`: ``remove`` appends a
+        tombstone (which keeps the email on disk) and protects a bound org
+        from losing its last owner — both wrong for an erasure request,
+        where the email must leave the ledger entirely even if the
+        workspace becomes unbound (the documented zero-member model).
+        Compacting rewrite; returns rows removed.
+        """
+        norm = normalize_email(email)
+        with _LEDGER_LOCK:
+            if not self._path.exists():
+                return 0
+            kept: list[dict] = []
+            removed = 0
+            try:
+                text = self._path.read_text(encoding="utf-8")
+            except OSError:
+                return 0
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and normalize_email(str(rec.get("email") or "")) == norm:
+                    removed += 1
+                    continue
+                kept.append(rec)
+            if removed:
+                tmp = self._path.with_suffix(".tmp")
+                with tmp.open("w", encoding="utf-8") as fh:
+                    for rec in kept:
+                        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                try:
+                    os.chmod(tmp, 0o600)
+                except OSError:
+                    pass
+                tmp.replace(self._path)
+            return removed
+
     def activate_invites(self, email: str) -> list[Membership]:
         """Flip every ``invited`` row for this email to ``active``.
 
