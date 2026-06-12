@@ -1,13 +1,13 @@
-"""Operator developer sign-in (Phase C add-on).
+"""Operator developer sign-in.
 
-An env-gated, unrestricted operator session. Pinned here:
-  1. The /developer route and its buttons DO NOT EXIST unless MEDIAHUB_DEV_KEY
-     is set — never a public backdoor.
-  2. A correct key grants an unrestricted (Owner-plan) session that bypasses the
-     paywall; a wrong key is rejected (401) and grants nothing.
-  3. Removing MEDIAHUB_DEV_KEY instantly revokes outstanding operator sessions.
-  4. The key is never echoed back into the page.
-  5. An anonymous visitor stays on Free (gates closed).
+Public, passwordless, unrestricted operator access (ADR-0018). Pinned here:
+  1. The /developer route and the footer link ALWAYS exist — no env var needed.
+  2. The page is passwordless: a one-click button, no key field.
+  3. One click grants an unrestricted (Owner-plan) session that bypasses the
+     paywall.
+  4. The footer "Developer access" pill is home-page only.
+  5. An anonymous visitor (who hasn't clicked through) stays on Free.
+  6. Logout clears the operator session.
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-signed-sessions")
+    # No MEDIAHUB_DEV_* vars: developer access must work with zero config.
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
     from mediahub.web.web import create_app
 
     return create_app()
@@ -36,9 +39,6 @@ def app(tmp_path, monkeypatch):
 @pytest.fixture
 def client(app):
     return app.test_client()
-
-
-# ---- disabled when no key configured -----------------------------------
 
 
 def _csrf(client) -> dict:
@@ -50,54 +50,41 @@ def _csrf(client) -> dict:
     return {"csrf_token": token}
 
 
-def test_route_404s_when_key_unset(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
-    assert client.get("/developer").status_code == 404
-    assert (
-        client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
-    )
+# ---- always present, passwordless, no env needed -----------------------
 
 
-def test_no_button_when_key_unset(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
-    login = client.get("/login").get_data(as_text=True)
-    assert "/developer" not in login
-    assert "Developer sign-in" not in login
-
-
-def test_verify_dev_key_false_when_unset(app, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
-    with app.test_request_context("/"):
-        assert _auth.verify_dev_key("anything") is False
-        assert _auth.dev_login_enabled() is False
-        assert _auth.dev_login_open() is False
-
-
-# ---- enabled: form + correct / wrong key -------------------------------
-
-
-def test_form_renders_when_key_set(client, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
+def test_route_always_available_passwordless(client):
     resp = client.get("/developer")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert 'name="dev_key"' in body
-    # the secret must never be echoed into the page
-    assert "s3cret-dev-key" not in body
+    # Passwordless: a one-click button, no key field.
+    assert 'name="dev_key"' not in body
+    assert "Enter unrestricted" in body
 
 
-def test_button_appears_on_login_when_key_set(client, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
+def test_footer_link_on_home_without_any_env(client):
+    home = client.get("/").get_data(as_text=True)
+    assert "Developer access" in home
+    assert "/developer" in home
+
+
+def test_footer_pill_is_home_only(client):
+    # The "Developer access" footer pill is home-scoped; it must not appear on
+    # other pages' footers.
+    assert "Developer access" not in client.get("/pricing").get_data(as_text=True)
+
+
+def test_login_page_links_to_developer(client):
     body = client.get("/login").get_data(as_text=True)
     assert "/developer" in body
+    assert "Developer sign-in" in body
 
 
-def test_correct_key_grants_unrestricted_session(client, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
-    resp = client.post("/developer", data={"dev_key": "s3cret-dev-key", **_csrf(client)})
+# ---- one click grants the unrestricted session -------------------------
+
+
+def test_one_click_grants_unrestricted_session(client):
+    resp = client.post("/developer", data={**_csrf(client)})  # no key
     assert resp.status_code in (302, 303)
     with client.session_transaction() as sess:
         assert sess.get("dev_operator") is True
@@ -106,20 +93,7 @@ def test_correct_key_grants_unrestricted_session(client, monkeypatch):
     assert "Operator mode" in page
 
 
-def test_wrong_key_rejected_and_grants_nothing(client, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
-    resp = client.post("/developer", data={"dev_key": "wrong", **_csrf(client)})
-    assert resp.status_code == 401
-    with client.session_transaction() as sess:
-        assert sess.get("dev_operator") is None
-    assert "wrong" not in resp.get_data(as_text=True)
-
-
-# ---- the gate: owner plan bypasses the paywall -------------------------
-
-
-def test_operator_session_is_premium(app, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
+def test_operator_session_is_premium(app):
     with app.test_request_context("/"):
         from flask import session
 
@@ -131,31 +105,16 @@ def test_operator_session_is_premium(app, monkeypatch):
         assert user is not None and user.plan == _auth.PLAN_OWNER
 
 
-def test_anonymous_visitor_is_not_premium(app, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
+def test_anonymous_visitor_is_not_premium(app):
     with app.test_request_context("/"):
         assert _auth.is_dev_operator() is False
         assert _auth.is_premium() is False  # signed out → Free, gates closed
 
 
-# ---- revocation + logout -----------------------------------------------
+# ---- logout ------------------------------------------------------------
 
 
-def test_removing_key_revokes_outstanding_session(app, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
-    with app.test_request_context("/"):
-        from flask import session
-
-        session[_auth._DEV_SESSION_KEY] = True
-        assert _auth.is_dev_operator() is True
-        # The operator pulls the key from the environment to revoke access.
-        monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-        assert _auth.is_dev_operator() is False
-        assert _auth.is_premium() is False
-
-
-def test_logout_clears_operator_session(app, monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
+def test_logout_clears_operator_session(app):
     with app.test_request_context("/"):
         from flask import session
 
@@ -164,64 +123,3 @@ def test_logout_clears_operator_session(app, monkeypatch):
         _auth.logout_user()
         assert session.get(_auth._DEV_SESSION_KEY) is None
         assert _auth.is_dev_operator() is False
-
-
-# ---- passwordless open mode (MEDIAHUB_DEV_OPEN) -------------------------
-# A deliberate, temporary development backdoor: one-click unrestricted sign-in
-# with NO key, opted into per deployment and OFF by default.
-
-
-def test_open_mode_off_by_default(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
-    # No key and no open flag → route gone, no footer affordance.
-    assert client.get("/developer").status_code == 404
-    assert "Developer access" not in client.get("/").get_data(as_text=True)
-
-
-def test_open_mode_renders_passwordless_form(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
-    resp = client.get("/developer")
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    # Passwordless: no key field, a one-click button, and a standing reminder
-    # naming the env var to unset before real customers.
-    assert 'name="dev_key"' not in body
-    assert "Enter unrestricted" in body
-    assert "MEDIAHUB_DEV_OPEN" in body
-
-
-def test_open_mode_grants_unrestricted_without_key(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
-    resp = client.post("/developer", data={**_csrf(client)})  # no dev_key
-    assert resp.status_code in (302, 303)
-    with client.session_transaction() as sess:
-        assert sess.get("dev_operator") is True
-    assert "Operator mode" in client.get("/pricing").get_data(as_text=True)
-
-
-def test_open_mode_footer_link_on_home_only(client, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
-    home = client.get("/").get_data(as_text=True)
-    assert "Developer access" in home
-    assert "/developer" in home
-    # The footer link is home-scoped; it must not bleed onto other pages.
-    assert "Developer access" not in client.get("/pricing").get_data(as_text=True)
-
-
-def test_open_mode_session_revoked_when_flag_unset(app, monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
-    with app.test_request_context("/"):
-        from flask import session
-
-        session[_auth._DEV_SESSION_KEY] = True
-        assert _auth.is_dev_operator() is True
-        assert _auth.current_plan() == _auth.PLAN_OWNER
-        # Unsetting the flag instantly revokes the outstanding open session.
-        monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
-        assert _auth.is_dev_operator() is False
-        assert _auth.is_premium() is False

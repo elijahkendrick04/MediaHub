@@ -1,9 +1,9 @@
 """Route tests for the operator-only commercial console (/operator/commercial).
 
-Pins the access posture (the page does not exist without MEDIAHUB_DEV_KEY;
-non-operator sessions are redirected to the developer sign-in) and the main
-PC.4/PC.6/PC.3 flows: quote add → manual payment → gate readout, lead add →
-update, NGB state, and the operator pre-bind → signup → bound-workspace path.
+Pins the access posture (non-operator sessions are redirected to the public,
+passwordless developer sign-in) and the main PC.4/PC.6/PC.3 flows: quote add →
+manual payment → gate readout, lead add → update, NGB state, and the operator
+pre-bind → signup → bound-workspace path.
 """
 
 from __future__ import annotations
@@ -37,17 +37,21 @@ def _make_app(monkeypatch, tmp_path, *, dev_key: str | None = DEV_KEY, stripe: b
     return app
 
 
-def _login_operator(client, key: str = DEV_KEY):
-    r = client.post("/developer", data={"dev_key": key})
+def _login_operator(client):
+    # Public, passwordless operator sign-in — one POST grants the session.
+    r = client.post("/developer", data={})
     assert r.status_code in (302, 303)
 
 
-def test_console_404s_without_dev_key(monkeypatch, tmp_path):
+def test_console_redirects_anonymous_to_developer_signin(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, dev_key=None)
     c = app.test_client()
-    assert c.get("/operator/commercial").status_code == 404
-    assert c.post("/operator/commercial/quotes", data={}).status_code == 404
-    assert c.post("/operator/commercial/bind", data={}).status_code == 404
+    r = c.get("/operator/commercial")
+    assert r.status_code in (302, 303)
+    assert "/developer" in r.headers["Location"]
+    # Operator-only POSTs bounce to the sign-in too (no operator session).
+    assert c.post("/operator/commercial/quotes", data={}).status_code in (302, 303)
+    assert c.post("/operator/commercial/bind", data={}).status_code in (302, 303)
 
 
 def test_console_redirects_non_operator_to_developer_login(monkeypatch, tmp_path):

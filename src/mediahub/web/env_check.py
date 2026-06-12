@@ -41,13 +41,6 @@ def _problems() -> tuple[list[str], list[str]]:
             "at the persistent disk."
         )
 
-    dev_key = os.environ.get("MEDIAHUB_DEV_KEY", "").strip()
-    if dev_key and len(dev_key) < 24:
-        errors.append(
-            "MEDIAHUB_DEV_KEY is set but shorter than 24 characters — the "
-            "operator override must be high-entropy (or unset)."
-        )
-
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"):
         val = os.environ.get(var, "")
         if val != val.strip():

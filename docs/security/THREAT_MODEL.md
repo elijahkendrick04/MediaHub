@@ -45,7 +45,7 @@ Internet ──> [TLS proxy (Render/Fly/反向代理)] ──> Flask monolith (w
 | S | Session fixation/persistence: cookie never rotates, no idle timeout | **S1** — rotation on login, idle timeout enforcement |
 | E | Brute-force login (no rate limit today) | **S1** — per-account+IP throttle, lockout, security events |
 | E | Weak password hash future-proofing (bcrypt-72-byte) | **S1** — argon2id for new hashes, verify-and-upgrade for existing |
-| E | `MEDIAHUB_DEV_KEY` operator backdoor guessed | Exists: hmac.compare_digest, env-gated, instant revocation; **S7** logs operator logins; key strength documented in ENV_INVENTORY (**S4**) |
+| E | `/developer` operator sign-in is **public and passwordless** — anyone can take an unrestricted operator session | **ACCEPTED RISK** (owner decision, ADR-0018): the env gate was removed by request; the door is intentionally open. `_safe_next` blocks open-redirect on sign-in and **S7** logs operator logins, but there is no password — re-gating requires a code change. |
 
 ## 3. Playwright HTML→PNG renderer
 

@@ -479,60 +479,21 @@ def _users_path() -> Path:
 _SESSION_KEY = "user_email"
 
 # ---- Operator / developer access ---------------------------------------
-# An env-gated, no-paywall sign-in for the operator running the deployment.
+# A public, passwordless, no-paywall sign-in for the operator running the
+# deployment. The "Developer access" link sits in the home-page footer (and on
+# the /login and /developer pages); one click grants an unrestricted
+# (Owner-plan) session with no key.
 #
-# Two ways to enable it, both opt-in and OFF by default:
-#   * MEDIAHUB_DEV_KEY  — keyed sign-in: visit /developer, enter the key.
-#   * MEDIAHUB_DEV_OPEN — PASSWORDLESS sign-in: one click, no key. A deliberate,
-#       TEMPORARY development backdoor — while it is on, anyone who can reach
-#       /developer can take an unrestricted session. Keep it off on any
-#       deployment that holds real customer data and remove it before
-#       onboarding real customers (the page shows a standing reminder).
-#
-# With neither set the route 404s and the affordance vanishes, so it is never an
-# accidental backdoor. Both values are read from the environment only — never
-# hardcoded, never logged — matching the project's API-keys-in-env rule.
+# This is deliberately OPEN — there is no key or env gate. The product owner
+# accepted that anyone who reaches /developer can take an unrestricted operator
+# session (see docs/adr/0018-public-passwordless-operator-signin.md). Closing
+# the door again is a code change, not an env tweak.
 _DEV_SESSION_KEY = "dev_operator"
-
-
-def dev_login_open() -> bool:
-    """True when PASSWORDLESS operator sign-in is explicitly enabled.
-
-    Temporary development backdoor: when ``MEDIAHUB_DEV_OPEN`` is truthy the
-    ``/developer`` route grants an unrestricted (Owner-plan) session with **no
-    key**. OFF by default; opt in per deployment. Unset the env var to close the
-    door instantly (it also revokes any outstanding open-mode session, since
-    ``is_dev_operator`` re-checks ``dev_login_enabled`` on every request).
-    """
-    raw = (os.environ.get("MEDIAHUB_DEV_OPEN") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def dev_login_enabled() -> bool:
-    """True when the developer sign-in affordance should exist at all.
-
-    Either a key is configured (keyed sign-in) **or** passwordless open mode is
-    on. Gates the ``/developer`` route and the nav/footer links so they
-    404/vanish when the operator has opted into neither.
-    """
-    return dev_login_open() or bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
 
 
 def _dev_operator_email() -> str:
     """The synthetic operator identity's email (configurable, never logged)."""
     return normalize_email(os.environ.get("MEDIAHUB_DEV_EMAIL") or "developer@mediahub.local")
-
-
-def verify_dev_key(candidate: object) -> bool:
-    """Constant-time check of a submitted key against MEDIAHUB_DEV_KEY.
-
-    Always False when no key is configured, so the route cannot be coerced into
-    granting access on an unconfigured deployment.
-    """
-    key = (os.environ.get("MEDIAHUB_DEV_KEY") or "").strip()
-    if not key:
-        return False
-    return hmac.compare_digest(key, str(candidate or "").strip())
 
 
 def login_dev_operator() -> None:
@@ -541,12 +502,8 @@ def login_dev_operator() -> None:
 
 
 def is_dev_operator() -> bool:
-    """True when the session is the operator AND the key is still configured.
-
-    Re-checking the env means removing MEDIAHUB_DEV_KEY instantly revokes every
-    outstanding operator session.
-    """
-    return bool(session.get(_DEV_SESSION_KEY)) and dev_login_enabled()
+    """True when this session holds the unrestricted operator cookie."""
+    return bool(session.get(_DEV_SESSION_KEY))
 
 
 def login_user(user: User) -> None:
