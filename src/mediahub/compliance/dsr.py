@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 from .consent import ConsentRegistry, athlete_key
-from .store import JsonlLedger, compliance_dir
+from .store import JsonlLedger
 
 # Art 12A UK GDPR: "applicable time period" = one month from receipt,
 # pausable while the controller awaits requested clarification / ID proof.
