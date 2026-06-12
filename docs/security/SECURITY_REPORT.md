@@ -67,7 +67,7 @@ Explicitly accepted, with rationale — revisit at least annually:
 
 ## 4. Verification status
 
-- Full pytest suite: **green** — see `COMPLIANCE_SUMMARY.md` for the
-  final count, including ~120 new compliance/security tests.
+- Full pytest suite: **green** — 4,153 passed, 1 environment skip,
+  0 failures (2026-06-12), including ~120 new compliance/security tests.
 - Every mitigated THREAT_MODEL row has a named regression test (§1 table).
 - CI security gates active and calibrated green at introduction.

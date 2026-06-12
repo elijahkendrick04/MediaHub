@@ -2408,6 +2408,6 @@ One programme, four phases, all in PR #346. **Framing:** not "unhackable" — th
 
 **Security (docs/security/):** STRIDE threat model incl. OWASP LLM Top 10. argon2id with bcrypt upgrade-on-login, login lockout, session rotation, optional stdlib TOTP 2FA; upload allowlist, PDF page cap, zip-slip static guard, **Playwright renderer network lockdown**, fail-closed SSRF guards; CSP/HSTS/nosniff/XFO headers + monolith-wide CSRF tokens + generic error pages; fail-fast env validation + least-privilege key scoping; CI gates (pip-audit, bandit 0-high, semgrep 0-ERROR, gitleaks-clean history) + dependabot + non-root Docker; encrypted restore-tested backups; pseudonymised security event log with operator view; prompt-injection delimiting/screening and an **unbypassable publish gate** — the schedule route now enforces tenant + human approval + consent server-side (it previously checked none of these).
 
-Verification: full suite green (~4,150 tests incl. ~120 new); OWASP ZAP 2.16.1 baseline against a local deploy — 0 High; findings triaged in the security report.
+Verification: full suite green — 4,153 passed, 1 skip, 0 failures (incl. ~120 new tests); OWASP ZAP 2.16.1 baseline against a local deploy — 0 High; findings triaged in the security report.
 
 ---
