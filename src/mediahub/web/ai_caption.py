@@ -27,6 +27,7 @@ system-prompt branch. The model decides exactly what that looks like.
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import sys
@@ -359,6 +360,45 @@ def _voice_profile_prose(vp: Optional[dict]) -> str:
     return " ".join(bits)
 
 
+def _llm_pseudonymise_enabled() -> bool:
+    """MEDIAHUB_LLM_PSEUDONYMISE=1 — data minimisation toward LLM providers.
+
+    When on, the athlete's name is replaced with a neutral token in the
+    prompt and restored in the returned caption, so the cloud provider never
+    receives the child's name. Trade-off (documented in .env.example and the
+    DPIA): name-style nuance (first-name vs surname address) flattens to the
+    full name, and brief-prose callers (the content engine) are not covered
+    because the name isn't separable there. Off by default.
+    """
+    return (os.environ.get("MEDIAHUB_LLM_PSEUDONYMISE") or "").strip() == "1"
+
+
+_PSEUDONYM_TOKEN = "Athlete A"
+
+
+def _pseudonymise_prose(prose: str, swimmer_name: str) -> tuple[str, bool]:
+    """Replace the swimmer's full name (and bare first name) with the token.
+
+    Returns (new_prose, replaced_anything).
+    """
+    name = (swimmer_name or "").strip()
+    if not name:
+        return prose, False
+    out = re.sub(re.escape(name), _PSEUDONYM_TOKEN, prose, flags=re.IGNORECASE)
+    first = name.split()[0]
+    if len(first) >= 3 and first.lower() != _PSEUDONYM_TOKEN.lower():
+        out = re.sub(
+            rf"\b{re.escape(first)}\b", _PSEUDONYM_TOKEN, out, flags=re.IGNORECASE
+        )
+    return out, out != prose
+
+
+def _restore_pseudonym(text: str, swimmer_name: str) -> str:
+    return re.sub(
+        re.escape(_PSEUDONYM_TOKEN), swimmer_name.strip(), text, flags=re.IGNORECASE
+    )
+
+
 def generate_caption_for_tone(
     achievement_dict: dict,
     club_brand: Optional[dict] = None,
@@ -525,6 +565,15 @@ def generate_caption_for_tone(
     nonce = random.randint(10_000, 99_999)
     user_prose = user_prose + f"\n\n[Generate a fresh caption. seed={nonce}]"
 
+    # Data minimisation (MEDIAHUB_LLM_PSEUDONYMISE=1): swap the athlete's
+    # name for a neutral token before the prompt leaves the box; restore it
+    # in the returned caption. Only achievement-led calls carry a separable
+    # name; brief-prose calls go through unchanged (see helper docstring).
+    swimmer_name = str((achievement_dict or {}).get("swimmer_name") or "").strip()
+    pseudonymised = False
+    if _llm_pseudonymise_enabled() and swimmer_name and not brief_prose:
+        user_prose, pseudonymised = _pseudonymise_prose(user_prose, swimmer_name)
+
     # Route through the local call_claude shim so tests that patch
     # `mediahub.web.ai_caption.call_claude` continue to work, and the
     # production path still goes through ai_core under the hood.
@@ -535,6 +584,8 @@ def generate_caption_for_tone(
     text = (text or "").strip()
     if not text:
         raise ClaudeUnavailableError("provider returned an empty caption")
+    if pseudonymised:
+        text = _restore_pseudonym(text, swimmer_name)
     return text
 
 

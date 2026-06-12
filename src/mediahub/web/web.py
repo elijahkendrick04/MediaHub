@@ -8348,6 +8348,24 @@ def create_app() -> Flask:
         session["terms_ok_version"] = _legal.TERMS_VERSION
         return None
 
+    # ---- security headers (Art. 32 / audit finding 1.10) -----------------
+
+    @app.after_request
+    def _security_headers(resp):
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # Clickjacking protection everywhere EXCEPT the public-wall embed,
+        # whose whole purpose is to be iframed into club websites.
+        if (request.endpoint or "") != "public_wall_embed":
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+        # HSTS only when we know we're behind TLS (same signals as the
+        # Secure-cookie flag): never teach a plain-HTTP dev setup to pin.
+        if request.is_secure or os.environ.get("RENDER"):
+            resp.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return resp
+
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
     def home():
@@ -18943,6 +18961,45 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         return _layout(title, body, active="signin")
 
+    # ---- auth rate limiting (Art. 32 / audit finding 1.10) ---------------
+    #
+    # Fixed-window, per-IP, per-endpoint, in-process. Two gunicorn workers
+    # means an attacker gets at most 2× the budget — still a hard brake on
+    # online guessing, with zero shared state to corrupt.
+    _AUTH_WINDOW_SECONDS = 600
+    _AUTH_MAX_ATTEMPTS = 10
+    _auth_attempts: dict = {}
+    _auth_attempts_lock = threading.Lock()
+
+    def _client_ip() -> str:
+        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return fwd or (request.remote_addr or "unknown")
+
+    def _auth_rate_limited(bucket: str) -> bool:
+        """Record an attempt; True when this IP exceeded the window budget."""
+        now = time.time()
+        key = (bucket, _client_ip())
+        with _auth_attempts_lock:
+            window = [t for t in _auth_attempts.get(key, []) if now - t < _AUTH_WINDOW_SECONDS]
+            window.append(now)
+            _auth_attempts[key] = window
+            # Opportunistic cleanup so the dict can't grow unbounded.
+            if len(_auth_attempts) > 10_000:
+                for k in [k for k, v in _auth_attempts.items() if not v or now - v[-1] > _AUTH_WINDOW_SECONDS]:
+                    _auth_attempts.pop(k, None)
+            return len(window) > _AUTH_MAX_ATTEMPTS
+
+    def _auth_rate_limit_response():
+        return (
+            _layout(
+                "Too many attempts",
+                '<div class="card"><p class="tag bad">Too many attempts from your '
+                "network &mdash; wait a few minutes and try again.</p></div>",
+                active="signin",
+            ),
+            429,
+        )
+
     def _terms_checkbox_html() -> str:
         """The required Terms/Privacy acceptance control on the signup form."""
         return (
@@ -18981,6 +19038,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/signup", methods=["POST"])
     def signup_post():
+        if _auth_rate_limited("signup"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
 
@@ -19058,6 +19117,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/login", methods=["POST"])
     def login_post():
+        if _auth_rate_limited("login"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
         store = _user_store()
@@ -19219,6 +19280,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def developer_login_post():
         if not _auth.dev_login_enabled():
             abort(404)
+        if _auth_rate_limited("developer"):
+            return _auth_rate_limit_response()
         if _auth.verify_dev_key(request.form.get("dev_key")):
             _auth.login_dev_operator()
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
