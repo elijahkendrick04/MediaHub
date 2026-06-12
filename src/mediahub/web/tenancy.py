@@ -335,6 +335,51 @@ class MembershipStore:
                 tmp.replace(self._path)
             return removed
 
+    def erase_profile(self, profile_id: str) -> int:
+        """Physically erase every membership row for a workspace (PC.13
+        whole-org deletion).
+
+        The org is being deleted outright, so the last-owner protection in
+        :meth:`remove` does not apply and tombstones would defeat the
+        erasure — same compacting-rewrite rationale as :meth:`erase_email`.
+        Returns rows removed.
+        """
+        pid = (profile_id or "").strip()
+        if not pid:
+            return 0
+        with _LEDGER_LOCK:
+            if not self._path.exists():
+                return 0
+            kept: list[dict] = []
+            removed = 0
+            try:
+                text = self._path.read_text(encoding="utf-8")
+            except OSError:
+                return 0
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and str(rec.get("profile_id") or "").strip() == pid:
+                    removed += 1
+                    continue
+                kept.append(rec)
+            if removed:
+                tmp = self._path.with_suffix(".tmp")
+                with tmp.open("w", encoding="utf-8") as fh:
+                    for rec in kept:
+                        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                try:
+                    os.chmod(tmp, 0o600)
+                except OSError:
+                    pass
+                tmp.replace(self._path)
+            return removed
+
     def activate_invites(self, email: str) -> list[Membership]:
         """Flip every ``invited`` row for this email to ``active``.
 

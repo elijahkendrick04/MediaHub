@@ -13,9 +13,16 @@ no platform review anywhere. Opt-in and conservative by default:
   approved card that has since been published) ever appear. QUEUE, EDITED
   and REJECTED never do.
 - ``public_wall_initials_only`` (default on) reduces athlete names to
-  initials in all wall *text* until per-athlete consent (W.2) exists; the
-  club may also exclude individual cards via
-  ``public_wall_excluded_cards`` ("run_id::card_id" keys).
+  initials in all wall *text*; the club may also exclude individual cards
+  via ``public_wall_excluded_cards`` ("run_id::card_id" keys).
+- **Per-athlete consent (W.2 → PC.12) is enforced here too.** When the
+  workspace runs a consent regime, every card's athlete is resolved
+  against the registry: a blocked athlete (``do_not_feature``, or no
+  consent on file under an active regime) never appears on the wall, in
+  the feeds, or via the card-image route; an ``initials_only`` athlete is
+  initialled even when the blanket toggle is off. The most restrictive of
+  the toggle and the athlete's recorded consent always wins — consent can
+  only tighten the wall, never loosen it.
 
 Everything here is read-only: no caption-memory capture, no workflow
 mutation — a public page load must never have side effects.
@@ -62,6 +69,44 @@ def initials_of(name: str) -> str:
     if not parts:
         return ""
     return ".".join(p[0].upper() for p in parts) + "."
+
+
+def _consent_block_reason(profile_id: str, swimmer_name: str) -> Optional[str]:
+    """Why this athlete must not appear on the wall at all — or ``None``.
+
+    Uses the same unified check as the publish gate
+    (``compliance.gate.consent_block_reason``), which consults BOTH consent
+    systems: the W.2 safeguarding levels (do_not_feature / no consent on
+    file under an active regime) and the compliance ledger (opt-outs,
+    Art 18 restriction, opt-in mode). A wholly failed lookup returns
+    ``None`` so a public page never 500s.
+    """
+    name = (swimmer_name or "").strip()
+    if not profile_id or not name:
+        return None
+    try:
+        from mediahub.compliance.gate import consent_block_reason
+
+        return consent_block_reason(profile_id, name)
+    except Exception:
+        return None
+
+
+def _consent_display_policy(profile_id: str, swimmer_name: str):
+    """The W.2 display policy (initials-only level etc.), or ``None`` when
+    the workspace runs no W.2 regime — blocking is handled separately by
+    :func:`_consent_block_reason`."""
+    name = (swimmer_name or "").strip()
+    if not profile_id or not name:
+        return None
+    try:
+        from mediahub.safeguarding import effective_policy, regime_active
+
+        if not regime_active(profile_id):
+            return None
+        return effective_policy(profile_id, name)
+    except Exception:
+        return None
 
 
 def profile_for_token(token: str) -> Optional[ClubProfile]:
@@ -188,17 +233,27 @@ def _best_visual_for_cards(run_id: str, wanted_card_ids: set[str]) -> dict[str, 
     return out
 
 
-def wall_cards(profile: ClubProfile, limit: int = WALL_CARD_LIMIT) -> list[dict]:
-    """The org's public wall feed: approved, rendered, non-excluded cards.
+def wall_cards(
+    profile: ClubProfile,
+    limit: int = WALL_CARD_LIMIT,
+    *,
+    consent_hidden: Optional[list] = None,
+) -> list[dict]:
+    """The org's public wall feed: approved, rendered, non-excluded cards
+    whose athlete's recorded consent allows a public appearance.
 
     Returns newest-run-first dicts::
 
         {run_id, card_id, title, alt_text, meet_name, event, time,
          format_name}
 
-    Names in ``title``/``alt_text`` honour the initials-only toggle. The
-    PNG itself is served by the wall image route from the path this module
-    resolved — paths never leave the server.
+    Names in ``title``/``alt_text`` honour the per-athlete consent level
+    and the blanket initials-only toggle (most restrictive wins). Cards
+    for blocked athletes are dropped; pass ``consent_hidden`` (a list) to
+    receive ``{run_id, card_id, athlete, level, reason}`` for each drop —
+    the members-only settings page uses it to explain *why* a card is off
+    the wall. The PNG itself is served by the wall image route from the
+    path this module resolved — paths never leave the server.
     """
     excluded = set(getattr(profile, "public_wall_excluded_cards", None) or [])
     initials_only = bool(getattr(profile, "public_wall_initials_only", True))
@@ -228,7 +283,22 @@ def wall_cards(profile: ClubProfile, limit: int = WALL_CARD_LIMIT) -> list[dict]
                 continue  # the wall only serves already-rendered cards
             ach = achs.get(cid) or {}
             raw_name = str(ach.get("swimmer_name") or "").strip()
-            display_name = initials_of(raw_name) if initials_only else raw_name
+            policy = _consent_display_policy(profile.profile_id, raw_name)
+            block_reason = _consent_block_reason(profile.profile_id, raw_name)
+            if block_reason:
+                if consent_hidden is not None:
+                    consent_hidden.append(
+                        {
+                            "run_id": run_id,
+                            "card_id": cid,
+                            "athlete": raw_name,
+                            "level": policy.level if policy is not None else "blocked",
+                            "reason": block_reason,
+                        }
+                    )
+                continue
+            use_initials = initials_only or (policy is not None and policy.level == "initials_only")
+            display_name = initials_of(raw_name) if use_initials else raw_name
             event = str(ach.get("event") or "").strip()
             time_str = str(ach.get("time") or ach.get("final_time") or "").strip()
             title_bits = [b for b in (display_name, event, time_str) if b]
@@ -251,7 +321,8 @@ def wall_cards(profile: ClubProfile, limit: int = WALL_CARD_LIMIT) -> list[dict]
 
 def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional[str]:
     """Resolve the PNG path for one wall card — only if it would appear on
-    the wall (approved, rendered, not excluded, owned by this org)."""
+    the wall (approved, rendered, not excluded, owned by this org, and the
+    athlete's consent allows a public appearance)."""
     if card_key(run_id, card_id) in set(getattr(profile, "public_wall_excluded_cards", None) or []):
         return None
     if run_id not in _recent_done_run_ids(profile.profile_id, limit=200):
@@ -263,5 +334,8 @@ def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional
     run_owner = run_data.get("profile_id") or ""
     if run_owner and run_owner != profile.profile_id:
         return None
+    ach = _achievements_by_card_id(run_data).get(str(card_id)) or {}
+    if _consent_block_reason(profile.profile_id, str(ach.get("swimmer_name") or "").strip()):
+        return None  # a blocked athlete's card is unreachable, not just unlisted
     vis = _best_visual_for_cards(run_id, {str(card_id)}).get(str(card_id))
     return vis["png_path"] if vis else None

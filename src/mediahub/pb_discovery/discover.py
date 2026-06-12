@@ -47,6 +47,10 @@ class PBSource:
     fetched_at: str
     parse_confidence: float
     pbs: list[PBRow] = field(default_factory=list)
+    # False when the HTTP fetch itself failed (vs. fetched but ineligible).
+    # Lets the snapshot bridge distinguish "couldn't reach any page" from
+    # "reached pages, found no verifiable history".
+    fetch_success: bool = True
 
     def to_dict(self) -> dict:
         return {
@@ -55,6 +59,7 @@ class PBSource:
             "fetched_at": self.fetched_at,
             "parse_confidence": self.parse_confidence,
             "pbs": [pb.to_dict() for pb in self.pbs],
+            "fetch_success": self.fetch_success,
         }
 
     @classmethod
@@ -65,6 +70,7 @@ class PBSource:
             fetched_at=d["fetched_at"],
             parse_confidence=d["parse_confidence"],
             pbs=[PBRow.from_dict(r) for r in d.get("pbs", [])],
+            fetch_success=bool(d.get("fetch_success", True)),
         )
 
 
@@ -264,7 +270,14 @@ def _evaluate_url(
     page = fetch_profile_page(url)
     if not page.fetch_success:
         sources_tried.append(
-            PBSource(url=url, domain=domain, fetched_at=fetched_at, parse_confidence=0.0, pbs=[])
+            PBSource(
+                url=url,
+                domain=domain,
+                fetched_at=fetched_at,
+                parse_confidence=0.0,
+                pbs=[],
+                fetch_success=False,
+            )
         )
         record_attempt(domain, success=False, purpose="swimmer_pbs")
         return None, False

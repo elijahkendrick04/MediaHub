@@ -98,8 +98,12 @@ class ConsentRegistry:
             athlete_name=re.sub(r"\s+", " ", athlete_name.strip())[:200],
             status=status,
             parental=bool(parental),
-            under_18=under_18 if under_18 is not None else (previous.under_18 if previous else None),
-            restricted=bool(restricted) if restricted is not None else (previous.restricted if previous else False),
+            under_18=under_18
+            if under_18 is not None
+            else (previous.under_18 if previous else None),
+            restricted=bool(restricted)
+            if restricted is not None
+            else (previous.restricted if previous else False),
             note=(note or "").strip()[:1000],
             recorded_by=(recorded_by or "").strip()[:200],
             recorded_at=_iso_now(),
@@ -107,7 +111,9 @@ class ConsentRegistry:
         self._ledger.append(rec.to_record())
         return rec
 
-    def set_restricted(self, athlete_name: str, restricted: bool, recorded_by: str = "") -> ConsentRecord:
+    def set_restricted(
+        self, athlete_name: str, restricted: bool, recorded_by: str = ""
+    ) -> ConsentRecord:
         """Art 18 restriction flag — blocks the athlete in every mode."""
         previous = self.get(athlete_name)
         rec = ConsentRecord(
