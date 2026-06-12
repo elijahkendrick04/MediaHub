@@ -12931,6 +12931,196 @@ Relay team broke club record"></textarea>
         )
         return redirect(url_for("org_consent_page"))
 
+    # ---- DATA SUBJECT RIGHTS (per tenant) --------------------------------
+    # SAR export / rectification / erasure / restriction, with the Art 12A
+    # request log (received → due date, stop-the-clock). Engine:
+    # mediahub.compliance.dsr — every store from docs/compliance/DATA_MAP.md.
+
+    @app.route("/organisation/athlete-rights")
+    def org_athlete_rights():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return _layout(
+                "Athlete rights",
+                '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
+                active="organisation",
+            ), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        rows = []
+        for r in DsrRequestLog().all(profile_id=pid):
+            status_tag = {
+                "open": '<span class="tag">open</span>',
+                "clock_stopped": '<span class="tag bad">clock stopped</span>',
+                "completed": '<span class="tag ok">completed</span>',
+            }.get(r.status, _h(r.status))
+            actions = []
+            if r.status != "completed":
+                if r.request_type == "access":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<button class="btn secondary" type="submit">Run export</button></form>'
+                    )
+                elif r.request_type == "erasure":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline" '
+                        "onsubmit=\"return confirm('Erase this athlete from every store? This cannot be undone.')\">"
+                        '<button class="btn secondary" type="submit">Run erasure</button></form>'
+                    )
+                elif r.request_type == "restriction":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<button class="btn secondary" type="submit">Apply restriction</button></form>'
+                    )
+                elif r.request_type == "rectification":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<input type="text" name="new_name" placeholder="corrected name" maxlength="200" required>'
+                        '<button class="btn secondary" type="submit">Apply</button></form>'
+                    )
+                if r.status == "open":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_clock", request_id=r.id)}" style="display:inline">'
+                        '<input type="hidden" name="op" value="stop">'
+                        '<button class="btn secondary" type="submit" title="Pause the response clock while you wait for clarification or ID">Stop clock</button></form>'
+                    )
+                else:
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_clock", request_id=r.id)}" style="display:inline">'
+                        '<input type="hidden" name="op" value="resume">'
+                        '<button class="btn secondary" type="submit">Resume clock</button></form>'
+                    )
+            rows.append(
+                f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
+                f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
+                f"<td>{_h(r.due_at[:10])}</td><td>{status_tag}</td><td>{''.join(actions) or '—'}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
+            "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
+            + "</tbody></table>"
+        )
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Athlete <em class="editorial">rights.</em></h1>
+  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the due date and the stop-the-clock rules (Article 12A) are tracked for you, and the actions reach every store on this deployment.</p>
+</section>
+<div class="card">
+  <h2>Log a request</h2>
+  <form method="post" action="{url_for('org_dsr_open')}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Request type<br>
+      <select name="request_type">
+        <option value="access">Access — export everything we hold (SAR)</option>
+        <option value="rectification">Rectification — correct their name</option>
+        <option value="erasure">Erasure — delete them everywhere</option>
+        <option value="restriction">Restriction — pause processing (Art 18)</option>
+      </select>
+    </label><br>
+    <label>Note<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Log request</button>
+  </form>
+</div>
+<div class="card"><h2>Requests</h2>{table}
+<p class="muted">"Run export" downloads a machine-readable JSON of everything held about the athlete. "Run erasure" removes them from runs, rendered cards, caches, the media library and caption memory, keeps a suppression record so they can't reappear, and reports anything it could not reach — honestly.</p></div>
+"""
+        return _layout("Athlete rights", body, active="organisation")
+
+    @app.route("/organisation/athlete-rights/open", methods=["POST"])
+    def org_dsr_open():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        name = (request.form.get("athlete_name") or "").strip()
+        rtype = request.form.get("request_type") or ""
+        if not name or rtype not in ("access", "rectification", "erasure", "restriction"):
+            return _layout(
+                "Athlete rights",
+                '<div class="card"><p class="tag bad">Athlete name and a valid request type are required.</p></div>',
+                active="organisation",
+            ), 400
+        DsrRequestLog().open(
+            profile_id=pid,
+            athlete_name=name,
+            request_type=rtype,
+            note=request.form.get("note") or "",
+        )
+        return redirect(url_for("org_athlete_rights"))
+
+    @app.route("/organisation/athlete-rights/<request_id>/run", methods=["POST"])
+    def org_dsr_action(request_id):
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance import dsr as _dsr
+        from mediahub.compliance.consent import ConsentRegistry
+
+        log_store = _dsr.DsrRequestLog()
+        req = log_store.get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        if req.request_type == "access":
+            export = _dsr.export_athlete(pid, req.athlete_name)
+            log_store.complete(request_id, note="export generated")
+            from mediahub.compliance.security_log import record_event
+
+            record_event("dsr_export", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            resp = app.response_class(
+                json.dumps(export, indent=2), mimetype="application/json"
+            )
+            resp.headers["Content-Disposition"] = f"attachment; filename=sar-{request_id}.json"
+            return resp
+        if req.request_type == "erasure":
+            report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
+            log_store.complete(request_id, note="erasure executed")
+            from mediahub.compliance.security_log import record_event
+
+            record_event("dsr_erasure", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            body = (
+                '<div class="card"><h2>Erasure report</h2><pre style="white-space:pre-wrap">'
+                + _h(json.dumps(report, indent=2))
+                + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
+            )
+            return _layout("Erasure report", body, active="organisation")
+        if req.request_type == "restriction":
+            ConsentRegistry(pid).set_restricted(req.athlete_name, True, recorded_by=recorded_by)
+            log_store.complete(request_id, note="restriction applied")
+            return redirect(url_for("org_athlete_rights"))
+        if req.request_type == "rectification":
+            new_name = (request.form.get("new_name") or "").strip()
+            if not new_name:
+                return jsonify({"error": "corrected name required"}), 400
+            _dsr.rectify_athlete_name(pid, req.athlete_name, new_name)
+            log_store.complete(request_id, note=f"rectified to '{new_name}'")
+            return redirect(url_for("org_athlete_rights"))
+        return jsonify({"error": "unknown request type"}), 400
+
+    @app.route("/organisation/athlete-rights/<request_id>/clock", methods=["POST"])
+    def org_dsr_clock(request_id):
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        log_store = DsrRequestLog()
+        req = log_store.get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        if request.form.get("op") == "stop":
+            log_store.stop_clock(request_id)
+        else:
+            log_store.resume_clock(request_id)
+        return redirect(url_for("org_athlete_rights"))
+
     @app.route("/admin/compliance/incidents", methods=["POST"])
     def admin_compliance_incident():
         if not _auth.is_dev_operator():
