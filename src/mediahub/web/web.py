@@ -2717,13 +2717,13 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
 
 // Motion-graphic generation: lazy, cached server-side. Streams the resulting
 // MP4 into an inline <video> on the card panel. fmt picks the output cut
-// (story 9:16 default, square 1:1, landscape 16:9) \u2014 same card facts, same
-// brand, re-laid-out per platform.
+// (story 9:16 default, portrait 4:5, square 1:1, landscape 16:9) \u2014 same
+// card facts, same brand, re-laid-out per platform.
 var _motionCache = {};
-var _MOTION_FMT_DIMS = {story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'};
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
 function _motionFmtChips(motionUrl, cardId, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -2792,10 +2792,11 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
 // far past what front-line proxies tolerate on a held connection \u2014 so the
 // button kicks off a background job and polls until the MP4 is ready.
-// fmt picks the output cut (story 9:16 default, square 1:1, landscape 16:9).
+// fmt picks the output cut (story 9:16 default, portrait 4:5, square 1:1,
+// landscape 16:9).
 function _reelFmtChips(reelUrl, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -23464,7 +23465,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var success = function(videoUrl) {{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
-    ['story', 'square', 'landscape'].forEach(function(f) {{
+    ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
       var label = f.charAt(0).toUpperCase() + f.slice(1);
       if (f === fmt) {{
         chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -26610,6 +26611,20 @@ voice, and queues them for one-click approval.</p>
         path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
             return jsonify({"error": "reel_not_rendered"}), 404
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            # The poster-frame PNG sidecar written beside the rendered MP4
+            # (visual/audio_mux.py) — a thumbnail for review surfaces and
+            # platforms that want one. 404s honestly when absent (e.g. a
+            # reel rendered before posters existed).
+            poster = path.with_suffix(".poster.png")
+            if not poster.exists():
+                return jsonify({"error": "poster_not_rendered"}), 404
+            return send_file(
+                str(poster),
+                mimetype="image/png",
+                as_attachment=False,
+                download_name=poster.name,
+            )
         return send_file(
             str(path),
             mimetype="video/mp4",

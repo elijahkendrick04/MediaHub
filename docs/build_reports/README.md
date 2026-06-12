@@ -20,6 +20,9 @@ What lives here now:
   [`SEQ_SPINE_2026-06-10.md`](SEQ_SPINE_2026-06-10.md) — the generation-engine
   v2 build evidence cited by [`../ROADMAP.md`](../ROADMAP.md),
   [`../GENERATION.md`](../GENERATION.md), and ADR-0001.
+- [`REEL_GRAPHIC_10X_2026-06-12.md`](REEL_GRAPHIC_10X_2026-06-12.md) — the
+  graphic/reel-builder 10× assessment and the first build wave it shipped
+  (reel/story audio, count-up intent, portrait cut, poster frames).
 - [`BLUEPRINT.md`](BLUEPRINT.md) — the original content-engine design
   blueprint; the live V5 detectors in `legacy/` still cite its principles.
 

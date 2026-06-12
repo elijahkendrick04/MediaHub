@@ -119,6 +119,7 @@ MOTION_INTENTS: tuple[str, ...] = (
     "crossfade",
     "kinetic_type",
     "parallax",
+    "count_up",
     "static",
 )
 

@@ -1,6 +1,7 @@
 import React from "react";
 import {
   AbsoluteFill,
+  Easing,
   interpolate,
   Sequence,
   spring,
@@ -74,16 +75,21 @@ const StatChips: React.FC<{
   ground: string;
   ts: number;
   opacity: number;
-}> = ({ stats, accent, ground, ts, opacity }) => {
+  progress: number;
+}> = ({ stats, accent, ground, ts, opacity, progress }) => {
+  // The numbers count up to their honest totals as the chips fade in —
+  // pure function of the frame-derived progress. Pluralisation follows the
+  // FINAL count so the label never flickers between forms mid-count.
+  const shown = (n: number) => Math.round(n * Math.max(0, Math.min(1, progress)));
   const chips: string[] = [];
   if (stats.swims > 0) {
-    chips.push(`TOP ${stats.swims} SWIM${stats.swims === 1 ? "" : "S"}`);
+    chips.push(`TOP ${shown(stats.swims)} SWIM${stats.swims === 1 ? "" : "S"}`);
   }
   if (stats.pbs > 0) {
-    chips.push(`${stats.pbs} PB${stats.pbs === 1 ? "" : "S"}`);
+    chips.push(`${shown(stats.pbs)} PB${stats.pbs === 1 ? "" : "S"}`);
   }
   if (stats.medals > 0) {
-    chips.push(`${stats.medals} MEDAL${stats.medals === 1 ? "" : "S"}`);
+    chips.push(`${shown(stats.medals)} MEDAL${stats.medals === 1 ? "" : "S"}`);
   }
   if (chips.length === 0) {
     return null;
@@ -98,9 +104,9 @@ const StatChips: React.FC<{
         opacity,
       }}
     >
-      {chips.map((c) => (
+      {chips.map((c, i) => (
         <div
-          key={c}
+          key={i}
           style={{
             padding: `${Math.round(12 * ts)}px ${Math.round(24 * ts)}px`,
             border: `3px solid ${accent}`,
@@ -140,6 +146,10 @@ const CoverScreen: React.FC<{
   });
   const chipsOpacity = interpolate(frame, [fps * 0.6, fps * 1.1], [0, 1], {
     extrapolateRight: "clamp",
+  });
+  const chipsProgress = interpolate(frame, [fps * 0.6, fps * 1.5], [0, 1], {
+    extrapolateRight: "clamp",
+    easing: Easing.out(Easing.cubic),
   });
   const outroFade = interpolate(
     frame,
@@ -245,6 +255,7 @@ const CoverScreen: React.FC<{
           ground={brand.primary || "#0A2540"}
           ts={ts}
           opacity={chipsOpacity}
+          progress={chipsProgress}
         />
       </div>
     </AbsoluteFill>

@@ -384,7 +384,7 @@ def reel_ffmpeg_args(
         last = nxt
     fade_out = max(0.0, total - 1.0)
     chains.append(
-        f"[{last}]fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=1.0," f"format=yuv420p[vout]"
+        f"[{last}]fade=t=in:st=0:d=0.4,fade=t=out:st={fade_out:.3f}:d=1.0,format=yuv420p[vout]"
     )
     args += [
         "-filter_complex",
@@ -438,16 +438,25 @@ def media_duration_seconds(path: Path) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 
-def _finalise(tmp_mp4: Path, cached: Path, out_path: Path) -> Path:
+def _finalise(
+    tmp_mp4: Path,
+    cached: Path,
+    out_path: Path,
+    *,
+    kind: str = "story",
+    duration_sec: float = 6.0,
+    audio_plan: Optional[dict] = None,
+) -> Path:
     if not tmp_mp4.exists() or tmp_mp4.stat().st_size < 1024:
         raise RuntimeError("FFmpeg reported success but the MP4 is missing or empty")
     cached.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(tmp_mp4), str(cached))
-    if cached.resolve() != Path(out_path).resolve():
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(cached, out_path)
-        return Path(out_path)
-    return cached
+    # Same finishing pass as the Remotion engine: planned audio (honest
+    # silent fallback) + the poster-frame sidecar, then publish.
+    from mediahub.visual.motion import _finish_cached_video, _publish
+
+    _finish_cached_video(cached, kind=kind, plan=audio_plan, duration_sec=duration_sec)
+    return _publish(cached, out_path)
 
 
 def render_story_card_from_props(
@@ -458,34 +467,35 @@ def render_story_card_from_props(
     *,
     duration_sec: float = 6.0,
     brief_dict: Optional[dict] = None,
+    audio_plan: Optional[dict] = None,
 ) -> Path:
     """Render one card's 1080x1920 story MP4 via the still+FFmpeg path.
 
     ``card_props`` / ``brand_dict`` are the exact prop dicts the Remotion
     composition would receive (built by motion's shapers), so both engines
-    are fed identical card facts by construction.
+    are fed identical card facts by construction. ``audio_plan`` (built by
+    motion's audio helpers) is folded into the cache key when present and
+    mixed onto the finished MP4 — None keeps the silent path's cache keys
+    byte-identical to before.
     """
-    from mediahub.visual.motion import _cache_dir, _content_hash
+    from mediahub.visual.motion import _cache_dir, _content_hash, _finish_cached_video, _publish
 
     _require_available()
     out_path = Path(out_path)
-    cache_key = _content_hash(
-        {
-            "card": card_props,
-            "brand": brand_dict,
-            "duration": duration_sec,
-            "engine": "ffmpeg",
-            "brief": brief_dict or {},
-        },
-        kind="story",
-    )
+    cache_payload = {
+        "card": card_props,
+        "brand": brand_dict,
+        "duration": duration_sec,
+        "engine": "ffmpeg",
+        "brief": brief_dict or {},
+    }
+    if audio_plan:
+        cache_payload["audio"] = audio_plan
+    cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
-        if cached.resolve() != out_path.resolve():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(cached, out_path)
-            return out_path
-        return cached
+        _finish_cached_video(cached, kind="story", plan=audio_plan, duration_sec=duration_sec)
+        return _publish(cached, out_path)
 
     brief = _frame_brief(card_props, brand_dict, brand_kit, brief_dict)
     with tempfile.TemporaryDirectory(prefix="mh_reel_ffmpeg_") as td:
@@ -493,7 +503,14 @@ def render_story_card_from_props(
         still = _render_still(brief, brand_kit, work, name="story")
         tmp_mp4 = work / "story.mp4"
         _run_ffmpeg(story_ffmpeg_args(still, tmp_mp4, duration_sec))
-        return _finalise(tmp_mp4, cached, out_path)
+        return _finalise(
+            tmp_mp4,
+            cached,
+            out_path,
+            kind="story",
+            duration_sec=duration_sec,
+            audio_plan=audio_plan,
+        )
 
 
 def render_meet_reel_from_props(
@@ -505,13 +522,22 @@ def render_meet_reel_from_props(
     meet_name: str = "",
     duration_sec: Optional[float] = None,
     brief_dicts: Optional[list[Optional[dict]]] = None,
+    audio_plan: Optional[dict] = None,
 ) -> Path:
     """Render the meet reel (cover + one beat per card) via still+FFmpeg.
 
     ``duration_sec=None`` (the default) is data-driven — the same
-    ``reel_duration_for`` arithmetic the Remotion path uses.
+    ``reel_duration_for`` arithmetic the Remotion path uses. ``audio_plan``
+    behaves exactly as on the story path (cache-key folded; honest silent
+    fallback).
     """
-    from mediahub.visual.motion import _cache_dir, _content_hash, reel_duration_for
+    from mediahub.visual.motion import (
+        _cache_dir,
+        _content_hash,
+        _finish_cached_video,
+        _publish,
+        reel_duration_for,
+    )
 
     _require_available()
     if not cards_props:
@@ -520,24 +546,21 @@ def render_meet_reel_from_props(
         duration_sec = reel_duration_for(len(cards_props))
     out_path = Path(out_path)
     briefs = list(brief_dicts or [])
-    cache_key = _content_hash(
-        {
-            "cards": cards_props,
-            "brand": brand_dict,
-            "meet": meet_name,
-            "duration": duration_sec,
-            "engine": "ffmpeg",
-            "briefs": [b or {} for b in briefs] or [{}] * len(cards_props),
-        },
-        kind="reel",
-    )
+    cache_payload = {
+        "cards": cards_props,
+        "brand": brand_dict,
+        "meet": meet_name,
+        "duration": duration_sec,
+        "engine": "ffmpeg",
+        "briefs": [b or {} for b in briefs] or [{}] * len(cards_props),
+    }
+    if audio_plan:
+        cache_payload["audio"] = audio_plan
+    cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
-        if cached.resolve() != out_path.resolve():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(cached, out_path)
-            return out_path
-        return cached
+        _finish_cached_video(cached, kind="reel", plan=audio_plan, duration_sec=duration_sec)
+        return _publish(cached, out_path)
 
     with tempfile.TemporaryDirectory(prefix="mh_reel_ffmpeg_") as td:
         work = Path(td)
@@ -557,7 +580,14 @@ def render_meet_reel_from_props(
         seg_durations = reel_segment_durations(len(cards_props), duration_sec)
         tmp_mp4 = work / "reel.mp4"
         _run_ffmpeg(reel_ffmpeg_args(stills, tmp_mp4, seg_durations))
-        return _finalise(tmp_mp4, cached, out_path)
+        return _finalise(
+            tmp_mp4,
+            cached,
+            out_path,
+            kind="reel",
+            duration_sec=duration_sec,
+            audio_plan=audio_plan,
+        )
 
 
 __all__ = [
