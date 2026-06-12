@@ -240,3 +240,65 @@ def test_healthz_breaker_wildcard_accept_returns_json(client):
     payload = r.get_json()
     assert payload is not None
     assert payload.get("ok") is True
+
+
+# ---------------------------------------------------------------------------
+# /healthz/deps — same content-negotiation contract (axe html-has-lang)
+# ---------------------------------------------------------------------------
+
+
+def test_healthz_deps_html_has_lang(client):
+    """Browser requests to /healthz/deps must receive an HTML page whose
+    <html> element carries lang="en" — regression for axe-core html-has-lang
+    (WCAG 3.1.1, serious)."""
+    r = client.get("/healthz/deps", headers={"Accept": "text/html"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert 'lang="en"' in body
+
+
+def test_healthz_deps_html_has_title(client):
+    """Browser requests to /healthz/deps must include a <title> element
+    — regression for axe-core document-title (WCAG 2.4.2)."""
+    r = client.get("/healthz/deps", headers={"Accept": "text/html"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_deps_json_by_default(client):
+    """Clients that send no Accept header must still receive JSON from
+    /healthz/deps — the HTML path must not break the existing monitoring
+    contract."""
+    r = client.get("/healthz/deps")
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert "ok" in payload
+    assert "deps" in payload
+
+
+def test_healthz_deps_wildcard_accept_returns_json(client):
+    """Accept: */* (curl/fetch default) must return JSON from /healthz/deps
+    — the /api/settings/llm-status consumer sends */* and must not get HTML."""
+    r = client.get("/healthz/deps", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert "ok" in payload
+
+
+def test_healthz_deps_sec_fetch_dest_document_returns_html(client):
+    """Sec-Fetch-Dest: document must trigger HTML from /healthz/deps even
+    when Accept is absent — guards against reverse-proxy stripping of Accept."""
+    r = client.get("/healthz/deps", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert 'lang="en"' in body
+    assert "<title>" in body
