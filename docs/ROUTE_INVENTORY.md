@@ -18,6 +18,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_stub_pack_create_graphic` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic` |
 | `api_stub_pack_card_status` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/status` |
 | `api_stub_pack_regenerate` | `POST` | `/api/drafts/<pack_id>/regenerate` |
+| `api_event_preview_parse_entries` | `POST` | `/api/event-preview/parse-entries` |
 | `api_media_library_upload` | `POST` | `/api/media-library` |
 | `api_media_library_delete` | `POST` | `/api/media-library/<asset_id>/delete` |
 | `api_media_library_file` | `GET` | `/api/media-library/file/<asset_id>` |
@@ -42,6 +43,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_regenerate_graphic` | `POST` | `/api/runs/<run_id>/cards/<card_id>/regenerate` |
 | `api_regenerate_variants` | `POST` | `/api/runs/<run_id>/cards/<card_id>/regenerate-variants` |
 | `api_export` | `GET` | `/api/runs/<run_id>/export` |
+| `api_mint_magic_link` | `POST` | `/api/runs/<run_id>/magic-link` |
+| `api_revoke_magic_link` | `POST` | `/api/runs/<run_id>/magic-link/revoke` |
 | `api_run_newsletter` | `GET` | `/api/runs/<run_id>/newsletter` |
 | `api_recognition` | `GET` | `/api/runs/<run_id>/recognition` |
 | `api_run_reel` | `GET,POST` | `/api/runs/<run_id>/reel` |
@@ -67,6 +70,9 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_web_research_submit` | `POST` | `/api/web-research` |
 | `api_web_research_status` | `GET` | `/api/web-research/<job_id>` |
 | `api_workflow_set` | `POST` | `/api/workflow/<run_id>/<card_id>` |
+| `athletes_page` | `GET` | `/athletes` |
+| `athletes_action` | `POST` | `/athletes/action` |
+| `athletes_consent_export` | `GET` | `/athletes/consent.csv` |
 | `pb_audit_page` | `GET` | `/audit/<run_id>` |
 | `pb_ground_truth` | `GET,POST` | `/audit/<run_id>/ground-truth` |
 | `pb_ignore` | `POST` | `/audit/<run_id>/ignore/<path:swimmer_key>` |
@@ -75,6 +81,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `billing_checkout` | `POST` | `/billing/checkout` |
 | `billing_confirm` | `GET` | `/billing/confirm` |
 | `billing_portal` | `POST` | `/billing/portal` |
+| `club_data_page` | `GET` | `/club-data` |
 | `cookies_page` | `GET` | `/cookies` |
 | `developer_login` | `GET` | `/developer` |
 | `developer_login_post` | `POST` | `/developer` |
@@ -105,9 +112,13 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `healthz_usage` | `GET` | `/healthz/usage` |
 | `legal_accept_page` | `GET` | `/legal/accept` |
 | `legal_accept_post` | `POST` | `/legal/accept` |
+| `live_meet_page` | `GET` | `/live` |
+| `live_meet_action` | `POST` | `/live/action` |
 | `login_page` | `GET` | `/login` |
 | `login_post` | `POST` | `/login` |
 | `logout` | `GET,POST` | `/logout` |
+| `magic_review_page` | `GET` | `/m/<token>` |
+| `magic_card_action` | `POST` | `/m/<token>/card/<path:card_id>` |
 | `make_page` | `GET` | `/make` |
 | `web_manifest` | `GET` | `/manifest.webmanifest` |
 | `media_library_page` | `GET` | `/media-library` |
@@ -129,6 +140,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `organisation_setup_palette_reorder` | `POST` | `/organisation/setup/palette/reorder` |
 | `organisation_setup_reread` | `POST` | `/organisation/setup/reread/<platform>` |
 | `content_pack` | `GET` | `/pack/<run_id>` |
+| `pack_certificates_zip` | `GET` | `/pack/<run_id>/certificates.zip` |
 | `content_pack_grouped` | `GET` | `/pack/<run_id>/grouped` |
 | `content_pack_zip` | `GET` | `/pack/<run_id>/zip` |
 | `plan_page` | `GET` | `/plan` |
@@ -142,6 +154,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `public_wall_settings` | `GET` | `/public-wall` |
 | `public_wall_update` | `POST` | `/public-wall/update` |
 | `recognition_page` | `GET` | `/recognition/<run_id>` |
+| `club_records_page` | `GET` | `/records` |
+| `club_records_action` | `POST` | `/records/action` |
 | `research_page` | `GET` | `/research` |
 | `review` | `GET` | `/review/<run_id>` |
 | `run_status` | `GET` | `/runs/<run_id>` |
@@ -184,3 +198,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `web_research_console` | `GET` | `/web-research` |
 | `stripe_webhook` | `POST` | `/webhooks/stripe` |
 | `stub_weekend_preview` | `GET,POST` | `/weekend-preview` |
+| `season_wraps_page` | `GET` | `/wraps` |
+| `season_wrap_view` | `GET` | `/wraps/<draft_id>` |
+| `season_wrap_poster` | `GET` | `/wraps/<draft_id>/poster.pdf` |
+| `season_wraps_action` | `POST` | `/wraps/action` |

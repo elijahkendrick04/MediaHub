@@ -1594,6 +1594,26 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     conn.commit()
     conn.close()
 
+    # W.1: log this run's swims into the athlete registry so identity,
+    # milestones, consent and wraps accumulate. Best-effort and idempotent —
+    # registry trouble must never fail a run.
+    if run.profile_id and not run.error:
+        try:
+            from mediahub.athletes import sync_run_payload as _ath_sync
+
+            _prof = None
+            try:
+                _prof = load_profile(run.profile_id)
+            except Exception:
+                _prof = None
+
+            def _is_ours(code):
+                return _prof.is_ours(code, None) if _prof else True
+
+            _ath_sync(run.profile_id, payload, is_ours=_is_ours)
+        except Exception:
+            log.warning("athlete registry sync failed for run %s", run.run_id, exc_info=True)
+
 
 def _load_run(run_id: str) -> Optional[dict]:
     p = RUNS_DIR / f"{run_id}.json"
@@ -2439,6 +2459,38 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         if (textarea) { textarea.value = active; }
       }
       _renderActive(0);
+      // W.13: Welsh variant for bilingual workspaces — shown beside the
+      // English caption so both are approved in one pass.
+      if (captionDiv && j.caption_cy) {
+        var cyBox = document.createElement('div');
+        cyBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
+        cyBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Cymraeg</div>'
+          + '<span style="white-space:pre-wrap">' + safeText(j.caption_cy) + '</span>';
+        captionDiv.appendChild(cyBox);
+      }
+      // W.11: result-grounded alt text — editable, saved with the card so
+      // every export/publish surface carries what the approver saw.
+      if (captionDiv && typeof j.alt_text === 'string' && j.live) {
+        var altWrap = document.createElement('div');
+        altWrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;align-items:center';
+        altWrap.innerHTML = '<span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap" title="Read aloud by screen readers — describes the result on the image">Alt text</span>'
+          + '<input type="text" class="alt-text-input" maxlength="200" value="' + safeText(j.alt_text).replace(/"/g,'&quot;') + '" style="flex:1;font-size:12px;padding:5px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)"/>'
+          + '<button type="button" class="btn secondary alt-text-save" style="font-size:11px;padding:4px 10px">Save</button>';
+        captionDiv.appendChild(altWrap);
+        var altInput = altWrap.querySelector('.alt-text-input');
+        var altSave = altWrap.querySelector('.alt-text-save');
+        altSave.addEventListener('click', function() {
+          if (typeof WF_API_BASE === 'undefined') { altSave.textContent = 'n/a'; return; }
+          fetch(WF_API_BASE + encodeURIComponent(cardId), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'set_edits', edits: {alt_text: altInput.value}})
+          }).then(function(r){ return r.json(); }).then(function() {
+            altSave.textContent = 'Saved';
+            setTimeout(function(){ altSave.textContent = 'Save'; }, 1500);
+          }).catch(function(){ altSave.textContent = 'Retry'; });
+        });
+      }
       // Update timestamp
       var picker = panel.closest('.tone-picker');
       if (picker) {
@@ -2788,13 +2840,13 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
 
 // Motion-graphic generation: lazy, cached server-side. Streams the resulting
 // MP4 into an inline <video> on the card panel. fmt picks the output cut
-// (story 9:16 default, square 1:1, landscape 16:9) \u2014 same card facts, same
-// brand, re-laid-out per platform.
+// (story 9:16 default, portrait 4:5, square 1:1, landscape 16:9) \u2014 same
+// card facts, same brand, re-laid-out per platform.
 var _motionCache = {};
-var _MOTION_FMT_DIMS = {story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'};
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
 function _motionFmtChips(motionUrl, cardId, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -2882,10 +2934,11 @@ function _loadMotionWhy(panel, motionUrl, fmt) {
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
 // far past what front-line proxies tolerate on a held connection \u2014 so the
 // button kicks off a background job and polls until the MP4 is ready.
-// fmt picks the output cut (story 9:16 default, square 1:1, landscape 16:9).
+// fmt picks the output cut (story 9:16 default, portrait 4:5, square 1:1,
+// landscape 16:9).
 function _reelFmtChips(reelUrl, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -6986,6 +7039,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('club_data_page') }}" class="{{ 'active' if active=='clubdata' else '' }}">Club data</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
@@ -7100,7 +7154,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
   function check(){
-    fetch(HEALTH_URL,{cache:'no-store'}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
+    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
       var ok = o.s === 200 && o.j && o.j.ok;
       var dot = document.getElementById('backend-pill-dot');
       var txt = document.getElementById('backend-pill-text');
@@ -8180,6 +8234,11 @@ def create_app() -> Flask:
             "public_wall_json",
             "public_wall_rss",
             "public_wall_card_png",
+            # W.9 — magic-link mobile approvals: the signed, expiring,
+            # revocable token IS the access control; the approver has no
+            # login by design (pool-deck phone).
+            "magic_review_page",
+            "magic_card_action",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -10996,9 +11055,37 @@ def create_app() -> Flask:
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       {_bulk_approve_btn}
+      <button type="button" class="btn secondary" id="mh-magic-link-btn"
+              data-mint-url="{url_for("api_mint_magic_link", run_id=run_id)}"
+              title="Create a no-login link so a coach can approve this pack from their phone">
+        &#128241; Approve from a phone</button>
       <a class="btn" href="{_pack_url}" style="align-self:flex-end">Open content builder &rarr;</a>
     </div>
   </div>
+  <div id="mh-magic-link-out" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px"></div>
+  <script>
+  (function() {{
+    var btn = document.getElementById('mh-magic-link-btn');
+    var out = document.getElementById('mh-magic-link-out');
+    if (!btn) return;
+    btn.addEventListener('click', function() {{
+      btn.disabled = true; btn.textContent = 'Creating link…';
+      fetch(btn.dataset.mintUrl, {{method: 'POST'}})
+        .then(function(r) {{ return r.json(); }})
+        .then(function(j) {{
+          btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone';
+          if (!j.ok) {{ out.style.display = ''; out.textContent = 'Could not create the link.'; return; }}
+          out.style.display = '';
+          out.innerHTML = '<strong>Review link</strong> (works for 72 hours, no login — anyone with it can approve, so share carefully):'
+            + '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">'
+            + '<input type="text" readonly value="' + j.url.replace(/"/g, '&quot;') + '" style="flex:1;font-size:12px;padding:6px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)"/>'
+            + '<button type="button" class="btn secondary" style="font-size:12px" onclick="navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent=\\'Copied\\'">Copy</button></div>'
+            + (j.notified ? '<div class="muted" style="margin-top:4px;font-size:12px">Also pushed to your notification channel.</div>' : '');
+        }})
+        .catch(function() {{ btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone'; }});
+    }});
+  }})();
+  </script>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
     <nav class="mh-segmented" role="tablist" aria-label="Filter cards by workflow status">
@@ -11911,11 +11998,52 @@ function copyWhyCard(btn, taId) {{
                         # variants — return None and filter.
                         return None
 
-                if n_variants == 1:
-                    variants = [_gen_one()]
+                # W.11/W.13: the PRIMARY variant rides the bundle call so the
+                # result-grounded alt text (and the Welsh variant for cy/
+                # bilingual workspaces) arrive in the SAME provider call —
+                # zero added latency. Extra variants stay caption-only.
+                from mediahub.web.ai_caption import (
+                    generate_caption_bundle as _gen_bundle,
+                )
+
+                _pw_language = (getattr(club_profile_obj, "language", "en") or "en").strip().lower()
+                alt_text = ""
+                caption_cy = None
+
+                def _gen_primary():
+                    try:
+                        return _gen_bundle(
+                            ach_dict,
+                            club_brand,
+                            tone=tone,
+                            voice_profile=_run_voice_profile,
+                            club_profile=club_profile_obj,
+                            recent_captions=_recent_captions,
+                            few_shot_examples=_few_shot_examples,
+                            language=_pw_language,
+                        )
+                    except Exception:
+                        # Strictly best-effort: ANY bundle failure (malformed
+                        # JSON, provider blip, no key) falls through to the
+                        # caption-only path below, whose error classification
+                        # (terminal vs transient) is the canonical one. The
+                        # caption is never lost just because alt text was.
+                        return None
+
+                _bundle = _gen_primary()
+                if _bundle:
+                    alt_text = _bundle.get("alt_text") or ""
+                    caption_cy = _bundle.get("caption_cy")
+                    variants = [_bundle.get("caption") or ""]
+                    extra_needed = max(0, n_variants - 1)
                 else:
-                    with ThreadPoolExecutor(max_workers=n_variants) as pool:
-                        variants = list(pool.map(lambda _: _gen_one(), range(n_variants)))
+                    variants = []
+                    extra_needed = n_variants
+                if extra_needed == 1:
+                    variants.append(_gen_one())
+                elif extra_needed > 1:
+                    with ThreadPoolExecutor(max_workers=extra_needed) as pool:
+                        variants.extend(pool.map(lambda _: _gen_one(), range(extra_needed)))
                 # Drop None placeholders from failed variants.
                 variants = [v for v in variants if v]
                 # Deduplicate identical outputs (Gemini occasionally returns the
@@ -11965,6 +12093,12 @@ function copyWhyCard(btn, taId) {{
                         "fallback": False,
                         "fallback_voice": None,
                         "explanation": explanation,
+                        # W.11: result-grounded alt text from the same call,
+                        # editable in review and threaded into exports.
+                        "alt_text": alt_text,
+                        # W.13: Welsh variant for bilingual workspaces.
+                        "caption_cy": caption_cy,
+                        "language": _pw_language,
                     }
                 )
             except _ClaudeUE as e:
@@ -13092,6 +13226,25 @@ Relay team broke club record"></textarea>
         except Exception:
             pass
 
+    def _wants_html_health() -> bool:
+        """True when the request is a genuine browser navigation that should
+        receive the HTML health page (axe-core document-title, WCAG 2.4.2).
+
+        Compares Accept qualities instead of ``best_match``: fetch()/curl/
+        python-requests send ``Accept: */*``, which matches both candidates
+        at equal quality — ``best_match`` then breaks the tie by list order
+        and misclassifies those API callers as browsers (the nav badge
+        choked on the HTML and painted "offline"). A real navigation ranks
+        text/html (q=1) strictly above ``*/*;q=0.8`` so it still gets HTML;
+        clients with no Accept header score 0 = 0 and stay on JSON.
+        ``Sec-Fetch-Dest: document`` covers proxies that strip Accept.
+        """
+        accept = request.accept_mimetypes
+        return (
+            accept["text/html"] > accept["application/json"]
+            or request.headers.get("Sec-Fetch-Dest", "") == "document"
+        )
+
     @app.route("/health")
     def health():
         import time as _time
@@ -13108,13 +13261,11 @@ Relay team broke club record"></textarea>
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         status_code = 200 if payload["ok"] else 503
-        # Return HTML (with a valid <title>) when a browser requests the page so
-        # that axe-core's document-title rule is satisfied; API/monitoring clients
-        # that send Accept: application/json (or no Accept) get plain JSON.
-        best = request.accept_mimetypes.best_match(
-            ["text/html", "application/json"], default="application/json"
-        )
-        if best == "text/html":
+        # Return HTML (with a valid <title>) when a browser navigates to the
+        # page so that axe-core's document-title rule is satisfied; API and
+        # monitoring clients (Accept: application/json, */*, or no Accept)
+        # get plain JSON — see _wants_html_health.
+        if _wants_html_health():
             status_label = _h("OK" if payload["ok"] else "Degraded")
             body = _h(json.dumps(payload, indent=2))
             html = (
@@ -13127,8 +13278,16 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=status_code, mimetype="text/html")
-        return jsonify(payload), status_code
+            return Response(
+                html,
+                status=status_code,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
+        resp = jsonify(payload)
+        resp.status_code = status_code
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     _FAVICON_SVG = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
@@ -13246,22 +13405,10 @@ Relay team broke club record"></textarea>
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         # Return HTML (with a valid <title>) for browser navigations so that
-        # axe-core's document-title rule (WCAG 2.4.2) is satisfied.  Two
-        # complementary signals cover edge cases where a reverse-proxy strips
-        # one or the other:
-        #   • Accept: text/html — standard content-negotiation
-        #   • Sec-Fetch-Dest: document — fetch-metadata sent by Chromium/Firefox
-        #     on top-level page navigations (page.goto in Playwright)
-        # Monitoring tools (curl, urllib, Render's own liveness probe) send
-        # neither, so they continue to receive JSON — the existing contract.
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        # axe-core's document-title rule (WCAG 2.4.2) is satisfied. API and
+        # monitoring callers — including the nav badge's fetch(), curl, and
+        # Render's liveness probe — stay on JSON; see _wants_html_health.
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -13725,14 +13872,7 @@ Relay team broke club record"></textarea>
                 "'open': false means a few errors but no trip yet."
             ),
         }
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -15653,6 +15793,19 @@ function mhPlanGenerate(btn) {{
                 }
             ), 503
 
+        # W.11: alt text rides the publish payload — the request's value
+        # wins, else the alt the approver saved in review.
+        _sched_alt = (payload.get("alt_text") or "").strip()
+        if not _sched_alt:
+            try:
+                _ws_sched = _get_wf_store()
+                _st_sched = _ws_sched.load(run_id).get(card_id) if _ws_sched is not None else None
+                _sched_alt = ((_st_sched.edited_captions or {}) if _st_sched else {}).get(
+                    "alt_text", ""
+                )
+            except Exception:
+                _sched_alt = ""
+
         for cid in channel_ids:
             try:
                 res = _buf_schedule(
@@ -15661,6 +15814,7 @@ function mhPlanGenerate(btn) {{
                     text=caption,
                     media_urls=media_urls,
                     scheduled_at=scheduled_at_dt,
+                    alt_text=_sched_alt,
                 )
                 results.append(
                     {
@@ -16936,8 +17090,57 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     ):
                         _up = request.files.get(_field)
                         if _up and getattr(_up, "filename", ""):
+                            _up_bytes = _up.read() or b""
+                            # W.6: LENEX entry files (.lef/.lxf — what meet
+                            # organisers actually send) parse structurally,
+                            # not as raw text, so the AI sees clean
+                            # name/event/entry-time rows.
+                            _fn_lower = (_up.filename or "").lower()
+                            if _field == "entries_file" and (
+                                _fn_lower.endswith((".lef", ".lxf"))
+                                or b"<LENEX" in _up_bytes[:2048].upper()
+                            ):
+                                try:
+                                    from mediahub.interpreter.lenex_parser import (
+                                        parse_lenex_entries,
+                                    )
+
+                                    _rows = parse_lenex_entries(_up_bytes)
+                                    # Zero-typing goal (W.6): the entry file
+                                    # already names the meet — use it when
+                                    # the form field was left blank.
+                                    if not (form_data.get("meet_name") or "").strip():
+                                        try:
+                                            from mediahub.interpreter.lenex_parser import (
+                                                parse_lenex as _parse_lenex_meet,
+                                            )
+
+                                            _ln_meet = _parse_lenex_meet(_up_bytes)
+                                            if _ln_meet.meet_name:
+                                                form_data["meet_name"] = _ln_meet.meet_name
+                                        except Exception:
+                                            pass
+                                    _lines = []
+                                    for _r in _rows:
+                                        _bits = [
+                                            _r.get("swimmer_name") or "",
+                                            (
+                                                f"{_r.get('distance_m') or ''}"
+                                                + (f" {_r['stroke']}" if _r.get("stroke") else "")
+                                            ).strip(),
+                                            _r.get("entry_time") or "",
+                                            _r.get("club") or "",
+                                        ]
+                                        _lines.append(" — ".join(b for b in _bits if b))
+                                    if _lines:
+                                        form_data[_key] = "\n".join(_lines)[:_cap]
+                                        continue
+                                except Exception:
+                                    app.logger.exception(
+                                        "event preview: LENEX entries parse failed"
+                                    )
                             try:
-                                _res = _doc_text(_up.filename, _up.read() or b"")
+                                _res = _doc_text(_up.filename, _up_bytes)
                             except Exception:
                                 app.logger.exception("event preview: %s extraction failed", _field)
                                 continue
@@ -18368,6 +18571,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 existing.org_type = (request.form.get("org_type") or "other").strip()
                 existing.governing_body = (request.form.get("governing_body") or "").strip()
                 existing.country = (request.form.get("country") or "").strip()
+                # W.13: caption language (en / cy / bilingual)
+                _lang = (request.form.get("language") or "en").strip().lower()
+                existing.language = _lang if _lang in ("en", "cy", "bilingual") else "en"
+                # W.4: which qualifying standards this club cares about
+                existing.important_standards = [
+                    s.strip() for s in request.form.getlist("important_standards") if s.strip()
+                ]
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
                 existing.brand_primary = (
@@ -18540,6 +18750,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
         voice_examples_text = "\n".join(profile.voice_examples or [])
+
+        # W.13: caption language picker
+        _LANGS = [
+            ("en", "English"),
+            ("cy", "Cymraeg (Welsh)"),
+            ("bilingual", "Bilingual — English + Cymraeg"),
+        ]
+        language_opts = "".join(
+            _opt(v, l, v == (getattr(profile, "language", "en") or "en")) for v, l in _LANGS
+        )
+
+        # W.4: qualifying-standards picker (season packs + quals registry)
+        standards_cbs = ""
+        try:
+            from mediahub.standards import available_standards_summary as _stds_summary
+
+            _picked = set(profile.important_standards or [])
+            _rows = []
+            for _s in _stds_summary():
+                _label = (
+                    f"{_s['competition']} — {_s['body']}"
+                    f" ({_s['level']}, {_s['course']}, {_s['season']})"
+                )
+                _rows.append(_cb("important_standards", _s["id"], _label, _s["id"] in _picked))
+            standards_cbs = "".join(_rows)
+        except Exception:
+            standards_cbs = ""
+        if not standards_cbs:
+            standards_cbs = (
+                '<p class="muted" style="font-size:12px">No qualifying-time tables are '
+                "loaded yet. The operator curates them each season — see "
+                "<code>data/standards/README.md</code>.</p>"
+            )
 
         # Build the voice-profile summary panel so the user can see what
         # the engine learned the last time they ran "Analyse voice".
@@ -18879,6 +19122,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
              style="{_input_style}"/>
     </div>
     <div>
+      <label>Caption language</label>
+      <select name="language" style="{_input_style}">{language_opts}</select>
+      <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Bilingual writes every caption in English and Cymraeg side by side.</p>
+    </div>
+    <div>
       <label>Result file codes</label>
       <input type="text" name="club_codes" value="{_h(", ".join(profile.club_codes or []))}"
              placeholder="e.g. CMA, COMA" style="{_input_style}"/>
@@ -18900,6 +19148,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <span class="mh-brandkit-chip"><span class="sw" id="bk-sw-pri" style="background:{_h(_org_pri)}"></span><span class="hex" id="bk-hex-pri">{_h(_org_pri)}</span></span>
     <span class="mh-brandkit-chip"><span class="sw" id="bk-sw-sec" style="background:{_h(_org_sec)}"></span><span class="hex" id="bk-hex-sec">{_h(_org_sec)}</span></span>
     <span style="font-size:var(--fs-sm);color:var(--ink-dim);margin-left:auto">This palette flows into every caption graphic and motion reel.</span>
+  </div>
+  <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px">
+    <label style="display:block;margin-bottom:6px">Qualifying standards this club cares about</label>
+    <p style="font-size:12px;color:var(--ink-dim);margin:0 0 8px">Tick the competitions whose qualifying times should trigger "Qualified!" cards. Each table names its source document on the card.</p>
+    {standards_cbs}
   </div>
   <script>
   (function(){{
@@ -23125,7 +23378,34 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _turn_into_html = _render_turn_into_card(run_id)
+
+        # W.14: what this club's own approval history says it prefers —
+        # deterministic, explainable, straight from the telemetry store.
+        _prefs_html = ""
+        try:
+            from mediahub.observability.approval_telemetry import preference_summary
+
+            _prefs_pid = profile_id or _run_owner_profile_id(run_id) or ""
+            if _prefs_pid:
+                _prefs = preference_summary(_prefs_pid)
+                if _prefs["reasons"]:
+                    _reasons_li = "".join(
+                        f'<li style="margin:2px 0">{_h(r)}</li>' for r in _prefs["reasons"][:4]
+                    )
+                    _prefs_html = (
+                        '<div class="card no-print" style="margin-bottom:14px;'
+                        'border-left:3px solid var(--accent)">'
+                        '<div style="font-size:13px;font-weight:700">What this club prefers</div>'
+                        '<div style="font-size:12px;color:var(--ink-dim);margin:2px 0 6px">'
+                        f"Learned from {_prefs['total_events']} of your own approve/reject "
+                        "decisions — no guesswork, no AI ranking.</div>"
+                        f'<ul style="margin:0;padding-left:18px;font-size:13px">{_reasons_li}</ul>'
+                        "</div>"
+                    )
+        except Exception:
+            _prefs_html = ""
 
         # Single global AI-availability banner (same pattern as /review).
         try:
@@ -23193,6 +23473,16 @@ function mhSetupMode(mode) {{
   </div>
 </div>
 
+{_prefs_html}
+
+<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
+  </div>
+  <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+</div>
+
 <div class="no-print">{_turn_into_html}</div>
 
 <h2 style="margin:18px 0 12px">Approved cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(approved)}</span></h2>
@@ -23231,12 +23521,31 @@ function mhSetupMode(mode) {{
                 return jsonify({"error": f"invalid status: {status_str}"}), 400
             notes = payload.get("notes")
             ws.set_status(run_id, card_id, status, notes=notes)
+            # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(
+                    _run_owner_profile_id(run_id) or _active_profile_id() or "",
+                    run_id,
+                    card_id,
+                    _action,
+                )
             summary = ws.summary(run_id)
             return jsonify({"ok": True, "status": status_str, "summary": summary})
 
         if action == "set_edits":
             edits = payload.get("edits", {})
             ws.set_edits(run_id, card_id, edits)
+            _phase_w_after_status_change(
+                _run_owner_profile_id(run_id) or _active_profile_id() or "",
+                run_id,
+                card_id,
+                "edited",
+            )
             # Auto-bump status to 'edited' if currently in queue, so the user
             # sees that this card has been modified. Don't overwrite approved/posted.
             try:
@@ -24326,7 +24635,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var success = function(videoUrl) {{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
-    ['story', 'square', 'landscape'].forEach(function(f) {{
+    ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
       var label = f.charAt(0).toUpperCase() + f.slice(1);
       if (f === fmt) {{
         chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -27593,6 +27902,20 @@ voice, and queues them for one-click approval.</p>
         path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
             return jsonify({"error": "reel_not_rendered"}), 404
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            # The poster-frame PNG sidecar written beside the rendered MP4
+            # (visual/audio_mux.py) — a thumbnail for review surfaces and
+            # platforms that want one. 404s honestly when absent (e.g. a
+            # reel rendered before posters existed).
+            poster = path.with_suffix(".poster.png")
+            if not poster.exists():
+                return jsonify({"error": "poster_not_rendered"}), 404
+            return send_file(
+                str(poster),
+                mimetype="image/png",
+                as_attachment=False,
+                download_name=poster.name,
+            )
         return send_file(
             str(path),
             mimetype="video/mp4",
@@ -27886,6 +28209,18 @@ voice, and queues them for one-click approval.</p>
 
         buf = io.BytesIO()
         approval = []
+        # W.11: the approver-edited alt text (saved in review) outranks
+        # whatever the visual sidecar recorded at generation time.
+        _wf_alt_edits: dict[str, str] = {}
+        try:
+            _ws_zip = _get_wf_store()
+            if _ws_zip is not None:
+                for _cid, _st in (_ws_zip.load(run_id) or {}).items():
+                    _alt = ((_st.edited_captions or {}) if _st else {}).get("alt_text", "")
+                    if _alt:
+                        _wf_alt_edits[_cid] = _alt
+        except Exception:
+            _wf_alt_edits = {}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for brief_dir in sorted(vdir.iterdir()):
                 if not brief_dir.is_dir():
@@ -27913,7 +28248,11 @@ voice, and queues them for one-click approval.</p>
                     z.writestr(arcname, png.read_bytes())
                 # Caption
                 cap = visual.get("caption") or ""
-                alt = visual.get("alt_text") or ""
+                alt = (
+                    _wf_alt_edits.get(visual.get("content_item_id") or "")
+                    or visual.get("alt_text")
+                    or ""
+                )
                 z.writestr(
                     f"{run_id}/captions/{vid}.txt",
                     f"CAPTION:\n{cap}\n\nALT TEXT:\n{alt}\n",
@@ -28010,6 +28349,1134 @@ voice, and queues them for one-click approval.</p>
         )
         return _layout("File too large", body, active=""), 413
 
+    # ------------------------------------------------------------------
+    # Phase W — club data surfaces (ADR-0016)
+    # W.1 athletes + merge · W.2 consent · W.3 records · W.7 live meet ·
+    # W.8 season wraps · W.9 magic links · W.12 print exports
+    # ------------------------------------------------------------------
+
+    def _phase_w_org():
+        """Active workspace id, or None (pages render a sign-in prompt)."""
+        return _active_profile_id() or None
+
+    _PW_NO_ORG = (
+        '<div class="card"><h2>Pick an organisation first</h2>'
+        '<p class="dim">Club data is workspace-scoped. Sign in and choose your '
+        "organisation, then come back here.</p></div>"
+    )
+
+    @app.route("/club-data")
+    def club_data_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Club data", _PW_NO_ORG, active="clubdata")
+        tiles = [
+            (
+                url_for("athletes_page"),
+                "Athletes &amp; consent",
+                "Your swimmer roster across every meet — merge duplicate names, "
+                "set photo/name permission per athlete, import the consent "
+                "register, export it for the welfare officer.",
+            ),
+            (
+                url_for("club_records_page"),
+                "Club records",
+                "Import the records sheet once; every faster swim becomes a "
+                "ranked NEW CLUB RECORD card, and the table updates only when "
+                "you approve it.",
+            ),
+            (
+                url_for("live_meet_page"),
+                "Live meet",
+                "Point MediaHub at the host club's live-results page during a "
+                "gala. New results queue cards for approval as they land — "
+                "nothing posts itself.",
+            ),
+            (
+                url_for("season_wraps_page"),
+                "Season wraps",
+                "Month-in-numbers and season recap packs built from your stored "
+                "history — PBs, medals, records, debuts, busiest swimmer.",
+            ),
+        ]
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Club data</span>'
+            '<h1>The club&rsquo;s <em class="editorial">memory</em></h1>'
+            '<p class="lede">Athletes, consent, records and history — the layer that '
+            "makes milestone, record and recap content possible.</p></section>"
+            '<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">'
+            + "".join(
+                f'<a class="card" href="{href}" style="display:block;text-decoration:none">'
+                f'<h2 style="margin-top:0">{title}</h2><p class="dim">{desc}</p></a>'
+                for href, title, desc in tiles
+            )
+            + "</div>"
+        )
+        return _layout("Club data", body, active="clubdata")
+
+    # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
+
+    @app.route("/athletes")
+    def athletes_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Athletes", _PW_NO_ORG, active="clubdata")
+        from mediahub.athletes import list_athletes
+        from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
+
+        roster = list_athletes(pid)
+        consent = list_consent(pid)
+        regime = regime_active(pid)
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+
+        level_options = list(LEVEL_LABELS.items())
+        rows = []
+        for rec in roster:
+            current = (consent.get(rec.athlete_id) or {}).get("level") or "unknown"
+            opts = "".join(
+                f'<option value="{_h(val)}" {"selected" if val == current else ""}>'
+                f"{_h(label)}</option>"
+                for val, label in level_options
+                if val != "unknown"
+            )
+            unknown_opt = (
+                f'<option value="" {"selected" if current == "unknown" else ""}>'
+                f"{_h(LEVEL_LABELS['unknown'])}</option>"
+            )
+            aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
+            rows.append(
+                "<tr>"
+                f"<td><strong>{_h(rec.canonical_name)}</strong>"
+                + (
+                    f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
+                    if aliases
+                    else ""
+                )
+                + "</td>"
+                f"<td>{rec.race_count}</td>"
+                f"<td>{_h(str(rec.birth_year or ''))}</td>"
+                f'<td><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                f'<input type="hidden" name="action" value="set_consent"/>'
+                f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
+                f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
+                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Save</button>'
+                f"</form></td>"
+                "</tr>"
+            )
+        rows_html = (
+            "".join(rows)
+            if rows
+            else '<tr><td colspan="4" class="muted">No athletes yet — run a meet '
+            "through the pipeline, or click &ldquo;Build from past runs&rdquo; below.</td></tr>"
+        )
+
+        merge_opts = "".join(
+            f'<option value="{_h(r.athlete_id)}">{_h(r.canonical_name)} ({r.race_count} races)</option>'
+            for r in roster
+        )
+        regime_note = (
+            '<p class="tag good" style="margin:0">Consent enforcement is ACTIVE — '
+            "athletes with no consent on file are blocked from content.</p>"
+            if regime
+            else '<p class="tag warn" style="margin:0">No consent regime yet — cards '
+            "behave as before. Import your consent register (or switch enforcement "
+            "on) and unknown athletes become most-restricted automatically.</p>"
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
+  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
+  <p class="lede">One identity per swimmer across every meet. Milestones (debut,
+  50th race), records and season wraps hang off this roster — and so does
+  photo/name permission.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">{regime_note}
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    <form method="POST" action="{url_for("athletes_action")}">
+      <input type="hidden" name="action" value="toggle_enforce"/>
+      <button type="submit" class="btn secondary">{"Switch enforcement off" if regime else "Switch enforcement on"}</button>
+    </form>
+    <a class="btn secondary" href="{url_for("athletes_consent_export")}">Welfare-officer export (.csv)</a>
+    <form method="POST" action="{url_for("athletes_action")}">
+      <input type="hidden" name="action" value="backfill"/>
+      <button type="submit" class="btn secondary" title="Scan this organisation's past runs and build the roster">Build from past runs</button>
+    </form>
+  </div>
+</div>
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Roster</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Same swimmer twice?</h2>
+  <p class="dim" style="font-size:13px">Results files spell names differently
+  ("Maya Patel" / "Patel, Maya"). Merge them and the decision sticks for every
+  future upload. Merges are recorded in the audit log.</p>
+  <form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input type="hidden" name="action" value="merge"/>
+    <label>Keep</label><select name="keep_id">{merge_opts}</select>
+    <label>absorbs</label><select name="merge_id">{merge_opts}</select>
+    <button type="submit" class="btn">Merge</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Import the consent register (.csv)</h2>
+  <p class="dim" style="font-size:13px">One row per athlete:
+  <code>name, permission[, note]</code> &mdash; permission is one of
+  <code>photo ok</code>, <code>no photo</code>, <code>initials only</code>,
+  <code>do not feature</code>. Rows we can&rsquo;t read are reported, never guessed.</p>
+  <form method="POST" action="{url_for("athletes_action")}">
+    <input type="hidden" name="action" value="import_consent"/>
+    <textarea name="csv_text" rows="6" style="width:100%;max-width:640px"
+      placeholder="Maya Patel, initials only, parent form 2026&#10;Joe Bloggs, photo ok"></textarea>
+    <div style="margin-top:8px"><button type="submit" class="btn">Import</button></div>
+  </form>
+</div>
+"""
+        return _layout("Athletes & consent", body, active="clubdata")
+
+    @app.route("/athletes/action", methods=["POST"])
+    def athletes_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.athletes import backfill_from_runs, merge_athletes
+        from mediahub.safeguarding import import_csv as consent_import
+        from mediahub.safeguarding import regime_active, set_consent, set_enforce
+        from mediahub.safeguarding.consent import LEVELS as _CONSENT_LEVELS
+
+        actor = (session.get("user_email") or "web").strip()
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "set_consent":
+            athlete_id = (request.form.get("athlete_id") or "").strip()
+            level = (request.form.get("level") or "").strip()
+            if level in _CONSENT_LEVELS and athlete_id:
+                set_consent(pid, athlete_id, level, actor=actor)
+                msg = "Consent updated."
+            elif athlete_id and not level:
+                msg = "Pick a permission level first."
+        elif action == "merge":
+            keep_id = (request.form.get("keep_id") or "").strip()
+            merge_id = (request.form.get("merge_id") or "").strip()
+            if keep_id and merge_id and keep_id != merge_id:
+                ok = merge_athletes(pid, keep_id, merge_id, actor=actor)
+                msg = "Merged — the decision is recorded and persists." if ok else "Merge failed."
+            else:
+                msg = "Pick two different athletes to merge."
+        elif action == "toggle_enforce":
+            now_on = regime_active(pid)
+            set_enforce(pid, not now_on, actor=actor)
+            msg = "Consent enforcement switched " + ("off." if now_on else "on.")
+        elif action == "import_consent":
+            result = consent_import(pid, request.form.get("csv_text") or "", actor=actor)
+            msg = f"Imported {result['imported']} rows."
+            if result["skipped"]:
+                msg += f" Skipped {len(result['skipped'])} (unreadable level/name)."
+        elif action == "backfill":
+            prof = load_profile(pid)
+
+            def _is_ours(code):
+                return prof.is_ours(code, None) if prof else True
+
+            stats = backfill_from_runs(pid, RUNS_DIR, is_ours=_is_ours)
+            msg = (
+                f"Scanned {stats['runs']} past runs — {stats['swims']} swims logged "
+                "into the roster."
+            )
+        return redirect(url_for("athletes_page", msg=msg))
+
+    @app.route("/athletes/consent.csv")
+    def athletes_consent_export():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.safeguarding import export_csv
+
+        out = export_csv(pid)
+        resp = make_response(out)
+        resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+        resp.headers["Content-Disposition"] = 'attachment; filename="consent-register.csv"'
+        return resp
+
+    # ---- W.3: club records ------------------------------------------------
+
+    @app.route("/records")
+    def club_records_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Club records", _PW_NO_ORG, active="clubdata")
+        from mediahub.club_records import list_records
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        records = list_records(pid)
+        rows = "".join(
+            "<tr>"
+            f"<td>{r.distance}m {_h(r.stroke)}</td><td>{_h(r.course)}</td>"
+            f"<td>{_h(r.gender)}</td><td>{_h(r.age_group)}</td>"
+            f"<td><strong>{_h(r.time_str)}</strong></td><td>{_h(r.holder)}</td>"
+            f"<td>{_h(r.set_date or '')}</td>"
+            f'<td><form method="POST" action="{url_for("club_records_action")}">'
+            f'<input type="hidden" name="action" value="delete"/>'
+            f'<input type="hidden" name="distance" value="{r.distance}"/>'
+            f'<input type="hidden" name="stroke" value="{_h(r.stroke)}"/>'
+            f'<input type="hidden" name="course" value="{_h(r.course)}"/>'
+            f'<input type="hidden" name="gender" value="{_h(r.gender)}"/>'
+            f'<input type="hidden" name="age_group" value="{_h(r.age_group)}"/>'
+            f'<button type="submit" class="btn secondary" style="font-size:11px;padding:3px 8px">Remove</button>'
+            f"</form></td></tr>"
+            for r in records
+        ) or (
+            '<tr><td colspan="8" class="muted">No records yet — import the club '
+            "records sheet below. That one import is what turns record swims into "
+            "NEW CLUB RECORD cards.</td></tr>"
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Records</span>
+  <h1>Club <em class="editorial">records</em></h1>
+  <p class="lede">The highest-emotion post a club makes. When a swim beats a mark
+  here, a NEW CLUB RECORD card outranks everything — and this table only changes
+  when you approve that card.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Current records ({len(records)})</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Event</th><th>Course</th><th>Sex</th><th>Age group</th><th>Time</th><th>Holder</th><th>Set</th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Import the records sheet (.csv)</h2>
+  <p class="dim" style="font-size:13px">One row per record:
+  <code>event, course, sex, age group, time, holder[, date]</code><br/>
+  e.g. <code>100 Freestyle, LC, F, open, 1:02.10, Erin Jones, 2019-05-01</code>
+  &mdash; age group is <code>open</code> or a band like <code>13-14</code>.
+  Unreadable rows are reported back, never guessed.</p>
+  <form method="POST" action="{url_for("club_records_action")}">
+    <input type="hidden" name="action" value="import"/>
+    <textarea name="csv_text" rows="8" style="width:100%;max-width:640px"
+      placeholder="100 Freestyle, LC, F, open, 1:02.10, Erin Jones, 2019-05-01"></textarea>
+    <div style="margin-top:8px"><button type="submit" class="btn">Import records</button></div>
+  </form>
+</div>
+"""
+        return _layout("Club records", body, active="clubdata")
+
+    @app.route("/records/action", methods=["POST"])
+    def club_records_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.club_records import delete_record, import_csv
+
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "import":
+            result = import_csv(pid, request.form.get("csv_text") or "")
+            msg = f"Imported {result['imported']} records."
+            if result["skipped"]:
+                msg += f" Skipped {len(result['skipped'])} unreadable rows."
+        elif action == "delete":
+            try:
+                ok = delete_record(
+                    pid,
+                    distance=int(request.form.get("distance") or 0),
+                    stroke=request.form.get("stroke") or "",
+                    course=request.form.get("course") or "",
+                    gender=request.form.get("gender") or "",
+                    age_group=request.form.get("age_group") or "open",
+                )
+                msg = "Record removed." if ok else "Record not found."
+            except (TypeError, ValueError):
+                msg = "Record not found."
+        return redirect(url_for("club_records_page", msg=msg))
+
+    # ---- W.7: live meet mode ----------------------------------------------
+
+    def _live_watch_runner(watch, data: bytes, new_swim_keys: list[str]) -> None:
+        """Re-run the full pipeline into the watch's fixed run id.
+
+        Idempotent per swim key: card ids derive from swim identity, so a
+        re-run upserts the same cards; the workflow sidecar (approvals so
+        far) is a separate file and survives. Cards land in QUEUE — the
+        autonomy posture is structural, nothing here can publish.
+        """
+        from mediahub.web.pipeline_v4 import run_pipeline_v4
+
+        run = run_pipeline_v4(
+            data,
+            f"live-{watch.id}.html",
+            profile_id=watch.profile_id,
+            run_id=watch.run_id or watch.id,
+        )
+        _persist_run(run, f"Live watch: {watch.label or watch.url}")
+
+    @app.route("/live")
+    def live_meet_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Live meet", _PW_NO_ORG, active="clubdata")
+        from mediahub.results_fetch.live_watch import list_watches
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        watches = list_watches(pid)
+        rows = (
+            "".join(
+                "<tr>"
+                f"<td>{_h(w.label or w.url)}<br/><span class='muted' style='font-size:11px'>{_h(w.url)}</span></td>"
+                f"<td><span class='tag {'good' if w.status == 'active' else 'warn'}'>{_h(w.status)}</span></td>"
+                f"<td>every {w.interval_minutes} min</td>"
+                f"<td>{w.polls} polls &middot; {w.new_swims_total} new swims</td>"
+                f"<td>{_h((w.last_error or '')[:80])}</td>"
+                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a></td>'
+                f'<td><form method="POST" action="{url_for("live_meet_action")}">'
+                f'<input type="hidden" name="action" value="stop"/>'
+                f'<input type="hidden" name="watch_id" value="{_h(w.id)}"/>'
+                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px"'
+                f"{' disabled' if w.status != 'active' else ''}>Stop</button></form></td>"
+                "</tr>"
+                for w in watches
+            )
+            or '<tr><td colspan="7" class="muted">No live watches yet.</td></tr>'
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Live meet</span>
+  <h1>Live <em class="editorial">meet</em> mode</h1>
+  <p class="lede">Paste the host club&rsquo;s live-results page. MediaHub checks it
+  politely during the gala; each new result runs through recognition and queues a
+  card for approval — you get a push, nothing posts itself, and the watch stops
+  on its own.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Watch a results page</h2>
+  <p class="dim" style="font-size:13px">Use the meet results page on the host
+  club&rsquo;s own website or results.swimming.org. Meet Mobile and rankings sites
+  are not supported — they don&rsquo;t allow it.</p>
+  <form method="POST" action="{url_for("live_meet_action")}" style="display:grid;gap:8px;max-width:640px">
+    <input type="hidden" name="action" value="create"/>
+    <label>Live results page URL</label>
+    <input type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
+    <label>Name (so you recognise it)</label>
+    <input type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div><label>Check every</label>
+        <select name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
+      <div><label>Stop after</label>
+        <select name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
+    </div>
+    <div><button type="submit" class="btn">Start watching</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Watches</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th></th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+"""
+        return _layout("Live meet", body, active="clubdata")
+
+    @app.route("/live/action", methods=["POST"])
+    def live_meet_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from datetime import timedelta as _td
+
+        from mediahub.results_fetch.live_watch import create_watch, stop_watch
+
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "create":
+            try:
+                hours = max(1, min(48, int(request.form.get("hours") or 12)))
+            except (TypeError, ValueError):
+                hours = 12
+            rid = uuid.uuid4().hex[:12]
+            try:
+                watch = create_watch(
+                    pid,
+                    (request.form.get("url") or "").strip(),
+                    interval_minutes=int(request.form.get("interval_minutes") or 5),
+                    expires_at=datetime.now(timezone.utc) + _td(hours=hours),
+                    label=(request.form.get("label") or "").strip(),
+                    run_id=rid,
+                    review_url=url_for("review", run_id=rid, _external=True),
+                )
+                _ensure_live_watch_schedule()
+                msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
+            except ValueError as e:
+                msg = f"Could not start the watch: {e}"
+        elif action == "stop":
+            ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
+            msg = "Watch stopped." if ok else "Watch not found."
+        return redirect(url_for("live_meet_page", msg=msg))
+
+    def _ensure_live_watch_schedule() -> None:
+        """One global poll task drives every org's due watches (idempotent)."""
+        try:
+            from mediahub.workflow.schedule import create_task as _ct
+            from mediahub.workflow.schedule import list_tasks as _lt
+
+            if not any(t.task_type == "live_meet_poll" for t in _lt()):
+                _ct(
+                    name="Live meet watch poll (W.7)",
+                    task_type="live_meet_poll",
+                    schedule_kind="cron",
+                    schedule_expr="*/2 * * * *",
+                )
+        except Exception:
+            log.warning("could not ensure live watch schedule", exc_info=True)
+
+    # ---- W.8: season wraps -------------------------------------------------
+
+    @app.route("/wraps")
+    def season_wraps_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Season wraps", _PW_NO_ORG, active="clubdata")
+        from mediahub.season_wrap import list_drafts
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        drafts = list_drafts(pid)
+        rows = (
+            "".join(
+                "<tr>"
+                f"<td><strong>{_h(d.get('title', d.get('id', '')))}</strong></td>"
+                f"<td>{_h((d.get('window') or {}).get('start', ''))} &rarr; {_h((d.get('window') or {}).get('end', ''))}</td>"
+                f"<td>{(d.get('stats') or {}).get('n_runs', 0)} meets</td>"
+                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                f'href="{url_for("season_wrap_view", draft_id=d.get("id", ""))}">Open</a></td>'
+                "</tr>"
+                for d in drafts
+            )
+            or '<tr><td colspan="4" class="muted">No wrap drafts yet — generate one below.</td></tr>'
+        )
+        try:
+            from mediahub.workflow.schedule import list_tasks as _lt
+
+            monthly_on = any(
+                t.task_type == "season_wrap_draft" and (t.params or {}).get("profile_id") == pid
+                for t in _lt()
+            )
+        except Exception:
+            monthly_on = False
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Wraps</span>
+  <h1>Season <em class="editorial">wraps</em></h1>
+  <p class="lede">Your stored history, turned into &ldquo;month in numbers&rdquo; and
+  season-recap packs — PBs, medals, records, debuts, the busiest swimmer.
+  Drafted for approval, never auto-posted.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="month"/>
+    <button type="submit" class="btn">Draft last month&rsquo;s wrap</button>
+  </form>
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="season"/>
+    <button type="submit" class="btn secondary">Draft this season&rsquo;s wrap (since 1 Sept)</button>
+  </form>
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="{"monthly_off" if monthly_on else "monthly_on"}"/>
+    <button type="submit" class="btn secondary">{"Disable monthly auto-draft" if monthly_on else "Enable monthly auto-draft"}</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Drafts</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Wrap</th><th>Window</th><th>Coverage</th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+"""
+        return _layout("Season wraps", body, active="clubdata")
+
+    @app.route("/wraps/action", methods=["POST"])
+    def season_wraps_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.season_wrap import (
+            build_monthly_draft,
+            build_season_draft,
+            save_draft,
+        )
+
+        action = (request.form.get("action") or "").strip()
+        now = datetime.now(timezone.utc)
+        msg = ""
+        if action == "month":
+            year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+            draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
+            save_draft(pid, draft)
+            msg = f"Drafted: {draft.get('title', '')}"
+        elif action == "season":
+            season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
+            draft = build_season_draft(
+                pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
+            )
+            save_draft(pid, draft)
+            msg = f"Drafted: {draft.get('title', '')}"
+        elif action == "monthly_on":
+            try:
+                from mediahub.workflow.schedule import create_task as _ct
+                from mediahub.workflow.schedule import list_tasks as _lt
+
+                if not any(
+                    t.task_type == "season_wrap_draft" and (t.params or {}).get("profile_id") == pid
+                    for t in _lt()
+                ):
+                    _ct(
+                        name=f"Monthly wrap draft — {pid}",
+                        task_type="season_wrap_draft",
+                        schedule_kind="monthly",
+                        schedule_expr="1 06:30",
+                        params={"profile_id": pid, "runs_dir": str(RUNS_DIR)},
+                    )
+                msg = "Monthly auto-draft enabled — a wrap drafts itself on the 1st."
+            except Exception as e:
+                msg = f"Could not enable: {e}"
+        elif action == "monthly_off":
+            try:
+                from mediahub.workflow.schedule import delete_task as _dt
+                from mediahub.workflow.schedule import list_tasks as _lt
+
+                for t in _lt():
+                    if (
+                        t.task_type == "season_wrap_draft"
+                        and (t.params or {}).get("profile_id") == pid
+                    ):
+                        _dt(t.id)
+                msg = "Monthly auto-draft disabled."
+            except Exception as e:
+                msg = f"Could not disable: {e}"
+        return redirect(url_for("season_wraps_page", msg=msg))
+
+    @app.route("/wraps/<draft_id>")
+    def season_wrap_view(draft_id: str):
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Season wrap", _PW_NO_ORG, active="clubdata")
+        from mediahub.season_wrap import load_draft
+
+        draft = load_draft(pid, draft_id)
+        if not draft:
+            abort(404)
+        chips = "".join(
+            f'<div style="border:1px solid var(--border);border-radius:10px;padding:14px 18px;text-align:center">'
+            f'<div style="font-size:28px;font-weight:800">{_h(str(v))}</div>'
+            f'<div class="muted" style="font-size:12px">{_h(str(k))}</div></div>'
+            for k, v in (draft.get("stat_chips") or [])
+        )
+        highlights = (
+            "".join(
+                "<tr>"
+                f"<td>{_h(h.get('swimmer_name', ''))}</td><td>{_h(h.get('event', ''))}</td>"
+                f"<td>{_h(h.get('headline', ''))}</td>"
+                "</tr>"
+                for h in (draft.get("highlights") or [])
+            )
+            or '<tr><td colspan="3" class="muted">No highlights in this window.</td></tr>'
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Season wrap</span>
+  <h1>{_h(draft.get("title", "Wrap"))}</h1>
+  <p class="lede">Deterministic numbers from your stored run history. Print the
+  noticeboard poster, or use the highlights to build posts.</p>
+</section>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">{chips}</div>
+<div class="card" style="margin-bottom:16px">
+  <a class="btn" href="{url_for("season_wrap_poster", draft_id=draft_id)}">Print A4 noticeboard poster (PDF)</a>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Highlights</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Swimmer</th><th>Event</th><th>What happened</th></tr></thead>
+    <tbody>{highlights}</tbody>
+  </table>
+</div>
+"""
+        return _layout(draft.get("title", "Season wrap"), body, active="clubdata")
+
+    @app.route("/wraps/<draft_id>/poster.pdf")
+    def season_wrap_poster(draft_id: str):
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.graphic_renderer.print_export import (
+            build_poster_html,
+            render_html_to_pdf,
+        )
+        from mediahub.season_wrap import load_draft
+
+        draft = load_draft(pid, draft_id)
+        if not draft:
+            abort(404)
+        prof = load_profile(pid)
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        highlight_rows = [
+            {
+                "swimmer": h.get("swimmer_name", ""),
+                "event": h.get("event", ""),
+                "time": (h.get("raw_facts") or {}).get("time", "")
+                if isinstance(h.get("raw_facts"), dict)
+                else "",
+                "note": h.get("headline", ""),
+            }
+            for h in (draft.get("highlights") or [])[:10]
+        ]
+        html = build_poster_html(
+            title=draft.get("title", "Club wrap"),
+            meet_name=", ".join((draft.get("stats") or {}).get("meet_names", [])[:3]),
+            stat_lines=[(str(k), str(v)) for k, v in (draft.get("stat_chips") or [])],
+            highlight_rows=highlight_rows,
+            club_name=(prof.display_name if prof else pid),
+            brand=brand,
+        )
+        out = DATA_DIR / "print_exports" / f"wrap-{pid}-{draft_id}.pdf"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        render_html_to_pdf(html, out)
+        return send_file(
+            out,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"{draft_id}-poster.pdf",
+        )
+
+    # ---- W.9: magic-link mobile approvals -----------------------------------
+
+    @app.route("/api/runs/<run_id>/magic-link", methods=["POST"])
+    def api_mint_magic_link(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.web.magic_links import mint_review_token
+
+        pid = _run_owner_profile_id(run_id) or _phase_w_org() or ""
+        token = mint_review_token(app.secret_key or "", run_id, pid)
+        link = url_for("magic_review_page", token=token, _external=True)
+        # Best-effort push to the org's configured channels (ntfy/webhook).
+        sent = False
+        try:
+            from mediahub.notify.channels import Notification, all_channels
+
+            n = Notification(
+                title="MediaHub: pack ready to review",
+                message="Tap to approve this run's cards from your phone — no login needed.",
+                tags=("incoming_envelope",),
+                click_url=link,
+            )
+            for ch in all_channels():
+                try:
+                    sent = ch.send(n) or sent
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            from mediahub.workflow.autonomy import AuditLog
+
+            AuditLog().record(
+                pid or "-",
+                f"magiclink:{run_id}",
+                "magic_link_minted",
+                tool="api_mint_magic_link",
+                args={"run_id": run_id, "notified": sent},
+                result="minted",
+            )
+        except Exception:
+            pass
+        return jsonify({"ok": True, "url": link, "notified": sent, "expires_hours": 72})
+
+    @app.route("/api/runs/<run_id>/magic-link/revoke", methods=["POST"])
+    def api_revoke_magic_link(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.web.magic_links import revoke_run_tokens
+
+        revoke_run_tokens(run_id)
+        return jsonify({"ok": True, "revoked": True})
+
+    def _magic_ctx_or_error(token: str):
+        from mediahub.web.magic_links import (
+            MagicLinkError,
+            MagicLinkExpired,
+            MagicLinkRevoked,
+            verify_review_token,
+        )
+
+        try:
+            return verify_review_token(app.secret_key or "", token), None
+        except MagicLinkExpired:
+            return None, "This review link has expired. Ask for a fresh one."
+        except MagicLinkRevoked:
+            return None, "This review link was revoked. Ask for a fresh one."
+        except MagicLinkError:
+            return None, "This review link isn't valid."
+
+    def _magic_page(token: str, ctx: dict, flash: str = "") -> str:
+        """Mobile-first lite review: approve / edit caption / reject only.
+
+        Deliberately self-contained HTML (no app chrome, no JS framework):
+        pool-deck phones on one bar of signal are the target device.
+        """
+        run_id = ctx["run_id"]
+        data = _load_run(run_id) or {}
+        from mediahub.content_pack.builder import build_grouped_pack
+
+        pack = build_grouped_pack(data, ctx.get("profile_id") or "", RUNS_DIR)
+        items = (
+            list(pack.get("main_feed") or [])
+            + list(pack.get("stories") or [])
+            + list(pack.get("needs_review") or [])
+        )
+        cards_html = []
+        for item in items:
+            a = item.get("achievement") or {}
+            card_id = a.get("swim_id") or ""
+            if not card_id:
+                continue
+            status = item.get("wf_status", "queue")
+            consent = item.get("consent") or {}
+            blocked = bool(item.get("consent_blocked"))
+            caption = item.get("caption_only") or a.get("headline") or ""
+            pill = {
+                "approved": '<span class="pill ok">Approved</span>',
+                "rejected": '<span class="pill bad">Rejected</span>',
+                "edited": '<span class="pill warn">Edited</span>',
+            }.get(status, '<span class="pill">Waiting</span>')
+            block_html = (
+                f'<p class="blocked">&#9888; {_h(consent.get("reason") or "blocked: no consent on file")}</p>'
+                if blocked
+                else ""
+            )
+            action_url = url_for("magic_card_action", token=token, card_id=card_id)
+            cards_html.append(
+                f"""
+<div class="card{" is-blocked" if blocked else ""}">
+  <div class="card-top">{pill}<span class="evt">{_h(a.get("event", ""))}</span></div>
+  <h2>{_h(a.get("headline", ""))}</h2>
+  {block_html}
+  <form method="POST" action="{action_url}">
+    <textarea name="caption" rows="3" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
+    <div class="btns">
+      <button class="approve" name="action" value="approve" {"disabled" if blocked else ""}>Approve</button>
+      <button class="save" name="action" value="save_caption" {"disabled" if blocked else ""}>Save edit</button>
+      <button class="reject" name="action" value="reject">Reject</button>
+    </div>
+  </form>
+</div>"""
+            )
+        meet_name = ((data.get("meet") or {}).get("name")) or data.get("file_name") or run_id
+        flash_html = f'<p class="flash">{_h(flash)}</p>' if flash else ""
+        return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex"/>
+<title>Approve — {_h(meet_name)}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin:0; padding:14px; background:#0A0B11; color:#F5F2E8;
+         font:16px/1.45 system-ui, -apple-system, sans-serif; }}
+  h1 {{ font-size:20px; margin:6px 0 2px; }}
+  .sub {{ color:#9a968c; font-size:13px; margin:0 0 14px; }}
+  .card {{ border:1px solid #2a2c36; border-radius:12px; padding:14px; margin-bottom:14px; background:#11131c; }}
+  .card.is-blocked {{ opacity:0.75; border-color:#7a2733; }}
+  .card-top {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }}
+  .evt {{ color:#9a968c; font-size:12px; }}
+  h2 {{ font-size:16px; margin:0 0 8px; }}
+  .pill {{ font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid #444; }}
+  .pill.ok {{ border-color:#2e7d32; color:#7bd88a; }}
+  .pill.bad {{ border-color:#a33; color:#ff8a80; }}
+  .pill.warn {{ border-color:#b8860b; color:#ffd54f; }}
+  .blocked {{ color:#ff8a80; font-size:13px; }}
+  textarea {{ width:100%; background:#0A0B11; color:#F5F2E8; border:1px solid #2a2c36;
+             border-radius:8px; padding:10px; font-size:15px; }}
+  .btns {{ display:flex; gap:8px; margin-top:10px; }}
+  button {{ flex:1; min-height:48px; border-radius:10px; border:1px solid #2a2c36;
+           font-size:15px; font-weight:700; cursor:pointer; }}
+  .approve {{ background:#1d4d27; color:#c9f0cf; border-color:#2e7d32; }}
+  .save {{ background:#1c2433; color:#cfe0ff; }}
+  .reject {{ background:#33161b; color:#ffc4be; border-color:#7a2733; }}
+  button:disabled {{ opacity:0.45; }}
+  .flash {{ background:#1d4d27; border:1px solid #2e7d32; padding:10px 12px; border-radius:8px; }}
+  .done {{ color:#9a968c; font-size:13px; text-align:center; margin:20px 0; }}
+</style></head><body>
+<h1>{_h(meet_name)}</h1>
+<p class="sub">Approve from your phone — changes save instantly. This link expires
+and can be revoked by the club.</p>
+{flash_html}
+{"".join(cards_html) or '<p class="done">Nothing waiting for review.</p>'}
+<p class="done">MediaHub &middot; secure review link</p>
+</body></html>"""
+
+    @app.route("/m/<token>")
+    def magic_review_page(token: str):
+        ctx, err = _magic_ctx_or_error(token)
+        if ctx is None:
+            return (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+                "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
+                "<title>Link unavailable</title>"
+                "<style>body{font-family:system-ui;background:var(--bg,black);"
+                "color:white;padding:32px 18px;text-align:center}</style></head>"
+                f"<body><h1>\U0001f512</h1><p>{_h(err)}</p></body></html>",
+                410,
+            )
+        flash = (request.args.get("ok") or "").strip()
+        return _magic_page(token, ctx, flash)
+
+    @app.route("/m/<token>/card/<path:card_id>", methods=["POST"])
+    def magic_card_action(token: str, card_id: str):
+        ctx, err = _magic_ctx_or_error(token)
+        if ctx is None:
+            abort(410)
+        run_id = ctx["run_id"]
+        action = (request.form.get("action") or "").strip()
+        ws = WorkflowStore(RUNS_DIR)
+        pid = ctx.get("profile_id") or _run_owner_profile_id(run_id) or ""
+        flash = ""
+        if action == "approve":
+            ws.set_status(run_id, card_id, CardStatus.APPROVED, notes="via magic link")
+            _phase_w_after_status_change(pid, run_id, card_id, "approved", via="magic_link")
+            flash = "Approved."
+        elif action == "reject":
+            ws.set_status(run_id, card_id, CardStatus.REJECTED, notes="via magic link")
+            _phase_w_after_status_change(pid, run_id, card_id, "rejected", via="magic_link")
+            flash = "Rejected."
+        elif action == "save_caption":
+            caption = (request.form.get("caption") or "").strip()
+            if caption:
+                ws.set_edits(run_id, card_id, {"caption": caption})
+                _phase_w_after_status_change(pid, run_id, card_id, "edited", via="magic_link")
+                flash = "Caption saved."
+        try:
+            from mediahub.workflow.autonomy import AuditLog
+
+            AuditLog().record(
+                pid or "-",
+                f"magiclink:{run_id}",
+                "magic_link_action",
+                tool="magic_card_action",
+                args={"run_id": run_id, "card_id": card_id, "action": action},
+                result=flash or "noop",
+            )
+        except Exception:
+            pass
+        return redirect(url_for("magic_review_page", token=token, ok=flash))
+
+    # ---- W.14 + W.3 approval-seam hook --------------------------------------
+
+    def _phase_w_after_status_change(
+        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web"
+    ) -> None:
+        """Telemetry + records-on-approval, fed by every approval surface.
+
+        Best-effort by design: a telemetry or records failure must never
+        block the approval itself.
+        """
+        card = None
+        try:
+            data = _load_run(run_id) or {}
+            for ra in (data.get("recognition_report") or {}).get("ranked_achievements") or []:
+                a = ra.get("achievement") or {}
+                if a.get("swim_id") == card_id:
+                    card = ra
+                    break
+        except Exception:
+            card = None
+        try:
+            from mediahub.observability.approval_telemetry import record_event
+
+            a = (card or {}).get("achievement") or {}
+            prof = load_profile(pid) if pid else None
+            record_event(
+                pid or "",
+                run_id,
+                card_id,
+                action,
+                achievement_type=a.get("type", ""),
+                post_angle=(card or {}).get("post_angle") or a.get("post_angle", ""),
+                tone=(getattr(prof, "tone", "") or "") if prof else "",
+                quality_band=str((card or {}).get("quality_band") or ""),
+                via=via,
+            )
+        except Exception:
+            log.warning("approval telemetry failed", exc_info=True)
+        if action == "approved" and card is not None:
+            try:
+                from mediahub.club_records import apply_approved_card
+
+                a = card.get("achievement") or {}
+                if a.get("type") == "club_record" and pid:
+                    updated = apply_approved_card(pid, dict(card, run_id=run_id))
+                    if updated:
+                        log.info("club record table updated from approved card %s", card_id)
+            except Exception:
+                log.warning("club record approval hook failed", exc_info=True)
+
+    # ---- W.12: print exports on the pack ------------------------------------
+
+    @app.route("/pack/<run_id>/certificates.zip")
+    def pack_certificates_zip(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        import io as _io
+        import zipfile as _zip
+
+        from mediahub.content_pack.builder import build_grouped_pack
+        from mediahub.graphic_renderer.print_export import (
+            build_certificate_html,
+            render_html_to_pdf,
+        )
+
+        data = _load_run(run_id)
+        if not data:
+            abort(404)
+        pid = _run_owner_profile_id(run_id) or ""
+        prof = load_profile(pid) if pid else None
+        pack = build_grouped_pack(data, pid, RUNS_DIR)
+        approved = [
+            item
+            for group in ("main_feed", "stories", "needs_review")
+            for item in (pack.get(group) or [])
+            if item.get("wf_status") in ("approved", "posted") and not item.get("consent_blocked")
+        ]
+        if not approved:
+            return (
+                _layout(
+                    "Certificates",
+                    '<div class="card"><h2>No approved cards yet</h2>'
+                    '<p class="dim">Certificates are printed from approved achievements '
+                    "only — approve some cards first, then come back.</p></div>",
+                ),
+                200,
+            )
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        meet = data.get("meet") or {}
+        meet_name = meet.get("name") or data.get("file_name") or run_id
+        meet_date = str(meet.get("start_date") or "")
+        out_dir = DATA_DIR / "print_exports" / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for i, item in enumerate(approved):
+                a = item.get("achievement") or {}
+                name = a.get("swimmer_name") or "Swimmer"
+                facts = a.get("raw_facts") or {}
+                time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
+                html = build_certificate_html(
+                    swimmer_name=name,
+                    event_label=a.get("event", ""),
+                    time_str=str(time_str),
+                    achievement_headline=a.get("headline", "Achievement"),
+                    meet_name=meet_name,
+                    meet_date=meet_date,
+                    club_name=(prof.display_name if prof else pid or "Our club"),
+                    brand=brand,
+                    detail_line=a.get("angle_hint", ""),
+                )
+                pdf_path = out_dir / f"cert-{i:02d}.pdf"
+                render_html_to_pdf(html, pdf_path)
+                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
+                zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"certificates-{run_id}.zip",
+        )
+
+    # ---- W.6: entry-file parsing for the event preview -----------------------
+
+    @app.route("/api/event-preview/parse-entries", methods=["POST"])
+    def api_event_preview_parse_entries():
+        """Turn an uploaded entry file into prefilled preview-form fields.
+
+        LENEX entries parse natively; CSV/TSV/plain text pass through with
+        light normalisation; anything unreadable returns an honest error.
+        Zero typing is the goal (W.6)."""
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"ok": False, "error": "No file uploaded."}), 400
+        data = f.read()
+        name = (f.filename or "").lower()
+        meet_name = ""
+        entries_text = ""
+        n_rows = 0
+        try:
+            if name.endswith((".lef", ".lxf")) or b"<LENEX" in data[:2048].upper():
+                from mediahub.interpreter.lenex_parser import (
+                    parse_lenex,
+                    parse_lenex_entries,
+                )
+
+                rows = parse_lenex_entries(data)
+                try:
+                    meet_name = parse_lenex(data).meet_name or ""
+                except Exception:
+                    meet_name = ""
+                lines = []
+                for r in rows:
+                    bits = [
+                        r.get("swimmer_name") or "",
+                        f"{r.get('distance_m') or ''}{(' ' + r['stroke']) if r.get('stroke') else ''}".strip(),
+                        r.get("entry_time") or "",
+                    ]
+                    lines.append(" — ".join(b for b in bits if b))
+                entries_text = "\n".join(lines)
+                n_rows = len(rows)
+            else:
+                text = data.decode("utf-8", errors="replace")
+                cleaned = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                if not cleaned:
+                    return jsonify(
+                        {"ok": False, "error": "Couldn't read any entries from that file."}
+                    ), 422
+                entries_text = "\n".join(cleaned[:400])
+                n_rows = len(cleaned)
+        except Exception:
+            log.warning("entry-file parse failed", exc_info=True)
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Couldn't read that entry file. Try the LENEX (.lef/.lxf) "
+                        "export from the meet organiser, or paste the entries as text."
+                    ),
+                }
+            ), 422
+        return jsonify(
+            {"ok": True, "meet_name": meet_name, "entries_text": entries_text, "rows": n_rows}
+        )
+
     # Start the in-process scheduler once per worker. Idempotent and self-
     # guarded (no-ops under pytest and when MEDIAHUB_SCHEDULER=0). Safe under
     # 2 workers because each due (task, UTC-slot) is fired via a single atomic
@@ -28032,6 +29499,22 @@ voice, and queues them for one-click approval.</p>
         from mediahub.workflow.approval import reconcile_all_approval_signal_cadences
 
         reconcile_all_approval_signal_cadences()
+        # W.7: live-meet watch polling — cards queue for approval only;
+        # the runner re-runs the pipeline into the watch's fixed run id.
+        try:
+            from mediahub.results_fetch.live_watch import register_live_watch_task
+
+            register_live_watch_task(_live_watch_runner)
+        except Exception:
+            log.warning("live watch task not registered", exc_info=True)
+        # W.8: monthly season-wrap drafts (per-org schedule rows are created
+        # from the Wraps page; this just registers the handler).
+        try:
+            from mediahub.season_wrap import register_season_wrap_task
+
+            register_season_wrap_task()
+        except Exception:
+            log.warning("season wrap task not registered", exc_info=True)
         # PC.7: the demo-run sweep — demo previews are self-cleaning. The
         # task type is registered unconditionally (cheap no-op when there
         # are no demo runs); the daily schedule row is ensured once.

@@ -8,14 +8,19 @@ from __future__ import annotations
 
 from mediahub.recognition.registry import register_sport
 from swim_content_v5.achievements import get_all_detectors
+from .achievements.club_record import ClubRecordDetector
+from .achievements.milestones import MilestoneDetector
 from .achievements.official_pb import OfficialPBDetector
 
 
 def production_detectors() -> list:
     """The full swimming detector set: OfficialPBDetector first (it covers
     the swim-equals-listed-PB case the plain PB detectors can't fire on),
-    then the V5 detector suite."""
-    return [OfficialPBDetector()] + get_all_detectors()
+    then the V5 detector suite, then the Phase W registry-fed detectors
+    (milestones, club records — silent without workspace context)."""
+    return (
+        [OfficialPBDetector()] + get_all_detectors() + [MilestoneDetector(), ClubRecordDetector()]
+    )
 
 
 def init():

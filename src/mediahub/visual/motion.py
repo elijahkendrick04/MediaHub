@@ -49,12 +49,13 @@ COMP_STORY = "StoryCard"
 COMP_REEL = "MeetReel"
 
 # Output formats (platform comprehensiveness): the canonical 9:16 story plus
-# the 1:1 feed square and 16:9 landscape cuts. The TSX compositions lay out
-# responsively from useVideoConfig(), so one composition serves every size.
-# "story" is the default and keeps every pre-format cache key and output
-# filename byte-identical.
+# the 4:5 portrait feed cut, the 1:1 feed square and 16:9 landscape cuts.
+# The TSX compositions lay out responsively from useVideoConfig(), so one
+# composition serves every size. "story" is the default and keeps every
+# pre-format cache key and output filename byte-identical.
 MOTION_FORMATS: dict[str, tuple[int, int]] = {
     "story": (1080, 1920),
+    "portrait": (1080, 1350),
     "square": (1080, 1080),
     "landscape": (1920, 1080),
 }
@@ -482,6 +483,152 @@ def _card_manifest_axes(card_props: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Audio + poster finishing (engine-agnostic; see visual/audio_mux.py)
+# ---------------------------------------------------------------------------
+
+
+def _story_audio_plan(card_props: dict, brand_dict: dict):
+    """The audio plan for one story render, or None for today's silent path.
+
+    Built from the same props the composition displays (zero invention; see
+    visual/narration.py). None when no audio source is configured — which
+    also keeps the cache payload, and therefore every existing cache key,
+    byte-identical to the pre-audio behaviour. The story line is one
+    sentence; the mux's trim-to-video-length is the overrun guarantee.
+    """
+    try:
+        from mediahub.visual import audio_mux, narration
+
+        if not audio_mux.audio_active():
+            return None
+        script = ""
+        if audio_mux.voice_active():
+            script = narration.story_script(card_props, brand_dict)
+        key = "story:{}:{}:{}".format(
+            card_props.get("athleteFullName") or "",
+            card_props.get("eventName") or "",
+            card_props.get("resultValue") or "",
+        )
+        return audio_mux.build_audio_plan(script=script, content_key=key)
+    except Exception:
+        return None
+
+
+def _reel_audio_plan(
+    cards_props: list[dict], brand_dict: dict, meet_name: str, *, duration_sec: float
+):
+    """The audio plan for a reel render, or None for today's silent path."""
+    try:
+        from mediahub.visual import audio_mux, narration
+
+        if not audio_mux.audio_active():
+            return None
+        script = ""
+        if audio_mux.voice_active():
+            script = narration.reel_script(
+                cards_props, brand_dict, meet_name, max_seconds=duration_sec
+            )
+        first = cards_props[0] if cards_props else {}
+        key = "reel:{}:{}:{}".format(
+            meet_name or "", len(cards_props), first.get("athleteFullName") or ""
+        )
+        return audio_mux.build_audio_plan(script=script, content_key=key)
+    except Exception:
+        return None
+
+
+def _audio_record_path(cached: Path) -> Path:
+    """Sidecar recording whether the planned audio was attached to this MP4.
+
+    A container probe can't answer that — Remotion's encoder emits a silent
+    AAC track on every render, so "has an audio stream" does not mean "has
+    the narration/music we planned". The record is written by the finishing
+    pass itself and is the only thing trusted on a cache hit.
+    """
+    return Path(cached).with_suffix(".audio.json")
+
+
+def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) -> dict:
+    """Idempotent finishing pass on the cached MP4: attach the planned audio
+    (honest silent fallback on failure; retried on the next request) and
+    ensure the poster-frame sidecar exists. Returns the manifest-ready
+    audio record.
+    """
+    try:
+        from mediahub.visual import audio_mux
+
+        if plan:
+            record_path = _audio_record_path(cached)
+            audio_rec: dict = {}
+            if record_path.exists():
+                try:
+                    prior = json.loads(record_path.read_text(encoding="utf-8"))
+                    if isinstance(prior, dict) and prior.get("status") == "mixed":
+                        audio_rec = prior
+                except (OSError, ValueError):
+                    audio_rec = {}
+            if not audio_rec:
+                audio_rec = audio_mux.apply_audio(cached, plan, duration_sec=duration_sec)
+                try:
+                    record_path.write_text(
+                        json.dumps(audio_rec, indent=2, sort_keys=True, default=str),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
+        else:
+            audio_rec = {"status": "off"}
+        poster = audio_mux.poster_path_for(cached)
+        if not poster.exists():
+            audio_mux.write_poster(
+                cached, poster, at_sec=audio_mux.poster_time_for(kind, duration_sec)
+            )
+        return audio_rec
+    except Exception as e:
+        return {"status": "silent_fallback", "reason": str(e)}
+
+
+def _publish(cached: Path, out_path: Path) -> Path:
+    """Copy the cached MP4 — plus its explainability manifest and poster
+    sidecars, when present — to the caller-requested path. No-op when they
+    are the same file."""
+    from mediahub.visual.audio_mux import poster_path_for
+
+    cached = Path(cached)
+    out_path = Path(out_path)
+    if cached.resolve() == out_path.resolve():
+        return cached
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(cached, out_path)
+    _publish_sidecar(cached, out_path)
+    cached_poster = poster_path_for(cached)
+    if cached_poster.exists():
+        try:
+            shutil.copyfile(cached_poster, poster_path_for(out_path))
+        except OSError:
+            pass
+    return out_path
+
+
+def _update_manifest_audio(cached: Path, audio_rec: dict) -> None:
+    """Refresh the manifest's audio record after a late audio attach (a
+    cache hit whose earlier audio attempt fell back to silent). Best-effort."""
+    try:
+        sidecar = Path(cached).with_suffix(".json")
+        if not sidecar.exists():
+            return
+        manifest = json.loads(sidecar.read_text(encoding="utf-8"))
+        if manifest.get("audio") == audio_rec:
+            return
+        manifest["audio"] = audio_rec
+        sidecar.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, default=str), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
 def _run_remotion(
     *,
     composition_id: str,
@@ -589,7 +736,14 @@ def render_story_card(
     compat.
 
     ``format_name`` picks the output cut: ``story`` (1080×1920, default),
-    ``square`` (1080×1080) or ``landscape`` (1920×1080).
+    ``portrait`` (1080×1350), ``square`` (1080×1080) or ``landscape``
+    (1920×1080).
+
+    When audio is configured (``MEDIAHUB_VOICEOVER=1`` narration and/or an
+    operator ``MEDIAHUB_REEL_MUSIC_DIR`` bed), the finished MP4 carries the
+    mixed track and the audio plan is folded into the cache key; otherwise
+    the silent path's cache keys stay byte-identical to the pre-audio era.
+    A poster-frame PNG sidecar is written beside the MP4 either way.
     """
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
@@ -601,6 +755,7 @@ def render_story_card(
         brief=brief,
         brand_kit=brand_kit,
     )
+    audio_plan = _story_audio_plan(card_dict, brand_dict)
 
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
@@ -618,27 +773,29 @@ def render_story_card(
             out_path,
             duration_sec=duration_sec,
             brief_dict=brief,
+            audio_plan=audio_plan,
         )
 
-    cache_key = _content_hash(
-        {
-            "card": card_dict,
-            "brand": brand_dict,
-            "duration": duration_sec,
-            "size": list(size),
-        },
-        kind="story",
-    )
+    cache_payload = {
+        "card": card_dict,
+        "brand": brand_dict,
+        "duration": duration_sec,
+        "size": list(size),
+    }
+    if audio_plan:
+        cache_payload["audio"] = audio_plan
+    cache_key = _content_hash(cache_payload, kind="story")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
-        # Re-publish the cached MP4 at the caller-requested path (without
-        # an expensive copy when the caller asked for the cache location).
-        if cached.resolve() != out_path.resolve():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(cached, out_path)
-            _publish_sidecar(cached, out_path)
-            return out_path
-        return cached
+        # Re-publish the cached MP4 at the caller-requested path. The
+        # finishing pass is idempotent: it retries a previously-failed
+        # audio attach and backfills a missing poster sidecar.
+        audio_rec = _finish_cached_video(
+            cached, kind="story", plan=audio_plan, duration_sec=duration_sec
+        )
+        if audio_plan:
+            _update_manifest_audio(cached, audio_rec)
+        return _publish(cached, out_path)
 
     # Render into the cache first so partial failures don't leave a half-
     # written file at the user-visible out_path.
@@ -649,6 +806,11 @@ def render_story_card(
         duration_sec=duration_sec,
         size=size,
     )
+    audio_rec = _finish_cached_video(
+        cached, kind="story", plan=audio_plan, duration_sec=duration_sec
+    )
+    from mediahub.visual.audio_mux import poster_path_for
+
     _write_render_manifest(
         cached,
         {
@@ -658,13 +820,12 @@ def render_story_card(
             "size": list(size),
             "duration_sec": duration_sec,
             "card": _card_manifest_axes(card_dict),
+            "audio": audio_rec,
+            "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
-    if cached.resolve() != out_path.resolve():
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(cached, out_path)
-        _publish_sidecar(cached, out_path)
-    return out_path if out_path.exists() else cached
+    published = _publish(cached, out_path)
+    return published if published.exists() else cached
 
 
 # Data-driven reel allocation (SEQ-4): the reel's length follows the number
@@ -712,7 +873,13 @@ def render_meet_reel(
                   data-driven: ``reel_duration_for(len(top_cards))``, so the
                   reel's structure follows the number of ranked moments
                   (1 card → 7s … 5 cards → 23s; 3 cards keep the historic 15s).
-      format_name  output cut: ``story`` (default) / ``square`` / ``landscape``.
+      format_name  output cut: ``story`` (default) / ``portrait`` /
+                  ``square`` / ``landscape``.
+
+    Audio + poster behaviour matches ``render_story_card``: opt-in narration
+    (built only from the cards' own facts) and/or the operator's music bed
+    are mixed in when configured, with an honest silent fallback, and a
+    poster-frame PNG sidecar lands beside the MP4.
     """
     engine = _dispatch_engine()
     size = motion_format_size(format_name)
@@ -759,6 +926,8 @@ def render_meet_reel(
     if duration_sec is None:
         duration_sec = reel_duration_for(len(cards_props))
 
+    audio_plan = _reel_audio_plan(cards_props, brand_dict, meet_name, duration_sec=duration_sec)
+
     if engine == "ffmpeg":
         if size != MOTION_FORMATS[DEFAULT_MOTION_FORMAT]:
             raise ReelEngineUnavailable(
@@ -776,26 +945,27 @@ def render_meet_reel(
             meet_name=meet_name,
             duration_sec=duration_sec,
             brief_dicts=briefs_list,
+            audio_plan=audio_plan,
         )
 
-    cache_key = _content_hash(
-        {
-            "cards": cards_props,
-            "brand": brand_dict,
-            "meet": meet_name,
-            "duration": duration_sec,
-            "size": list(size),
-        },
-        kind="reel",
-    )
+    cache_payload = {
+        "cards": cards_props,
+        "brand": brand_dict,
+        "meet": meet_name,
+        "duration": duration_sec,
+        "size": list(size),
+    }
+    if audio_plan:
+        cache_payload["audio"] = audio_plan
+    cache_key = _content_hash(cache_payload, kind="reel")
     cached = _cache_dir() / f"{cache_key}.mp4"
     if cached.exists() and cached.stat().st_size > 1024:
-        if cached.resolve() != out_path.resolve():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(cached, out_path)
-            _publish_sidecar(cached, out_path)
-            return out_path
-        return cached
+        audio_rec = _finish_cached_video(
+            cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+        )
+        if audio_plan:
+            _update_manifest_audio(cached, audio_rec)
+        return _publish(cached, out_path)
 
     _run_remotion(
         composition_id=COMP_REEL,
@@ -804,6 +974,11 @@ def render_meet_reel(
         duration_sec=duration_sec,
         size=size,
     )
+    audio_rec = _finish_cached_video(
+        cached, kind="reel", plan=audio_plan, duration_sec=duration_sec
+    )
+    from mediahub.visual.audio_mux import poster_path_for
+
     _write_render_manifest(
         cached,
         {
@@ -814,13 +989,12 @@ def render_meet_reel(
             "duration_sec": duration_sec,
             "meet_name": meet_name,
             "cards": [_card_manifest_axes(cp) for cp in cards_props],
+            "audio": audio_rec,
+            "poster": poster_path_for(cached).name if poster_path_for(cached).exists() else "",
         },
     )
-    if cached.resolve() != out_path.resolve():
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(cached, out_path)
-        _publish_sidecar(cached, out_path)
-    return out_path if out_path.exists() else cached
+    published = _publish(cached, out_path)
+    return published if published.exists() else cached
 
 
 __all__ = [

@@ -143,3 +143,25 @@ class TestReelJob:
             resp = c.get("/api/runs/r1/reel-file")
         assert resp.status_code == 404
         assert resp.get_json()["error"] == "reel_not_rendered"
+
+    def test_reel_file_serves_poster_sidecar(self, app_env):
+        """?poster=1 streams the poster PNG written beside the rendered MP4,
+        and 404s honestly when the sidecar is absent (a pre-poster render)."""
+        app, wm, _ = app_env
+        motion_dir = wm.RUNS_DIR / "r1" / "motion"
+        motion_dir.mkdir(parents=True, exist_ok=True)
+        (motion_dir / "reel_3.mp4").write_bytes(b"0" * 2048)
+        with app.test_client() as c:
+            c.post("/api/organisation/active", data={"profile_id": "alpha"})
+            resp = c.get("/api/runs/r1/reel-file?poster=1")
+            assert resp.status_code == 404
+            assert resp.get_json()["error"] == "poster_not_rendered"
+
+            (motion_dir / "reel_3.poster.png").write_bytes(b"\x89PNG fake poster")
+            resp = c.get("/api/runs/r1/reel-file?poster=1")
+            assert resp.status_code == 200
+            assert "image/png" in (resp.headers.get("Content-Type") or "")
+            # The plain request still streams the MP4.
+            resp = c.get("/api/runs/r1/reel-file")
+            assert resp.status_code == 200
+            assert "video/mp4" in (resp.headers.get("Content-Type") or "")

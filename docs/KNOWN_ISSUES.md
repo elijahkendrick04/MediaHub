@@ -17,13 +17,17 @@ Live issues that we accept for now. Each has a workaround and is tracked in
   run-ids are 48-bit random (`uuid4().hex[:12]`) rather than HMAC-signed, and
   owner-less *legacy* runs stay readable by design so historical data isn't orphaned.
   Signed tokens would add defence-in-depth against guessing; the cross-tenant hole
-  itself is closed.
+  itself is closed. *(Partially hardened by W.9, 2026-06-12: the magic-link
+  review surface uses HMAC-signed, expiring, revocable run-scoped tokens —
+  the signed-token pattern now exists in-tree for other routes to adopt.)*
 
 ## Interpreter
 
-- **PDFs scanned at low DPI silently parse to gibberish.** No OCR fallback yet.
-  The interpreter logs a low-confidence warning at `phase = interpreting`; the
-  user has to spot it.
+- **PDFs scanned at low DPI** — ✅ improved (W.10, 2026-06-12): an OCR
+  fallback (Tesseract in the deployed image; engine optional elsewhere) now
+  catches image-only PDFs and photos, with per-row uncertainty flags and
+  confidence capped at 0.55. With no engine installed the honest
+  "image-needs-ocr" review flag is raised instead of gibberish.
 - **HTML scraping is per-format** (Hy-Tek WebGen + SportSystems + Goodtime).
   Other formats fall through to the generic table extractor with reduced
   reliability.
@@ -35,7 +39,9 @@ Live issues that we accept for now. Each has a workaround and is tracked in
 - **swimmingresults.org rate-limits** are real. The cache helps but a fresh
   meet with 100 swimmers will pause for ~5 min during the first upload.
 - **Identity matches by name + DOB** — twins or siblings with very close DOBs
-  occasionally cross-match. No UI override yet.
+  occasionally cross-match. ✅ Fix surface added (W.1, 2026-06-12): the
+  Athletes page's "same swimmer?" merge persists the human's decision and is
+  audited; cross-matches now have a durable correction path.
 - **Short-course / long-course conversion** is exact-course only.
 
 ## Rendering
@@ -70,5 +76,7 @@ Live issues that we accept for now. Each has a workaround and is tracked in
 
 ## Accessibility
 
-- **Generated images do not include alt-text** in the export ZIP. Captions are
-  the only text track.
+- **Generated images do not include alt-text** — ✅ fixed (W.11, 2026-06-12):
+  a result-grounded alt text is produced in the same provider call as the
+  caption, is editable beside it in review, and rides the export ZIP, the
+  public wall embeds/feeds and Buffer publish payloads.

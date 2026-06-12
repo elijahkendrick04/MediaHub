@@ -85,6 +85,8 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
             return "zip"
         if "hy3" in h:
             return "hy3"
+        if any(x in h for x in ("lef", "lxf", "lenex")):
+            return "lenex"
         if any(x in h for x in ("png", "jpg", "jpeg", "gif", "tiff", "bmp", "webp")):
             return "image"
     if data[:4] == _PDF_MAGIC:
@@ -92,6 +94,12 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
     if data[:4] == _ZIP_MAGIC:
         # .xlsx spreadsheets are ZIPs — disambiguate before generic zip handling.
         return "xlsx" if _is_xlsx(data) else "zip"
+    # LENEX .lef: XML declaration + a <LENEX root tag near the top.
+    # (The native parser in interpreter/__init__ intercepts these before
+    # the schema-induce pipeline; this sniff keeps routing honest.)
+    head2k = data[:2048]
+    if head2k.lstrip()[:5] == b"<?xml" and b"<lenex" in head2k.lower():
+        return "lenex"
     # HTML heuristic
     sample = data[:2000].lower()
     if b"<!doctype html" in sample or b"<html" in sample or b"<table" in sample:
@@ -700,6 +708,31 @@ def _detect_table_rows(raw_lines: list[str], min_cols: int = 2) -> list[list[str
 
 
 # ---------------------------------------------------------------------------
+# OCR fallback (W.10) — optional engine seam, see interpreter/ocr.py
+# ---------------------------------------------------------------------------
+
+# Below this many extracted characters a PDF is treated as scanned/image-only
+# (every text extractor returns ~nothing for a photographed printout).
+_SCANNED_PDF_TEXT_MIN_CHARS = 50
+
+
+def _stream_from_ocr(result) -> IngestStream:
+    """Build an IngestStream from an ``ocr.OcrResult``.
+
+    Per-line confidences ride along as dynamic attributes (``ocr_engine``,
+    ``ocr_lines``) — ``schema_dataclasses.Line`` has no confidence field, and
+    the interpreter reads these to flag uncertain rows for human review.
+    """
+    kept = [(t, c) for t, c in result.lines if t.strip()]
+    text = "\n".join(t for t, _c in kept)
+    lines = [Line(text=t, page_no=0, y_position=float(i)) for i, (t, _c) in enumerate(kept)]
+    stream = IngestStream(text=text, lines=lines, tables=[], format_detected="image-ocr")
+    stream.ocr_engine = result.engine
+    stream.ocr_lines = kept
+    return stream
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -727,14 +760,37 @@ def ingest(
     fmt = _sniff_format(data, content_type_hint)
     log.debug("Detected format: %s", fmt)
 
+    ocr_unavailable_note: Optional[str] = None
+
     if fmt == "pdf":
         text, lines, tables = _extract_pdf(data)
+        # W.10: a scanned/photographed PDF has no text layer, so every
+        # extractor above yields (near-)nothing. Attempt the optional OCR
+        # fallback; with no engine installed, keep the honest empty stream
+        # and let the interpreter flag it for human review.
+        if len(text.strip()) < _SCANNED_PDF_TEXT_MIN_CHARS:
+            from . import ocr as _ocr  # noqa: PLC0415
+
+            result = _ocr.ocr_pdf_pages(data)
+            if result.ok and result.lines:
+                log.info("Scanned PDF OCR'd via %s: %d lines", result.engine, len(result.lines))
+                return _stream_from_ocr(result)
+            ocr_unavailable_note = f"Scanned PDF; {result.error or 'OCR recognised no text'}"
+            log.warning(
+                "PDF has no usable text layer and OCR fallback did not engage: %s",
+                result.error,
+            )
     elif fmt == "html":
         text, lines, tables = _extract_html(data, source_path=source_path)
     elif fmt == "zip":
         return _extract_zip(data, content_type_hint, source_path=source_path)
     elif fmt == "hy3":
         text, lines, tables = _extract_hy3(data)
+    elif fmt == "lenex":
+        # LENEX is parsed by interpreter.lenex_parser via the native fast
+        # path before ingest is reached; raw text keeps this branch honest
+        # for any direct caller.
+        text, lines, tables = _extract_text(data)
     elif fmt == "json":
         text, lines, tables = _extract_json(data)
     elif fmt == "csv":
@@ -742,9 +798,18 @@ def ingest(
     elif fmt == "xlsx":
         text, lines, tables = _extract_xlsx(data)
     elif fmt == "image":
+        # W.10: photographed/scanned results sheet — OCR when an engine is
+        # installed, otherwise keep the existing honest needs-review path.
+        from . import ocr as _ocr  # noqa: PLC0415
+
+        result = _ocr.ocr_image(data)
+        if result.ok and result.lines:
+            log.info("Image input OCR'd via %s: %d lines", result.engine, len(result.lines))
+            return _stream_from_ocr(result)
         log.warning(
-            "Image input detected.  OCR (tesseract) is not available in this "
-            "environment.  Returning empty stream with needs_review flag."
+            "Image input detected and OCR did not engage (%s). "
+            "Returning empty stream with needs_review flag.",
+            result.error or "no text recognised",
         )
         return IngestStream(
             text="",
@@ -755,9 +820,13 @@ def ingest(
     else:
         text, lines, tables = _extract_text(data)
 
-    return IngestStream(
+    stream = IngestStream(
         text=text,
         lines=lines,
         tables=tables,
         format_detected=fmt,
     )
+    if ocr_unavailable_note is not None:
+        # Read by interpret_document → needs_review (uncertainty made explicit).
+        stream.ocr_unavailable_detail = ocr_unavailable_note
+    return stream

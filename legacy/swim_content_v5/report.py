@@ -97,6 +97,7 @@ def _run_detectors_for_swim(
     standards: list,
     club_code: str,
     detectors: list,
+    extra_context: dict | None = None,
 ) -> tuple[list[Achievement], list]:
     """Run all detectors for one swim. Returns (achievements, detector_traces)."""
     extra = {
@@ -104,6 +105,10 @@ def _run_detectors_for_swim(
         "standards": standards,
         "club_code": club_code,
     }
+    # Phase W: workspace-scoped context (athlete milestones, club records,
+    # swimmer gender/age metadata). Absent keys leave detectors silent.
+    if extra_context:
+        extra.update(extra_context)
 
     all_achievements: list[Achievement] = []
     detector_traces = []
@@ -343,14 +348,20 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
     # Build history map from pb_snapshots
     history_map = _build_history_map_from_snapshots(our_results, pb_snapshots, swimmer_names)
 
-    # Load standards and club code
+    # Load standards and club code. W.4: season packs merge with quals.json
+    # and the club's Organisation picks narrow which standards fire.
     standards: list = []
     club_code = ""
     try:
-        from swim_content.quals_registry import load_registry
-        standards = load_registry()
+        from mediahub.standards import standards_for_profile
+
+        standards = standards_for_profile(profile)
     except Exception:
-        pass
+        try:
+            from swim_content.quals_registry import load_registry
+            standards = load_registry()
+        except Exception:
+            pass
     if profile and profile.club_codes:
         club_code = profile.club_codes[0]
 
@@ -364,6 +375,55 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
         detectors = production_detectors()
     except ImportError:
         detectors = get_all_detectors()
+
+    # Phase W detectors + context (athlete registry milestones, club records).
+    # All optional enrichment: failure or absence leaves the V5 path untouched.
+    extra_context: dict = {}
+    try:
+        from mediahub.recognition_swim.achievements.club_record import ClubRecordDetector
+        from mediahub.recognition_swim.achievements.milestones import MilestoneDetector
+
+        detectors = detectors + [MilestoneDetector(), ClubRecordDetector()]
+    except Exception:
+        pass
+    if profile_id:
+        try:
+            from mediahub.athletes.registry import milestone_context
+
+            am = milestone_context(profile_id, exclude_run_id=run.run_id)
+            if am:
+                extra_context["athlete_milestones"] = am
+        except Exception:
+            pass
+        try:
+            from mediahub.club_records.store import records_map
+
+            cr = records_map(profile_id)
+            if cr:
+                extra_context["club_records"] = cr
+        except Exception:
+            pass
+    # Swimmer gender/age metadata for record matching (from the canonical meet).
+    swimmer_meta: dict = {}
+    meet_year = None
+    if getattr(meet, "start_date", None):
+        try:
+            meet_year = int(str(meet.start_date)[:4])
+        except (TypeError, ValueError):
+            meet_year = None
+    for sk, sw in meet.swimmers.items():
+        gender = (getattr(sw, "gender", "") or "").upper()[:1]
+        yob = None
+        dob = getattr(sw, "dob", None)
+        if dob:
+            try:
+                yob = int(str(dob)[:4])
+            except (TypeError, ValueError):
+                yob = None
+        age = (meet_year - yob) if (meet_year and yob) else None
+        swimmer_meta[sk] = {"gender": gender, "yob": yob, "age": age}
+    if swimmer_meta:
+        extra_context["swimmer_meta"] = swimmer_meta
 
     # Run detectors
     all_achievements: list[Achievement] = []
@@ -386,6 +446,7 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
             standards=standards,
             club_code=club_code,
             detectors=detectors,
+            extra_context=extra_context,
         )
         all_achievements.extend(achs)
         swim_trace = build_swim_trace(swim, swimmer_name, traces, len(achs))
