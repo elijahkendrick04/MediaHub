@@ -143,7 +143,9 @@ def search(query: str, num: int = 5) -> "list[SearchResult]":
     if not base:
         raise SearxngUnavailable("MEDIAHUB_SEARCH_ENDPOINT is not configured")
     if breaker_open():
-        raise SearxngUnavailable(f"skipped — circuit open after earlier failure: {breaker_reason()}")
+        raise SearxngUnavailable(
+            f"skipped — circuit open after earlier failure: {breaker_reason()}"
+        )
     try:
         import requests  # noqa: PLC0415
     except Exception as e:  # pragma: no cover - requests is a hard dep
