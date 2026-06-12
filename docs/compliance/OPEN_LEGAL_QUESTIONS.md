@@ -21,6 +21,8 @@
 | Q11 | **DPIA sign-off.** The draft DPIA (children's data + AI + social publication makes one effectively mandatory) requires a named accountable human reviewer on the operator side, and consultation expectations (e.g. whether residual high risk would require prior ICO consultation under Art 36). | DPIA drafted on the ICO template, marked DRAFT, not self-approved. | OPEN |
 | Q12 | **Publication boundary.** On publication to Instagram/Facebook/TikTok, the platforms become independent controllers. Confirm how far the club's notices/consents must go in warning about platform-side processing (indexing, ad profiling of published children's content), and whether per-post parental consent or a standing consent suffices. | Notices template flags platform-side processing; standing per-athlete consent with revocation honoured for *future* packs (published posts are outside MediaHub's control — noted honestly). | OPEN |
 
+| Q13 | **Real children's data in repository fixtures.** `samples/MISM-2024-Results.pdf` and `samples/learning_corpus/level1/*` are publicly published meet-results documents containing real children's names/ages/clubs, committed as parser test fixtures (~10 test files depend on the MISM PDF). Is holding them in the (private) repo justified as legitimate-interest testing use, and on what retention/replacement schedule? | Kept (deleting would break the parser suite — operator decision required); repo stays private; gap analysis recommends progressive replacement with synthetic fixtures. | OPEN |
+
 ## How to use this register
 
 - Each Phase 2 capability that touches one of these questions links back to
