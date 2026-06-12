@@ -45,6 +45,7 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | The **website** and its buttons | `src/mediahub/web/` |
 | Who can **sign in to which club** (workspaces) | `src/mediahub/web/tenancy.py` |
 | The founder's **selling notebook** (quotes, leads) | `src/mediahub/commercial/` |
+| **Consent, "delete me", privacy rules** | `src/mediahub/compliance/` (the law paperwork: `docs/compliance/`) |
 
 ## If you're joining the team
 
