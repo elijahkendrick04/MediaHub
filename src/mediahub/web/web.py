@@ -7134,7 +7134,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
   function check(){
-    fetch(HEALTH_URL,{cache:'no-store'}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
+    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
       var ok = o.s === 200 && o.j && o.j.ok;
       var dot = document.getElementById('backend-pill-dot');
       var txt = document.getElementById('backend-pill-text');
@@ -12879,6 +12879,25 @@ Relay team broke club record"></textarea>
         except Exception:
             pass
 
+    def _wants_html_health() -> bool:
+        """True when the request is a genuine browser navigation that should
+        receive the HTML health page (axe-core document-title, WCAG 2.4.2).
+
+        Compares Accept qualities instead of ``best_match``: fetch()/curl/
+        python-requests send ``Accept: */*``, which matches both candidates
+        at equal quality — ``best_match`` then breaks the tie by list order
+        and misclassifies those API callers as browsers (the nav badge
+        choked on the HTML and painted "offline"). A real navigation ranks
+        text/html (q=1) strictly above ``*/*;q=0.8`` so it still gets HTML;
+        clients with no Accept header score 0 = 0 and stay on JSON.
+        ``Sec-Fetch-Dest: document`` covers proxies that strip Accept.
+        """
+        accept = request.accept_mimetypes
+        return (
+            accept["text/html"] > accept["application/json"]
+            or request.headers.get("Sec-Fetch-Dest", "") == "document"
+        )
+
     @app.route("/health")
     def health():
         import time as _time
@@ -12895,13 +12914,11 @@ Relay team broke club record"></textarea>
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         status_code = 200 if payload["ok"] else 503
-        # Return HTML (with a valid <title>) when a browser requests the page so
-        # that axe-core's document-title rule is satisfied; API/monitoring clients
-        # that send Accept: application/json (or no Accept) get plain JSON.
-        best = request.accept_mimetypes.best_match(
-            ["text/html", "application/json"], default="application/json"
-        )
-        if best == "text/html":
+        # Return HTML (with a valid <title>) when a browser navigates to the
+        # page so that axe-core's document-title rule is satisfied; API and
+        # monitoring clients (Accept: application/json, */*, or no Accept)
+        # get plain JSON — see _wants_html_health.
+        if _wants_html_health():
             status_label = _h("OK" if payload["ok"] else "Degraded")
             body = _h(json.dumps(payload, indent=2))
             html = (
@@ -12914,8 +12931,16 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=status_code, mimetype="text/html")
-        return jsonify(payload), status_code
+            return Response(
+                html,
+                status=status_code,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
+        resp = jsonify(payload)
+        resp.status_code = status_code
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     _FAVICON_SVG = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
@@ -13033,22 +13058,10 @@ Relay team broke club record"></textarea>
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         # Return HTML (with a valid <title>) for browser navigations so that
-        # axe-core's document-title rule (WCAG 2.4.2) is satisfied.  Two
-        # complementary signals cover edge cases where a reverse-proxy strips
-        # one or the other:
-        #   • Accept: text/html — standard content-negotiation
-        #   • Sec-Fetch-Dest: document — fetch-metadata sent by Chromium/Firefox
-        #     on top-level page navigations (page.goto in Playwright)
-        # Monitoring tools (curl, urllib, Render's own liveness probe) send
-        # neither, so they continue to receive JSON — the existing contract.
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        # axe-core's document-title rule (WCAG 2.4.2) is satisfied. API and
+        # monitoring callers — including the nav badge's fetch(), curl, and
+        # Render's liveness probe — stay on JSON; see _wants_html_health.
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -13512,14 +13525,7 @@ Relay team broke club record"></textarea>
                 "'open': false means a few errors but no trip yet."
             ),
         }
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
