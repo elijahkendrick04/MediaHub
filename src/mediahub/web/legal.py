@@ -92,32 +92,41 @@ class Subprocessor:
     # The env keys that activate/configure this provider. Empty = always on
     # (the hosting platform itself).
     env_keys: tuple[str, ...] = ()
+    # Public /legal/subprocessors columns (transparency page).
+    transfer_mechanism: str = ""
+    engaged_when: str = ""
 
 
 SUBPROCESSORS: tuple[Subprocessor, ...] = (
     Subprocessor(
-        name="Hosting & backup storage ([HOSTING_PROVIDER_AND_REGION])",
+        name="Render Services, Inc. (hosting & backup storage)",
         processing=(
             "Runs the service and stores all Club Data, including the "
             "operator-configured off-site backup archives"
         ),
-        location="[HOSTING_REGION]",
+        location="United States",
         env_keys=("MEDIAHUB_BACKUP_UPLOAD_URL", "MEDIAHUB_BACKUP_UPLOAD_TOKEN"),
+        transfer_mechanism="UK–US data bridge (DPF-certified); SCC fallback",
+        engaged_when="Always",
     ),
     Subprocessor(
-        name="Google (Gemini API)",
+        name="Google LLC (Gemini API)",
         processing="Caption/creative generation; AI page reading",
-        location="US",
+        location="United States / global",
         env_keys=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        transfer_mechanism="Google Cloud DPA: SCCs + UK Addendum",
+        engaged_when="When configured by the operator",
     ),
     Subprocessor(
-        name="Anthropic",
+        name="Anthropic, PBC (Claude API)",
         processing="Failover for the same generation calls",
-        location="US",
+        location="United States",
         env_keys=("ANTHROPIC_API_KEY",),
+        transfer_mechanism="DPA with SCCs + UK IDTA/Addendum",
+        engaged_when="When configured by the operator",
     ),
     Subprocessor(
-        name="Operator-configured OpenAI-compatible endpoint (only if configured)",
+        name="Operator-configured OpenAI-compatible endpoint",
         processing=(
             "Additional LLM failover and caption-memory embeddings "
             "(generation prompts and caption text, athlete names included)"
@@ -129,46 +138,63 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
             "MEDIAHUB_EMBED_ENDPOINT",
             "MEDIAHUB_EMBED_API_KEY",
         ),
+        transfer_mechanism=("The operator must hold processor terms with their chosen provider"),
+        engaged_when="Only if the operator configures an endpoint",
     ),
     Subprocessor(
-        name="Photoroom (only if enabled)",
+        name="Photoroom SAS",
         processing="Photo background removal",
-        location="[PHOTOROOM_REGION]",
+        location="France (sub-processors may be outside the EEA)",
         env_keys=("PHOTOROOM_API_KEY", "PHOTOROOM_ENDPOINT"),
+        transfer_mechanism="GDPR processor terms",
+        engaged_when="Only if the club/operator enables cloud cutout",
     ),
     Subprocessor(
-        name="Replicate (only if enabled)",
+        name="Replicate, Inc.",
         processing="Photo background removal",
-        location="US",
+        location="United States",
         env_keys=("REPLICATE_API_TOKEN",),
+        transfer_mechanism="Processor terms; SCCs/IDTA",
+        engaged_when="Only if the club/operator enables cloud cutout",
     ),
     Subprocessor(
-        name="Microsoft (edge-tts, only if voiceover is enabled)",
+        name="Microsoft (edge-tts)",
         processing="Synthesises reel narration audio (athlete name, event, time)",
-        location="US",
+        location="United States",
         env_keys=("MEDIAHUB_VOICEOVER",),
+        transfer_mechanism=(
+            "Public synthesis endpoint, no contractual terms — voiceover is "
+            "OFF by default and opt-in for exactly this reason"
+        ),
+        engaged_when="Only if voiceover is enabled",
     ),
     Subprocessor(
-        name="Buffer (only if the club connects it)",
-        processing="Social scheduling of approved content",
-        location="US",
+        name="Buffer, Inc.",
+        processing="Relay of approved posts to social platforms",
+        location="United States",
         env_keys=("BUFFER_ACCESS_TOKEN",),
+        transfer_mechanism="DPA; SCCs/IDTA",
+        engaged_when="Only if the club connects publishing",
     ),
     Subprocessor(
-        name="Resend (only if transactional email is configured)",
+        name="Resend, Inc.",
         processing=(
             "Transactional email delivery: password resets, email "
             "verification, workspace invites and service/breach notices "
             "(account email addresses and the message content)"
         ),
-        location="US",
+        location="United States",
         env_keys=("RESEND_API_KEY", "MEDIAHUB_EMAIL_ENDPOINT"),
+        transfer_mechanism="DPA; SCCs/IDTA",
+        engaged_when="Only if transactional email is configured",
     ),
     Subprocessor(
-        name="Stripe",
+        name="Stripe, Inc.",
         processing="Billing (controller-side, listed for transparency)",
-        location="US",
+        location="United States",
         env_keys=("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"),
+        transfer_mechanism="Stripe DPA; UK–US data bridge / SCCs",
+        engaged_when="Only if billing is configured",
     ),
 )
 
@@ -198,6 +224,16 @@ def subprocessor_table_rows_html() -> str:
     can never drift from the declared provider surface."""
     return "".join(
         f"<tr><td>{s.name}</td><td>{s.processing}</td><td>{s.location}</td></tr>"
+        for s in SUBPROCESSORS
+    )
+
+
+def subprocessor_public_rows_html() -> str:
+    """The public /legal/subprocessors table body — same register, with the
+    transfer-safeguard and when-engaged columns."""
+    return "".join(
+        f"<tr><td>{s.name}</td><td>{s.processing}</td><td>{s.location}</td>"
+        f"<td>{s.transfer_mechanism}</td><td>{s.engaged_when}</td></tr>"
         for s in SUBPROCESSORS
     )
 
@@ -948,6 +984,7 @@ __all__ = [
     "dpa_html",
     "identity_block",
     "privacy_html",
+    "subprocessor_public_rows_html",
     "subprocessor_table_rows_html",
     "terms_html",
 ]

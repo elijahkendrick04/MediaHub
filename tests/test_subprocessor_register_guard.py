@@ -99,6 +99,45 @@ def test_dpa_table_renders_from_the_register():
     assert legal.subprocessor_table_rows_html() in html
 
 
+def test_public_subprocessors_page_renders_from_the_register():
+    """One register, two renders: the public /legal/subprocessors page and
+    the DPA table must both come from legal.SUBPROCESSORS — no parallel
+    hand-maintained list may reappear in web.py."""
+    public = legal.subprocessor_public_rows_html()
+    for sub in legal.SUBPROCESSORS:
+        assert sub.name in public
+        assert sub.transfer_mechanism, f"{sub.name} needs a recorded transfer mechanism"
+        assert sub.engaged_when, f"{sub.name} needs a recorded engaged-when note"
+    web_src = (SRC_ROOT / "web" / "web.py").read_text(encoding="utf-8")
+    assert "_SUBPROCESSORS_PUBLIC" not in web_src, (
+        "web.py grew a parallel subprocessor list — render from "
+        "legal.SUBPROCESSORS instead (PC.11)"
+    )
+    assert "subprocessor_public_rows_html" in web_src
+
+
+def test_canonical_doc_lists_every_register_provider():
+    """docs/compliance/SUBPROCESSORS.md is the procurement-facing mirror of
+    the register — a provider added in code must be recorded there."""
+    doc = (
+        Path(__file__).resolve().parents[1] / "docs" / "compliance" / "SUBPROCESSORS.md"
+    ).read_text(encoding="utf-8")
+    for fragment in (
+        "Render",
+        "Google",
+        "Anthropic",
+        "OpenAI-compatible",
+        "Photoroom",
+        "Replicate",
+        "Microsoft",
+        "Buffer",
+        "Resend",
+        "Stripe",
+        "backup target",
+    ):
+        assert fragment in doc, f"SUBPROCESSORS.md is missing {fragment!r}"
+
+
 def test_privacy_notice_discloses_each_provider_flow():
     html = legal.privacy_html(
         terms_url="/terms", cookies_url="/cookies", dpa_url="/dpa"

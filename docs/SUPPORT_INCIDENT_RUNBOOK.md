@@ -2,9 +2,14 @@
 
 The boring promises a paying club silently relies on: where to get help, who
 does what when something breaks, and the rehearsed path back from data loss.
-Companion docs: [`docs/compliance/DPIA.md`](compliance/DPIA.md) (risk
-register), [`docs/COMPLIANCE_HANDOVER.md`](COMPLIANCE_HANDOVER.md) (founder
-checklist), ADR-0015 (the lawful-to-sell gate this implements half of).
+Companion docs: [`compliance/BREACH_PLAYBOOK.md`](compliance/BREACH_PLAYBOOK.md)
+(the breach **decision** process — 72-hour clock, risk assessment,
+notifiability; this runbook is the operational channel and recovery half),
+[`docs/compliance/DPIA.md`](compliance/DPIA.md) (risk register),
+[`docs/COMPLIANCE_HANDOVER.md`](COMPLIANCE_HANDOVER.md) (founder checklist),
+ADR-0015 (the lawful-to-sell gate this implements half of). Every breach —
+notifiable or not — is documented in the Art 33(5) incident register
+(`compliance/incidents.py`, surfaced on `/admin/compliance`).
 
 **Owner:** the founder/operator (named as breach owner per F.6 — update here
 when that changes). **Support contact:** the address in
@@ -48,6 +53,11 @@ autonomy audit ledger, `legal_acceptances.jsonl`, run JSONs, Render logs.
 Write a timeline as you go — it becomes the ICO record.
 
 **Notify.**
+- **Record first:** open an incident in the Art 33(5) register
+  (`/admin/compliance` → incidents; `compliance/incidents.py`) — every
+  breach is documented whether or not it's notifiable. The notifiability
+  *decision* (risk assessment, 72-hour clock mechanics) follows
+  [`compliance/BREACH_PLAYBOOK.md`](compliance/BREACH_PLAYBOOK.md).
 - **Clubs (controllers): without undue delay.** Use the operator
   breach channel — `/operator/notify-users` sends to every account email
   and records the send (counts + subject) in

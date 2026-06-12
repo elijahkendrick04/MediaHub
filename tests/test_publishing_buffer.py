@@ -307,7 +307,19 @@ def test_api_buffer_channels_auth_error_returns_401(app, monkeypatch):
     assert "settings_url" not in j
 
 
+def _approve(run_id: str, card_id: str) -> None:
+    """The schedule endpoint now enforces server-side human approval
+    (security/llm-pipeline) — tests exercising it must approve first."""
+    from mediahub.web import web as _web
+    from mediahub.workflow.status import CardStatus
+    from mediahub.workflow.store import WorkflowStore
+
+    ws = WorkflowStore(_web.RUNS_DIR)
+    ws.set_status(run_id, card_id, CardStatus.APPROVED)
+
+
 def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
+    _approve("run123", "swim456")
     c = app.test_client()
     r = c.post(
         "/api/runs/run123/card/swim456/schedule",
@@ -324,6 +336,7 @@ def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
 
 def test_api_schedule_rejects_empty_channels(app, monkeypatch):
     monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    _approve("r", "c")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",
@@ -335,6 +348,7 @@ def test_api_schedule_rejects_empty_channels(app, monkeypatch):
 
 def test_api_schedule_rejects_empty_caption(app, monkeypatch):
     monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    _approve("r", "c")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",
@@ -346,6 +360,7 @@ def test_api_schedule_rejects_empty_caption(app, monkeypatch):
 
 def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
     monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    _approve("run1", "cardA")
     monkeypatch.setattr(
         "mediahub.publishing.buffer.schedule_post",
         lambda **kw: {"ok": True, "update_id": "u-1", "channel_id": kw["channel_id"], "raw": {}},
@@ -380,6 +395,7 @@ def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
     app, monkeypatch
 ):
     monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    _approve("run2", "cardB")
 
     def fail(**kw):
         raise BufferAPIError("Profile has reached its queue limit.")
@@ -406,6 +422,7 @@ def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
 
 def test_api_schedule_bad_iso_time_returns_400(app, monkeypatch):
     monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    _approve("r", "c")
     c = app.test_client()
     r = c.post(
         "/api/runs/r/card/c/schedule",

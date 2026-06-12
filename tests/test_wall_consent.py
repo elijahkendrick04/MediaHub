@@ -185,6 +185,28 @@ def test_full_consent_cannot_loosen_blanket_toggle(consent_wall):
     assert "A.S." in cards["swim-1"]["title"]
 
 
+def test_compliance_ledger_optout_blocks_the_wall_too(consent_wall):
+    """The wall honours BOTH consent systems: an athlete who opted out (or
+    is Art-18 restricted) in the compliance ledger is unreachable even with
+    no W.2 record — the same unified check as the publish gate."""
+    from mediahub.compliance.consent import ConsentRegistry
+    from mediahub.web.club_profile import load_profile
+    from mediahub.web.public_wall import wall_cards, wall_image_path
+
+    ConsentRegistry("org-a").record(
+        athlete_name="Alice Smith", status="revoked", recorded_by="test"
+    )
+
+    hidden: list = []
+    cards = wall_cards(load_profile("org-a"), consent_hidden=hidden)
+    assert {c["card_id"] for c in cards} == {"swim-2"}
+    assert hidden and "opted out" in hidden[0]["reason"]
+    assert wall_image_path(load_profile("org-a"), "run-a-1", "swim-1") is None
+
+    c = consent_wall["app"].test_client()
+    assert c.get("/wall/token-org-a-secret/card/run-a-1/swim-1.png").status_code == 404
+
+
 def test_settings_page_explains_consent_hidden_cards(consent_wall):
     _set_consent("org-a", "Alice Smith", "do_not_feature")
     _set_consent("org-a", "Bob Jones", "full")

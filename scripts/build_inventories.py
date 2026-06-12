@@ -227,6 +227,12 @@ def env_inventory_md() -> str:
             f"{' …' if len(files) > 6 else ''} |\n"
         )
     out.append("\nSee `.env.example` for descriptions and defaults.\n")
+    # Hand-written security appendix (least-privilege key scoping) — kept in
+    # its own file so this generator can fully own the table above while the
+    # freshness test still covers the whole committed document.
+    extra = DOCS / "_env_inventory_security.md"
+    if extra.exists():
+        out.append("\n" + extra.read_text())
     return "".join(out)
 
 

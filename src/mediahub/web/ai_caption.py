@@ -156,15 +156,39 @@ def _strip_course_suffix(event: str) -> str:
     return _COURSE_SUFFIX_RE.sub("", event).strip()
 
 
+# Data-minimisation boundary (UK GDPR Art 5(1)(c)): identifiers and
+# DOB-adjacent fields a caption never needs MUST NOT leave the platform in
+# an LLM payload. Age/age-group stay (captions legitimately say "12-year-old
+# PB") — see docs/compliance/DATA_MAP.md flow F1.
+_PROMPT_DROP_KEYS = frozenset(
+    {
+        "asa_id",
+        "member_id",
+        "dob",
+        "date_of_birth",
+        "birth_date",
+        "yob",
+        "year_of_birth",
+    }
+)
+
+
 def _sanitise_achievement_for_prompt(a: dict) -> dict:
     """Return a shallow copy of the achievement with course jargon
     removed from the event name and the ``course`` field spelled out
     ("SC" → "short course") so the raw distinction stays available for
     data-led time context without the abbreviation ever reaching the
-    LLM's source prose."""
+    LLM's source prose. Also the data-minimisation boundary: registry
+    identifiers and DOB-level fields are stripped before the payload
+    leaves the platform (top level and inside ``raw_facts``)."""
     if not isinstance(a, dict):
         return a
-    out = dict(a)
+    out = {k: v for k, v in a.items() if k.lower() not in _PROMPT_DROP_KEYS}
+    raw_facts = out.get("raw_facts")
+    if isinstance(raw_facts, dict):
+        out["raw_facts"] = {
+            k: v for k, v in raw_facts.items() if k.lower() not in _PROMPT_DROP_KEYS
+        }
     event = (out.get("event") or "").strip()
     if event:
         out["event"] = _strip_course_suffix(event)
@@ -519,9 +543,12 @@ def _compose_caption_prompt(
     )
     vp_prose = _voice_profile_prose(resolved_vp)
 
+    from mediahub.ai_core.prompt_guard import SYSTEM_GUARD as _SYSTEM_GUARD
+
     system_parts = [
         "You are a sports social-media writer. Produce ONE caption for a "
         "single swimming achievement.",
+        _SYSTEM_GUARD,
         "Tone: " + tone_desc,
         "Keep it specific, human, club-appropriate, ~280 characters max. "
         "Never invent facts. Output ONLY the caption text — no preamble, "
@@ -641,12 +668,41 @@ def _compose_caption_prompt(
         # MR-5: strip "(SC)"/"(LC)" jargon from the event name (and spell
         # out the course field) before the facts are narrated into the
         # prompt. The caller's dict is never mutated.
+        # Children's Code backstop at the LLM boundary: legacy runs persisted
+        # before the tenant enabled child controls still get the transformed
+        # identity (pipeline-time transform covers new runs).
+        from mediahub.compliance.child_policy import apply_to_achievement
+
+        _payload = apply_to_achievement(
+            club_profile, _sanitise_achievement_for_prompt(achievement_dict)
+        )
         user_prose = narrate_achievement(
-            _sanitise_achievement_for_prompt(achievement_dict),
+            _payload,
             profile=club_profile,
         )
     if not user_prose.strip():
         raise ClaudeUnavailableError("not enough detail to generate a caption")
+    # Prompt-injection defence (OWASP LLM01): the prose was assembled from
+    # uploaded-file fields, so it rides inside data delimiters; detected
+    # instruction-shaped text hardens the wrapper and is logged — never
+    # silently rewritten (the human reviewing the card stays the decider).
+    # Lives HERE so both generate_caption_for_tone and the W.11 bundle
+    # inherit the same boundary.
+    from mediahub.ai_core.prompt_guard import delimit_untrusted, scan as _injection_scan
+
+    _injection_hits = _injection_scan(user_prose)
+    if _injection_hits:
+        try:
+            from mediahub.compliance.security_log import record_event as _sec_event
+
+            _sec_event(
+                "prompt_injection_suspected",
+                detail=f"patterns={','.join(_injection_hits)[:200]}",
+                outcome="hardened",
+            )
+        except Exception:
+            pass
+    user_prose = delimit_untrusted(user_prose, flagged=bool(_injection_hits))
     return system, user_prose
 
 

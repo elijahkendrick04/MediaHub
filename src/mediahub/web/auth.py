@@ -35,7 +35,11 @@ from pathlib import Path
 from typing import Optional
 
 import bcrypt
+from argon2 import PasswordHasher as _Argon2Hasher
 from flask import session
+
+# argon2id with argon2-cffi defaults (t=3, m=64MiB, p=4) — ASVS L2 V2.4.
+_ARGON2 = _Argon2Hasher()
 
 # Tier identifiers. "free" is the always-available default; "club" and
 # "federation" are the paid tiers driven by Stripe (see billing.py). These are
@@ -77,6 +81,7 @@ class User:
     # When the address proved it can receive our mail (PC.14). Empty = not
     # verified; purely informational — no feature gates on it.
     email_verified_at: str = ""
+    totp_secret: str = ""  # empty = 2FA off; set via /account/2fa
 
     def to_record(self) -> dict:
         return asdict(self)
@@ -90,6 +95,7 @@ class User:
             stripe_customer_id=str(d.get("stripe_customer_id", "") or ""),
             created_at=str(d.get("created_at", "") or ""),
             email_verified_at=str(d.get("email_verified_at", "") or ""),
+            totp_secret=str(d.get("totp_secret", "") or ""),
         )
 
 
@@ -116,22 +122,138 @@ def _looks_like_email(email: str) -> bool:
 
 
 def hash_password(plaintext: str) -> str:
-    """Return a bcrypt hash string for ``plaintext`` (``$2b$`` format)."""
-    raw = (plaintext or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
-    return bcrypt.hashpw(raw, bcrypt.gensalt(rounds=12)).decode("utf-8")
+    """Return an **argon2id** hash for ``plaintext`` (ASVS L2 V2.4).
+
+    New and re-hashed passwords use argon2id (argon2-cffi defaults:
+    t=3, m=64MiB, p=4). Existing ``$2b$`` bcrypt hashes keep verifying —
+    they are upgraded transparently on the next successful login
+    (see ``UserStore.authenticate``).
+    """
+    return _ARGON2.hash(plaintext or "")
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
-    """Constant-time check of ``plaintext`` against a stored bcrypt hash.
+    """Constant-time check against a stored argon2id OR legacy bcrypt hash.
 
     Never raises on a malformed/empty stored hash — returns ``False`` so a
     wrong password (or corrupted record) is a clean auth failure, not a 500.
     """
+    stored = hashed or ""
+    if stored.startswith("$argon2"):
+        try:
+            return _ARGON2.verify(stored, plaintext or "")
+        except Exception:
+            return False
     raw = (plaintext or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
     try:
-        return bcrypt.checkpw(raw, (hashed or "").encode("utf-8"))
+        return bcrypt.checkpw(raw, stored.encode("utf-8"))
     except (ValueError, TypeError):
         return False
+
+
+def password_needs_rehash(hashed: str) -> bool:
+    """True when the stored hash should be upgraded to current argon2id."""
+    stored = hashed or ""
+    if not stored.startswith("$argon2"):
+        return True  # legacy bcrypt (or unknown) → upgrade on next login
+    try:
+        return _ARGON2.check_needs_rehash(stored)
+    except Exception:
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Account lockout (ASVS V2.2): per normalised email, in-process. 5 failures
+# in 15 minutes locks the ACCOUNT for 15 minutes. Deliberately NOT keyed on
+# client address: per-IP volume limiting is the web layer's per-app auth
+# limiter (web.py _auth_rate_limited) — an address key here would let one
+# bad actor behind a club's shared NAT lock out the whole club (and lets a
+# spoofed X-Forwarded-For lock arbitrary keys). In-memory by design (a
+# restart clears it); every lockout is written to the security event log so
+# a pattern survives restarts as evidence.
+# ---------------------------------------------------------------------------
+
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW_SECS = 15 * 60
+_failed_logins: dict[str, list[float]] = {}
+_FAIL_LOCK = threading.Lock()
+
+
+def login_locked(email: str) -> bool:
+    norm = normalize_email(email)
+    if not norm:
+        return False
+    now = time.time()
+    with _FAIL_LOCK:
+        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
+        _failed_logins[norm] = window
+        return len(window) >= LOGIN_FAILURE_LIMIT
+
+
+def record_login_failure(email: str) -> bool:
+    """Record one failure; returns True when this failure triggers a lockout."""
+    norm = normalize_email(email)
+    if not norm:
+        return False
+    now = time.time()
+    with _FAIL_LOCK:
+        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
+        window.append(now)
+        _failed_logins[norm] = window
+        return len(window) == LOGIN_FAILURE_LIMIT
+
+
+def clear_login_failures(email: str) -> None:
+    norm = normalize_email(email)
+    if norm:
+        with _FAIL_LOCK:
+            _failed_logins.pop(norm, None)
+
+
+# ---------------------------------------------------------------------------
+# TOTP (RFC 6238) — optional second factor, stdlib-only (hmac + struct), no
+# new dependency. 30s steps, 6 digits, ±1 step of clock skew.
+# ---------------------------------------------------------------------------
+
+
+def totp_generate_secret() -> str:
+    import base64
+    import secrets as _secrets
+
+    return base64.b32encode(_secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _totp_code(secret: str, counter: int) -> str:
+    import base64
+    import hashlib
+    import struct
+
+    pad = "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode((secret + pad).upper())
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code = (struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF) % 1_000_000
+    return f"{code:06d}"
+
+
+def totp_verify(secret: str, code: str, *, at: Optional[float] = None) -> bool:
+    if not secret or not code:
+        return False
+    cleaned = str(code).strip().replace(" ", "")
+    if not cleaned.isdigit() or len(cleaned) != 6:
+        return False
+    counter = int((at if at is not None else time.time()) // 30)
+    for skew in (-1, 0, 1):
+        if hmac.compare_digest(_totp_code(secret, counter + skew), cleaned):
+            return True
+    return False
+
+
+def totp_provisioning_uri(secret: str, email: str, issuer: str = "MediaHub") -> str:
+    from urllib.parse import quote
+
+    label = quote(f"{issuer}:{normalize_email(email)}")
+    return f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
 
 
 class UserStore:
@@ -225,7 +347,27 @@ class UserStore:
         ok = verify_password(plaintext_password, reference)
         if not user or not ok:
             raise AuthError("Incorrect email or password.")
+        # Transparent upgrade: a verified legacy bcrypt (or stale-parameter
+        # argon2) hash is re-hashed with current argon2id and re-appended.
+        if password_needs_rehash(user.hashed_password):
+            try:
+                with _LEDGER_LOCK:
+                    user.hashed_password = hash_password(plaintext_password)
+                    self._append(user)
+            except OSError:
+                pass  # upgrade is best-effort; login still succeeds
         return user
+
+    def set_totp(self, email: str, secret: str) -> Optional[User]:
+        """Set (or clear, with "") the user's TOTP secret."""
+        with _LEDGER_LOCK:
+            users = self._read_all()
+            user = users.get(normalize_email(email))
+            if user is None:
+                return None
+            user.totp_secret = str(secret or "")
+            self._append(user)
+            return user
 
     def set_plan(
         self,

@@ -68,6 +68,9 @@ croniter>=2.0
 # runtime: with no STRIPE_* env configured, billing honest-errors (503) and the
 # rest of the app is unaffected.
 bcrypt>=4.0
+# argon2-cffi (MIT): argon2id password hashing (ASVS L2 V2.4); bcrypt stays
+# for verifying legacy hashes, upgraded on next login.
+argon2-cffi>=23.1
 stripe>=7.0
 
 # W.10 OPTIONAL OCR fallback (interpreter/ocr.py) — deliberately NOT installed

@@ -41,10 +41,20 @@ def client(app):
 # ---- disabled when no key configured -----------------------------------
 
 
+
+def _csrf(client) -> dict:
+    """This suite runs with TESTING unset, so CSRF enforcement is live
+    (security/web-hardening) — mint a session token and carry it."""
+    token = "devlogin-csrf-token-0123456789ab"
+    with client.session_transaction() as sess:
+        sess["_csrf"] = token
+    return {"csrf_token": token}
+
+
 def test_route_404s_when_key_unset(client, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     assert client.get("/developer").status_code == 404
-    assert client.post("/developer", data={"dev_key": "anything"}).status_code == 404
+    assert client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
 
 
 def test_no_button_when_key_unset(client, monkeypatch):
@@ -82,7 +92,7 @@ def test_button_appears_on_login_when_key_set(client, monkeypatch):
 
 def test_correct_key_grants_unrestricted_session(client, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
-    resp = client.post("/developer", data={"dev_key": "s3cret-dev-key"})
+    resp = client.post("/developer", data={"dev_key": "s3cret-dev-key", **_csrf(client)})
     assert resp.status_code in (302, 303)
     with client.session_transaction() as sess:
         assert sess.get("dev_operator") is True
@@ -93,7 +103,7 @@ def test_correct_key_grants_unrestricted_session(client, monkeypatch):
 
 def test_wrong_key_rejected_and_grants_nothing(client, monkeypatch):
     monkeypatch.setenv("MEDIAHUB_DEV_KEY", "s3cret-dev-key")
-    resp = client.post("/developer", data={"dev_key": "wrong"})
+    resp = client.post("/developer", data={"dev_key": "wrong", **_csrf(client)})
     assert resp.status_code == 401
     with client.session_transaction() as sess:
         assert sess.get("dev_operator") is None

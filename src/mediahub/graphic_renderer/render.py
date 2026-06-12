@@ -2177,6 +2177,24 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
                 viewport={"width": width, "height": height},
                 device_scale_factor=dpr,
             )
+            # Renderer lockdown (THREAT_MODEL §3): card HTML carries
+            # user-influenced text, so the render context gets NO network —
+            # only file:// (the page itself + self-hosted fonts/assets),
+            # data: URIs and about:blank may load. A template-injected
+            # https:// fetch is aborted, killing both SSRF and exfiltration
+            # through the renderer. Operator escape hatch for knowingly
+            # remote assets: MEDIAHUB_RENDERER_ALLOW_NET=1.
+            if os.environ.get("MEDIAHUB_RENDERER_ALLOW_NET", "") != "1":
+
+                def _renderer_route_guard(route):
+                    url = route.request.url
+                    if url.startswith(("file://", "data:", "about:")):
+                        route.continue_()
+                    else:
+                        log.warning("renderer blocked network request: %s", url.split("?")[0][:200])
+                        route.abort()
+
+                ctx.route("**/*", _renderer_route_guard)
             page = ctx.new_page()
             page.goto(page_path.as_uri(), wait_until="networkidle", timeout=30_000)
             # Wait for ALL @font-face downloads to settle. Playwright exposes

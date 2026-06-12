@@ -349,6 +349,18 @@ def run_pipeline_v4(
     except Exception:
         _llm_provider = "heuristic"
     _skip_pb_discovery = _llm_provider == "heuristic"
+    # Per-tenant enrichment opt-in: fetching PB history from public rankings
+    # is data collection NOT from the data subject (UK GDPR Art 14) — the
+    # club must have switched it on (and owes athletes/parents the Art 14
+    # notice; template in docs/compliance/templates/). Default is on for
+    # backward compatibility; the club can turn it off on /organisation/consent.
+    if fetch_pbs and profile is not None and not getattr(profile, "pb_enrichment_enabled", True):
+        step(
+            "Skipping PB discovery: this organisation has switched off PB-history "
+            "enrichment (Privacy → Consent & lawful basis)."
+        )
+        fetch_pbs = False
+
     if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
         step(
             "Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable)."
@@ -490,6 +502,19 @@ def run_pipeline_v4(
         run.recognition_report = None
         run.recognition_error = f"{type(exc).__name__}: {exc}"
         step(f"v5 recognition failed: {exc}")
+
+    # 12b. Children's Code content controls: transform under-18 athletes'
+    # display identity (surname initialisation / age suppression) per the
+    # tenant's policy BEFORE cards are synthesised and persisted, so every
+    # downstream surface (stills, captions, reels, packs) inherits it.
+    # Full name + age stay in raw_facts (internal) for consent/safeguarding.
+    if run.recognition_report and profile is not None:
+        try:
+            from mediahub.compliance.child_policy import apply_to_ranked
+
+            apply_to_ranked(profile, run.recognition_report.get("ranked_achievements") or [])
+        except Exception as exc:
+            step(f"child-policy transform failed (content left untransformed): {exc}")
 
     # 13. Bridge V5 → V3 stubs when V3 produced no cards.
     # The V3 detector path is intentionally skipped for interpreter-parsed

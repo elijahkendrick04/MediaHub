@@ -71,15 +71,31 @@ def initials_of(name: str) -> str:
     return ".".join(p[0].upper() for p in parts) + "."
 
 
-def _consent_policy(profile_id: str, swimmer_name: str):
-    """The athlete's enforceable consent policy, or ``None`` when the
-    workspace runs no consent regime (legacy behaviour applies).
+def _consent_block_reason(profile_id: str, swimmer_name: str) -> Optional[str]:
+    """Why this athlete must not appear on the wall at all — or ``None``.
 
-    Mirrors the generation/publish-gate semantics in
-    ``mediahub.safeguarding.consent.effective_policy``; a wholly failed
-    lookup (import error etc.) returns ``None`` so a public page never
-    500s — the blanket initials-only default still applies.
+    Uses the same unified check as the publish gate
+    (``compliance.gate.consent_block_reason``), which consults BOTH consent
+    systems: the W.2 safeguarding levels (do_not_feature / no consent on
+    file under an active regime) and the compliance ledger (opt-outs,
+    Art 18 restriction, opt-in mode). A wholly failed lookup returns
+    ``None`` so a public page never 500s.
     """
+    name = (swimmer_name or "").strip()
+    if not profile_id or not name:
+        return None
+    try:
+        from mediahub.compliance.gate import consent_block_reason
+
+        return consent_block_reason(profile_id, name)
+    except Exception:
+        return None
+
+
+def _consent_display_policy(profile_id: str, swimmer_name: str):
+    """The W.2 display policy (initials-only level etc.), or ``None`` when
+    the workspace runs no W.2 regime — blocking is handled separately by
+    :func:`_consent_block_reason`."""
     name = (swimmer_name or "").strip()
     if not profile_id or not name:
         return None
@@ -267,16 +283,17 @@ def wall_cards(
                 continue  # the wall only serves already-rendered cards
             ach = achs.get(cid) or {}
             raw_name = str(ach.get("swimmer_name") or "").strip()
-            policy = _consent_policy(profile.profile_id, raw_name)
-            if policy is not None and policy.blocked:
+            policy = _consent_display_policy(profile.profile_id, raw_name)
+            block_reason = _consent_block_reason(profile.profile_id, raw_name)
+            if block_reason:
                 if consent_hidden is not None:
                     consent_hidden.append(
                         {
                             "run_id": run_id,
                             "card_id": cid,
                             "athlete": raw_name,
-                            "level": policy.level,
-                            "reason": policy.reason,
+                            "level": policy.level if policy is not None else "blocked",
+                            "reason": block_reason,
                         }
                     )
                 continue
@@ -318,8 +335,7 @@ def wall_image_path(profile: ClubProfile, run_id: str, card_id: str) -> Optional
     if run_owner and run_owner != profile.profile_id:
         return None
     ach = _achievements_by_card_id(run_data).get(str(card_id)) or {}
-    policy = _consent_policy(profile.profile_id, str(ach.get("swimmer_name") or "").strip())
-    if policy is not None and policy.blocked:
+    if _consent_block_reason(profile.profile_id, str(ach.get("swimmer_name") or "").strip()):
         return None  # a blocked athlete's card is unreachable, not just unlisted
     vis = _best_visual_for_cards(run_id, {str(card_id)}).get(str(card_id))
     return vis["png_path"] if vis else None

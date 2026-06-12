@@ -1,5 +1,11 @@
 # Children's Code (Age Appropriate Design Code) pass — public surfaces
 
+> Companion: [`CHILDRENS_CODE.md`](CHILDRENS_CODE.md) maps the 15 standards
+> across the **whole product** (consent registry, identity controls, gates).
+> This document is the *surface audit* of the four public, unauthenticated
+> surfaces specifically — what a stranger can reach — with findings and
+> fixes. Read both together.
+
 **Scope.** The ICO's Age Appropriate Design Code applies to information
 society services *likely to be accessed by children*. MediaHub's accounts are
 adult club officers only (ToS §2), but four surfaces are reachable by anyone
