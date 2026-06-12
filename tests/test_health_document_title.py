@@ -2,11 +2,15 @@
 violation on /health.
 
 The /health endpoint performs content negotiation:
-  * Accept: application/json (or no Accept) → plain JSON, status 200/503
-  * Accept: text/html → a minimal HTML page with a valid <title>, same status
+  * Accept: application/json, */*, or no Accept → plain JSON, status 200/503
+  * Accept ranking text/html strictly above */* (a real browser navigation),
+    or Sec-Fetch-Dest: document → a minimal HTML page with a valid <title>
 
-This pins the a11y fix: browsers must see a <title> element so axe-core's
-document-title rule (WCAG 2.4.2) is satisfied.
+This pins the a11y fix (browsers must see a <title> element so axe-core's
+document-title rule, WCAG 2.4.2, is satisfied) AND the API contract for
+generic clients: fetch(), curl, and python-requests all send ``Accept: */*``
+and must receive JSON — the nav badge's bare fetch() once got HTML back,
+r.json() threw, and the badge painted "offline" on a perfectly healthy site.
 """
 from __future__ import annotations
 
@@ -77,6 +81,32 @@ def test_health_json_explicit_accept(client):
     assert r.get_json() is not None
 
 
+def test_health_wildcard_accept_returns_json(client):
+    """Accept: */* (fetch(), curl, python-requests defaults) must return JSON.
+
+    best_match() used to break the */* tie by list order and hand these API
+    callers the HTML page instead.
+    """
+    r = client.get("/health", headers={"Accept": "*/*"})
+    assert r.status_code in (200, 503)
+    assert r.content_type.startswith("application/json")
+    assert r.get_json() is not None
+
+
+def test_health_browser_accept_returns_html(client):
+    """A real browser navigation Accept header (text/html ranked above
+    */*;q=0.8) must still receive the HTML page."""
+    r = client.get(
+        "/health",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code in (200, 503)
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
+
+
 # ---------------------------------------------------------------------------
 # /healthz — same content-negotiation contract
 # ---------------------------------------------------------------------------
@@ -110,6 +140,33 @@ def test_healthz_json_explicit_accept(client):
     assert r.status_code == 200
     assert r.content_type.startswith("application/json")
     assert r.get_json() is not None
+
+
+def test_healthz_wildcard_accept_returns_json(client):
+    """Accept: */* must return JSON from /healthz — this is exactly what the
+    nav badge's fetch(HEALTH_URL) sends. When best_match() resolved */* to
+    text/html, r.json() threw on the HTML and the badge showed "offline"
+    every 30s on a healthy deployment."""
+    r = client.get("/healthz", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert payload.get("ok") is True
+
+
+def test_healthz_browser_accept_returns_html(client):
+    """A real browser navigation Accept header must still get the HTML page
+    (axe-core document-title, WCAG 2.4.2)."""
+    r = client.get(
+        "/healthz",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
 
 
 def test_healthz_sec_fetch_dest_document_returns_html(client):
@@ -172,3 +229,14 @@ def test_healthz_breaker_sec_fetch_dest_document_returns_html(client):
     body = r.data.decode()
     assert "<title>" in body
     assert "MediaHub Health" in body
+
+
+def test_healthz_breaker_wildcard_accept_returns_json(client):
+    """Accept: */* (curl/fetch default) must return JSON from
+    /healthz/breaker — same tie-break bug as /healthz."""
+    r = client.get("/healthz/breaker", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert payload.get("ok") is True

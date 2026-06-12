@@ -57,7 +57,7 @@ def test_console_redirects_non_operator_to_developer_login(monkeypatch, tmp_path
     assert r.status_code in (302, 303)
     assert "/developer" in r.headers["Location"]
     # A signed-in regular USER is still not the operator.
-    c.post("/signup", data={"email": "user@club.org", "password": PASSWORD})
+    c.post("/signup", data={"email": "user@club.org", "password": PASSWORD, "accept_terms": "1"})
     r = c.get("/operator/commercial")
     assert r.status_code in (302, 303)
     assert "/developer" in r.headers["Location"]
@@ -231,7 +231,7 @@ def test_bind_invite_then_signup_binds_workspace(monkeypatch, tmp_path):
 
     # The pilot signs up — org binds, anonymous access ends.
     new = app.test_client()
-    new.post("/signup", data={"email": "chair@pilot.org", "password": PASSWORD})
+    new.post("/signup", data={"email": "chair@pilot.org", "password": PASSWORD, "accept_terms": "1"})
     assert ms.is_bound("org-pilot") is True
     assert ms.is_active_owner("chair@pilot.org", "org-pilot") is True
     anon2 = app.test_client()

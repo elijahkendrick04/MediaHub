@@ -125,7 +125,7 @@ def test_set_plan_and_customer_id(monkeypatch, tmp_path):
 def test_signup_creates_user_hashes_and_logs_in(client, tmp_path):
     r = client.post(
         "/signup",
-        data={"email": "coach@club.org", "password": "twelvechars1"},
+        data={"email": "coach@club.org", "password": "twelvechars1", "accept_terms": "1"},
     )
     # Redirects into the app and sets a session cookie.
     assert r.status_code == 302
@@ -145,15 +145,21 @@ def test_signup_creates_user_hashes_and_logs_in(client, tmp_path):
 
 
 def test_signup_duplicate_shows_clean_error_not_500(client):
-    client.post("/signup", data={"email": "dup@club.org", "password": "twelvechars1"})
+    client.post(
+        "/signup", data={"email": "dup@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     # Fresh client (no session) re-signing up the same email.
-    r = client.post("/signup", data={"email": "dup@club.org", "password": "twelvechars1"})
+    r = client.post(
+        "/signup", data={"email": "dup@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     assert r.status_code == 400  # clean rejection, not a crash
     assert b"already exists" in r.data
 
 
 def test_login_logout_round_trip(client):
-    client.post("/signup", data={"email": "rt@club.org", "password": "twelvechars1"})
+    client.post(
+        "/signup", data={"email": "rt@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     # Log out, then the create page should no longer treat us as the account.
     client.get("/logout")
     # Log back in.
@@ -163,7 +169,9 @@ def test_login_logout_round_trip(client):
 
 
 def test_login_wrong_password_is_clean_error_not_500(client):
-    client.post("/signup", data={"email": "wp@club.org", "password": "twelvechars1"})
+    client.post(
+        "/signup", data={"email": "wp@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     client.get("/logout")
     r = client.post("/login", data={"email": "wp@club.org", "password": "WRONGWRONG"})
     # A wrong password is a clean 401, never a 500.
@@ -188,7 +196,9 @@ def test_session_cookie_is_httponly_and_signed(app, client):
     # HttpOnly configured; Secure off in test/dev (so HTTP cookies survive).
     assert app.config["SESSION_COOKIE_HTTPONLY"] is True
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
-    r = client.post("/signup", data={"email": "sec@club.org", "password": "twelvechars1"})
+    r = client.post(
+        "/signup", data={"email": "sec@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     set_cookie = "\n".join(v for k, v in r.headers if k == "Set-Cookie")
     assert "HttpOnly" in set_cookie
     # The signed cookie value is itimsdangerous-tagged, not the raw email.
@@ -196,7 +206,9 @@ def test_session_cookie_is_httponly_and_signed(app, client):
 
 
 def test_signup_redirects_authenticated_user_away(client):
-    client.post("/signup", data={"email": "again@club.org", "password": "twelvechars1"})
+    client.post(
+        "/signup", data={"email": "again@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     # Visiting /signup or /login while already signed in bounces into the app.
     r = client.get("/signup")
     assert r.status_code == 302
@@ -251,7 +263,9 @@ def test_billing_does_not_leak_another_accounts_plan(billing_client):
     # --- Account B: a premium CLUB subscriber with a Stripe customer id. ---
     b_email = "owner-b@premium-federation.example"
     b_customer_id = "cus_ISOLATIONLEAKB999"
-    billing_client.post("/signup", data={"email": b_email, "password": "twelvechars1"})
+    billing_client.post(
+        "/signup", data={"email": b_email, "password": "twelvechars1", "accept_terms": "1"}
+    )
     # Stamp B onto the paid Club plan via the REAL auth API (no invented names).
     store = auth.UserStore()
     updated = store.set_plan(b_email, auth.PLAN_CLUB, stripe_customer_id=b_customer_id)
@@ -261,7 +275,9 @@ def test_billing_does_not_leak_another_accounts_plan(billing_client):
 
     # --- Account A: a brand-new Free user. ---
     a_email = "viewer-a@grassroots.example"
-    billing_client.post("/signup", data={"email": a_email, "password": "twelvechars1"})
+    billing_client.post(
+        "/signup", data={"email": a_email, "password": "twelvechars1", "accept_terms": "1"}
+    )
 
     r = billing_client.get("/billing")
     assert r.status_code == 200
