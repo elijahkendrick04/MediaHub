@@ -7,25 +7,32 @@ hand-written prose is never touched:
   1. **Last-updated stamp** — date + short SHA + subject of the pushed tip.
   2. **Recent-activity feed** — the last N non-bot commits as a small table.
   3. **Status directives** — any ``roadmap: <ID> <status>`` line found in the
-     pushed commit messages updates the matching item in the roadmap's two
-     lists: ``done`` **moves the item from the To-do list to the Completed
-     list** (date-stamped); ``wip``/``blocked``/``todo`` set the badge and
-     move the item back to To do if it had been completed.
+     pushed commit messages updates the matching item in the roadmap's three
+     lists: ``done`` **moves the item from its to-do list to the Completed
+     list** (date-stamped); ``wip``/``blocked``/``todo`` set the badge in
+     place, or move the item back out of Completed — ``F.*`` ids return to
+     the founder list, everything else to the main (Fable 5) list.
 
 Directive convention (put one per line in any commit message)::
 
     roadmap: PC.3 wip
     roadmap: P1.2 done
+    roadmap: F.2 done
     roadmap: P4.1 blocked
 
-IDs are the item IDs in the lists (``PC.3``, ``P0.1`` …). Statuses:
+IDs are the item IDs in the lists (``PC.3``, ``F.1``, ``P0.1`` …). Statuses:
 ``done | wip | blocked | todo``.
 
 The roadmap's list contract (kept by this script):
 
-* To-do items live between ``<!-- ROADMAP:TODO -->`` markers, one per line::
+* To-do items live in two blocks, one item per line, same shape in both::
 
       - **<ID>** · <description> · <emoji> **<LABEL>**
+
+  ``<!-- ROADMAP:TODO -->`` is the main list (things Fable 5 can build);
+  ``<!-- ROADMAP:TODO_FOUNDER -->`` is the founder list (things only the
+  maintainer can do — ``F.*`` ids plus the founder-owned ``PC.*`` items).
+  Both are searched for directive ids; an id must be unique across them.
 
 * Completed items live between ``<!-- ROADMAP:DONE -->`` markers::
 
@@ -78,7 +85,10 @@ _DIRECTIVE_RE = re.compile(
 
 
 def _norm_id(raw: str) -> str:
-    """Normalise a directive id: 'pc.3'->'PC.3', 'par-1'->'PAR-1', 'step 8'->'Step 8'."""
+    """Normalise a directive id: 'pc.3'->'PC.3', 'f.2'->'F.2', 'par-1'->'PAR-1',
+    'step 8'->'Step 8'. Every letter-prefixed id family in the lists (P*, PC.*,
+    F.*, W.*) is uppercase, so uppercase them all — the old p-only rule made
+    lowercase 'f.2'/'w.3' directives silently miss."""
     s = raw.strip().replace("–", "-")
     m = re.match(r"^(par|seq)[-\s]?(\d+)$", s, re.IGNORECASE)
     if m:
@@ -86,7 +96,7 @@ def _norm_id(raw: str) -> str:
     m = re.match(r"^step[-\s]?(\d+)$", s, re.IGNORECASE)
     if m:
         return f"Step {m.group(1)}"
-    return s.upper() if re.match(r"^p", s, re.IGNORECASE) else s
+    return s.upper() if re.match(r"^[a-z]", s, re.IGNORECASE) else s
 
 
 def parse_directives(messages):
@@ -106,6 +116,20 @@ def parse_directives(messages):
 # ---------------------------------------------------------------------------
 # List-item status + movement (the To-do / Completed contract)
 # ---------------------------------------------------------------------------
+
+# The two to-do blocks, in search order. TODO_FOUNDER is optional in a
+# document (set_item_status degrades to single-list behaviour without it).
+_TODO_BLOCKS = ("TODO", "TODO_FOUNDER")
+
+
+def _demote_target(ident: str) -> str:
+    """Which to-do block an item demoted out of Completed lands in.
+
+    ``F.*`` ids are founder actions by construction; everything else defaults
+    to the main list (a founder-owned ``PC.*`` item demoted here is moved by
+    hand — demotion is rare and the main list is the safe default).
+    """
+    return "TODO_FOUNDER" if re.match(r"^F\.", ident, re.IGNORECASE) else "TODO"
 
 
 def _block_re(name: str) -> re.Pattern:
@@ -151,58 +175,70 @@ def _append_line(body: str, line: str) -> str:
 
 
 def set_item_status(text: str, ident: str, status_kw: str, *, today: str | None = None):
-    """Apply a directive to the To-do / Completed lists.
+    """Apply a directive to the to-do / Completed lists.
 
-    ``done`` moves the item into the Completed block with a
-    ``*(completed <date>)*`` stamp (an already-completed item keeps its
-    original annotation). Any other status puts the item in the To-do block
-    with the matching badge — including demoting a Completed item back to
-    To do. Returns ``(new_text, changed)``; unknown ids are a no-op.
+    ``done`` moves the item (from whichever to-do block holds it) into the
+    Completed block with a ``*(completed <date>)*`` stamp (an
+    already-completed item keeps its original annotation). Any other status
+    sets the badge in place, or — for a Completed item — demotes it back to a
+    to-do block (``F.*`` → the founder block, else the main block). Returns
+    ``(new_text, changed)``; unknown ids are a no-op.
     """
     if status_kw not in STATUS:
         return text, False
-    todo_m = _block_re("TODO").search(text)
-    done_m = _block_re("DONE").search(text)
-    if not todo_m or not done_m:
+    bodies = {}
+    for name in (*_TODO_BLOCKS, "DONE"):
+        m = _block_re(name).search(text)
+        if m:
+            bodies[name] = m.group(1)
+    if "TODO" not in bodies or "DONE" not in bodies:
         print("warning: TODO/DONE marker blocks not found in ROADMAP.md", file=sys.stderr)
         return text, False
-    todo_body, done_body = todo_m.group(1), done_m.group(1)
 
-    in_todo = _find_item(todo_body, ident)
-    in_done = None if in_todo else _find_item(done_body, ident)
-    if not in_todo and not in_done:
+    found_in, item = None, None
+    for name in (*_TODO_BLOCKS, "DONE"):
+        if name in bodies:
+            item = _find_item(bodies[name], ident)
+            if item:
+                found_in = name
+                break
+    if not item:
         return text, False
-    old_line = (in_todo or in_done).group(0)
+    old_line = item.group(0)
     core = _item_core(old_line)
 
+    new_bodies = dict(bodies)
     if status_kw == "done":
-        kept = _COMPLETED_RE.search(old_line) if in_done else None
+        kept = _COMPLETED_RE.search(old_line) if found_in == "DONE" else None
         annotation = kept.group(0).strip() if kept else (
             f"*(completed {today or date.today().isoformat()})*"
         )
         new_line = f"- ✅ **{ident}** · {core} {annotation}"
-        if in_done:
-            new_done = done_body.replace(old_line, new_line, 1)
-            new_todo = todo_body
+        if found_in == "DONE":
+            new_bodies["DONE"] = bodies["DONE"].replace(old_line, new_line, 1)
         else:
-            new_todo = _remove_line(todo_body, old_line)
-            new_done = _append_line(done_body, new_line)
+            new_bodies[found_in] = _remove_line(bodies[found_in], old_line)
+            new_bodies["DONE"] = _append_line(bodies["DONE"], new_line)
     else:
         emoji, label = STATUS[status_kw]
         new_line = f"- **{ident}** · {core} · {emoji} **{label}**"
-        if in_todo:
-            new_todo = todo_body.replace(old_line, new_line, 1)
-            new_done = done_body
+        if found_in == "DONE":
+            target = _demote_target(ident)
+            if target not in bodies:
+                target = "TODO"
+            new_bodies["DONE"] = _remove_line(bodies["DONE"], old_line)
+            new_bodies[target] = _append_line(new_bodies[target], new_line)
         else:
-            new_done = _remove_line(done_body, old_line)
-            new_todo = _append_line(todo_body, new_line)
+            new_bodies[found_in] = bodies[found_in].replace(old_line, new_line, 1)
 
-    new_text = _block_re("TODO").sub(
-        lambda _m: f"<!-- ROADMAP:TODO -->{new_todo}<!-- /ROADMAP:TODO -->", text, count=1
-    )
-    new_text = _block_re("DONE").sub(
-        lambda _m: f"<!-- ROADMAP:DONE -->{new_done}<!-- /ROADMAP:DONE -->", new_text, count=1
-    )
+    new_text = text
+    for name, body in new_bodies.items():
+        if body != bodies[name]:
+            new_text = _block_re(name).sub(
+                lambda _m, n=name, b=body: f"<!-- ROADMAP:{n} -->{b}<!-- /ROADMAP:{n} -->",
+                new_text,
+                count=1,
+            )
     return new_text, new_text != text
 
 
