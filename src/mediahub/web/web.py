@@ -75,6 +75,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import legal as _legal
 from . import tenancy as _tenancy
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
@@ -6974,9 +6975,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
       <span class="mh-footer-sep">/</span>
-      <a href="{{ url_for('privacy_page') }}">Data &amp; privacy</a>
+      <a href="{{ url_for('privacy_page') }}">Privacy</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('terms_page') }}">Terms</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('cookies_page') }}">Cookies</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+    </div>
+    <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
+      {{ provider_identity }}
     </div>
   </div>
 </footer>
@@ -7740,6 +7750,10 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
         theme_seed_style=_theme_seed_style_block(),
+        provider_identity=(
+            f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · "
+            f"{_legal.CONTACT_EMAIL}"
+        ),
     )
 
 
@@ -7994,6 +8008,15 @@ def create_app() -> Flask:
             "login_page",
             "login_post",
             "logout",
+            # UK legal baseline — the legal documents must be readable by
+            # anyone BEFORE they sign up or set up an organisation (UK GDPR
+            # Art. 13 requires the privacy notice at the point of
+            # collection; CCR 2013 requires pre-contract information).
+            # The privacy ACTIONS (cache clear / run delete) stay gated.
+            "privacy_page",
+            "terms_page",
+            "cookies_page",
+            "dpa_page",
             "pricing_page",
             "billing_page",
             "billing_checkout",
@@ -12496,43 +12519,50 @@ Relay team broke club record"></textarea>
             )
         except Exception:
             n_cache = 0
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>What we <em class="editorial">keep.</em></h1>
-  <p class="lede">Everything MediaHub stores on this deployment, and exactly how to delete it. No data leaves the box except to fetch public PB-lookup pages from the configured source.</p>
-</section>
-
+        # The deployment inventory (counts + cache-clear action) is only for
+        # signed-in sessions — the notice text itself is public (Art. 13).
+        signed_in = bool(_auth.current_user_email() or _active_profile_id())
+        inventory_html = f"""
 <div class="card">
-  <h2>Inventory</h2>
+  <h2>Your data on this deployment</h2>
   <div class="stat-block">
     <div class="stat"><div class="l">Runs (DB)</div><div class="v">{n_runs}</div></div>
     <div class="stat"><div class="l">Run JSON files</div><div class="v">{n_files}</div></div>
     <div class="stat"><div class="l">Upload temp files</div><div class="v">{n_uploads}</div></div>
     <div class="stat"><div class="l">PB cache entries</div><div class="v">{n_cache}</div></div>
   </div>
-</div>
-
-<div class="card">
-  <h2>What we store</h2>
-  <ul>
-    <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
-    <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
-    <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
-  </ul>
-  <p class="muted">No data is sent to third parties beyond fetching public PB-lookup pages from the configured PB source.</p>
-</div>
-
-<div class="card">
-  <h2>Actions</h2>
   <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
 </div>
 """
-        return _layout("Privacy", body, active="privacy")
+        body = _legal.privacy_html(
+            terms_url=url_for("terms_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+            deployment_inventory_html=inventory_html if signed_in else "",
+        )
+        return _layout("Privacy Notice", body, active="privacy")
+
+    @app.route("/terms")
+    def terms_page():
+        body = _legal.terms_html(
+            privacy_url=url_for("privacy_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+        )
+        return _layout("Terms of Service", body, active="")
+
+    @app.route("/cookies")
+    def cookies_page():
+        body = _legal.cookies_html(privacy_url=url_for("privacy_page"))
+        return _layout("Cookie Policy", body, active="")
+
+    @app.route("/dpa")
+    def dpa_page():
+        body = _legal.dpa_html(privacy_url=url_for("privacy_page"))
+        return _layout("Data Processing Agreement", body, active="")
 
     @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
     def privacy_delete_run(run_id):
