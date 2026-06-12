@@ -107,7 +107,6 @@ def _purpose_from_module(rel: Path) -> str:
             "media_requirements": "Content-type → media rules",
             "venue_search": "Pool venue image search",
             "inspiration": "Pattern + exemplar library",
-            "history": "Swimmer historical results",
             "content_pack": "Pack ZIP builder",
             "content_pack_visual": "Visual pack integration",
             "web_research": "Web research client",

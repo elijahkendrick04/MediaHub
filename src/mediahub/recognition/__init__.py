@@ -37,9 +37,6 @@ from .registry import register_sport, get_sport, list_sports, SportConfig
 from .copy_text import build_caption_text
 from .weekend_in_numbers import build_weekend_in_numbers
 
-# V9: "Why this card?" plain-English explainer surface.
-from .explainer import explain_achievement
-
 __all__ = [
     # core from v5
     "QualityBand",
@@ -67,6 +64,4 @@ __all__ = [
     "SportConfig",
     "build_caption_text",
     "build_weekend_in_numbers",
-    # V9 additions
-    "explain_achievement",
 ]

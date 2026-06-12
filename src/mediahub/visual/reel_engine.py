@@ -11,17 +11,13 @@ ffmpeg    Free fallback (roadmap P0.1): the card's own still graphic
           (Playwright/Chromium via ``graphic_renderer``) animated and
           stitched by FFmpeg.  No Remotion Company License, no Node
           required.  Implementation: :mod:`mediahub.visual.reel_ffmpeg`.
-satori    Future Satori fast-path (roadmap P5.4); raises
-          :exc:`ReelEngineUnavailable` until it ships.  Never emits a
-          fake/placeholder asset — CLAUDE.md requires an honest error
-          instead.
 """
 
 from __future__ import annotations
 
 import os
 
-_VALID_ENGINES: frozenset[str] = frozenset({"remotion", "ffmpeg", "satori"})
+_VALID_ENGINES: frozenset[str] = frozenset({"remotion", "ffmpeg"})
 _DEFAULT_ENGINE: str = "remotion"
 
 
@@ -74,7 +70,6 @@ def reel_engine_status() -> dict:
     ffmpeg_available   ``True`` when the free fallback can run: an FFmpeg
                        binary is resolvable and Playwright (the still
                        renderer) is importable.
-    satori_available   Always ``False`` until the Satori engine ships.
     available_engines  List of engine names that would succeed right now.
     """
     import shutil
@@ -95,7 +90,6 @@ def reel_engine_status() -> dict:
         ffmpeg_ok = _ffmpeg_available()
     except Exception:
         ffmpeg_ok = False
-    satori_ok = False  # not yet implemented (P5.4)
 
     available: list[str] = []
     if remotion_ok:
@@ -108,7 +102,6 @@ def reel_engine_status() -> dict:
         "active": active,
         "remotion_available": remotion_ok,
         "ffmpeg_available": ffmpeg_ok,
-        "satori_available": satori_ok,
         "available_engines": available,
     }
 
