@@ -24,6 +24,7 @@
 | **Resend, Inc.** (transactional email, PC.14) | Password resets, email verification, workspace invites, service/breach notices | Account email addresses and the message content | United States | DPA; SCCs/IDTA | [resend.com/legal/dpa](https://resend.com/legal/dpa) | Yes — `RESEND_API_KEY` + `MEDIAHUB_EMAIL_FROM`; honest-unavailable unset |
 | **Stripe, Inc.** (billing) | Payment processing (controller-side, listed for transparency) | Account email, plan, payment details (collected by Stripe directly) | United States | Stripe DPA; UK–US data bridge / SCCs | [stripe.com/legal/dpa](https://stripe.com/legal/dpa) | Yes — `STRIPE_SECRET_KEY`; billing is honest-503 unset |
 | **Operator's off-site backup target** (PC.14) | Stores backup archives (ledgers, databases, runs JSON) | Everything a backup archive holds — see `mediahub/backup` | Operator-chosen | Part of the hosting/storage surface: the operator must hold processor terms with the target's provider | provider-specific | Yes — `MEDIAHUB_BACKUP_UPLOAD_URL`; off unset |
+| **GitHub, Inc.** (log sentinel) | Receives operational log excerpts filed as issues in the operator's repository | Log lines around a detected failure (designed to carry no athlete personal data) | United States | GitHub DPA; SCCs/IDTA | [GitHub DPA](https://github.com/customer-terms/github-data-protection-agreement) | Yes — `MEDIAHUB_SENTINEL_GITHUB_TOKEN`; sentinel inert unset (also needs `RENDER_API_KEY`, covered under Render above) |
 
 ## Recipients that are NOT sub-processors
 

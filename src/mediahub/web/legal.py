@@ -102,12 +102,29 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
         name="Render Services, Inc. (hosting & backup storage)",
         processing=(
             "Runs the service and stores all Club Data, including the "
-            "operator-configured off-site backup archives"
+            "operator-configured off-site backup archives; the log sentinel "
+            "reads the service's own logs through the Render API"
         ),
         location="United States",
-        env_keys=("MEDIAHUB_BACKUP_UPLOAD_URL", "MEDIAHUB_BACKUP_UPLOAD_TOKEN"),
+        env_keys=(
+            "MEDIAHUB_BACKUP_UPLOAD_URL",
+            "MEDIAHUB_BACKUP_UPLOAD_TOKEN",
+            "RENDER_API_KEY",
+        ),
         transfer_mechanism="UK–US data bridge (DPF-certified); SCC fallback",
         engaged_when="Always",
+    ),
+    Subprocessor(
+        name="GitHub, Inc. (log sentinel)",
+        processing=(
+            "Receives operational log excerpts filed as issues in the "
+            "operator's repository by the log sentinel (logs are designed to "
+            "carry no athlete personal data)"
+        ),
+        location="United States",
+        env_keys=("MEDIAHUB_SENTINEL_GITHUB_TOKEN",),
+        transfer_mechanism="GitHub DPA; SCCs/IDTA",
+        engaged_when="Only if the log sentinel is configured",
     ),
     Subprocessor(
         name="Google LLC (Gemini API)",
