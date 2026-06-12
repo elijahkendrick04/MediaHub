@@ -2191,9 +2191,7 @@ def render_html_to_png(html: str, output_path: str | Path, size: tuple[int, int]
                     if url.startswith(("file://", "data:", "about:")):
                         route.continue_()
                     else:
-                        log.warning(
-                            "renderer blocked network request: %s", url.split("?")[0][:200]
-                        )
+                        log.warning("renderer blocked network request: %s", url.split("?")[0][:200])
                         route.abort()
 
                 ctx.route("**/*", _renderer_route_guard)
