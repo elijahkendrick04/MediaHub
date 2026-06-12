@@ -31,7 +31,7 @@ def _stable_swimmer_key(*, asa_id: Optional[str], club_code: str, last: str, fir
     if asa_id:
         return f"asa:{asa_id}"
     raw = f"{club_code}|{last.lower()}|{first.lower()}".encode("utf-8")
-    return f"hash:{hashlib.md5(raw).hexdigest()[:10]}"
+    return f"hash:{hashlib.md5(raw, usedforsecurity=False).hexdigest()[:10]}"
 
 
 class HY3Adapter(MeetAdapter):

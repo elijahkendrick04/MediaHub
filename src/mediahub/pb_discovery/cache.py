@@ -35,7 +35,7 @@ def _discovered_root() -> Path:
 def make_swimmer_key(name: str, club: str) -> str:
     """Create a stable, filesystem-safe key for a swimmer."""
     raw = f"{name.lower().strip()}|{club.lower().strip()}"
-    return hashlib.md5(raw.encode()).hexdigest()[:20]
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()[:20]
 
 
 class RunCache:

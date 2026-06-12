@@ -2400,6 +2400,15 @@ Folded the June 2026 external market-and-scalability research pass into the long
 
 ---
 
+## Compliance & Security — 2026-06-12 — UK/EU data-protection programme + ASVS L2 hardening
+
+One programme, four phases, all in PR #346. **Framing:** not "unhackable" — threat-modelled, defence-in-depth, ASVS L2-verified, residual risks listed honestly (`docs/security/SECURITY_REPORT.md`). Nothing legal was silently decided: 12 judgment calls live in `docs/compliance/OPEN_LEGAL_QUESTIONS.md` and every legal-shaped document is DRAFT — FOR LEGAL REVIEW.
+
+**Compliance (docs/compliance/):** legal framework verified against primary sources (DUAA main tranche 5 Feb 2026 per SI 2026/82; s.164A complaints duty 19 Jun 2026; renewed EU–UK adequacy to 2031); data map (every store/flow, with module evidence); ROPA; sub-processor inventory + public `/legal/subprocessors` page; article-by-article gap analysis. Capabilities: per-tenant lawful-basis + consent/opt-out registry with **hard gating** (an opted-out or no-consent athlete cannot be approved, packed, or published — one decision function at four enforcement points); athlete-level SAR export / rectification / **erasure across every mapped store** (with honest residuals) + Art 12A stop-the-clock request log; retention schedule + daily purge + LLM-payload minimisation; Art 13/14 notice + Art 28 DPA templates + PECR cookie audit (clean — no banner needed); Children's Code controls (surname initialisation, age suppression, photo exclusion; high-privacy defaults for new orgs) with all 15 standards documented; s.164A complaints intake (live ahead of the statutory date) + incident register + breach playbook; draft DPIA awaiting sign-off.
+
+**Security (docs/security/):** STRIDE threat model incl. OWASP LLM Top 10. argon2id with bcrypt upgrade-on-login, login lockout, session rotation, optional stdlib TOTP 2FA; upload allowlist, PDF page cap, zip-slip static guard, **Playwright renderer network lockdown**, fail-closed SSRF guards; CSP/HSTS/nosniff/XFO headers + monolith-wide CSRF tokens + generic error pages; fail-fast env validation + least-privilege key scoping; CI gates (pip-audit, bandit 0-high, semgrep 0-ERROR, gitleaks-clean history) + dependabot + non-root Docker; encrypted restore-tested backups; pseudonymised security event log with operator view; prompt-injection delimiting/screening and an **unbypassable publish gate** — the schedule route now enforces tenant + human approval + consent server-side (it previously checked none of these).
+
+Verification: full suite green — 4,153 passed, 1 skip, 0 failures (incl. ~120 new tests); OWASP ZAP 2.16.1 baseline against a local deploy — 0 High; findings triaged in the security report.
 ## Feature — 2026-06-12 — Multilingual captions: top-10 world languages + Irish (W.13 generalised)
 
 The W.13 bilingual-Welsh caption feature is now a full multilingual system. A new

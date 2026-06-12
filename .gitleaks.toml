@@ -1,0 +1,21 @@
+# gitleaks configuration — security/secrets-and-config (THREAT_MODEL §7).
+# Full-history scan runs in CI (.github/workflows/security.yml) and locally:
+#   gitleaks git --no-banner --redact .
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives — synthetic test values, never real credentials"
+regexTarget = "line"
+regexes = [
+  # tests/test_official_pb_detector.py builds composite swim ids from a fake
+  # swimmer_key ("jane-smith-001"); the generic-api-key rule matches the
+  # `..._key="..."` assignment shape. Synthetic fixture, not a secret.
+  '''swimmer_key="[a-z-]+-\d{3}"''',
+]
+paths = [
+  # Vendored reference material (never executed) and binary corpora.
+  '''^vendor/''',
+  '''^samples/learning_corpus/''',
+]

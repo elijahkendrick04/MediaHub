@@ -118,7 +118,7 @@ class TestPublishGate:
             "confidence",
             "brand_safety",
             "safeguarding",
-            "consent",  # W.2 — per-athlete consent registry check
+"consent",  # unified check: W.2 registry + compliance ledger
             "rate_limit",
         }
         assert all(c.detail for c in v.checks)

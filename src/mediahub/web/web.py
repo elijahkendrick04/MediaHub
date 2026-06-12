@@ -8022,6 +8022,13 @@ _PALETTE_PICKER_JS = """
 
 
 def create_app() -> Flask:
+    # Fail-fast env validation (security/secrets-and-config): production
+    # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
+    # malformed provider keys) instead of running degraded.
+    from mediahub.web.env_check import validate_environment
+
+    validate_environment()
+
     # Python's mimetypes database omits font/woff2 on some Linux systems,
     # causing Flask to serve .woff2 as application/octet-stream and browsers
     # to treat it as a download rather than loading it as a font.
@@ -8030,6 +8037,116 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
     app.url_map.strict_slashes = False
+
+    # ---- Web hardening (security/web-hardening, THREAT_MODEL §6) --------
+    # Security headers on every response + CSRF protection on state-changing
+    # form posts. JSON POSTs are exempt by content-type (a cross-site form
+    # cannot send application/json without a CORS preflight), webhooks are
+    # exempt by signature verification, and the public wall embed keeps its
+    # frame permissions. Enforcement follows the ENFORCE_LOGIN_IDLE pattern:
+    # on in production, opt-in under TESTING via ENFORCE_CSRF so the large
+    # form-posting test corpus doesn't need a token each.
+    import hmac as _hmac
+    import secrets as _secrets_mod
+
+    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe"}
+    _FORM_TAG_RX = re.compile(r"(<form\b[^>]*\bmethod=[\"']?post[\"']?[^>]*>)", re.IGNORECASE)
+
+    def _csrf_token() -> str:
+        tok = session.get("_csrf")
+        if not tok:
+            tok = _secrets_mod.token_hex(16)
+            session["_csrf"] = tok
+        return tok
+
+    def _csrf_enforced() -> bool:
+        return (not app.config.get("TESTING")) or bool(app.config.get("ENFORCE_CSRF"))
+
+    @app.before_request
+    def _csrf_protect():
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
+            return None
+        ctype = (request.content_type or "").lower()
+        if ctype.startswith("application/json"):
+            return None
+        supplied = (
+            request.form.get("csrf_token")
+            or request.headers.get("X-CSRF-Token")
+            or ""
+        )
+        expected = session.get("_csrf") or ""
+        if not expected or not _hmac.compare_digest(str(supplied), str(expected)):
+            try:
+                from mediahub.compliance.security_log import record_event as _sec_event
+
+                _sec_event("csrf_rejected", detail=request.path[:200], outcome="blocked")
+            except Exception:
+                pass
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "csrf", "message": "Missing or invalid CSRF token."}), 403
+            return (
+                "<h1>Request blocked</h1><p>This form was submitted without a valid "
+                "security token. Go back, reload the page, and try again.</p>"
+            ), 403
+        return None
+
+    @app.after_request
+    def _security_headers(resp):
+        # CSRF auto-injection: every rendered POST form gets the session
+        # token as a hidden input — works across the whole f-string
+        # monolith without touching each form.
+        try:
+            if (
+                resp.content_type
+                and resp.content_type.startswith("text/html")
+                and not resp.direct_passthrough
+            ):
+                html_text = resp.get_data(as_text=True)
+                if "<form" in html_text.lower():
+                    tok = _csrf_token()
+                    injected = _FORM_TAG_RX.sub(
+                        lambda m: m.group(1)
+                        + f'<input type="hidden" name="csrf_token" value="{tok}">',
+                        html_text,
+                    )
+                    if injected != html_text:
+                        resp.set_data(injected)
+        except Exception:
+            pass
+        h = resp.headers
+        # 'unsafe-inline' is required by the f-string templates' inline
+        # style/script idiom; the CSP still blocks every remote script,
+        # object embedding, and base/form hijack. Tightening to nonces is
+        # tracked in the residual register.
+        # The public wall embed is DESIGNED to be iframed by club websites;
+        # everything else refuses framing (clickjacking). frame-ancestors
+        # has no default-src fallback, so it must be set explicitly (ZAP
+        # baseline finding, 2026-06-12).
+        _embeddable = (request.endpoint or "") == "public_wall_embed" or (
+            request.path.startswith("/wall/") and request.path.endswith("/embed")
+        )
+        h.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+            "font-src 'self'; connect-src 'self'; media-src 'self' blob:; "
+            "object-src 'none'; base-uri 'self'; form-action 'self'; "
+            + ("frame-ancestors *" if _embeddable else "frame-ancestors 'none'"),
+        )
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        if not _embeddable:
+            h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        # HSTS when we know we're behind TLS (secure-cookie config, a TLS
+        # request, or Render's edge) — never teach a plain-HTTP dev setup to pin.
+        if app.config.get("SESSION_COOKIE_SECURE") or request.is_secure or os.environ.get("RENDER"):
+            h.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return resp
 
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
     # Priority: env var > persisted file > generated + saved.
@@ -8486,23 +8603,10 @@ def create_app() -> Flask:
         session["terms_ok_version"] = _legal.TERMS_VERSION
         return None
 
-    # ---- security headers (Art. 32 / audit finding 1.10) -----------------
-
-    @app.after_request
-    def _security_headers(resp):
-        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        # Clickjacking protection everywhere EXCEPT the public-wall embed,
-        # whose whole purpose is to be iframed into club websites.
-        if (request.endpoint or "") != "public_wall_embed":
-            resp.headers.setdefault("X-Frame-Options", "DENY")
-        # HSTS only when we know we're behind TLS (same signals as the
-        # Secure-cookie flag): never teach a plain-HTTP dev setup to pin.
-        if request.is_secure or os.environ.get("RENDER"):
-            resp.headers.setdefault(
-                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
-            )
-        return resp
+    # Security headers live in the consolidated _security_headers hook in
+    # create_app's web-hardening block (CSP + CSRF injection + nosniff +
+    # embed-aware XFO + Referrer/Permissions-Policy + HSTS) — one hook,
+    # one truth (Art. 32 / audit finding 1.10).
 
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
@@ -9288,6 +9392,22 @@ def create_app() -> Flask:
                     '<div class="card"><p class="tag bad">No file selected.</p></div>',
                     active="create",
                 )
+            # Extension allowlist (THREAT_MODEL §1): results files only. The
+            # file is stored as opaque bytes under a random run id and parsed
+            # by deterministic parsers — but rejecting junk up front shrinks
+            # the parser attack surface and gives an honest error.
+            _ALLOWED_UPLOAD_EXTS = {
+                ".hy3", ".hyv", ".sd3", ".sdif", ".cl2", ".zip", ".pdf",
+                ".htm", ".html", ".csv", ".txt",
+            }
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in _ALLOWED_UPLOAD_EXTS:
+                return _layout(
+                    "Upload",
+                    '<div class="card"><p class="tag bad">That file type isn\'t supported. '
+                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML or CSV.</p></div>",
+                    active="create",
+                ), 400
             data = f.read()
             if not data:
                 return _layout(
@@ -9927,16 +10047,19 @@ def create_app() -> Flask:
                 400,
             )
         # Early SSRF reject (every fetch inside the crawl is re-validated too).
+        # FAIL-CLOSED: if the guard itself can't run, the URL doesn't either.
         try:
             from mediahub.web_research.safe_fetch import is_url_safe
 
-            if not is_url_safe(url):
-                return (
-                    jsonify({"error": "That address can't be reached (private/invalid host)."}),
-                    400,
-                )
+            url_ok = is_url_safe(url)
         except Exception:
-            pass
+            log.warning("SSRF guard unavailable — refusing user-supplied URL", exc_info=True)
+            url_ok = False
+        if not url_ok:
+            return (
+                jsonify({"error": "That address can't be reached (private/invalid host)."}),
+                400,
+            )
         # Per-session rate limit (a real headless-browser crawl is a real cost).
         sid = session.get("mh_sid")
         if not sid:
@@ -12936,6 +13059,11 @@ Relay team broke club record"></textarea>
   <p class="muted" style="margin-top:8px">Automatic retention: {_retention_line}</p>
 </div>
 {_rights_tools_html}
+
+<div class="card">
+  <h2>Complaints</h2>
+  <p>Think we've handled personal data wrongly? <a href="{url_for('complaints_form')}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
+</div>
 """
         body = _legal.privacy_html(
             terms_url=url_for("terms_page"),
@@ -13017,6 +13145,663 @@ Relay team broke club record"></textarea>
                         pass
         return redirect(url_for("privacy_page"))
 
+    # ---- DATA-PROTECTION COMPLAINTS (s.164A DPA 2018) -------------------
+    # From 19 June 2026 controllers must facilitate data-protection
+    # complaints via an electronic form and acknowledge within 30 days.
+    # The form is public on purpose: complainants (athletes, parents) are
+    # usually NOT platform users. Engine: mediahub.compliance.complaints.
+
+    _complaint_recent_posts: dict = {}
+
+    def _complaints_throttled(remote: str) -> bool:
+        # Tiny per-IP throttle so the public form can't be flooded:
+        # 5 submissions per hour per address.
+        import time as _time
+
+        now = _time.time()
+        window = [t for t in _complaint_recent_posts.get(remote, []) if now - t < 3600]
+        _complaint_recent_posts[remote] = window
+        if len(window) >= 5:
+            return True
+        window.append(now)
+        return False
+
+    def _complaints_form_body(error: str = "") -> str:
+        err_html = (
+            f'<p class="tag bad">{_h(error)}</p>' if error else ""
+        )
+        return f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Make a <em class="editorial">complaint.</em></h1>
+  <p class="lede">If you think this service has handled your (or your child's) personal data wrongly, tell us here. We will acknowledge your complaint within 30 days and respond as soon as we can. You can also complain to the ICO at any time at ico.org.uk.</p>
+</section>
+<div class="card">
+  {err_html}
+  <form method="post" action="{url_for('complaints_submit')}">
+    <label>Your name<br><input type="text" name="name" maxlength="200" required></label><br>
+    <label>How can we reach you? (email or phone)<br><input type="text" name="contact" maxlength="300" required></label><br>
+    <label>You are…<br>
+      <select name="relationship">
+        <option value="parent/guardian">A parent or guardian of an athlete</option>
+        <option value="athlete">An athlete</option>
+        <option value="club member">A club member or volunteer</option>
+        <option value="other">Other</option>
+      </select>
+    </label><br>
+    <label>Club (if relevant)<br><input type="text" name="club" maxlength="120"></label><br>
+    <label>What happened?<br><textarea name="details" rows="8" maxlength="8000" required></textarea></label><br>
+    <button class="btn" type="submit">Send complaint</button>
+  </form>
+</div>
+"""
+
+    @app.route("/complaints")
+    def complaints_form():
+        return _layout("Complaints", _complaints_form_body(), active="privacy")
+
+    @app.route("/complaints", methods=["POST"])
+    def complaints_submit():
+        from mediahub.compliance.complaints import ComplaintsStore
+
+        remote = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+        if _complaints_throttled(remote):
+            return _layout(
+                "Complaints",
+                _complaints_form_body("Too many submissions from this address — please try again later."),
+                active="privacy",
+            ), 429
+        details = (request.form.get("details") or "").strip()
+        contact = (request.form.get("contact") or "").strip()
+        if not details or not contact:
+            return _layout(
+                "Complaints",
+                _complaints_form_body("Please tell us what happened and how to reach you."),
+                active="privacy",
+            ), 400
+        complaint = ComplaintsStore().submit(
+            name=request.form.get("name") or "",
+            contact=contact,
+            details=details,
+            relationship=request.form.get("relationship") or "",
+            club=request.form.get("club") or "",
+        )
+        log.info("complaint received id=%s", complaint.id)  # no contact details in logs
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Complaint <em class="editorial">received.</em></h1>
+  <p class="lede">Thank you. Your reference is <strong>{_h(complaint.id)}</strong> — keep it. We will acknowledge your complaint within 30 days (by {_h(complaint.ack_due_at[:10])}) using the contact details you gave.</p>
+</section>
+<div class="card"><p class="muted">You can also raise this with the Information Commissioner's Office at any time: ico.org.uk/make-a-complaint.</p></div>
+"""
+        return _layout("Complaint received", body, active="privacy")
+
+    # ---- SUB-PROCESSOR DISCLOSURE (public) ------------------------------
+    # The public page clubs/parents can check. Keep in sync with
+    # docs/compliance/SUBPROCESSORS.md (the canonical inventory) — the
+    # test suite pins the provider set on both.
+
+    _SUBPROCESSORS_PUBLIC = [
+        ("Render Services, Inc.", "Hosting (application, database, files)", "United States", "UK–US data bridge (DPF-certified); SCC fallback", "Always"),
+        ("Google LLC (Gemini API)", "AI caption & creative-brief generation", "United States / global", "Google Cloud DPA: SCCs + UK Addendum", "When configured by the operator"),
+        ("Anthropic, PBC (Claude API)", "AI captioning failover", "United States", "DPA with SCCs + UK IDTA/Addendum", "When configured by the operator"),
+        ("Photoroom SAS", "Photo background removal", "France (sub-processors may be outside the EEA)", "GDPR processor terms", "Only if the club/operator enables cloud cutout"),
+        ("Replicate, Inc.", "Photo background removal", "United States", "Processor terms; SCCs/IDTA", "Only if the club/operator enables cloud cutout"),
+        ("Buffer, Inc.", "Relay of approved posts to social platforms", "United States", "DPA; SCCs/IDTA", "Only if the club connects publishing"),
+    ]
+
+    @app.route("/legal/subprocessors")
+    def legal_subprocessors():
+        rows = "".join(
+            f"<tr><td>{_h(name)}</td><td>{_h(role)}</td><td>{_h(where)}</td>"
+            f"<td>{_h(mechanism)}</td><td>{_h(when)}</td></tr>"
+            for name, role, where, mechanism, when in _SUBPROCESSORS_PUBLIC
+        )
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Who we <em class="editorial">work with.</em></h1>
+  <p class="lede">Every third party that can touch personal data processed by this service, what they do, where they do it, and the legal safeguard for the transfer. Social platforms (Instagram, Facebook, TikTok) are not processors — once a club approves a post, the platform handles it under its own terms.</p>
+</section>
+<div class="card">
+  <table>
+    <thead><tr><th>Provider</th><th>What they do</th><th>Where</th><th>Transfer safeguard</th><th>When engaged</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p class="muted">Clubs are notified before a new sub-processor is added and may object (see the Data Processing Agreement). The swimmingresults.org rankings site is a public data <em>source</em>, not a processor — nothing is sent to it beyond the lookup itself.</p>
+</div>
+"""
+        return _layout("Sub-processors", body, active="privacy")
+
+    @app.route("/admin/compliance")
+    def admin_compliance():
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.complaints import ComplaintsStore
+        from mediahub.compliance.incidents import IncidentRegister
+
+        store = ComplaintsStore()
+        complaints = store.all()
+        overdue_ids = {c.id for c in store.overdue()}
+        rows = []
+        for c in complaints:
+            badge = {
+                "received": '<span class="tag">received</span>',
+                "acknowledged": '<span class="tag ok">acknowledged</span>',
+                "responded": '<span class="tag ok">responded</span>',
+                "closed": '<span class="tag">closed</span>',
+            }.get(c.status, _h(c.status))
+            late = ' <span class="tag bad">ACK OVERDUE</span>' if c.id in overdue_ids else ""
+            ack_form = ""
+            if c.status == "received":
+                ack_form = (
+                    f'<form method="post" action="{url_for("admin_compliance_ack", complaint_id=c.id)}" style="display:inline">'
+                    '<input type="text" name="via" placeholder="how (e.g. email sent)" maxlength="300">'
+                    '<button class="btn secondary" type="submit">Mark acknowledged</button></form>'
+                )
+            rows.append(
+                f"<tr><td><code>{_h(c.id)}</code></td><td>{_h(c.received_at[:10])}<br>"
+                f"<span class='muted'>ack by {_h(c.ack_due_at[:10])}</span>{late}</td>"
+                f"<td>{_h(c.name)}<br><span class='muted'>{_h(c.relationship)} — {_h(c.contact)}</span></td>"
+                f"<td>{_h(c.club)}</td><td style='max-width:420px'>{_h(c.details[:600])}</td>"
+                f"<td>{badge}{ack_form}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Ref</th><th>Received</th><th>From</th><th>Club</th>"
+            "<th>Details</th><th>Status</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="6" class="muted">No complaints.</td></tr>')
+            + "</tbody></table>"
+        )
+        from mediahub.compliance.security_log import read_events as _read_sec_events
+
+        _events = list(reversed(_read_sec_events(limit=100)))
+        _event_rows = "".join(
+            f"<tr><td>{_h(e.get('ts', '')[:19])}</td><td>{_h(e.get('event', ''))}</td>"
+            f"<td>{_h(e.get('actor', ''))}</td><td><code>{_h(e.get('subject_pseudonym', ''))}</code></td>"
+            f"<td>{_h(e.get('profile_id', ''))}</td><td>{_h(e.get('outcome', ''))}</td>"
+            f"<td class='muted'>{_h(e.get('detail', '')[:120])}</td></tr>"
+            for e in _events
+        ) or '<tr><td colspan="7" class="muted">No events.</td></tr>'
+        events_table = (
+            "<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Subject</th>"
+            "<th>Org</th><th>Outcome</th><th>Detail</th></tr></thead>"
+            f"<tbody>{_event_rows}</tbody></table>"
+        )
+        incidents = IncidentRegister().all()
+        inc_rows = "".join(
+            f"<tr><td><code>{_h(i.id)}</code></td><td>{_h(i.opened_at[:10])}</td>"
+            f"<td>{_h(i.title)}</td><td>{_h(i.severity)}</td>"
+            f"<td>{'yes' if i.personal_data_involved else 'no'}</td>"
+            f"<td>{_h(i.status)}</td></tr>"
+            for i in incidents
+        ) or '<tr><td colspan="6" class="muted">No incidents recorded.</td></tr>'
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Operator</span>
+  <h1>Compliance <em class="editorial">desk.</em></h1>
+  <p class="lede">Data-protection complaints (acknowledge within 30 days — s.164A DPA 2018) and the incident register (Art 33(5)). Breach process: docs/compliance/BREACH_PLAYBOOK.md.</p>
+</section>
+<div class="card"><h2>Security events (last 100)</h2>
+<p class="muted">Logins, failures, lockouts, exports, erasures, publishes, CSRF rejections. Data subjects appear as pseudonyms only; full stream: <code>DATA_DIR/security_log/events.jsonl</code>.</p>
+{events_table}</div>
+<div class="card"><h2>Complaints</h2>{table}</div>
+<div class="card"><h2>Incident register</h2>
+<table><thead><tr><th>Ref</th><th>Opened</th><th>Title</th><th>Severity</th><th>Personal data</th><th>Status</th></tr></thead>
+<tbody>{inc_rows}</tbody></table>
+<form method="post" action="{url_for('admin_compliance_incident')}" style="margin-top:12px">
+  <input type="text" name="title" placeholder="Incident title" maxlength="300" required>
+  <select name="severity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select>
+  <label><input type="checkbox" name="personal_data" value="1"> personal data involved</label>
+  <button class="btn secondary" type="submit">Open incident</button>
+</form>
+</div>
+"""
+        return _layout("Compliance desk", body, active="privacy")
+
+    @app.route("/admin/compliance/complaints/<complaint_id>/ack", methods=["POST"])
+    def admin_compliance_ack(complaint_id):
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.complaints import ComplaintsStore
+
+        ComplaintsStore().acknowledge(complaint_id, via=request.form.get("via") or "")
+        return redirect(url_for("admin_compliance"))
+
+    # ---- CONSENT & LAWFUL BASIS (per tenant) -----------------------------
+    # The club records its lawful basis and manages the per-athlete
+    # consent/opt-out registry. Enforcement is in mediahub.compliance.gate
+    # (approval, pack build, publish gate all ask the same function).
+
+    @app.route("/organisation/consent")
+    def org_consent_page():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return _layout(
+                "Consent",
+                '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
+                active="organisation",
+            ), 404
+        from mediahub.compliance.consent import ConsentRegistry
+
+        from mediahub.compliance.retention import global_days as _ret_global
+
+        records = ConsentRegistry(pid).all()
+        rows = []
+        for r in records:
+            status_tag = {
+                "granted": '<span class="tag ok">granted</span>',
+                "refused": '<span class="tag bad">refused</span>',
+                "revoked": '<span class="tag bad">revoked</span>',
+            }.get(r.status, _h(r.status))
+            extra = []
+            if r.parental:
+                extra.append("parental")
+            if r.under_18 is True:
+                extra.append("under 18")
+            if r.restricted:
+                extra.append('<strong>RESTRICTED (Art 18)</strong>')
+            rows.append(
+                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
+                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
+                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>')
+            + "</tbody></table>"
+        )
+        mode = (profile.consent_mode or "").strip()
+
+        def _sel(value, current):
+            return " selected" if value == current else ""
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Consent &amp; <em class="editorial">lawful basis.</em></h1>
+  <p class="lede">Record why you're allowed to post about your athletes, and who has said yes or no. A refused, revoked or restricted athlete can never be approved, packed, or published — on any setting.</p>
+</section>
+
+<div class="card">
+  <h2>Lawful basis &amp; gating mode</h2>
+  <form method="post" action="{url_for('org_consent_settings')}">
+    <label>Lawful basis for publication<br>
+      <select name="lawful_basis_publication">
+        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>Consent (Art 6(1)(a))</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>Legitimate interests (Art 6(1)(f))</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other (see notes)</option>
+      </select>
+    </label><br>
+    <label>Lawful basis for PB-history enrichment<br>
+      <select name="lawful_basis_enrichment">
+        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>Consent (Art 6(1)(a))</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>Legitimate interests (Art 6(1)(f))</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other (see notes)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
+    <label>Consent gating mode<br>
+      <select name="consent_mode">
+        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
+        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
+        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
+    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Under-18 content controls</h2>
+  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
+  <form method="post" action="{url_for('org_child_policy_settings')}">
+    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
+    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
+    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
+    <button class="btn" type="submit">Save content controls</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Retention</h2>
+  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
+  <form method="post" action="{url_for('org_retention_settings')}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global('raw_uploads')))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get('raw_uploads', '')))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global('runs')))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get('runs', '')))}"></label><br>
+    <button class="btn" type="submit">Save retention</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Record a consent decision</h2>
+  <form method="post" action="{url_for('org_consent_record')}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Decision<br>
+      <select name="status">
+        <option value="granted">Consent granted</option>
+        <option value="refused">Refused — never publish</option>
+        <option value="revoked">Revoked — was granted, now withdrawn</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
+    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
+    <label><input type="checkbox" name="restricted" value="1"> Restrict processing (Art 18)</label><br>
+    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Save record</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Registry</h2>
+  {table}
+  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
+</div>
+"""
+        return _layout("Consent & lawful basis", body, active="organisation")
+
+    @app.route("/organisation/consent/settings", methods=["POST"])
+    def org_consent_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        basis_values = ("", "consent", "legitimate_interests", "other")
+        pub = request.form.get("lawful_basis_publication") or ""
+        enr = request.form.get("lawful_basis_enrichment") or ""
+        mode = request.form.get("consent_mode") or ""
+        if pub in basis_values:
+            profile.lawful_basis_publication = pub
+        if enr in basis_values:
+            profile.lawful_basis_enrichment = enr
+        if mode in ("", "opt_out", "opt_in"):
+            profile.consent_mode = mode
+        profile.consent_require_parental_for_minors = bool(request.form.get("parental_minors"))
+        profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
+        profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/child-policy", methods=["POST"])
+    def org_child_policy_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        profile.child_surname_initial = bool(request.form.get("child_surname_initial"))
+        profile.child_suppress_age = bool(request.form.get("child_suppress_age"))
+        profile.child_exclude_photos = bool(request.form.get("child_exclude_photos"))
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/retention", methods=["POST"])
+    def org_retention_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        overrides = dict(profile.retention_overrides or {})
+        for cls in ("raw_uploads", "runs"):
+            raw = (request.form.get(cls) or "").strip()
+            if raw == "":
+                overrides.pop(cls, None)
+                continue
+            try:
+                overrides[cls] = max(0, int(raw))
+            except ValueError:
+                continue
+        profile.retention_overrides = overrides
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/record", methods=["POST"])
+    def org_consent_record():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.consent import ConsentRegistry
+
+        status = request.form.get("status") or ""
+        name = (request.form.get("athlete_name") or "").strip()
+        if status not in ("granted", "refused", "revoked") or not name:
+            return _layout(
+                "Consent",
+                '<div class="card"><p class="tag bad">Athlete name and a valid decision are required.</p></div>',
+                active="organisation",
+            ), 400
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        ConsentRegistry(pid).record(
+            athlete_name=name,
+            status=status,
+            parental=bool(request.form.get("parental")),
+            under_18=True if request.form.get("under_18") else None,
+            restricted=bool(request.form.get("restricted")),
+            note=request.form.get("note") or "",
+            recorded_by=recorded_by,
+        )
+        return redirect(url_for("org_consent_page"))
+
+    # ---- DATA SUBJECT RIGHTS (per tenant) --------------------------------
+    # SAR export / rectification / erasure / restriction, with the Art 12A
+    # request log (received → due date, stop-the-clock). Engine:
+    # mediahub.compliance.dsr — every store from docs/compliance/DATA_MAP.md.
+
+    @app.route("/organisation/athlete-rights")
+    def org_athlete_rights():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return _layout(
+                "Athlete rights",
+                '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
+                active="organisation",
+            ), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        rows = []
+        for r in DsrRequestLog().all(profile_id=pid):
+            status_tag = {
+                "open": '<span class="tag">open</span>',
+                "clock_stopped": '<span class="tag bad">clock stopped</span>',
+                "completed": '<span class="tag ok">completed</span>',
+            }.get(r.status, _h(r.status))
+            actions = []
+            if r.status != "completed":
+                if r.request_type == "access":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<button class="btn secondary" type="submit">Run export</button></form>'
+                    )
+                elif r.request_type == "erasure":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline" '
+                        "onsubmit=\"return confirm('Erase this athlete from every store? This cannot be undone.')\">"
+                        '<button class="btn secondary" type="submit">Run erasure</button></form>'
+                    )
+                elif r.request_type == "restriction":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<button class="btn secondary" type="submit">Apply restriction</button></form>'
+                    )
+                elif r.request_type == "rectification":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_action", request_id=r.id)}" style="display:inline">'
+                        '<input type="text" name="new_name" placeholder="corrected name" maxlength="200" required>'
+                        '<button class="btn secondary" type="submit">Apply</button></form>'
+                    )
+                if r.status == "open":
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_clock", request_id=r.id)}" style="display:inline">'
+                        '<input type="hidden" name="op" value="stop">'
+                        '<button class="btn secondary" type="submit" title="Pause the response clock while you wait for clarification or ID">Stop clock</button></form>'
+                    )
+                else:
+                    actions.append(
+                        f'<form method="post" action="{url_for("org_dsr_clock", request_id=r.id)}" style="display:inline">'
+                        '<input type="hidden" name="op" value="resume">'
+                        '<button class="btn secondary" type="submit">Resume clock</button></form>'
+                    )
+            rows.append(
+                f"<tr><td><code>{_h(r.id)}</code></td><td>{_h(r.request_type)}</td>"
+                f"<td>{_h(r.athlete_name)}</td><td>{_h(r.received_at[:10])}</td>"
+                f"<td>{_h(r.due_at[:10])}</td><td>{status_tag}</td><td>{''.join(actions) or '—'}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Ref</th><th>Type</th><th>Athlete</th><th>Received</th>"
+            "<th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="7" class="muted">No requests logged.</td></tr>')
+            + "</tbody></table>"
+        )
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Athlete <em class="editorial">rights.</em></h1>
+  <p class="lede">When an athlete or parent asks to see, fix, restrict or erase their data, log it here — the due date and the stop-the-clock rules (Article 12A) are tracked for you, and the actions reach every store on this deployment.</p>
+</section>
+<div class="card">
+  <h2>Log a request</h2>
+  <form method="post" action="{url_for('org_dsr_open')}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Request type<br>
+      <select name="request_type">
+        <option value="access">Access — export everything we hold (SAR)</option>
+        <option value="rectification">Rectification — correct their name</option>
+        <option value="erasure">Erasure — delete them everywhere</option>
+        <option value="restriction">Restriction — pause processing (Art 18)</option>
+      </select>
+    </label><br>
+    <label>Note<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Log request</button>
+  </form>
+</div>
+<div class="card"><h2>Requests</h2>{table}
+<p class="muted">"Run export" downloads a machine-readable JSON of everything held about the athlete. "Run erasure" removes them from runs, rendered cards, caches, the media library and caption memory, keeps a suppression record so they can't reappear, and reports anything it could not reach — honestly.</p></div>
+"""
+        return _layout("Athlete rights", body, active="organisation")
+
+    @app.route("/organisation/athlete-rights/open", methods=["POST"])
+    def org_dsr_open():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        name = (request.form.get("athlete_name") or "").strip()
+        rtype = request.form.get("request_type") or ""
+        if not name or rtype not in ("access", "rectification", "erasure", "restriction"):
+            return _layout(
+                "Athlete rights",
+                '<div class="card"><p class="tag bad">Athlete name and a valid request type are required.</p></div>',
+                active="organisation",
+            ), 400
+        DsrRequestLog().open(
+            profile_id=pid,
+            athlete_name=name,
+            request_type=rtype,
+            note=request.form.get("note") or "",
+        )
+        return redirect(url_for("org_athlete_rights"))
+
+    @app.route("/organisation/athlete-rights/<request_id>/run", methods=["POST"])
+    def org_dsr_action(request_id):
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance import dsr as _dsr
+        from mediahub.compliance.consent import ConsentRegistry
+
+        log_store = _dsr.DsrRequestLog()
+        req = log_store.get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        if req.request_type == "access":
+            export = _dsr.export_athlete(pid, req.athlete_name)
+            log_store.complete(request_id, note="export generated")
+            from mediahub.compliance.security_log import record_event
+
+            record_event("dsr_export", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            resp = app.response_class(
+                json.dumps(export, indent=2), mimetype="application/json"
+            )
+            resp.headers["Content-Disposition"] = f"attachment; filename=sar-{request_id}.json"
+            return resp
+        if req.request_type == "erasure":
+            report = _dsr.erase_athlete(pid, req.athlete_name, recorded_by=recorded_by)
+            log_store.complete(request_id, note="erasure executed")
+            from mediahub.compliance.security_log import record_event
+
+            record_event("dsr_erasure", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
+            body = (
+                '<div class="card"><h2>Erasure report</h2><pre style="white-space:pre-wrap">'
+                + _h(json.dumps(report, indent=2))
+                + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
+            )
+            return _layout("Erasure report", body, active="organisation")
+        if req.request_type == "restriction":
+            ConsentRegistry(pid).set_restricted(req.athlete_name, True, recorded_by=recorded_by)
+            log_store.complete(request_id, note="restriction applied")
+            return redirect(url_for("org_athlete_rights"))
+        if req.request_type == "rectification":
+            new_name = (request.form.get("new_name") or "").strip()
+            if not new_name:
+                return jsonify({"error": "corrected name required"}), 400
+            _dsr.rectify_athlete_name(pid, req.athlete_name, new_name)
+            log_store.complete(request_id, note=f"rectified to '{new_name}'")
+            return redirect(url_for("org_athlete_rights"))
+        return jsonify({"error": "unknown request type"}), 400
+
+    @app.route("/organisation/athlete-rights/<request_id>/clock", methods=["POST"])
+    def org_dsr_clock(request_id):
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.dsr import DsrRequestLog
+
+        log_store = DsrRequestLog()
+        req = log_store.get(request_id)
+        if req is None or req.profile_id != pid:
+            return jsonify({"error": "request not found"}), 404
+        if request.form.get("op") == "stop":
+            log_store.stop_clock(request_id)
+        else:
+            log_store.resume_clock(request_id)
+        return redirect(url_for("org_athlete_rights"))
+
+    @app.route("/admin/compliance/incidents", methods=["POST"])
+    def admin_compliance_incident():
+        if not _auth.is_dev_operator():
+            return _layout(
+                "Not found", '<div class="card"><p class="tag bad">No such page.</p></div>'
+            ), 404
+        from mediahub.compliance.incidents import IncidentRegister
+
+        title = (request.form.get("title") or "").strip()
+        if title:
+            IncidentRegister().open(
+                title=title,
+                severity=request.form.get("severity") or "medium",
+                personal_data_involved=bool(request.form.get("personal_data")),
+            )
+        return redirect(url_for("admin_compliance"))
     # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
 
     @app.route("/privacy/athlete/erase", methods=["POST"])
@@ -13029,24 +13814,38 @@ Relay team broke club record"></textarea>
         club = (request.form.get("athlete_club") or "").strip()
         if not name:
             return redirect(url_for("privacy_page"))
-        from mediahub.privacy import erase_athlete
+        # ONE erasure engine: compliance.dsr delegates to the privacy
+        # cascade and adds the media-library / profile-text / suppression
+        # extras, so this quick action and the Art 12A DSR workflow
+        # (/organisation/athlete-rights) do the same work.
+        from mediahub.compliance.dsr import erase_athlete as _dsr_erase
 
-        report = erase_athlete(active, name, club)
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        report = _dsr_erase(active, name, recorded_by=recorded_by)
+        cascade = report.get("cascade") or {}
+        _runs_n = len(set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", []))))
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
             '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
             '<div class="card"><h2>What was removed</h2><ul>'
-            f"<li>{report.cards_removed} card(s) and {report.swims_removed} result "
-            f"row(s) across {len(report.runs_touched)} run(s)</li>"
-            f"<li>{report.assets_removed} rendered file(s)</li>"
-            f"<li>{report.pb_cache_files} PB-cache and "
-            f"{report.research_cache_files} research-cache file(s)</li>"
-            f"<li>{report.memory_rows} caption-memory row(s)</li>"
-            f"<li>{report.posting_excerpts} posting-log excerpt(s) blanked</li>"
+            f"<li>{cascade.get('cards_removed', 0) + report.get('cards_removed', 0)} card(s) and "
+            f"{cascade.get('swims_removed', 0)} result row(s) across {_runs_n} run(s)</li>"
+            f"<li>{cascade.get('assets_removed', 0) + len(report.get('visual_files_deleted', []))} rendered file(s)</li>"
+            f"<li>{cascade.get('pb_cache_files', 0) + len(report.get('pb_cache_files_deleted', []))} PB-cache and "
+            f"{cascade.get('research_cache_files', 0)} research-cache file(s)</li>"
+            f"<li>{cascade.get('memory_rows', 0) + report.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
+            f"<li>{cascade.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
+            f"<li>{len(report.get('media_assets_deleted', []))} media-library photo(s) deleted, "
+            f"{len(report.get('media_assets_unlinked', []))} unlinked</li>"
+            "<li>Suppression recorded in both consent registries &mdash; the athlete cannot reappear in new content</li>"
             "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
-            "were replaced with [removed]. Content already published to social "
+            "were redacted. Content already published to social "
             "platforms must be deleted there too &mdash; use the correction tools "
             "on the Privacy page.</p>"
             f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
@@ -13160,6 +13959,7 @@ Relay team broke club record"></textarea>
         _auth.logout_user()
         session.clear()
         return redirect(url_for("home"))
+
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -15699,6 +16499,46 @@ function mhPlanGenerate(btn) {{
         )
         from mediahub.publishing import posting_log as _plog
 
+        # ---- The unbypassable publish gate (THREAT_MODEL §8) ----
+        # This is the route that makes content public. Three server-side
+        # checks no client (human, script, or LLM-authored payload) can
+        # skip: tenant ownership, recorded human APPROVAL, and consent.
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        ws = _get_wf_store()
+        state = ws.load(run_id).get(card_id) if ws is not None else None
+        approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if not approved:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "not_approved",
+                    "message": "This card hasn't been approved. Approve it on the review page first — publishing always follows a human decision.",
+                }
+            ), 409
+        from mediahub.compliance.gate import (
+            consent_block_reason_for_card,
+            find_card_in_run,
+        )
+
+        _card = find_card_in_run(run_data or {}, card_id)
+        _consent_reason = consent_block_reason_for_card(
+            (run_data or {}).get("profile_id", ""), _card
+        )
+        if _consent_reason:
+            from mediahub.compliance.security_log import record_event as _sec_event
+
+            _sec_event(
+                "publish_blocked_consent",
+                profile_id=(run_data or {}).get("profile_id", ""),
+                detail=f"run={run_id} card={card_id}",
+                outcome="blocked",
+            )
+            return jsonify(
+                {"ok": False, "error": "consent_blocked", "reason": _consent_reason}
+            ), 403
+
         payload = request.get_json(silent=True) or {}
         channel_ids = payload.get("channel_ids") or []
         if not isinstance(channel_ids, list) or not channel_ids:
@@ -15869,6 +16709,22 @@ function mhPlanGenerate(btn) {{
                     media_url=media_url or None,
                     scheduled_at=scheduled_at_iso_for_log,
                 )
+                try:
+                    from mediahub.compliance.security_log import record_event as _sec_event
+
+                    _actor = ""
+                    try:
+                        _actor = _auth.current_user_email() or ""
+                    except Exception:
+                        pass
+                    _sec_event(
+                        "publish_scheduled",
+                        actor=_actor,
+                        profile_id=profile_id_for_log or "",
+                        detail=f"run={run_id} card={card_id} channel={cid}",
+                    )
+                except Exception:
+                    pass
             except BufferAuthError as exc:
                 failure = str(exc)
                 results.append(
@@ -18404,6 +19260,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             existing = _prior_profile or ClubProfile(
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
+                # Children's Code standard 7 (high privacy by default): NEW
+                # organisations start with the child content controls ON;
+                # the club can relax them deliberately on /organisation/consent.
+                child_surname_initial=True,
+                child_suppress_age=True,
+                child_exclude_photos=False,
             )
 
             if action == "capture":
@@ -19593,11 +20455,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             user = store.create(email, password)
         except _auth.AuthError as exc:
             return _signup_error(str(exc), 400)
+        # Session rotation on privilege change (signup = login) — clear the
+        # pre-signup session BEFORE the acceptance marker lands in it.
+        session.clear()
         # Record the timestamped, versioned acceptance before the session
         # starts; the session marker spares the ledger a read per request.
         _legal.AcceptanceStore().record(user.email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
         session["terms_ok_version"] = _legal.TERMS_VERSION
         _auth.login_user(user)
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        _sec_event("signup", actor=user.email)
         # PC.3 (ADR-0014): activate any operator-issued workspace invites for
         # this email — the zero-founder-involvement first-claim path. The org
         # binds the moment its invited owner signs up.
@@ -19633,33 +20501,64 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             alt_html=alt,
         )
 
+    def _login_error_page(email: str, message: str, status: int = 401):
+        return (
+            _auth_form_page(
+                title="Log in",
+                heading='Welcome <em class="editorial">back</em>.',
+                lede="Log in to manage your content and billing.",
+                action_url=url_for("login_post"),
+                submit_label="Log in",
+                alt_html=(
+                    f'No account yet? <a href="{url_for("signup_page")}" '
+                    'style="color:var(--accent);font-weight:600">Create one</a>.'
+                ),
+                prefill_email=email,
+                error=message,
+            ),
+            status,
+        )
+
     @app.route("/login", methods=["POST"])
     def login_post():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        # Two layers by design: the W per-IP auth limiter (fast 429 on raw
+        # request volume) + the per-email/per-address lockout below (counts
+        # FAILURES, blocks before password verification).
         if _auth_rate_limited("login"):
             return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
+        # Lockout BEFORE password verification: a locked key gets the same
+        # response whether or not the password would have been right.
+        if _auth.login_locked(email):
+            _sec_event("login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked")
+            return _login_error_page(
+                email, "Too many failed attempts — try again in 15 minutes.", 429
+            )
         store = _user_store()
         try:
             user = store.authenticate(email, password)
         except _auth.AuthError as exc:
-            return (
-                _auth_form_page(
-                    title="Log in",
-                    heading='Welcome <em class="editorial">back</em>.',
-                    lede="Log in to manage your content and billing.",
-                    action_url=url_for("login_post"),
-                    submit_label="Log in",
-                    alt_html=(
-                        f'No account yet? <a href="{url_for("signup_page")}" '
-                        'style="color:var(--accent);font-weight:600">Create one</a>.'
-                    ),
-                    prefill_email=email,
-                    error=str(exc),
-                ),
-                401,
+            locked_now = _auth.record_login_failure(email)
+            _sec_event(
+                "login_lockout" if locked_now else "login_failed",
+                actor=_auth.normalize_email(email),
+                outcome="lockout" if locked_now else "failed",
             )
+            return _login_error_page(email, str(exc))
+        # Optional second factor: password ok → park the email (NOT a login)
+        # and ask for the TOTP code.
+        if user.totp_secret:
+            session["pending_2fa_email"] = user.email
+            return redirect(url_for("login_2fa"))
+        _auth.clear_login_failures(email)
+        # Session rotation on privilege change: drop everything the
+        # pre-login session held before granting the signed-in identity.
+        session.clear()
         _auth.login_user(user)
+        _sec_event("login", actor=user.email)
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
         # Re-acceptance check: accounts whose recorded Terms acceptance
         # predates TERMS_VERSION (or legacy accounts with no record) are
@@ -19670,6 +20569,122 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
         session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
+
+    @app.route("/login/2fa", methods=["GET", "POST"])
+    def login_2fa():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = session.get("pending_2fa_email") or ""
+        if not email:
+            return redirect(url_for("login_page"))
+        if request.method == "GET":
+            body = f"""
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h2>Two-factor code</h2>
+  <p class="muted">Enter the 6-digit code from your authenticator app.</p>
+  <form method="post" action="{url_for('login_2fa')}">
+    <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
+    <button class="btn" type="submit">Verify</button>
+  </form>
+</div>
+"""
+            return _layout("Two-factor", body, active="")
+        if _auth.login_locked(email):
+            return _layout(
+                "Two-factor",
+                '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
+                active="",
+            ), 429
+        user = _user_store().get(email)
+        code = request.form.get("totp") or ""
+        if user is None or not _auth.totp_verify(user.totp_secret, code):
+            locked_now = _auth.record_login_failure(email)
+            _sec_event(
+                "login_lockout" if locked_now else "login_2fa_failed",
+                actor=email,
+                outcome="lockout" if locked_now else "failed",
+            )
+            return _layout(
+                "Two-factor",
+                f'<div class="card"><p class="tag bad">That code didn\'t match.</p>'
+                f'<p><a href="{url_for("login_2fa")}">Try again</a></p></div>',
+                active="",
+            ), 401
+        _auth.clear_login_failures(email)
+        session.clear()
+        _auth.login_user(user)
+        _sec_event("login", actor=user.email, detail="2fa")
+        return redirect(url_for("make_page"))
+
+    @app.route("/account/2fa", methods=["GET", "POST"])
+    def account_2fa():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        store = _user_store()
+        user = store.get(email)
+        if user is None:
+            return redirect(url_for("login_page"))
+        if request.method == "POST":
+            action = request.form.get("action") or ""
+            if action == "enable":
+                secret = session.get("totp_setup_secret") or ""
+                if secret and _auth.totp_verify(secret, request.form.get("totp") or ""):
+                    store.set_totp(email, secret)
+                    session.pop("totp_setup_secret", None)
+                    _sec_event("totp_enabled", actor=email)
+                    return redirect(url_for("account_2fa"))
+                return _layout(
+                    "Two-factor",
+                    '<div class="card"><p class="tag bad">Code didn\'t match — scan the secret again and retry.</p>'
+                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    active="",
+                ), 400
+            if action == "disable":
+                if user.totp_secret and _auth.totp_verify(
+                    user.totp_secret, request.form.get("totp") or ""
+                ):
+                    store.set_totp(email, "")
+                    _sec_event("totp_disabled", actor=email)
+                    return redirect(url_for("account_2fa"))
+                return _layout(
+                    "Two-factor",
+                    '<div class="card"><p class="tag bad">Enter a valid current code to disable 2FA.</p>'
+                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    active="",
+                ), 400
+            return jsonify({"error": "unknown action"}), 400
+        if user.totp_secret:
+            body = f"""
+<div class="card" style="max-width:520px;margin:40px auto">
+  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
+  <form method="post" action="{url_for('account_2fa')}">
+    <input type="hidden" name="action" value="disable">
+    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
+    <button class="btn secondary" type="submit">Disable 2FA</button>
+  </form>
+</div>
+"""
+        else:
+            secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
+            session["totp_setup_secret"] = secret
+            uri = _auth.totp_provisioning_uri(secret, email)
+            body = f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Set up two-factor authentication</h2>
+  <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
+  <p><code>{_h(secret)}</code></p>
+  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
+  <form method="post" action="{url_for('account_2fa')}">
+    <input type="hidden" name="action" value="enable">
+    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
+    <button class="btn" type="submit">Enable 2FA</button>
+  </form>
+</div>
+"""
+        return _layout("Two-factor", body, active="")
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
@@ -23570,6 +24585,23 @@ function mhSetupMode(mode) {{
                 status = CardStatus(status_str)
             except (ValueError, NameError):
                 return jsonify({"error": f"invalid status: {status_str}"}), 400
+            # Consent gate: a card featuring an opted-out or no-consent
+            # athlete can never be APPROVED (or marked POSTED). One shared
+            # decision function — same rule as pack build + publish gate.
+            if status in (CardStatus.APPROVED, CardStatus.POSTED):
+                from mediahub.compliance.gate import (
+                    consent_block_reason_for_card,
+                    find_card_in_run,
+                )
+
+                run_data = _load_run(run_id) or {}
+                card = find_card_in_run(run_data, card_id)
+                reason = consent_block_reason_for_card(
+                    run_data.get("profile_id", ""), card
+                )
+                if reason:
+                    log.info("consent gate blocked approval run=%s card=%s", run_id, card_id)
+                    return jsonify({"error": "consent_blocked", "reason": reason}), 403
             notes = payload.get("notes")
             ws.set_status(run_id, card_id, status, notes=notes)
             # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
@@ -23639,6 +24671,20 @@ function mhSetupMode(mode) {{
         payload = request.get_json(silent=True) or {}
         deterministic = bool(payload.get("deterministic", False))
         async_mode = bool(payload.get("async", False))
+
+        # Consent gate: blocked athletes never reach the pack builder, so
+        # they cannot be rendered into any artefact.
+        from mediahub.compliance.gate import filter_consent_blocked
+
+        run_data, _consent_excluded = filter_consent_blocked(
+            run_data.get("profile_id", ""), run_data
+        )
+        if _consent_excluded:
+            log.info(
+                "consent gate excluded %d athlete(s) from turn-into pack run=%s",
+                len(_consent_excluded),
+                run_id,
+            )
 
         def _do_generate(job_id: str) -> None:
             try:
@@ -29588,27 +30634,36 @@ and can be revoked by the club.</p>
                     schedule_kind="daily",
                     schedule_expr="03:30",
                 )
-        # UK legal baseline: retention enforcement. The task type is always
-        # registered (no-op when MEDIAHUB_RETENTION_DAYS is 0/unset); the
-        # daily schedule row is ensured once when retention is enabled.
-        from mediahub.privacy.retention import retention_days as _retention_days
-        from mediahub.privacy.retention import sweep_expired as _retention_sweep
 
+        # Retention purge (Art 5(1)(e) storage limitation): ONE daily job.
+        # compliance.retention is the engine — per-class windows
+        # (runs/uploads/caches/security-log), tenant tightening, and it
+        # honours the legacy global MEDIAHUB_RETENTION_DAYS window from the
+        # UK-legal baseline as a ceiling for runs + raw uploads (so the
+        # Privacy page's stated setting stays true). Disabling a class is
+        # an explicit env setting (days=0), never an absent job.
         def _retention_handler(params: dict) -> None:
-            _retention_sweep(_delete_run)
+            from mediahub.compliance.retention import run_purge
 
-        _register_task_type("retention_sweep", _retention_handler)
-        if _retention_days() > 0:
-            from mediahub.workflow.schedule import create_task as _sched_create_task2
-            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
+            report = run_purge(_delete_run)
+            log.info(
+                "retention purge: %d runs, %d upload dirs, %d cache files removed",
+                len(report["runs_deleted"]),
+                len(report["upload_dirs_deleted"]),
+                report["pb_cache_files_deleted"],
+            )
 
-            if not any(t.task_type == "retention_sweep" for t in _sched_list_tasks2()):
-                _sched_create_task2(
-                    name="Retention sweep (Privacy Notice §8)",
-                    task_type="retention_sweep",
-                    schedule_kind="daily",
-                    schedule_expr="03:50",
-                )
+        _register_task_type("retention_purge", _retention_handler)
+        from mediahub.workflow.schedule import create_task as _ret_create_task
+        from mediahub.workflow.schedule import list_tasks as _ret_list_tasks
+
+        if not any(t.task_type == "retention_purge" for t in _ret_list_tasks()):
+            _ret_create_task(
+                name="Retention purge (storage limitation)",
+                task_type="retention_purge",
+                schedule_kind="daily",
+                schedule_expr="04:10",
+            )
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)
