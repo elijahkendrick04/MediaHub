@@ -8307,11 +8307,12 @@ def create_app() -> Flask:
             "healthz",
             "healthz_deps",
             "healthz_memory",
-            # /healthz/search and /healthz/breaker are monitoring probes
-            # that must return health JSON without an active org, like
-            # their /healthz/* siblings above.
+            # /healthz/search, /healthz/breaker and /healthz/sentinel are
+            # monitoring probes that must return health JSON without an
+            # active org, like their /healthz/* siblings above.
             "healthz_search",
             "healthz_breaker",
+            "healthz_sentinel",
             # /health is the deep dep-checking probe; it must also be
             # reachable without an active org (and outside the API prefix
             # allowlist below — it returns HTML/JSON, not JSON-only).
@@ -14758,6 +14759,28 @@ Relay team broke club record"></textarea>
             return jsonify({"ok": True, **searxng_client.health()})
         except Exception as e:
             return jsonify({"ok": False, "error": f"search_health_unavailable: {e}"}), 500
+
+    @app.route("/healthz/sentinel")
+    def healthz_sentinel():
+        """Log-sentinel monitoring probe: last poll, findings, recent actions.
+
+        Read-only snapshot of DATA_DIR/log_sentinel/status.json plus the audit
+        tail, so the operator can see what the watchdog saw and did
+        (docs/LOG_SENTINEL.md). Reports configured=False honestly when the
+        Render API env vars aren't set.
+        """
+        try:
+            from mediahub.log_sentinel import state as _sentinel_state
+
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": _sentinel_state.read_status(),
+                    "audit_tail": _sentinel_state.read_audit_tail(10),
+                }
+            )
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"sentinel_health_unavailable: {e}"}), 500
 
     @app.route("/healthz/usage")
     def healthz_usage():
@@ -31451,6 +31474,17 @@ and can be revoked by the club.</p>
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)
+
+    # Production log watchdog (log_sentinel): polls this service's own Render
+    # logs, notifies on known failure patterns, and applies opt-in, rate-capped
+    # auto-fixes. Inert without RENDER_API_KEY + RENDER_SERVICE_ID; a heartbeat
+    # lockfile under DATA_DIR elects one polling worker. docs/LOG_SENTINEL.md.
+    try:
+        from mediahub.log_sentinel import start_sentinel
+
+        start_sentinel()
+    except Exception:
+        log.warning("log sentinel did not start", exc_info=True)
 
     return app
 

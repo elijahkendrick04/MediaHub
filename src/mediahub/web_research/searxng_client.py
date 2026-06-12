@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:  # avoid an import cycle at runtime (search.py imports us lazily)
@@ -39,10 +41,65 @@ if TYPE_CHECKING:  # avoid an import cycle at runtime (search.py imports us lazi
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 10.0
+DEFAULT_BREAKER_COOLDOWN = 300.0  # seconds to skip SearXNG after a failure
 
 
 class SearxngUnavailable(RuntimeError):
     """Raised when the SearXNG instance can't be reached or errors."""
+
+
+# --- circuit breaker ---------------------------------------------------------
+# When the configured instance is down (e.g. the in-container SearXNG never
+# started), every research query would otherwise re-probe the dead endpoint and
+# warn — dozens of identical log lines per run. After a failure we skip SearXNG
+# for a cooldown window instead; per-process state, no persistence needed.
+
+_breaker_lock = threading.Lock()
+_breaker_open_until: float = 0.0
+_breaker_reason: str = ""
+
+
+def breaker_cooldown() -> float:
+    """Cooldown seconds after a failure (``MEDIAHUB_SEARCH_BREAKER_COOLDOWN``).
+
+    ``0`` disables the breaker entirely — every query probes SearXNG again,
+    matching the pre-breaker behaviour."""
+    raw = os.environ.get("MEDIAHUB_SEARCH_BREAKER_COOLDOWN", "").strip()
+    if not raw:
+        return DEFAULT_BREAKER_COOLDOWN
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_BREAKER_COOLDOWN
+
+
+def breaker_open() -> bool:
+    """True while SearXNG attempts are paused after a recent failure."""
+    with _breaker_lock:
+        return time.time() < _breaker_open_until
+
+
+def breaker_reason() -> str:
+    """The failure message that opened the breaker ('' when closed)."""
+    with _breaker_lock:
+        return _breaker_reason if time.time() < _breaker_open_until else ""
+
+
+def _trip_breaker(reason: str) -> None:
+    global _breaker_open_until, _breaker_reason
+    cooldown = breaker_cooldown()
+    if cooldown <= 0:
+        return
+    with _breaker_lock:
+        _breaker_open_until = time.time() + cooldown
+        _breaker_reason = reason
+
+
+def _reset_breaker() -> None:
+    global _breaker_open_until, _breaker_reason
+    with _breaker_lock:
+        _breaker_open_until = 0.0
+        _breaker_reason = ""
 
 
 def endpoint() -> Optional[str]:
@@ -85,6 +142,10 @@ def search(query: str, num: int = 5) -> "list[SearchResult]":
     base = endpoint()
     if not base:
         raise SearxngUnavailable("MEDIAHUB_SEARCH_ENDPOINT is not configured")
+    if breaker_open():
+        raise SearxngUnavailable(
+            f"skipped — circuit open after earlier failure: {breaker_reason()}"
+        )
     try:
         import requests  # noqa: PLC0415
     except Exception as e:  # pragma: no cover - requests is a hard dep
@@ -98,13 +159,17 @@ def search(query: str, num: int = 5) -> "list[SearchResult]":
             timeout=_timeout(),
         )
     except Exception as e:
+        _trip_breaker(f"SearXNG transport error: {e}")
         raise SearxngUnavailable(f"SearXNG transport error: {e}") from e
     if r.status_code != 200:
+        _trip_breaker(f"SearXNG HTTP {r.status_code}")
         raise SearxngUnavailable(f"SearXNG HTTP {r.status_code}")
     try:
         data = r.json()
     except Exception as e:
+        _trip_breaker("SearXNG returned non-JSON")
         raise SearxngUnavailable(f"SearXNG returned non-JSON (is json format enabled?): {e}") from e
+    _reset_breaker()
 
     out: "list[SearchResult]" = []
     for item in data.get("results") or []:
@@ -139,6 +204,7 @@ def health() -> dict:
             "engine": "duckduckgo",
             "searxng_configured": False,
             "searxng_reachable": False,
+            "breaker_open": False,
             "detail": "MEDIAHUB_SEARCH_ENDPOINT not set",
         }
     reachable = False
@@ -157,12 +223,28 @@ def health() -> dict:
             detail = f"HTTP {r.status_code} (is json format enabled?)"
     except Exception as e:
         detail = str(e)[:160]
+    # The probe is fresh truth — let it close (or open) the breaker so a
+    # recovered SearXNG is picked up immediately rather than after cooldown.
+    if reachable:
+        _reset_breaker()
+    else:
+        _trip_breaker(detail or "health probe failed")
     return {
         "engine": "searxng" if reachable else "duckduckgo",
         "searxng_configured": True,
         "searxng_reachable": reachable,
+        "breaker_open": breaker_open(),
         "detail": detail or "ok",
     }
 
 
-__all__ = ["SearxngUnavailable", "search", "is_configured", "endpoint", "health"]
+__all__ = [
+    "SearxngUnavailable",
+    "search",
+    "is_configured",
+    "endpoint",
+    "health",
+    "breaker_open",
+    "breaker_reason",
+    "breaker_cooldown",
+]
