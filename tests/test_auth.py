@@ -40,14 +40,16 @@ def _users_file(tmp_path):
 # ---- store-level unit tests --------------------------------------------
 
 
-def test_password_is_hashed_with_bcrypt(monkeypatch, tmp_path):
+def test_password_is_hashed_with_argon2id(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.web import auth
 
     store = auth.UserStore()
     user = store.create("a@club.org", "swimswim1234")
-    # Stored hash is a bcrypt $2b$ string, NOT the plaintext.
-    assert user.hashed_password.startswith("$2b$")
+    # Stored hash is argon2id (ASVS L2 V2.4), NOT the plaintext. Legacy
+    # bcrypt hashes still verify and upgrade on login —
+    # tests/test_authn_hardening.py.
+    assert user.hashed_password.startswith("$argon2id$")
     assert "swimswim1234" not in user.hashed_password
     # Round-trips: correct verifies, wrong does not.
     assert auth.verify_password("swimswim1234", user.hashed_password) is True
@@ -135,12 +137,12 @@ def test_signup_creates_user_hashes_and_logs_in(client, tmp_path):
     # HttpOnly is set on the session cookie.
     assert "HttpOnly" in set_cookie
 
-    # Ledger holds a bcrypt hash, never the plaintext.
+    # Ledger holds an argon2id hash, never the plaintext.
     ledger = _users_file(tmp_path).read_text()
     rec = json.loads(ledger.splitlines()[0])
     assert rec["email"] == "coach@club.org"
     assert rec["plan"] == "free"
-    assert rec["hashed_password"].startswith("$2b$")
+    assert rec["hashed_password"].startswith("$argon2id$")
     assert "twelvechars1" not in ledger
 
 

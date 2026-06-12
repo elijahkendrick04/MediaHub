@@ -19306,7 +19306,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 ),
                 400,
             )
+        session.clear()  # session rotation on privilege change (signup = login)
         _auth.login_user(user)
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        _sec_event("signup", actor=user.email)
         # PC.3 (ADR-0014): activate any operator-issued workspace invites for
         # this email — the zero-founder-involvement first-claim path. The org
         # binds the moment its invited owner signs up.
@@ -19342,33 +19346,183 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             alt_html=alt,
         )
 
+    def _login_error_page(email: str, message: str, status: int = 401):
+        return (
+            _auth_form_page(
+                title="Log in",
+                heading='Welcome <em class="editorial">back</em>.',
+                lede="Log in to manage your content and billing.",
+                action_url=url_for("login_post"),
+                submit_label="Log in",
+                alt_html=(
+                    f'No account yet? <a href="{url_for("signup_page")}" '
+                    'style="color:var(--accent);font-weight:600">Create one</a>.'
+                ),
+                prefill_email=email,
+                error=message,
+            ),
+            status,
+        )
+
+    def _client_addr() -> str:
+        fwd = request.headers.get("X-Forwarded-For", "")
+        return (fwd.split(",")[0].strip() if fwd else "") or (request.remote_addr or "")
+
     @app.route("/login", methods=["POST"])
     def login_post():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
+        addr = _client_addr()
+        # Lockout BEFORE password verification: a locked key gets the same
+        # response whether or not the password would have been right.
+        if _auth.login_locked(email, addr):
+            _sec_event("login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked")
+            return _login_error_page(
+                email, "Too many failed attempts — try again in 15 minutes.", 429
+            )
         store = _user_store()
         try:
             user = store.authenticate(email, password)
         except _auth.AuthError as exc:
-            return (
-                _auth_form_page(
-                    title="Log in",
-                    heading='Welcome <em class="editorial">back</em>.',
-                    lede="Log in to manage your content and billing.",
-                    action_url=url_for("login_post"),
-                    submit_label="Log in",
-                    alt_html=(
-                        f'No account yet? <a href="{url_for("signup_page")}" '
-                        'style="color:var(--accent);font-weight:600">Create one</a>.'
-                    ),
-                    prefill_email=email,
-                    error=str(exc),
-                ),
-                401,
+            locked_now = _auth.record_login_failure(email, addr)
+            _sec_event(
+                "login_lockout" if locked_now else "login_failed",
+                actor=_auth.normalize_email(email),
+                outcome="lockout" if locked_now else "failed",
             )
+            return _login_error_page(email, str(exc))
+        # Optional second factor: password ok → park the email (NOT a login)
+        # and ask for the TOTP code.
+        if user.totp_secret:
+            session["pending_2fa_email"] = user.email
+            return redirect(url_for("login_2fa"))
+        _auth.clear_login_failures(email, addr)
+        # Session rotation on privilege change: drop everything the
+        # pre-login session held before granting the signed-in identity.
+        session.clear()
         _auth.login_user(user)
+        _sec_event("login", actor=user.email)
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
         return redirect(nxt or url_for("make_page"))
+
+    @app.route("/login/2fa", methods=["GET", "POST"])
+    def login_2fa():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = session.get("pending_2fa_email") or ""
+        if not email:
+            return redirect(url_for("login_page"))
+        if request.method == "GET":
+            body = f"""
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h2>Two-factor code</h2>
+  <p class="muted">Enter the 6-digit code from your authenticator app.</p>
+  <form method="post" action="{url_for('login_2fa')}">
+    <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
+    <button class="btn" type="submit">Verify</button>
+  </form>
+</div>
+"""
+            return _layout("Two-factor", body, active="")
+        addr = _client_addr()
+        if _auth.login_locked(email, addr):
+            return _layout(
+                "Two-factor",
+                '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
+                active="",
+            ), 429
+        user = _user_store().get(email)
+        code = request.form.get("totp") or ""
+        if user is None or not _auth.totp_verify(user.totp_secret, code):
+            locked_now = _auth.record_login_failure(email, addr)
+            _sec_event(
+                "login_lockout" if locked_now else "login_2fa_failed",
+                actor=email,
+                outcome="lockout" if locked_now else "failed",
+            )
+            return _layout(
+                "Two-factor",
+                f'<div class="card"><p class="tag bad">That code didn\'t match.</p>'
+                f'<p><a href="{url_for("login_2fa")}">Try again</a></p></div>',
+                active="",
+            ), 401
+        _auth.clear_login_failures(email, addr)
+        session.clear()
+        _auth.login_user(user)
+        _sec_event("login", actor=user.email, detail="2fa")
+        return redirect(url_for("make_page"))
+
+    @app.route("/account/2fa", methods=["GET", "POST"])
+    def account_2fa():
+        from mediahub.compliance.security_log import record_event as _sec_event
+
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        store = _user_store()
+        user = store.get(email)
+        if user is None:
+            return redirect(url_for("login_page"))
+        if request.method == "POST":
+            action = request.form.get("action") or ""
+            if action == "enable":
+                secret = session.get("totp_setup_secret") or ""
+                if secret and _auth.totp_verify(secret, request.form.get("totp") or ""):
+                    store.set_totp(email, secret)
+                    session.pop("totp_setup_secret", None)
+                    _sec_event("totp_enabled", actor=email)
+                    return redirect(url_for("account_2fa"))
+                return _layout(
+                    "Two-factor",
+                    '<div class="card"><p class="tag bad">Code didn\'t match — scan the secret again and retry.</p>'
+                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    active="",
+                ), 400
+            if action == "disable":
+                if user.totp_secret and _auth.totp_verify(
+                    user.totp_secret, request.form.get("totp") or ""
+                ):
+                    store.set_totp(email, "")
+                    _sec_event("totp_disabled", actor=email)
+                    return redirect(url_for("account_2fa"))
+                return _layout(
+                    "Two-factor",
+                    '<div class="card"><p class="tag bad">Enter a valid current code to disable 2FA.</p>'
+                    f'<p><a href="{url_for("account_2fa")}">Back</a></p></div>',
+                    active="",
+                ), 400
+            return jsonify({"error": "unknown action"}), 400
+        if user.totp_secret:
+            body = f"""
+<div class="card" style="max-width:520px;margin:40px auto">
+  <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
+  <form method="post" action="{url_for('account_2fa')}">
+    <input type="hidden" name="action" value="disable">
+    <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
+    <button class="btn secondary" type="submit">Disable 2FA</button>
+  </form>
+</div>
+"""
+        else:
+            secret = session.get("totp_setup_secret") or _auth.totp_generate_secret()
+            session["totp_setup_secret"] = secret
+            uri = _auth.totp_provisioning_uri(secret, email)
+            body = f"""
+<div class="card" style="max-width:560px;margin:40px auto">
+  <h2>Set up two-factor authentication</h2>
+  <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
+  <p><code>{_h(secret)}</code></p>
+  <p class="muted" style="word-break:break-all">{_h(uri)}</p>
+  <form method="post" action="{url_for('account_2fa')}">
+    <input type="hidden" name="action" value="enable">
+    <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
+    <button class="btn" type="submit">Enable 2FA</button>
+  </form>
+</div>
+"""
+        return _layout("Two-factor", body, active="")
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
