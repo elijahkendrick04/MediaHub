@@ -12599,6 +12599,14 @@ Relay team broke club record"></textarea>
         account_email = _auth.current_user_email() or ""
         active_org = _active_profile_id() or ""
         signed_in = bool(account_email or active_org)
+        from mediahub.privacy.retention import retention_days
+
+        _rd = retention_days()
+        _retention_line = (
+            f"runs, uploads and packs older than {_rd} days are deleted daily."
+            if _rd > 0
+            else "disabled on this deployment — runs are kept until you delete them."
+        )
         _rights_tools_html = ""
         if active_org:
             _rights_tools_html += f"""
@@ -12680,6 +12688,7 @@ Relay team broke club record"></textarea>
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
+  <p class="muted" style="margin-top:8px">Automatic retention: {_retention_line}</p>
 </div>
 {_rights_tools_html}
 """
@@ -27541,6 +27550,27 @@ voice, and queues them for one-click approval.</p>
                     task_type="demo_sweep",
                     schedule_kind="daily",
                     schedule_expr="03:30",
+                )
+        # UK legal baseline: retention enforcement. The task type is always
+        # registered (no-op when MEDIAHUB_RETENTION_DAYS is 0/unset); the
+        # daily schedule row is ensured once when retention is enabled.
+        from mediahub.privacy.retention import retention_days as _retention_days
+        from mediahub.privacy.retention import sweep_expired as _retention_sweep
+
+        def _retention_handler(params: dict) -> None:
+            _retention_sweep(_delete_run)
+
+        _register_task_type("retention_sweep", _retention_handler)
+        if _retention_days() > 0:
+            from mediahub.workflow.schedule import create_task as _sched_create_task2
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
+
+            if not any(t.task_type == "retention_sweep" for t in _sched_list_tasks2()):
+                _sched_create_task2(
+                    name="Retention sweep (Privacy Notice §8)",
+                    task_type="retention_sweep",
+                    schedule_kind="daily",
+                    schedule_expr="03:50",
                 )
         start_scheduler()
     except Exception:
