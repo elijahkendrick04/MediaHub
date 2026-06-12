@@ -12781,6 +12781,8 @@ Relay team broke club record"></textarea>
             ), 404
         from mediahub.compliance.consent import ConsentRegistry
 
+        from mediahub.compliance.retention import global_days as _ret_global
+
         records = ConsentRegistry(pid).all()
         rows = []
         for r in records:
@@ -12852,6 +12854,18 @@ Relay team broke club record"></textarea>
 </div>
 
 <div class="card">
+  <h2>Retention</h2>
+  <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
+  <form method="post" action="{url_for('org_retention_settings')}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global('raw_uploads')))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get('raw_uploads', '')))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global('runs')))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get('runs', '')))}"></label><br>
+    <button class="btn" type="submit">Save retention</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>Record a consent decision</h2>
   <form method="post" action="{url_for('org_consent_record')}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
@@ -12897,6 +12911,26 @@ Relay team broke club record"></textarea>
         profile.consent_require_parental_for_minors = bool(request.form.get("parental_minors"))
         profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
         profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/retention", methods=["POST"])
+    def org_retention_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        overrides = dict(profile.retention_overrides or {})
+        for cls in ("raw_uploads", "runs"):
+            raw = (request.form.get(cls) or "").strip()
+            if raw == "":
+                overrides.pop(cls, None)
+                continue
+            try:
+                overrides[cls] = max(0, int(raw))
+            except ValueError:
+                continue
+        profile.retention_overrides = overrides
         save_profile(profile)
         return redirect(url_for("org_consent_page"))
 
@@ -27638,6 +27672,33 @@ voice, and queues them for one-click approval.</p>
                     schedule_kind="daily",
                     schedule_expr="03:30",
                 )
+
+        # Retention purge (Art 5(1)(e) storage limitation): every artifact
+        # class ages out per compliance.retention's schedule. Always
+        # registered + scheduled — disabling a class is an explicit env
+        # setting (days=0), not an absent job.
+        def _retention_handler(params: dict) -> None:
+            from mediahub.compliance.retention import run_purge
+
+            report = run_purge(_delete_run)
+            log.info(
+                "retention purge: %d runs, %d upload dirs, %d cache files removed",
+                len(report["runs_deleted"]),
+                len(report["upload_dirs_deleted"]),
+                report["pb_cache_files_deleted"],
+            )
+
+        _register_task_type("retention_purge", _retention_handler)
+        from mediahub.workflow.schedule import create_task as _ret_create_task
+        from mediahub.workflow.schedule import list_tasks as _ret_list_tasks
+
+        if not any(t.task_type == "retention_purge" for t in _ret_list_tasks()):
+            _ret_create_task(
+                name="Retention purge (storage limitation)",
+                task_type="retention_purge",
+                schedule_kind="daily",
+                schedule_expr="04:10",
+            )
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)

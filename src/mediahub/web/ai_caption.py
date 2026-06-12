@@ -146,15 +146,39 @@ def _strip_course_suffix(event: str) -> str:
     return _COURSE_SUFFIX_RE.sub("", event).strip()
 
 
+# Data-minimisation boundary (UK GDPR Art 5(1)(c)): identifiers and
+# DOB-adjacent fields a caption never needs MUST NOT leave the platform in
+# an LLM payload. Age/age-group stay (captions legitimately say "12-year-old
+# PB") — see docs/compliance/DATA_MAP.md flow F1.
+_PROMPT_DROP_KEYS = frozenset(
+    {
+        "asa_id",
+        "member_id",
+        "dob",
+        "date_of_birth",
+        "birth_date",
+        "yob",
+        "year_of_birth",
+    }
+)
+
+
 def _sanitise_achievement_for_prompt(a: dict) -> dict:
     """Return a shallow copy of the achievement with course jargon
     removed from the event name and the ``course`` field spelled out
     ("SC" → "short course") so the raw distinction stays available for
     data-led time context without the abbreviation ever reaching the
-    LLM's source prose."""
+    LLM's source prose. Also the data-minimisation boundary: registry
+    identifiers and DOB-level fields are stripped before the payload
+    leaves the platform (top level and inside ``raw_facts``)."""
     if not isinstance(a, dict):
         return a
-    out = dict(a)
+    out = {k: v for k, v in a.items() if k.lower() not in _PROMPT_DROP_KEYS}
+    raw_facts = out.get("raw_facts")
+    if isinstance(raw_facts, dict):
+        out["raw_facts"] = {
+            k: v for k, v in raw_facts.items() if k.lower() not in _PROMPT_DROP_KEYS
+        }
     event = (out.get("event") or "").strip()
     if event:
         out["event"] = _strip_course_suffix(event)

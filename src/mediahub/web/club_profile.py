@@ -240,6 +240,9 @@ class ClubProfile:
     # Per-tenant opt-in for the swimmingresults.org PB enrichment (Art 14
     # duty sits with the club — see DATA_MAP E4 / OPEN_LEGAL_QUESTIONS Q4).
     pb_enrichment_enabled: bool = True
+    # Per-tenant retention overrides {artifact_class: days}; a club can
+    # TIGHTEN the deployment window, never extend it (compliance.retention).
+    retention_overrides: dict = field(default_factory=dict)
 
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
