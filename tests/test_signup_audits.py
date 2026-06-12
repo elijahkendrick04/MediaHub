@@ -164,6 +164,7 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
     app = create_app()
     client = app.test_client()
     resp = client.post("/organisation/setup/capture", data={
+        "accept_dpa": "1", "confirm_lawful_basis": "1",
         "display_name": "Test Aquatics",
         "org_type": "swimming_club",
         "country": "United Kingdom",
@@ -326,6 +327,7 @@ def test_capture_pins_profile_into_session(monkeypatch, tmp_path):
     app = create_app()
     with app.test_client() as client:
         resp = client.post("/organisation/setup/capture", data={
+        "accept_dpa": "1", "confirm_lawful_basis": "1",
             "display_name": "Pinned Org",
             "country": "United Kingdom",
         })

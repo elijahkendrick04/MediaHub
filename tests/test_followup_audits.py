@@ -95,6 +95,7 @@ class TestM2OptionalSection:
         the POST body — verify by submitting with no link data."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
         resp = client.post("/organisation/setup/capture", data={
+        "accept_dpa": "1", "confirm_lawful_basis": "1",
             "display_name": "No Links Org",
             "country": "France",
         })
@@ -361,6 +362,7 @@ class TestV1FullSignupFlow:
 
             # 2. POST capture with the full form
             r2 = c.post("/organisation/setup/capture", data={
+        "accept_dpa": "1", "confirm_lawful_basis": "1",
                 "display_name": "Verify Club",
                 "org_type": "swimming_club",
                 "country": "United Kingdom",
