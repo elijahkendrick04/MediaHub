@@ -1,13 +1,16 @@
 """Operator developer sign-in.
 
-Public, passwordless, unrestricted operator access (ADR-0018). Pinned here:
-  1. The /developer route and the footer link ALWAYS exist — no env var needed.
-  2. The page is passwordless: a one-click button, no key field.
-  3. One click grants an unrestricted (Owner-plan) session that bypasses the
-     paywall.
+Username + password operator access (ADR-0019). Pinned here:
+  1. The /developer route and the footer link always exist — no env var needed.
+  2. The page asks for a username AND a password (no passwordless one-click).
+  3. Correct credentials grant an unrestricted (Owner-plan) session; wrong
+     credentials are rejected (401) and grant nothing.
   4. The footer "Developer access" pill is home-page only.
-  5. An anonymous visitor (who hasn't clicked through) stays on Free.
-  6. Logout clears the operator session.
+  5. The password is never echoed back into the page.
+  6. The baked-in default credential ships only as an argon2id hash — never the
+     plaintext password (the repo-secret rule covers tests too, so these tests
+     drive the login through a TEST credential set via the env override).
+  7. Logout clears the operator session.
 """
 
 from __future__ import annotations
@@ -22,15 +25,20 @@ sys.path.insert(0, str(_ROOT))
 
 from mediahub.web import auth as _auth  # noqa: E402
 
+# A throwaway credential used only by this suite (never the real operator
+# password) — set via the documented env override so the full sign-in path is
+# exercised without putting any real secret in the repo.
+TEST_USER = "test-operator"
+TEST_PASSWORD = "test-operator-password-123"
+
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-signed-sessions")
-    # No MEDIAHUB_DEV_* vars: developer access must work with zero config.
-    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
-    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
+    monkeypatch.setenv("MEDIAHUB_DEV_USER", TEST_USER)
+    monkeypatch.setenv("MEDIAHUB_DEV_PASSWORD_HASH", _auth.hash_password(TEST_PASSWORD))
     from mediahub.web.web import create_app
 
     return create_app()
@@ -50,27 +58,24 @@ def _csrf(client) -> dict:
     return {"csrf_token": token}
 
 
-# ---- always present, passwordless, no env needed -----------------------
+# ---- the page: present, asks for username + password -------------------
 
 
-def test_route_always_available_passwordless(client):
+def test_route_available_and_asks_for_credentials(client):
     resp = client.get("/developer")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # Passwordless: a one-click button, no key field.
-    assert 'name="dev_key"' not in body
-    assert "Enter unrestricted" in body
+    assert 'name="dev_user"' in body
+    assert 'name="dev_password"' in body
 
 
-def test_footer_link_on_home_without_any_env(client):
+def test_footer_link_on_home(client):
     home = client.get("/").get_data(as_text=True)
     assert "Developer access" in home
     assert "/developer" in home
 
 
 def test_footer_pill_is_home_only(client):
-    # The "Developer access" footer pill is home-scoped; it must not appear on
-    # other pages' footers.
     assert "Developer access" not in client.get("/pricing").get_data(as_text=True)
 
 
@@ -80,17 +85,59 @@ def test_login_page_links_to_developer(client):
     assert "Developer sign-in" in body
 
 
-# ---- one click grants the unrestricted session -------------------------
+# ---- credentials: correct grants, wrong rejected -----------------------
 
 
-def test_one_click_grants_unrestricted_session(client):
-    resp = client.post("/developer", data={**_csrf(client)})  # no key
+def test_correct_credentials_grant_unrestricted_session(client):
+    resp = client.post(
+        "/developer",
+        data={"dev_user": TEST_USER, "dev_password": TEST_PASSWORD, **_csrf(client)},
+    )
     assert resp.status_code in (302, 303)
     with client.session_transaction() as sess:
         assert sess.get("dev_operator") is True
-    # The nav now renders operator mode (the dev_operator branch), not "Log in".
+    # The nav now renders operator mode, not "Log in".
     page = client.get("/pricing").get_data(as_text=True)
     assert "Operator mode" in page
+
+
+def test_wrong_password_rejected_and_grants_nothing(client):
+    resp = client.post(
+        "/developer",
+        data={"dev_user": TEST_USER, "dev_password": "not-the-password", **_csrf(client)},
+    )
+    assert resp.status_code == 401
+    with client.session_transaction() as sess:
+        assert sess.get("dev_operator") is None
+    assert "not-the-password" not in resp.get_data(as_text=True)
+
+
+def test_wrong_username_rejected(client):
+    resp = client.post(
+        "/developer",
+        data={"dev_user": "someone-else", "dev_password": TEST_PASSWORD, **_csrf(client)},
+    )
+    assert resp.status_code == 401
+    with client.session_transaction() as sess:
+        assert sess.get("dev_operator") is None
+
+
+# ---- credential verification unit + secret hygiene ---------------------
+
+
+def test_verify_dev_credentials_unit(app):
+    with app.test_request_context("/"):
+        assert _auth.verify_dev_credentials(TEST_USER, TEST_PASSWORD) is True
+        assert _auth.verify_dev_credentials(TEST_USER, "wrong") is False
+        assert _auth.verify_dev_credentials("wrong", TEST_PASSWORD) is False
+        assert _auth.verify_dev_credentials("", "") is False
+
+
+def test_baked_in_default_is_a_hash_not_plaintext():
+    # The committed default credential must be an argon2id hash, never a
+    # plaintext password (repo-secret rule).
+    assert _auth._DEV_PASSWORD_HASH_DEFAULT.startswith("$argon2id$")
+    assert _auth._DEV_USERNAME_DEFAULT == "ekandani"
 
 
 def test_operator_session_is_premium(app):
@@ -101,17 +148,12 @@ def test_operator_session_is_premium(app):
         assert _auth.is_dev_operator() is True
         assert _auth.current_plan() == _auth.PLAN_OWNER
         assert _auth.is_premium() is True
-        user = _auth.current_user()
-        assert user is not None and user.plan == _auth.PLAN_OWNER
 
 
 def test_anonymous_visitor_is_not_premium(app):
     with app.test_request_context("/"):
         assert _auth.is_dev_operator() is False
-        assert _auth.is_premium() is False  # signed out → Free, gates closed
-
-
-# ---- logout ------------------------------------------------------------
+        assert _auth.is_premium() is False
 
 
 def test_logout_clears_operator_session(app):

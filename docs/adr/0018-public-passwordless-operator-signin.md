@@ -1,6 +1,10 @@
 # ADR 0018 — Public, passwordless operator developer sign-in
 
-- **Status:** accepted (2026-06-12)
+- **Status:** SUPERSEDED by [ADR-0019](0019-password-protect-operator-signin.md)
+  (2026-06-12) — the public, passwordless sign-in below was reverted the same
+  day at the operator's request; `/developer` is now username + password.
+  Retained for the record.
+- **Original status:** accepted (2026-06-12)
 - **Context:** operator request. PR #412/#416 moved the home-page "Developer
   access" link into the footer, but the link only appears when
   `MEDIAHUB_DEV_KEY` (or `MEDIAHUB_DEV_OPEN`) is set in the Render dashboard —

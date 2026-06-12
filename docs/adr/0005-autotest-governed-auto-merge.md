@@ -1,6 +1,12 @@
 # 5. Governed auto-merge for the autotest feature
 
-- **Status:** Accepted. The autonomous autotest loop may auto-merge its own ordinary
+- **Status:** Auto-merge SUPERSEDED by
+  [ADR-0020](0020-no-autotest-automerge.md) (2026-06-12) — after an auto-merged
+  web change broke production fonts, the operator chose human approval for every
+  fix, so the loop no longer auto-merges anything. The 3-way classification
+  below still stands for **scope/labelling**; it just no longer feeds an
+  auto-merge.
+- **Original status:** Accepted. The autonomous autotest loop may auto-merge its own ordinary
   harness code (and product fixes) on green CI; it may **never** auto-merge a change to the
   files that govern it. Recorded in [`../../autotest/CHANGE_CLASSIFICATION.md`](../../autotest/CHANGE_CLASSIFICATION.md)
   and enforced by [`gitops.classify_change`](../../autotest/gitops.py),

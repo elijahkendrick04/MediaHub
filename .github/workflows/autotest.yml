@@ -133,7 +133,12 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTOTEST_GH_PAT || secrets.GITHUB_TOKEN }}
           AUTOTEST_FIX_APPLY: "1"
-          AUTOTEST_BUILD_MERGE: "1"   # fully autonomous: auto-merge fix PRs on green CI
+          # Human-approval policy (2026-06-12 incident: an auto-merged web change
+          # broke production fonts site-wide). The loop still finds bugs and opens
+          # fix PRs, but it NEVER auto-merges — a human reviews and merges every
+          # one. Do not set back to "1" without an explicit operator decision;
+          # tests/test_autonomy_tripwire.py enforces this. See ADR-0020.
+          AUTOTEST_BUILD_MERGE: "0"   # open PRs for human approval; never auto-merge
           AUTOTEST_CODER: "claude"
           # Where _persist_to_main finds the finder's fresh ledger after the
           # per-bug git resets (see the snapshot step above).

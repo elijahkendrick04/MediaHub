@@ -40,12 +40,12 @@ errors, a provider breach notice, anomalous ledger entries
 **Contain.**
 1. Publishing: flip the autonomy kill switch (publish gate honours it) and,
    if needed, suspend Buffer channel connections.
-2. Access: the operator `/developer` sign-in is public and passwordless
-   (ADR-0018), so there is no key to rotate — rotate `SECRET_KEY` to
-   invalidate every session cookie (including any outstanding operator
-   session) plus magic links and reset tokens; rotate any provider key
-   suspected leaked (`.env` only — never code). To close the operator door
-   itself, ship a code change re-gating `/developer`.
+2. Access: rotate the operator `/developer` credential by setting
+   `MEDIAHUB_DEV_USER` / `MEDIAHUB_DEV_PASSWORD_HASH` (argon2id hash, ADR-0019)
+   — or change the baked-in default in code; rotate `SECRET_KEY` to invalidate
+   every session cookie (including any outstanding operator session) plus magic
+   links and reset tokens; rotate any provider key suspected leaked (`.env`
+   only — never code).
 3. If the host itself is compromised: scale the Render service to zero;
    the data disk persists.
 

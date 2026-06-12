@@ -1,5 +1,12 @@
 # Change classification rule: product vs. harness/governance
 
+> **AUTO-MERGE DISABLED (2026-06-12, [ADR-0020](../docs/adr/0020-no-autotest-automerge.md)).**
+> After an auto-merged web change broke production fonts, the operator chose
+> human approval for **every** fix. The loop now opens PRs and stops — a human
+> merges all of them. The 3-way classification below still governs **scope and
+> labelling**, but no class auto-merges any more. (`AUTOTEST_BUILD_MERGE: "0"` in
+> `.github/workflows/autotest.yml`, enforced by `tests/test_autonomy_tripwire.py`.)
+
 > **Human-authored governance artifact** (council "is it working" ruling, Q2 bootstrap).
 > The autonomous loop must NOT classify its own changes — that would be a governance
 > decision made by the system about the system (the recursion the council flagged).
