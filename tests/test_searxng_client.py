@@ -30,10 +30,16 @@ class _FakeResp:
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for k in ("MEDIAHUB_SEARCH_ENDPOINT", "MEDIAHUB_SEARCH_TIMEOUT"):
+    for k in (
+        "MEDIAHUB_SEARCH_ENDPOINT",
+        "MEDIAHUB_SEARCH_TIMEOUT",
+        "MEDIAHUB_SEARCH_BREAKER_COOLDOWN",
+    ):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr("mediahub.web.secrets_store.get_secret", lambda k: None)
+    searxng_client._reset_breaker()
     yield
+    searxng_client._reset_breaker()
 
 
 # --- client ----------------------------------------------------------------
@@ -165,3 +171,100 @@ def test_webresearcher_unconfigured_uses_ddg(monkeypatch, no_cache):
     out = wr.search("query")
     assert called["searxng"] == 0  # is_configured() False => never called
     assert [r.source for r in out] == ["duckduckgo"]
+
+
+# --- circuit breaker ---------------------------------------------------------
+
+def _boom_counting(counter):
+    def boom(*a, **k):
+        counter["n"] += 1
+        raise OSError("connection refused")
+
+    return boom
+
+
+def test_breaker_trips_then_skips_network(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+    calls = {"n": 0}
+    monkeypatch.setattr(requests, "get", _boom_counting(calls))
+    with pytest.raises(searxng_client.SearxngUnavailable):
+        searxng_client.search("q")  # real attempt → trips
+    assert searxng_client.breaker_open() is True
+    assert "transport error" in searxng_client.breaker_reason()
+    with pytest.raises(searxng_client.SearxngUnavailable, match="circuit open"):
+        searxng_client.search("q")  # skipped — no second network attempt
+    assert calls["n"] == 1
+
+
+def test_breaker_cooldown_expires(monkeypatch):
+    import time as _time
+
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+    monkeypatch.setenv("MEDIAHUB_SEARCH_BREAKER_COOLDOWN", "0.05")
+    calls = {"n": 0}
+    monkeypatch.setattr(requests, "get", _boom_counting(calls))
+    with pytest.raises(searxng_client.SearxngUnavailable):
+        searxng_client.search("q")
+    assert searxng_client.breaker_open() is True
+    _time.sleep(0.06)
+    assert searxng_client.breaker_open() is False
+    with pytest.raises(searxng_client.SearxngUnavailable):
+        searxng_client.search("q")  # retried for real after cooldown
+    assert calls["n"] == 2
+
+
+def test_breaker_disabled_with_zero_cooldown(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+    monkeypatch.setenv("MEDIAHUB_SEARCH_BREAKER_COOLDOWN", "0")
+    calls = {"n": 0}
+    monkeypatch.setattr(requests, "get", _boom_counting(calls))
+    for _ in range(3):
+        with pytest.raises(searxng_client.SearxngUnavailable):
+            searxng_client.search("q")
+    assert searxng_client.breaker_open() is False
+    assert calls["n"] == 3  # pre-breaker behaviour: every call attempts
+
+
+def test_breaker_resets_on_success(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+    searxng_client._trip_breaker("earlier failure")
+    searxng_client._reset_breaker()
+    payload = {"results": [{"url": "https://a.com", "title": "A"}]}
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(200, payload))
+    out = searxng_client.search("q")
+    assert len(out) == 1
+    assert searxng_client.breaker_open() is False
+
+
+def test_health_reports_and_drives_breaker(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+
+    def boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(requests, "get", boom)
+    h = searxng_client.health()
+    assert h["engine"] == "duckduckgo"
+    assert h["breaker_open"] is True
+    payload = {"results": []}
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(200, payload))
+    h2 = searxng_client.health()
+    assert h2["engine"] == "searxng"
+    assert h2["breaker_open"] is False  # recovery closes the breaker immediately
+
+
+def test_webresearcher_warns_once_then_skips_quietly(monkeypatch, no_cache, caplog):
+    monkeypatch.setenv("MEDIAHUB_SEARCH_ENDPOINT", "http://s")
+    monkeypatch.setattr(requests, "get", _boom_counting({"n": 0}))
+    wr = WebResearcher()
+    monkeypatch.setattr(wr, "_check_pplx", lambda: False)
+    monkeypatch.setattr(
+        wr, "_search_duckduckgo", lambda q, n: [SearchResult("https://ddg", "D", "s", "duckduckgo")]
+    )
+    with caplog.at_level("DEBUG", logger="mediahub.web_research.search"):
+        for _ in range(5):
+            out = wr.search("query")
+            assert [r.source for r in out] == ["duckduckgo"]
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1  # one trip warning, then silent breaker skips
+    assert "pausing SearXNG attempts" in warnings[0].getMessage()

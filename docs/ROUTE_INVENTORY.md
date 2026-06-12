@@ -7,10 +7,14 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | Endpoint | Methods | Rule |
 |---|---|---|
 | `home` | `GET` | `/` |
+| `account_2fa` | `GET,POST` | `/account/2fa` |
 | `account_delete` | `POST` | `/account/delete` |
 | `account_export_route` | `GET` | `/account/export` |
 | `activity_page` | `GET` | `/activity` |
 | `add_input_page` | `GET` | `/add-input` |
+| `admin_compliance` | `GET` | `/admin/compliance` |
+| `admin_compliance_ack` | `POST` | `/admin/compliance/complaints/<complaint_id>/ack` |
+| `admin_compliance_incident` | `POST` | `/admin/compliance/incidents` |
 | `api_autonomy_policy_load` | `GET` | `/api/autonomy/policy` |
 | `api_autonomy_policy_save` | `POST` | `/api/autonomy/policy` |
 | `api_autonomy_sweep` | `POST` | `/api/autonomy/sweep` |
@@ -82,6 +86,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `billing_confirm` | `GET` | `/billing/confirm` |
 | `billing_portal` | `POST` | `/billing/portal` |
 | `club_data_page` | `GET` | `/club-data` |
+| `complaints_form` | `GET` | `/complaints` |
+| `complaints_submit` | `POST` | `/complaints` |
 | `cookies_page` | `GET` | `/cookies` |
 | `developer_login` | `GET` | `/developer` |
 | `developer_login_post` | `POST` | `/developer` |
@@ -109,13 +115,16 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `healthz_memory` | `GET` | `/healthz/memory` |
 | `healthz_ping` | `GET` | `/healthz/ping` |
 | `healthz_search` | `GET` | `/healthz/search` |
+| `healthz_sentinel` | `GET` | `/healthz/sentinel` |
 | `healthz_usage` | `GET` | `/healthz/usage` |
 | `legal_accept_page` | `GET` | `/legal/accept` |
 | `legal_accept_post` | `POST` | `/legal/accept` |
+| `legal_subprocessors` | `GET` | `/legal/subprocessors` |
 | `live_meet_page` | `GET` | `/live` |
 | `live_meet_action` | `POST` | `/live/action` |
 | `login_page` | `GET` | `/login` |
 | `login_post` | `POST` | `/login` |
+| `login_2fa` | `GET,POST` | `/login/2fa` |
 | `logout` | `GET,POST` | `/logout` |
 | `magic_review_page` | `GET` | `/m/<token>` |
 | `magic_card_action` | `POST` | `/m/<token>/card/<path:card_id>` |
@@ -130,6 +139,15 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `operator_commercial_quote_add` | `POST` | `/operator/commercial/quotes` |
 | `operator_commercial_quote_update` | `POST` | `/operator/commercial/quotes/update` |
 | `organisation_page` | `GET,POST` | `/organisation` |
+| `org_athlete_rights` | `GET` | `/organisation/athlete-rights` |
+| `org_dsr_clock` | `POST` | `/organisation/athlete-rights/<request_id>/clock` |
+| `org_dsr_action` | `POST` | `/organisation/athlete-rights/<request_id>/run` |
+| `org_dsr_open` | `POST` | `/organisation/athlete-rights/open` |
+| `org_consent_page` | `GET` | `/organisation/consent` |
+| `org_child_policy_settings` | `POST` | `/organisation/consent/child-policy` |
+| `org_consent_record` | `POST` | `/organisation/consent/record` |
+| `org_retention_settings` | `POST` | `/organisation/consent/retention` |
+| `org_consent_settings` | `POST` | `/organisation/consent/settings` |
 | `organisation_members_page` | `GET,POST` | `/organisation/members` |
 | `organisation_setup` | `GET` | `/organisation/setup` |
 | `organisation_setup_capture` | `POST` | `/organisation/setup/capture` |

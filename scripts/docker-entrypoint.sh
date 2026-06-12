@@ -79,14 +79,46 @@ fi
 # Non-fatal: any problem just means MediaHub uses DuckDuckGo. Off unless
 # MEDIAHUB_RUN_SEARXNG=1 (zero RAM when off). See docs/SEARXNG.md + render.yaml.
 SEARXNG_VENV="${SEARXNG_VENV:-/opt/searxng-venv}"
+SEARXNG_UP=0
 if [ "${MEDIAHUB_RUN_SEARXNG:-0}" = "1" ]; then
   if [ -x "$SEARXNG_VENV/bin/python" ] && "$SEARXNG_VENV/bin/python" -c "import searx" 2>/dev/null; then
     echo "Starting in-container SearXNG on 127.0.0.1:8888 ..."
     SEARXNG_SETTINGS_PATH="${SEARXNG_SETTINGS_PATH:-/app/deploy/searxng/settings.yml}" \
       "$SEARXNG_VENV/bin/python" -m searx.webapp >/tmp/searxng.log 2>&1 &
+    # Bounded readiness wait (verified ~3s in practice) so boot-time searches
+    # don't trip the SearXNG circuit breaker while it's still starting.
+    i=0
+    while [ "$i" -lt 20 ]; do
+      if curl -sS -o /dev/null --max-time 1 "http://127.0.0.1:8888/" 2>/dev/null; then
+        SEARXNG_UP=1
+        echo "SearXNG is up (after ~${i}s)."
+        break
+      fi
+      i=$((i + 1))
+      sleep 1
+    done
+    if [ "$SEARXNG_UP" != "1" ]; then
+      echo "WARN: SearXNG did not answer on 127.0.0.1:8888 within 20s; MediaHub will use DuckDuckGo."
+      echo "----- tail /tmp/searxng.log -----"
+      tail -n 20 /tmp/searxng.log 2>/dev/null || true
+      echo "---------------------------------"
+    fi
   else
     echo "MEDIAHUB_RUN_SEARXNG=1 but SearXNG is not installed; using DuckDuckGo."
   fi
+fi
+# Config must match reality: render.yaml points MEDIAHUB_SEARCH_ENDPOINT at the
+# in-container SearXNG. If that SearXNG is NOT running (install failed, crashed
+# at boot, or MEDIAHUB_RUN_SEARXNG=0), drop the endpoint so the search client is
+# honestly inert instead of probing a dead localhost port on every query.
+# A bring-your-own EXTERNAL endpoint (any non-127.0.0.1 host) is left alone.
+if [ "$SEARXNG_UP" != "1" ]; then
+  case "${MEDIAHUB_SEARCH_ENDPOINT:-}" in
+    http://127.0.0.1:8888*|http://localhost:8888*)
+      echo "Unsetting MEDIAHUB_SEARCH_ENDPOINT — in-container SearXNG is not running."
+      unset MEDIAHUB_SEARCH_ENDPOINT
+      ;;
+  esac
 fi
 
 exec gunicorn mediahub.web:app \
