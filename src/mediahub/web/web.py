@@ -8071,11 +8071,7 @@ def create_app() -> Flask:
         ctype = (request.content_type or "").lower()
         if ctype.startswith("application/json"):
             return None
-        supplied = (
-            request.form.get("csrf_token")
-            or request.headers.get("X-CSRF-Token")
-            or ""
-        )
+        supplied = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
         expected = session.get("_csrf") or ""
         if not expected or not _hmac.compare_digest(str(supplied), str(expected)):
             try:
@@ -8143,9 +8139,7 @@ def create_app() -> Flask:
         # HSTS when we know we're behind TLS (secure-cookie config, a TLS
         # request, or Render's edge) — never teach a plain-HTTP dev setup to pin.
         if app.config.get("SESSION_COOKIE_SECURE") or request.is_secure or os.environ.get("RENDER"):
-            h.setdefault(
-                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
-            )
+            h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return resp
 
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
@@ -9398,8 +9392,17 @@ def create_app() -> Flask:
             # by deterministic parsers — but rejecting junk up front shrinks
             # the parser attack surface and gives an honest error.
             _ALLOWED_UPLOAD_EXTS = {
-                ".hy3", ".hyv", ".sd3", ".sdif", ".cl2", ".zip", ".pdf",
-                ".htm", ".html", ".csv", ".txt",
+                ".hy3",
+                ".hyv",
+                ".sd3",
+                ".sdif",
+                ".cl2",
+                ".zip",
+                ".pdf",
+                ".htm",
+                ".html",
+                ".csv",
+                ".txt",
             }
             ext = os.path.splitext(f.filename)[1].lower()
             if ext not in _ALLOWED_UPLOAD_EXTS:
@@ -13168,9 +13171,7 @@ Relay team broke club record"></textarea>
         return False
 
     def _complaints_form_body(error: str = "") -> str:
-        err_html = (
-            f'<p class="tag bad">{_h(error)}</p>' if error else ""
-        )
+        err_html = f'<p class="tag bad">{_h(error)}</p>' if error else ""
         return f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
@@ -13205,11 +13206,15 @@ Relay team broke club record"></textarea>
     def complaints_submit():
         from mediahub.compliance.complaints import ComplaintsStore
 
-        remote = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+        remote = (
+            request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+        )
         if _complaints_throttled(remote):
             return _layout(
                 "Complaints",
-                _complaints_form_body("Too many submissions from this address — please try again later."),
+                _complaints_form_body(
+                    "Too many submissions from this address — please try again later."
+                ),
                 active="privacy",
             ), 429
         details = (request.form.get("details") or "").strip()
@@ -13244,12 +13249,48 @@ Relay team broke club record"></textarea>
     # test suite pins the provider set on both.
 
     _SUBPROCESSORS_PUBLIC = [
-        ("Render Services, Inc.", "Hosting (application, database, files)", "United States", "UK–US data bridge (DPF-certified); SCC fallback", "Always"),
-        ("Google LLC (Gemini API)", "AI caption & creative-brief generation", "United States / global", "Google Cloud DPA: SCCs + UK Addendum", "When configured by the operator"),
-        ("Anthropic, PBC (Claude API)", "AI captioning failover", "United States", "DPA with SCCs + UK IDTA/Addendum", "When configured by the operator"),
-        ("Photoroom SAS", "Photo background removal", "France (sub-processors may be outside the EEA)", "GDPR processor terms", "Only if the club/operator enables cloud cutout"),
-        ("Replicate, Inc.", "Photo background removal", "United States", "Processor terms; SCCs/IDTA", "Only if the club/operator enables cloud cutout"),
-        ("Buffer, Inc.", "Relay of approved posts to social platforms", "United States", "DPA; SCCs/IDTA", "Only if the club connects publishing"),
+        (
+            "Render Services, Inc.",
+            "Hosting (application, database, files)",
+            "United States",
+            "UK–US data bridge (DPF-certified); SCC fallback",
+            "Always",
+        ),
+        (
+            "Google LLC (Gemini API)",
+            "AI caption & creative-brief generation",
+            "United States / global",
+            "Google Cloud DPA: SCCs + UK Addendum",
+            "When configured by the operator",
+        ),
+        (
+            "Anthropic, PBC (Claude API)",
+            "AI captioning failover",
+            "United States",
+            "DPA with SCCs + UK IDTA/Addendum",
+            "When configured by the operator",
+        ),
+        (
+            "Photoroom SAS",
+            "Photo background removal",
+            "France (sub-processors may be outside the EEA)",
+            "GDPR processor terms",
+            "Only if the club/operator enables cloud cutout",
+        ),
+        (
+            "Replicate, Inc.",
+            "Photo background removal",
+            "United States",
+            "Processor terms; SCCs/IDTA",
+            "Only if the club/operator enables cloud cutout",
+        ),
+        (
+            "Buffer, Inc.",
+            "Relay of approved posts to social platforms",
+            "United States",
+            "DPA; SCCs/IDTA",
+            "Only if the club connects publishing",
+        ),
     ]
 
     @app.route("/legal/subprocessors")
@@ -13319,26 +13360,32 @@ Relay team broke club record"></textarea>
         from mediahub.compliance.security_log import read_events as _read_sec_events
 
         _events = list(reversed(_read_sec_events(limit=100)))
-        _event_rows = "".join(
-            f"<tr><td>{_h(e.get('ts', '')[:19])}</td><td>{_h(e.get('event', ''))}</td>"
-            f"<td>{_h(e.get('actor', ''))}</td><td><code>{_h(e.get('subject_pseudonym', ''))}</code></td>"
-            f"<td>{_h(e.get('profile_id', ''))}</td><td>{_h(e.get('outcome', ''))}</td>"
-            f"<td class='muted'>{_h(e.get('detail', '')[:120])}</td></tr>"
-            for e in _events
-        ) or '<tr><td colspan="7" class="muted">No events.</td></tr>'
+        _event_rows = (
+            "".join(
+                f"<tr><td>{_h(e.get('ts', '')[:19])}</td><td>{_h(e.get('event', ''))}</td>"
+                f"<td>{_h(e.get('actor', ''))}</td><td><code>{_h(e.get('subject_pseudonym', ''))}</code></td>"
+                f"<td>{_h(e.get('profile_id', ''))}</td><td>{_h(e.get('outcome', ''))}</td>"
+                f"<td class='muted'>{_h(e.get('detail', '')[:120])}</td></tr>"
+                for e in _events
+            )
+            or '<tr><td colspan="7" class="muted">No events.</td></tr>'
+        )
         events_table = (
             "<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Subject</th>"
             "<th>Org</th><th>Outcome</th><th>Detail</th></tr></thead>"
             f"<tbody>{_event_rows}</tbody></table>"
         )
         incidents = IncidentRegister().all()
-        inc_rows = "".join(
-            f"<tr><td><code>{_h(i.id)}</code></td><td>{_h(i.opened_at[:10])}</td>"
-            f"<td>{_h(i.title)}</td><td>{_h(i.severity)}</td>"
-            f"<td>{'yes' if i.personal_data_involved else 'no'}</td>"
-            f"<td>{_h(i.status)}</td></tr>"
-            for i in incidents
-        ) or '<tr><td colspan="6" class="muted">No incidents recorded.</td></tr>'
+        inc_rows = (
+            "".join(
+                f"<tr><td><code>{_h(i.id)}</code></td><td>{_h(i.opened_at[:10])}</td>"
+                f"<td>{_h(i.title)}</td><td>{_h(i.severity)}</td>"
+                f"<td>{'yes' if i.personal_data_involved else 'no'}</td>"
+                f"<td>{_h(i.status)}</td></tr>"
+                for i in incidents
+            )
+            or '<tr><td colspan="6" class="muted">No incidents recorded.</td></tr>'
+        )
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Operator</span>
@@ -13406,7 +13453,7 @@ Relay team broke club record"></textarea>
             if r.under_18 is True:
                 extra.append("under 18")
             if r.restricted:
-                extra.append('<strong>RESTRICTED (Art 18)</strong>')
+                extra.append("<strong>RESTRICTED (Art 18)</strong>")
             rows.append(
                 f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
                 f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
@@ -13414,7 +13461,10 @@ Relay team broke club record"></textarea>
             )
         table = (
             "<table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>"
-            + ("".join(rows) or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>')
+            + (
+                "".join(rows)
+                or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>'
+            )
             + "</tbody></table>"
         )
         mode = (profile.consent_mode or "").strip()
@@ -13740,9 +13790,7 @@ Relay team broke club record"></textarea>
             from mediahub.compliance.security_log import record_event
 
             record_event("dsr_export", profile_id=pid, subject=req.athlete_name, actor=recorded_by)
-            resp = app.response_class(
-                json.dumps(export, indent=2), mimetype="application/json"
-            )
+            resp = app.response_class(json.dumps(export, indent=2), mimetype="application/json")
             resp.headers["Content-Disposition"] = f"attachment; filename=sar-{request_id}.json"
             return resp
         if req.request_type == "erasure":
@@ -13803,6 +13851,7 @@ Relay team broke club record"></textarea>
                 personal_data_involved=bool(request.form.get("personal_data")),
             )
         return redirect(url_for("admin_compliance"))
+
     # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
 
     @app.route("/privacy/athlete/erase", methods=["POST"])
@@ -13828,7 +13877,9 @@ Relay team broke club record"></textarea>
             pass
         report = _dsr_erase(active, name, recorded_by=recorded_by)
         cascade = report.get("cascade") or {}
-        _runs_n = len(set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", []))))
+        _runs_n = len(
+            set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", [])))
+        )
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
@@ -13960,7 +14011,6 @@ Relay team broke club record"></textarea>
         _auth.logout_user()
         session.clear()
         return redirect(url_for("home"))
-
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -20572,7 +20622,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Lockout BEFORE password verification: a locked key gets the same
         # response whether or not the password would have been right.
         if _auth.login_locked(email):
-            _sec_event("login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked")
+            _sec_event(
+                "login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked"
+            )
             return _login_error_page(
                 email, "Too many failed attempts — try again in 15 minutes.", 429
             )
@@ -24635,9 +24687,7 @@ function mhSetupMode(mode) {{
 
                 run_data = _load_run(run_id) or {}
                 card = find_card_in_run(run_data, card_id)
-                reason = consent_block_reason_for_card(
-                    run_data.get("profile_id", ""), card
-                )
+                reason = consent_block_reason_for_card(run_data.get("profile_id", ""), card)
                 if reason:
                     log.info("consent gate blocked approval run=%s card=%s", run_id, card_id)
                     return jsonify({"error": "consent_blocked", "reason": reason}), 403

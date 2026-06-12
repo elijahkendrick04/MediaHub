@@ -125,15 +125,9 @@ class ComplaintsStore:
     def overdue(self) -> list[Complaint]:
         """Complaints past their 30-day window with no acknowledgement."""
         now = _iso(_now())
-        return [
-            c for c in self.all() if c.status == "received" and c.ack_due_at < now
-        ]
+        return [c for c in self.all() if c.status == "received" and c.ack_due_at < now]
 
     def due_soon(self, days: int = 7) -> list[Complaint]:
         horizon = _iso(_now() + timedelta(days=days))
         now = _iso(_now())
-        return [
-            c
-            for c in self.all()
-            if c.status == "received" and now <= c.ack_due_at <= horizon
-        ]
+        return [c for c in self.all() if c.status == "received" and now <= c.ack_due_at <= horizon]

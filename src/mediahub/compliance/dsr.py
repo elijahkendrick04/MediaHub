@@ -96,7 +96,9 @@ class DsrRequestLog:
     def __init__(self) -> None:
         self._ledger = JsonlLedger("dsr_requests.jsonl", key_field="id")
 
-    def open(self, *, profile_id: str, athlete_name: str, request_type: str, note: str = "") -> DsrRequest:
+    def open(
+        self, *, profile_id: str, athlete_name: str, request_type: str, note: str = ""
+    ) -> DsrRequest:
         now = _now()
         req = DsrRequest(
             id=secrets.token_hex(6),
@@ -323,7 +325,9 @@ def export_athlete(profile_id: str, athlete_name: str) -> dict:
             for f in d.rglob("*.json"):
                 if _file_mentions(f, key):
                     try:
-                        report["pb_caches"].append({"path": str(f), "content": json.loads(f.read_text())})
+                        report["pb_caches"].append(
+                            {"path": str(f), "content": json.loads(f.read_text())}
+                        )
                     except Exception:
                         report["pb_caches"].append({"path": str(f), "content": "unparseable"})
 
@@ -358,7 +362,13 @@ def _memory_rows_matching(memory_store, tenant_id: str, key: str) -> list[dict]:
             ):
                 if key and key in re.sub(r"\s+", " ", (caption or "").lower()):
                     rows.append(
-                        {"table": tbl, "rowid": rowid, "caption": caption, "card_id": card_id, "run_id": run_id}
+                        {
+                            "table": tbl,
+                            "rowid": rowid,
+                            "caption": caption,
+                            "card_id": card_id,
+                            "run_id": run_id,
+                        }
                     )
     finally:
         conn.close()
@@ -430,7 +440,9 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
             kept_cards = [
                 c
                 for c in cards
-                if not (isinstance(c, dict) and any(_name_matches(c.get(k), key) for k in _NAME_KEYS))
+                if not (
+                    isinstance(c, dict) and any(_name_matches(c.get(k), key) for k in _NAME_KEYS)
+                )
             ]
             report["cards_removed"] += len(cards) - len(kept_cards)
             run["cards"] = kept_cards
@@ -447,7 +459,9 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                 if not f.is_file():
                     continue
                 fname = f.name.lower()
-                if any(cid and cid.lower() in fname for cid in card_ids) or (slug and slug in fname):
+                if any(cid and cid.lower() in fname for cid in card_ids) or (
+                    slug and slug in fname
+                ):
                     try:
                         f.unlink()
                         report["visual_files_deleted"].append(str(f))
@@ -496,7 +510,9 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
 
         cascade = _cascade_erase(profile_id, athlete_name)
         report["cascade"] = (
-            cascade.to_dict() if hasattr(cascade, "to_dict") else dict(getattr(cascade, "__dict__", {}))
+            cascade.to_dict()
+            if hasattr(cascade, "to_dict")
+            else dict(getattr(cascade, "__dict__", {}))
         )
     except Exception as e:
         report["residuals"].append(f"privacy cascade unavailable: {e}")
@@ -516,7 +532,10 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
                         report["pb_cache_files_deleted"].append(str(f))
                     except OSError:
                         report["residuals"].append(f"could not delete cache file {f}")
-    for legacy in (_data_dir() / ".cache" / "pb_lookup", _data_dir() / ".cache" / "swimmingresults"):
+    for legacy in (
+        _data_dir() / ".cache" / "pb_lookup",
+        _data_dir() / ".cache" / "swimmingresults",
+    ):
         if legacy.exists():
             for f in list(legacy.glob("*.json")):
                 if _file_mentions(f, key):
