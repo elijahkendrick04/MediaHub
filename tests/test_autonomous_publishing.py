@@ -495,7 +495,12 @@ class TestWebSurface:
         with app_with_org.test_client() as client:
             assert client.post("/api/autonomy/sweep", json={"run_id": "x"}).status_code == 403
             _with_org(client)
-            assert client.post("/api/autonomy/sweep", json={}).status_code == 400
+            # No run_id sweeps the org's recent runs (the settings-page
+            # "Run autonomy check now" path) — fine even with zero runs.
+            resp = client.post("/api/autonomy/sweep", json={})
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body["ok"] is True and body["swept_runs"] == 0
             # A foreign/missing run is refused, not leaked.
             assert client.post("/api/autonomy/sweep", json={"run_id": "nope"}).status_code == 404
 
@@ -552,3 +557,66 @@ def test_audit_log_never_corrupts_on_oversized_args(env):
     entries = log.read(ORG)
     assert entries, "the oversized entry must still be written and parseable"
     assert "_truncated" in entries[-1]["args"]
+
+
+class TestApprovalSignalCadence:
+    """The cadence that makes fully_autonomous real: one hourly scheduled
+    approval_signal task per opted-in org, reconciled on every policy save."""
+
+    def _tasks(self, org_id=ORG):
+        from mediahub.workflow.schedule import list_tasks
+
+        return [
+            t
+            for t in list_tasks()
+            if t.task_type == "approval_signal" and (t.params or {}).get("org_id") == org_id
+        ]
+
+    def test_opt_in_creates_task_and_revert_removes_it(self, env):
+        from mediahub.workflow.approval import ensure_approval_signal_cadence
+
+        save_policy(ORG, {"meet_recap": "fully_autonomous"})
+        assert ensure_approval_signal_cadence(ORG) is True
+        tasks = self._tasks()
+        assert len(tasks) == 1 and tasks[0].schedule_kind == "cron"
+
+        save_policy(ORG, {"meet_recap": "approval_required"})
+        assert ensure_approval_signal_cadence(ORG) is False
+        assert self._tasks() == []
+
+    def test_reconcile_is_idempotent_and_collapses_duplicates(self, env):
+        from mediahub.workflow.approval import ensure_approval_signal_cadence
+        from mediahub.workflow.schedule import create_task
+
+        save_policy(ORG, {"meet_recap": "fully_autonomous"})
+        ensure_approval_signal_cadence(ORG)
+        ensure_approval_signal_cadence(ORG)
+        # Simulate a startup race writing a second row.
+        create_task(
+            name="dup",
+            task_type="approval_signal",
+            schedule_kind="cron",
+            schedule_expr="0 * * * *",
+            params={"org_id": ORG},
+        )
+        ensure_approval_signal_cadence(ORG)
+        assert len(self._tasks()) == 1
+
+    def test_policy_save_route_reconciles_cadence(self, app_with_org):
+        with app_with_org.test_client() as client:
+            _with_org(client)
+            resp = client.post("/api/autonomy/policy", data={"meet_recap": "fully_autonomous"})
+            assert resp.get_json()["ok"] is True
+            assert len(self._tasks()) == 1
+            resp = client.post("/api/autonomy/policy", data={"meet_recap": "approval_required"})
+            assert resp.get_json()["ok"] is True
+            assert self._tasks() == []
+
+    def test_settings_page_shows_activity_log_and_operations(self, app_with_org):
+        AuditLog().record(ORG, "s1", "auto_approve", tool="apply_approval_signal", result="ok")
+        with app_with_org.test_client() as client:
+            _with_org(client)
+            html = client.get("/settings").get_data(as_text=True)
+        assert "Autonomy activity log" in html
+        assert "auto_approve" in html
+        assert "Run autonomy check now" in html

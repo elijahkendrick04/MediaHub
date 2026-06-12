@@ -127,9 +127,14 @@ the org has chosen autonomous channels (Settings → Autonomy; requires its own
 Buffer token), publish through the same Buffer path a human click uses.
 Failing cards stay queued for the human with the blockers recorded —
 autonomy degrades to approval, never the other way round. Trigger it on
-demand (`POST /api/autonomy/sweep`) or on a cadence (the `approval_signal`
-scheduler task type). Machine-approved captions deliberately do **not** feed
-the voice-learning store. End-to-end pinned by
+demand (`POST /api/autonomy/sweep`, with or without a `run_id` — the Settings
+page's "Run autonomy check now" button) or on the cadence: saving a policy
+with any `fully_autonomous` type auto-creates the org's hourly
+`approval_signal` scheduler task (`workflow.approval.
+ensure_approval_signal_cadence`); reverting to fully gated removes it.
+Machine-approved captions deliberately do **not** feed the voice-learning
+store. Every decision is visible in Settings → Autonomy ("Autonomy activity
+log", the `workflow.autonomy.AuditLog` read surface). End-to-end pinned by
 `tests/test_autonomous_publishing.py`.
 
 ## 6. What is NOT in scope
