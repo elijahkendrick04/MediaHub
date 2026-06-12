@@ -118,6 +118,7 @@ class TestPublishGate:
             "confidence",
             "brand_safety",
             "safeguarding",
+            "consent",  # compliance/lawful-basis-and-consent gate check
             "rate_limit",
         }
         assert all(c.detail for c in v.checks)

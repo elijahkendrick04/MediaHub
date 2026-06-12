@@ -33,7 +33,7 @@ def _discovered_root() -> Path:
 
 def _make_key(text: str) -> str:
     """Create a short filesystem-safe cache key from arbitrary text."""
-    return hashlib.md5(text.lower().strip().encode()).hexdigest()[:20]
+    return hashlib.md5(text.lower().strip().encode(), usedforsecurity=False).hexdigest()[:20]
 
 
 class DiscoveryCache:

@@ -422,9 +422,12 @@ def generate_caption_for_tone(
     )
     vp_prose = _voice_profile_prose(resolved_vp)
 
+    from mediahub.ai_core.prompt_guard import SYSTEM_GUARD as _SYSTEM_GUARD
+
     system_parts = [
         "You are a sports social-media writer. Produce ONE caption for a "
         "single swimming achievement.",
+        _SYSTEM_GUARD,
         "Tone: " + tone_desc,
         "Keep it specific, human, club-appropriate, ~280 characters max. "
         "Never invent facts. Output ONLY the caption text — no preamble, "
@@ -551,6 +554,25 @@ def generate_caption_for_tone(
         )
     if not user_prose.strip():
         raise ClaudeUnavailableError("not enough detail to generate a caption")
+    # Prompt-injection defence (OWASP LLM01): the prose was assembled from
+    # uploaded-file fields, so it rides inside data delimiters; detected
+    # instruction-shaped text hardens the wrapper and is logged — never
+    # silently rewritten (the human reviewing the card stays the decider).
+    from mediahub.ai_core.prompt_guard import delimit_untrusted, scan as _injection_scan
+
+    _injection_hits = _injection_scan(user_prose)
+    if _injection_hits:
+        try:
+            from mediahub.compliance.security_log import record_event as _sec_event
+
+            _sec_event(
+                "prompt_injection_suspected",
+                detail=f"patterns={','.join(_injection_hits)[:200]}",
+                outcome="hardened",
+            )
+        except Exception:
+            pass
+    user_prose = delimit_untrusted(user_prose, flagged=bool(_injection_hits))
     # Tiny random suffix breaks identical-output caching at the provider's
     # end without leaking into the visible caption (the prompt asks for
     # caption-only output, so the model will not echo the seed).

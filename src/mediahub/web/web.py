@@ -7865,6 +7865,13 @@ _PALETTE_PICKER_JS = """
 
 
 def create_app() -> Flask:
+    # Fail-fast env validation (security/secrets-and-config): production
+    # refuses to boot with unsafe config (no DATA_DIR, weak operator key,
+    # malformed provider keys) instead of running degraded.
+    from mediahub.web.env_check import validate_environment
+
+    validate_environment()
+
     # Python's mimetypes database omits font/woff2 on some Linux systems,
     # causing Flask to serve .woff2 as application/octet-stream and browsers
     # to treat it as a download rather than loading it as a font.
@@ -15637,6 +15644,46 @@ function mhPlanGenerate(btn) {{
         )
         from mediahub.publishing import posting_log as _plog
 
+        # ---- The unbypassable publish gate (THREAT_MODEL §8) ----
+        # This is the route that makes content public. Three server-side
+        # checks no client (human, script, or LLM-authored payload) can
+        # skip: tenant ownership, recorded human APPROVAL, and consent.
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        ws = _get_wf_store()
+        state = ws.load(run_id).get(card_id) if ws is not None else None
+        approved = state is not None and state.status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if not approved:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "not_approved",
+                    "message": "This card hasn't been approved. Approve it on the review page first — publishing always follows a human decision.",
+                }
+            ), 409
+        from mediahub.compliance.gate import (
+            consent_block_reason_for_card,
+            find_card_in_run,
+        )
+
+        _card = find_card_in_run(run_data or {}, card_id)
+        _consent_reason = consent_block_reason_for_card(
+            (run_data or {}).get("profile_id", ""), _card
+        )
+        if _consent_reason:
+            from mediahub.compliance.security_log import record_event as _sec_event
+
+            _sec_event(
+                "publish_blocked_consent",
+                profile_id=(run_data or {}).get("profile_id", ""),
+                detail=f"run={run_id} card={card_id}",
+                outcome="blocked",
+            )
+            return jsonify(
+                {"ok": False, "error": "consent_blocked", "reason": _consent_reason}
+            ), 403
+
         payload = request.get_json(silent=True) or {}
         channel_ids = payload.get("channel_ids") or []
         if not isinstance(channel_ids, list) or not channel_ids:
@@ -15793,6 +15840,22 @@ function mhPlanGenerate(btn) {{
                     media_url=media_url or None,
                     scheduled_at=scheduled_at_iso_for_log,
                 )
+                try:
+                    from mediahub.compliance.security_log import record_event as _sec_event
+
+                    _actor = ""
+                    try:
+                        _actor = _auth.current_user_email() or ""
+                    except Exception:
+                        pass
+                    _sec_event(
+                        "publish_scheduled",
+                        actor=_actor,
+                        profile_id=profile_id_for_log or "",
+                        detail=f"run={run_id} card={card_id} channel={cid}",
+                    )
+                except Exception:
+                    pass
             except BufferAuthError as exc:
                 failure = str(exc)
                 results.append(

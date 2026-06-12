@@ -1,1 +1,5 @@
 {"ts": "2026-06-12T06:20:55+00:00", "event": "retention_purge", "actor": "", "subject_pseudonym": "", "profile_id": "", "detail": "runs=0 uploads=0 pb_cache_files=0 log_lines=0 errors=0", "outcome": "ok"}
+{"ts": "2026-06-12T06:57:20+00:00", "event": "publish_scheduled", "actor": "", "subject_pseudonym": "", "profile_id": "clubx", "detail": "run=run1 card=cardA channel=p1", "outcome": "ok"}
+{"ts": "2026-06-12T06:57:20+00:00", "event": "publish_scheduled", "actor": "", "subject_pseudonym": "", "profile_id": "clubx", "detail": "run=run1 card=cardA channel=p2", "outcome": "ok"}
+{"ts": "2026-06-12T06:58:04+00:00", "event": "publish_scheduled", "actor": "", "subject_pseudonym": "", "profile_id": "_orphaned", "detail": "run=run1 card=cardA channel=p1", "outcome": "ok"}
+{"ts": "2026-06-12T06:58:04+00:00", "event": "publish_scheduled", "actor": "", "subject_pseudonym": "", "profile_id": "_orphaned", "detail": "run=run1 card=cardA channel=p2", "outcome": "ok"}

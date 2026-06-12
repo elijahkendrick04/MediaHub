@@ -134,6 +134,13 @@ def ready_app(tmp_path, monkeypatch):
             data={"profile_id": profile_id},
         )
         assert pin.status_code == 200, pin.get_data(as_text=True)
+        # The schedule endpoint now enforces server-side human approval
+        # (security/llm-pipeline) — approve the seeded card up front.
+        ap = c.post(
+            f"/api/workflow/{run_id}/{card_id}",
+            json={"action": "set_status", "status": "approved"},
+        )
+        assert ap.status_code == 200, ap.get_data(as_text=True)
         yield c, run_id, card_id, profile_id
 
 
