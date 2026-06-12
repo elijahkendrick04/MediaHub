@@ -280,9 +280,7 @@ def wall_cards(
                         }
                     )
                 continue
-            use_initials = initials_only or (
-                policy is not None and policy.level == "initials_only"
-            )
+            use_initials = initials_only or (policy is not None and policy.level == "initials_only")
             display_name = initials_of(raw_name) if use_initials else raw_name
             event = str(ach.get("event") or "").strip()
             time_str = str(ach.get("time") or ach.get("final_time") or "").strip()

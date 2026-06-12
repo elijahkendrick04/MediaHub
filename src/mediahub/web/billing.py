@@ -306,9 +306,7 @@ def grant_referral_reward(
         if not coupon_id:
             raise BillingError("Stripe did not return a coupon id")
         subs = stripe.Subscription.list(customer=cid, status="active", limit=1)
-        data = getattr(subs, "data", None) or (
-            subs.get("data") if isinstance(subs, dict) else []
-        )
+        data = getattr(subs, "data", None) or (subs.get("data") if isinstance(subs, dict) else [])
         if data:
             sub_id = getattr(data[0], "id", None) or data[0].get("id")
             stripe.Subscription.modify(sub_id, coupon=coupon_id)

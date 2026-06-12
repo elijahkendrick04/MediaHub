@@ -248,6 +248,7 @@ class ReferralRewardStore:
             if rid:
                 by_id[rid] = rec
         for rec in by_id.values():
+
             def _int_or_none(v):
                 try:
                     return int(v) if v is not None else None

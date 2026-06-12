@@ -19312,9 +19312,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 from mediahub.commercial.referrals import ReferralCodeStore
 
-                _rc = ReferralCodeStore().get_or_create(
-                    profile.profile_id, profile.display_name
-                )
+                _rc = ReferralCodeStore().get_or_create(profile.profile_id, profile.display_name)
                 _share_url = url_for("signup_page", ref=_rc.code, _external=True)
                 body += (
                     '<div class="card" style="margin-top:20px;padding:20px 24px">'
@@ -19637,8 +19635,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     error=message,
                     min_password=True,
                     extra_fields_html=(
-                        _referral_field_html(request.form.get("ref") or "")
-                        + _terms_checkbox_html()
+                        _referral_field_html(request.form.get("ref") or "") + _terms_checkbox_html()
                     ),
                 ),
                 status,
@@ -19801,9 +19798,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             email = _auth.normalize_email(request.form.get("email") or "")
             user = _user_store().get(email) if email else None
             if user is not None:
-                token = _tokens.mint_reset_token(
-                    app.secret_key, user.email, user.hashed_password
-                )
+                token = _tokens.mint_reset_token(app.secret_key, user.email, user.hashed_password)
                 reset_url = url_for("password_reset", token=token, _external=True)
                 try:
                     send_email(
@@ -20169,11 +20164,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 sent_html = (
                     f'<p class="tag good" style="margin-bottom:16px">Sent to '
                     f"{result['sent']} of {len(emails)} account(s)."
-                    + (
-                        f" Failed: {_h(', '.join(failed))}."
-                        if failed
-                        else ""
-                    )
+                    + (f" Failed: {_h(', '.join(failed))}." if failed else "")
                     + " Recorded in the notice ledger.</p>"
                 )
         seam_line = (

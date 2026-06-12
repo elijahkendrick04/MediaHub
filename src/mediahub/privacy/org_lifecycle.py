@@ -31,7 +31,6 @@ never aborts the rest.
 
 from __future__ import annotations
 
-import csv
 import io
 import json
 import logging
@@ -68,9 +67,7 @@ def _org_run_ids(profile_id: str) -> list[str]:
     if conn is None:
         return []
     try:
-        rows = conn.execute(
-            "SELECT id FROM runs WHERE profile_id = ?", (profile_id,)
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM runs WHERE profile_id = ?", (profile_id,)).fetchall()
         return [r["id"] for r in rows]
     except sqlite3.Error:
         return []
@@ -418,25 +415,35 @@ def org_export_zip(profile_id: str, out_path: Path, *, media_store=None) -> dict
         conn = _connect()
         if conn is not None:
             try:
-                posting = _rows_as_dicts(
-                    conn,
-                    "SELECT * FROM posting_attempts WHERE profile_id = ? ORDER BY id",
-                    (pid,),
-                ) if _table_exists(conn, "posting_attempts") else []
+                posting = (
+                    _rows_as_dicts(
+                        conn,
+                        "SELECT * FROM posting_attempts WHERE profile_id = ? ORDER BY id",
+                        (pid,),
+                    )
+                    if _table_exists(conn, "posting_attempts")
+                    else []
+                )
                 manifest["posting_rows"] = len(posting)
                 zf.writestr("posting_log.json", json.dumps(posting, indent=2, default=str))
 
-                records = _rows_as_dicts(
-                    conn, "SELECT * FROM club_records WHERE profile_id = ?", (pid,)
-                ) if _table_exists(conn, "club_records") else []
+                records = (
+                    _rows_as_dicts(conn, "SELECT * FROM club_records WHERE profile_id = ?", (pid,))
+                    if _table_exists(conn, "club_records")
+                    else []
+                )
                 manifest["club_records"] = len(records)
                 zf.writestr("club_records.json", json.dumps(records, indent=2, default=str))
 
-                corrections = _rows_as_dicts(
-                    conn,
-                    "SELECT * FROM content_corrections WHERE profile_id = ? ORDER BY id",
-                    (pid,),
-                ) if _table_exists(conn, "content_corrections") else []
+                corrections = (
+                    _rows_as_dicts(
+                        conn,
+                        "SELECT * FROM content_corrections WHERE profile_id = ? ORDER BY id",
+                        (pid,),
+                    )
+                    if _table_exists(conn, "content_corrections")
+                    else []
+                )
                 manifest["corrections"] = len(corrections)
                 zf.writestr("corrections.json", json.dumps(corrections, indent=2, default=str))
             finally:

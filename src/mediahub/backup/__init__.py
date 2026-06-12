@@ -87,9 +87,7 @@ def _keep() -> int:
 def _snapshot_sqlite(src: Path, dest: Path) -> bool:
     """Copy a SQLite DB consistently even while the app writes to it."""
     try:
-        with sqlite3.connect(str(src), timeout=10.0) as conn, sqlite3.connect(
-            str(dest)
-        ) as out:
+        with sqlite3.connect(str(src), timeout=10.0) as conn, sqlite3.connect(str(dest)) as out:
             conn.backup(out)
         return True
     except sqlite3.Error as exc:

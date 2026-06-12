@@ -26,9 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     p_restore.add_argument(
         "--data-dir", type=Path, default=None, help="target (default: $DATA_DIR)"
     )
-    p_restore.add_argument(
-        "--force", action="store_true", help="restore over a non-empty target"
-    )
+    p_restore.add_argument("--force", action="store_true", help="restore over a non-empty target")
 
     args = parser.parse_args(argv)
     if args.cmd == "create":

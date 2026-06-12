@@ -64,9 +64,7 @@ def verify_reset_token(
     change fails the fingerprint check — single-use by construction.
     """
     try:
-        payload = _serializer(secret, _RESET_SALT).loads(
-            token, max_age=int(max_age_hours * 3600)
-        )
+        payload = _serializer(secret, _RESET_SALT).loads(token, max_age=int(max_age_hours * 3600))
     except SignatureExpired as e:
         raise AccountTokenExpired("this reset link has expired") from e
     except BadSignature as e:
@@ -94,9 +92,7 @@ def verify_verify_token(
 ) -> str:
     """Validate a verification token → the account email."""
     try:
-        payload = _serializer(secret, _VERIFY_SALT).loads(
-            token, max_age=int(max_age_hours * 3600)
-        )
+        payload = _serializer(secret, _VERIFY_SALT).loads(token, max_age=int(max_age_hours * 3600))
     except SignatureExpired as e:
         raise AccountTokenExpired("this verification link has expired") from e
     except BadSignature as e:
