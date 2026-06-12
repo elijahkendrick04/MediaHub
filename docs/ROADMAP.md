@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `26d56a28b` · Merge pull request #365 from elijahkendrick04/claude/bold-lovelace-3lryuf
+**Last updated:** 2026-06-12 · `59f470fea` · fix: a11y: <html> element must have a lang attribute (html-has-la (#368)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,6 +370,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
 | 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
 | 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
 | 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
@@ -378,8 +379,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `56d01c8fa` | docs(roadmap): record the UK legal compliance baseline against the PC.11-PC.14 sell gate |
 | 2026-06-12 | `cd34d6807` | style: apply pre-commit ruff-format (fixes Repo hygiene CI) |
 | 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
-| 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
-| 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
