@@ -24,9 +24,18 @@ import re
 _INJECTION_PATTERNS: tuple[tuple[str, re.Pattern], ...] = tuple(
     (name, re.compile(rx, re.IGNORECASE))
     for name, rx in [
-        ("ignore_instructions", r"\bignore\s+(all\s+|any\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)"),
-        ("disregard_instructions", r"\bdisregard\s+(all\s+|any\s+)?(previous|prior|above|earlier|your)\s+(instructions?|prompts?|rules?|guidelines?)"),
-        ("system_prompt_probe", r"\b(reveal|show|print|repeat)\b.{0,40}\b(system\s+prompt|instructions)\b"),
+        (
+            "ignore_instructions",
+            r"\bignore\s+(all\s+|any\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)",
+        ),
+        (
+            "disregard_instructions",
+            r"\bdisregard\s+(all\s+|any\s+)?(previous|prior|above|earlier|your)\s+(instructions?|prompts?|rules?|guidelines?)",
+        ),
+        (
+            "system_prompt_probe",
+            r"\b(reveal|show|print|repeat)\b.{0,40}\b(system\s+prompt|instructions)\b",
+        ),
         ("role_reassignment", r"\byou\s+are\s+(now|no\s+longer)\b"),
         ("new_instructions", r"\b(new|updated|real)\s+instructions?\s*:"),
         ("do_anything", r"\bdo\s+anything\s+now\b|\bDAN\s+mode\b"),

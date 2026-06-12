@@ -41,7 +41,6 @@ def client(app):
 # ---- disabled when no key configured -----------------------------------
 
 
-
 def _csrf(client) -> dict:
     """This suite runs with TESTING unset, so CSRF enforcement is live
     (security/web-hardening) — mint a session token and carry it."""
@@ -53,12 +52,16 @@ def _csrf(client) -> dict:
 
 def test_route_404s_when_key_unset(client, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
     assert client.get("/developer").status_code == 404
-    assert client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
+    assert (
+        client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
+    )
 
 
 def test_no_button_when_key_unset(client, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
     login = client.get("/login").get_data(as_text=True)
     assert "/developer" not in login
     assert "Developer sign-in" not in login
@@ -66,9 +69,11 @@ def test_no_button_when_key_unset(client, monkeypatch):
 
 def test_verify_dev_key_false_when_unset(app, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
     with app.test_request_context("/"):
         assert _auth.verify_dev_key("anything") is False
         assert _auth.dev_login_enabled() is False
+        assert _auth.dev_login_open() is False
 
 
 # ---- enabled: form + correct / wrong key -------------------------------
@@ -159,3 +164,64 @@ def test_logout_clears_operator_session(app, monkeypatch):
         _auth.logout_user()
         assert session.get(_auth._DEV_SESSION_KEY) is None
         assert _auth.is_dev_operator() is False
+
+
+# ---- passwordless open mode (MEDIAHUB_DEV_OPEN) -------------------------
+# A deliberate, temporary development backdoor: one-click unrestricted sign-in
+# with NO key, opted into per deployment and OFF by default.
+
+
+def test_open_mode_off_by_default(client, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
+    # No key and no open flag → route gone, no footer affordance.
+    assert client.get("/developer").status_code == 404
+    assert "Developer access" not in client.get("/").get_data(as_text=True)
+
+
+def test_open_mode_renders_passwordless_form(client, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
+    resp = client.get("/developer")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # Passwordless: no key field, a one-click button, and a standing reminder
+    # naming the env var to unset before real customers.
+    assert 'name="dev_key"' not in body
+    assert "Enter unrestricted" in body
+    assert "MEDIAHUB_DEV_OPEN" in body
+
+
+def test_open_mode_grants_unrestricted_without_key(client, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
+    resp = client.post("/developer", data={**_csrf(client)})  # no dev_key
+    assert resp.status_code in (302, 303)
+    with client.session_transaction() as sess:
+        assert sess.get("dev_operator") is True
+    assert "Operator mode" in client.get("/pricing").get_data(as_text=True)
+
+
+def test_open_mode_footer_link_on_home_only(client, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
+    home = client.get("/").get_data(as_text=True)
+    assert "Developer access" in home
+    assert "/developer" in home
+    # The footer link is home-scoped; it must not bleed onto other pages.
+    assert "Developer access" not in client.get("/pricing").get_data(as_text=True)
+
+
+def test_open_mode_session_revoked_when_flag_unset(app, monkeypatch):
+    monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
+    monkeypatch.setenv("MEDIAHUB_DEV_OPEN", "1")
+    with app.test_request_context("/"):
+        from flask import session
+
+        session[_auth._DEV_SESSION_KEY] = True
+        assert _auth.is_dev_operator() is True
+        assert _auth.current_plan() == _auth.PLAN_OWNER
+        # Unsetting the flag instantly revokes the outstanding open session.
+        monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
+        assert _auth.is_dev_operator() is False
+        assert _auth.is_premium() is False

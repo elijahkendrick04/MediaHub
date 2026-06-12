@@ -42,9 +42,9 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 TERMS_VERSION = "2026-06-12"
-PRIVACY_VERSION = "2026-06-12"
+PRIVACY_VERSION = "2026-06-12.1"
 COOKIES_VERSION = "2026-06-12"
-DPA_VERSION = "2026-06-12"
+DPA_VERSION = "2026-06-12.1"
 
 # Facts the repository cannot know. Fill these before launch; the handover
 # (docs/COMPLIANCE_HANDOVER.md) lists them as operational items.
@@ -70,6 +70,189 @@ _DRAFT_BANNER = (
     "<code>[COMPANY_NAME]</code> are placeholders."
     "</div>"
 )
+
+
+# ---------------------------------------------------------------------------
+# Sub-processor register (PC.11)
+# ---------------------------------------------------------------------------
+#
+# The single source of truth for which external services can receive Club
+# Data, keyed to the env flags that activate each one. The DPA §6 table is
+# rendered FROM this register, and tests/test_subprocessor_register_guard.py
+# fails the build when a provider-shaped env key appears in src/mediahub
+# without being declared here (or in the documented non-sub-processor list
+# below) — so a new provider cannot ship undisclosed.
+
+
+@dataclass(frozen=True)
+class Subprocessor:
+    name: str
+    processing: str
+    location: str
+    # The env keys that activate/configure this provider. Empty = always on
+    # (the hosting platform itself).
+    env_keys: tuple[str, ...] = ()
+    # Public /legal/subprocessors columns (transparency page).
+    transfer_mechanism: str = ""
+    engaged_when: str = ""
+
+
+SUBPROCESSORS: tuple[Subprocessor, ...] = (
+    Subprocessor(
+        name="Render Services, Inc. (hosting & backup storage)",
+        processing=(
+            "Runs the service and stores all Club Data, including the "
+            "operator-configured off-site backup archives; the log sentinel "
+            "reads the service's own logs through the Render API"
+        ),
+        location="United States",
+        env_keys=(
+            "MEDIAHUB_BACKUP_UPLOAD_URL",
+            "MEDIAHUB_BACKUP_UPLOAD_TOKEN",
+            "RENDER_API_KEY",
+        ),
+        transfer_mechanism="UK–US data bridge (DPF-certified); SCC fallback",
+        engaged_when="Always",
+    ),
+    Subprocessor(
+        name="GitHub, Inc. (log sentinel)",
+        processing=(
+            "Receives operational log excerpts filed as issues in the "
+            "operator's repository by the log sentinel (logs are designed to "
+            "carry no athlete personal data)"
+        ),
+        location="United States",
+        env_keys=("MEDIAHUB_SENTINEL_GITHUB_TOKEN",),
+        transfer_mechanism="GitHub DPA; SCCs/IDTA",
+        engaged_when="Only if the log sentinel is configured",
+    ),
+    Subprocessor(
+        name="Google LLC (Gemini API)",
+        processing="Caption/creative generation; AI page reading",
+        location="United States / global",
+        env_keys=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        transfer_mechanism="Google Cloud DPA: SCCs + UK Addendum",
+        engaged_when="When configured by the operator",
+    ),
+    Subprocessor(
+        name="Anthropic, PBC (Claude API)",
+        processing="Failover for the same generation calls",
+        location="United States",
+        env_keys=("ANTHROPIC_API_KEY",),
+        transfer_mechanism="DPA with SCCs + UK IDTA/Addendum",
+        engaged_when="When configured by the operator",
+    ),
+    Subprocessor(
+        name="Operator-configured OpenAI-compatible endpoint",
+        processing=(
+            "Additional LLM failover and caption-memory embeddings "
+            "(generation prompts and caption text, athlete names included)"
+        ),
+        location="Operator-chosen provider",
+        env_keys=(
+            "MEDIAHUB_LLM_ENDPOINTS",
+            "MEDIAHUB_LLM_API_KEY",
+            "MEDIAHUB_EMBED_ENDPOINT",
+            "MEDIAHUB_EMBED_API_KEY",
+        ),
+        transfer_mechanism=("The operator must hold processor terms with their chosen provider"),
+        engaged_when="Only if the operator configures an endpoint",
+    ),
+    Subprocessor(
+        name="Photoroom SAS",
+        processing="Photo background removal",
+        location="France (sub-processors may be outside the EEA)",
+        env_keys=("PHOTOROOM_API_KEY", "PHOTOROOM_ENDPOINT"),
+        transfer_mechanism="GDPR processor terms",
+        engaged_when="Only if the club/operator enables cloud cutout",
+    ),
+    Subprocessor(
+        name="Replicate, Inc.",
+        processing="Photo background removal",
+        location="United States",
+        env_keys=("REPLICATE_API_TOKEN",),
+        transfer_mechanism="Processor terms; SCCs/IDTA",
+        engaged_when="Only if the club/operator enables cloud cutout",
+    ),
+    Subprocessor(
+        name="Microsoft (edge-tts)",
+        processing="Synthesises reel narration audio (athlete name, event, time)",
+        location="United States",
+        env_keys=("MEDIAHUB_VOICEOVER",),
+        transfer_mechanism=(
+            "Public synthesis endpoint, no contractual terms — voiceover is "
+            "OFF by default and opt-in for exactly this reason"
+        ),
+        engaged_when="Only if voiceover is enabled",
+    ),
+    Subprocessor(
+        name="Buffer, Inc.",
+        processing="Relay of approved posts to social platforms",
+        location="United States",
+        env_keys=("BUFFER_ACCESS_TOKEN",),
+        transfer_mechanism="DPA; SCCs/IDTA",
+        engaged_when="Only if the club connects publishing",
+    ),
+    Subprocessor(
+        name="Resend, Inc.",
+        processing=(
+            "Transactional email delivery: password resets, email "
+            "verification, workspace invites and service/breach notices "
+            "(account email addresses and the message content)"
+        ),
+        location="United States",
+        env_keys=("RESEND_API_KEY", "MEDIAHUB_EMAIL_ENDPOINT"),
+        transfer_mechanism="DPA; SCCs/IDTA",
+        engaged_when="Only if transactional email is configured",
+    ),
+    Subprocessor(
+        name="Stripe, Inc.",
+        processing="Billing (controller-side, listed for transparency)",
+        location="United States",
+        env_keys=("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"),
+        transfer_mechanism="Stripe DPA; UK–US data bridge / SCCs",
+        engaged_when="Only if billing is configured",
+    ),
+)
+
+# Provider-shaped env keys that deliberately do NOT appear in the DPA
+# sub-processor table, each with the recorded reason. The guard test fails
+# when a key is in neither this dict nor a SUBPROCESSORS entry.
+NON_SUBPROCESSOR_PROVIDER_ENV: dict[str, str] = {
+    "MEDIAHUB_NTFY_TOKEN": (
+        "ntfy notifications carry human-readable status text only — no athlete "
+        "or member personal data by design (Privacy Notice §3)."
+    ),
+    "MEDIAHUB_NOTIFY_WEBHOOK": (
+        "the operator's own webhook endpoint; status text only, no athlete or "
+        "member personal data by design (Privacy Notice §3)."
+    ),
+    "MEDIAHUB_SEARCH_ENDPOINT": (
+        "personal-best verification queries (athlete name, club, birth year) go "
+        "to DuckDuckGo by default or the operator's self-hosted SearXNG — "
+        "disclosed in Privacy Notice §3–4. A public search engine is not an "
+        "Art. 28 sub-processor; queries are transient and uncontracted."
+    ),
+}
+
+
+def subprocessor_table_rows_html() -> str:
+    """The DPA §6 table body, rendered from the register so the legal page
+    can never drift from the declared provider surface."""
+    return "".join(
+        f"<tr><td>{s.name}</td><td>{s.processing}</td><td>{s.location}</td></tr>"
+        for s in SUBPROCESSORS
+    )
+
+
+def subprocessor_public_rows_html() -> str:
+    """The public /legal/subprocessors table body — same register, with the
+    transfer-safeguard and when-engaged columns."""
+    return "".join(
+        f"<tr><td>{s.name}</td><td>{s.processing}</td><td>{s.location}</td>"
+        f"<td>{s.transfer_mechanism}</td><td>{s.engaged_when}</td></tr>"
+        for s in SUBPROCESSORS
+    )
 
 
 def identity_block() -> str:
@@ -470,10 +653,17 @@ def privacy_html(
     <tr><td>Reading results from a link (AI page reader)</td>
         <td>Page screenshot/text including competitor names and results</td>
         <td>Google (Gemini API); Anthropic as failover</td></tr>
+    <tr><td>Caption memory &amp; additional LLM endpoints</td>
+        <td>Caption text and generation prompts (athlete names embedded)</td>
+        <td>An operator-configured OpenAI-compatible provider &mdash; only if
+            configured</td></tr>
     <tr><td>Photo background removal</td>
         <td>The athlete photo being processed</td>
         <td>Runs on our own server by default; Photoroom or Replicate only if
             configured</td></tr>
+    <tr><td>Reel narration voiceover</td>
+        <td>The narration text (athlete name, event, time)</td>
+        <td>Microsoft (edge-tts) &mdash; only if voiceover is enabled</td></tr>
     <tr><td>Personal-best verification</td>
         <td>Search queries containing athlete name, club and birth year; fetches of
             public results pages</td>
@@ -484,6 +674,10 @@ def privacy_html(
             connects Buffer</td></tr>
     <tr><td>Payments</td><td>Email, plan, payment details (collected by Stripe
         directly)</td><td>Stripe</td></tr>
+    <tr><td>Transactional email (password resets, verification, workspace
+        invites, service/breach notices)</td>
+        <td>Your account email address and the message content</td>
+        <td>Resend &mdash; only if configured</td></tr>
     <tr><td>Notifications</td><td>Human-readable status messages (no athlete data by
         design)</td><td>ntfy / your webhook &mdash; only if configured</td></tr>
   </table>
@@ -512,7 +706,9 @@ def privacy_html(
     <li><strong>Content about an under-18 athlete is never published autonomously</strong> —
         it always waits for a human decision at the club, enforced in code.</li>
     <li>The public showcase wall shows athletes' initials, not full names, by
-        default.</li>
+        default &mdash; and where the club keeps a per-athlete consent registry,
+        the wall enforces each athlete's recorded consent: a "do not feature"
+        athlete (or one with no consent on file) never appears on it.</li>
     <li>Accounts are for adult club officers; we don't offer accounts to children.</li>
   </ul>
 </div>
@@ -533,8 +729,11 @@ def privacy_html(
 
 <div class="card">
   <h2>7. International transfers</h2>
-  <p>Google (Gemini), Anthropic, Replicate, Stripe and Buffer process data in the
-  United States; Photoroom processes data in [PHOTOROOM_REGION]. Where a provider is
+  <p>Google (Gemini), Anthropic, Replicate, Microsoft (voiceover, where enabled),
+  Resend (email, where configured), Stripe and Buffer process data in the United
+  States; Photoroom processes data in [PHOTOROOM_REGION]; an operator-configured
+  OpenAI-compatible endpoint (where one is configured) processes data wherever that
+  chosen provider runs. Where a provider is
   certified under the UK&ndash;US Data Bridge we rely on that; otherwise we use the UK
   International Data Transfer Agreement/Addendum with that provider. The status for
   each provider is recorded in our processing records ([CONTACT_EMAIL] for a copy).</p>
@@ -564,10 +763,13 @@ def privacy_html(
   <ul>
     <li><strong>Erasure:</strong> delete any run (with its uploads, generated content
         and caption memory) from the run page or Privacy page; delete your whole
-        account from the Privacy page. Clubs can request erasure of a single athlete
-        across all stored data.</li>
+        account from the Privacy page. Clubs can erase a single athlete across all
+        stored data, and a workspace owner can delete the entire organisation —
+        runs, media, registries, ledgers and the public wall — from the
+        Organisation page.</li>
     <li><strong>Access / portability:</strong> export any run as JSON; export your
-        account data from the Privacy page.</li>
+        account data from the Privacy page; workspace owners can download the
+        whole organisation as one takeout ZIP from the Organisation page.</li>
     <li><strong>Rectification:</strong> edit captions before approval; request
         correction of a published item via the correction workflow on this
         Privacy page (it records the request, pulls the card from the public
@@ -729,13 +931,7 @@ def dpa_html(*, privacy_url: str) -> str:
   the flows in the <a href="{privacy_url}">Privacy Notice</a>:</p>
   <table>
     <tr><th>Sub-processor</th><th>Processing</th><th>Location</th></tr>
-    <tr><td>Hosting provider ([HOSTING_PROVIDER_AND_REGION])</td><td>Runs the service and stores all Club Data</td><td>[HOSTING_REGION]</td></tr>
-    <tr><td>Google (Gemini API)</td><td>Caption/creative generation; AI page reading</td><td>US</td></tr>
-    <tr><td>Anthropic</td><td>Failover for the same generation calls</td><td>US</td></tr>
-    <tr><td>Photoroom (only if enabled)</td><td>Photo background removal</td><td>[PHOTOROOM_REGION]</td></tr>
-    <tr><td>Replicate (only if enabled)</td><td>Photo background removal</td><td>US</td></tr>
-    <tr><td>Buffer (only if the club connects it)</td><td>Social scheduling of approved content</td><td>US</td></tr>
-    <tr><td>Stripe</td><td>Billing (controller-side, listed for transparency)</td><td>US</td></tr>
+    {subprocessor_table_rows_html()}
   </table>
   <p>We give at least 30 days' notice before adding or replacing a sub-processor; the
   club may object on reasonable data-protection grounds and terminate if we can't
@@ -793,14 +989,19 @@ __all__ = [
     "DOC_TERMS",
     "DPA_VERSION",
     "ICO_REGISTRATION_NUMBER",
+    "NON_SUBPROCESSOR_PROVIDER_ENV",
     "PLACEHOLDERS",
     "PRIVACY_VERSION",
     "REGISTERED_ADDRESS",
+    "SUBPROCESSORS",
+    "Subprocessor",
     "TERMS_VERSION",
     "cookies_html",
     "current_version",
     "dpa_html",
     "identity_block",
     "privacy_html",
+    "subprocessor_public_rows_html",
+    "subprocessor_table_rows_html",
     "terms_html",
 ]

@@ -93,7 +93,7 @@ class TestUploadErrorMessaging:
         """The MISM sample is a real Sportsystems meet results PDF; it
         should parse to 30+ clubs and land on the configure form, NOT
         any error state."""
-        sample = Path(__file__).resolve().parents[1] / "samples" / "MISM-2024-Results.pdf"
+        sample = Path(__file__).resolve().parents[1] / "sample_data" / "MISM-2024-Results.pdf"
         if not sample.exists():
             pytest.skip(f"sample missing: {sample}")
         c, _ = gated_client
