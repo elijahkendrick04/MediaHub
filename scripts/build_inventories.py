@@ -94,7 +94,6 @@ def _purpose_from_module(rel: Path) -> str:
             "interpreter": "Format-agnostic ingest",
             "recognition": "Sport-agnostic detector bus",
             "recognition_swim": "Swim achievement detectors",
-            "canonical": "Canonical schema",
             "pb_discovery": "PB lookup engine",
             "context_engine": "Identity + ontology + trust",
             "voice": "Caption voice profiles",

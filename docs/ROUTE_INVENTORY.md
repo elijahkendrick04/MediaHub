@@ -32,6 +32,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_posting_log` | `GET` | `/api/posting/log` |
 | `api_reel_job_status` | `GET` | `/api/reel-jobs/<job_id>` |
 | `api_card_motion` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/motion` |
+| `api_card_motion_manifest` | `GET` | `/api/runs/<run_id>/card/<card_id>/motion/manifest` |
 | `api_card_voiceover` | `GET,POST` | `/api/runs/<run_id>/card/<card_id>/voiceover` |
 | `api_card_download` | `GET` | `/api/runs/<run_id>/card/<path:card_id>/download` |
 | `api_card_schedule` | `POST` | `/api/runs/<run_id>/card/<path:card_id>/schedule` |
@@ -54,6 +55,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_turn_into` | `POST` | `/api/runs/<run_id>/turn-into` |
 | `api_turn_into_status` | `GET` | `/api/runs/<run_id>/turn-into-status/<job_id>` |
 | `api_turn_into_edit_caption` | `POST` | `/api/runs/<run_id>/turn-into/<pack_id>/caption` |
+| `api_venue_import` | `POST` | `/api/runs/<run_id>/venue-import` |
 | `api_venue_search` | `GET` | `/api/runs/<run_id>/venue-search` |
 | `api_why_card` | `GET` | `/api/runs/<run_id>/why/<int:ach_index>` |
 | `api_llm_status` | `GET` | `/api/settings/llm-status` |

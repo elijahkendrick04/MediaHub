@@ -30,7 +30,6 @@ if _LEGACY.exists() and str(_LEGACY) not in _sys.path:
 _LEGACY_ALIASES = (
     "recognition",
     "recognition_swim",
-    "canonical",
     "interpreter",
     "voice",
     "brand",

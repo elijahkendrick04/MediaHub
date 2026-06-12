@@ -34,7 +34,6 @@ publishes JSON status to `/api/runs/<id>/status`).
 | `mediahub.web` | Flask UI, upload form, review/queue pages, JSON APIs | `web.create_app()` |
 | `mediahub.pipeline` | Orchestrates upload → interpreter → detectors → cards | `pipeline_v4.run_pipeline_v4()` |
 | `mediahub.interpreter` | Format-agnostic ingest of HY3 / SDIF / PDF / HTML | `interpret_document()` |
-| `mediahub.canonical` | Canonical SportEvent / SwimMeet schema | `canonical.swim.SwimMeet` |
 | `mediahub.recognition` | Sport-agnostic detector bus + ranker | `recognition.registry.register_sport()` |
 | `mediahub.recognition_swim` | Swim-specific achievement detectors | `recognition_swim.achievements.official_pb` |
 | `mediahub.pb_discovery` | Web-verified PB lookup against swimmingresults.org | `pb_discovery.discover_swimmer_pbs()` |

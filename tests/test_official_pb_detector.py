@@ -307,3 +307,88 @@ class TestPBDecisionShapes:
         swim = _make_swim()
         history = _make_history(pb_decision="not a dict and not a dataclass")
         assert det.detect(swim, ctx={}, history=history) == []
+
+
+# ---------------------------------------------------------------------------
+# Derived decision (production path): no pre-set pb_decision — the detector
+# derives V7.3 Rule 0 from the discovery-bridged snapshot itself.
+# ---------------------------------------------------------------------------
+
+
+def _make_snapshot_history(
+    *,
+    time_sec: float = 62.34,
+    date_iso: str = "2026-06-07",
+    source_url: str = "https://example.org/p",
+    fetch_ok: bool = True,
+):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "legacy"))
+    from swim_content_v5.history import SwimmerHistory
+
+    snap = SimpleNamespace(
+        fetch_ok=fetch_ok,
+        pb_times={
+            "100FRLC": [
+                {
+                    "time_sec": time_sec,
+                    "date_iso": date_iso,
+                    "source_url": source_url,
+                    "meet": "June Meet",
+                    "rank": 1,
+                }
+            ]
+        },
+        source_domain="example.org",
+        tiref="jane-smith-001",
+    )
+    return SwimmerHistory("jane-smith-001", "Jane Smith", snap)
+
+
+def _meet_ctx(start="2026-06-07", end="2026-06-08"):
+    return SimpleNamespace(start_date=start, end_date=end)
+
+
+class TestOfficialPBDetectorDerivedDecision:
+    def test_fires_when_listed_pb_matches_time_and_meet_date(self) -> None:
+        det = OfficialPBDetector()
+        achs = det.detect(
+            _make_swim(), _meet_ctx(), _make_snapshot_history(), extra={"swimmer_name": "Jane"}
+        )
+        assert len(achs) == 1
+        assert achs[0].type == "official_pb_confirmed"
+        assert achs[0].confidence == 0.98
+        assert any(ev.source_url for ev in achs[0].evidence)
+
+    def test_no_fire_when_pb_date_outside_meet_window(self) -> None:
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(date_iso="2026-01-10")
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_no_fire_when_time_differs(self) -> None:
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(time_sec=61.90)
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_no_fire_without_meet_date(self) -> None:
+        det = OfficialPBDetector()
+        assert det.detect(_make_swim(), _meet_ctx(start=None, end=None), _make_snapshot_history(), extra={}) == []
+
+    def test_no_fire_when_fetch_failed(self) -> None:
+        det = OfficialPBDetector()
+        history = _make_snapshot_history(fetch_ok=False)
+        assert det.detect(_make_swim(), _meet_ctx(), history, extra={}) == []
+
+    def test_dict_ctx_is_tolerated(self) -> None:
+        # Callers passing a bare dict ctx (tests, ad-hoc tools) must not crash.
+        det = OfficialPBDetector()
+        assert det.detect(_make_swim(), {}, _make_snapshot_history(), extra={}) == []
+
+    def test_production_detector_list_leads_with_official_pb(self) -> None:
+        from mediahub.recognition_swim import production_detectors
+
+        dets = production_detectors()
+        assert dets[0].name == "official_pb_confirmed"
+        assert len(dets) > 1
