@@ -23886,10 +23886,8 @@ what you're doing, what they should do.</p>
              placeholder="e.g. City Aquatics Swimming Club"/>
     </div>
     <div>
-      <label>
-        Type
-      </label>
-      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+      <label for="ai-org-type">Type</label>
+      <select id="ai-org-type" name="org_type" style="{_input_style}">{org_type_opts}</select>
     </div>
     <div class="mh-combobox" data-mh-combobox="country">
       <label for="country-input" style="display:block;font-size:13px;color:var(--ink-dim);margin-bottom:4px">
@@ -24018,8 +24016,8 @@ what you're doing, what they should do.</p>
              placeholder="e.g. City Aquatics Swimming Club"/>
     </div>
     <div>
-      <label>Type</label>
-      <select name="org_type" style="{_input_style}">{org_type_opts}</select>
+      <label for="ms-org-type">Type</label>
+      <select id="ms-org-type" name="org_type" style="{_input_style}">{org_type_opts}</select>
     </div>
     <div>
       <label for="ms-country">Country</label>
