@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `d27866350` · Merge pull request #377: Fix the PB auditor in the meet-recap pipeline
+**Last updated:** 2026-06-12 · `4156143eb` · Merge pull request #384: PC.9 + PC.11–PC.14 — sell-gate code remainders + in-product referral engine
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -374,18 +374,18 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
+| 2026-06-12 | `b58c21fcd` | Disclose log-sentinel providers in the register (guard catch #4 and #5) |
 | 2026-06-12 | `aae3242f3` | Align the DSR erasure test with the canonical discovered-cache root |
 | 2026-06-12 | `ef5e3112c` | Fix the PB auditor in the meet-recap pipeline: real decisions, honest lookups, run guards |
+| 2026-06-12 | `9bacf51fe` | docs: regenerate inventories on the merged tree |
 | 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
 | 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
+| 2026-06-12 | `636d1df01` | fix: unconfigured GET /password/forgot answers 200, POST stays 503 |
+| 2026-06-12 | `27f27cb63` | docs: package READMEs for backup/, privacy org lifecycle, referrals |
+| 2026-06-12 | `32ff4edba` | docs: mark compliance-handover items 11+12 resolved (PC.11/PC.12) |
+| 2026-06-12 | `6c08bf6c6` | docs(roadmap): record PC.9 + PC.11-PC.14 code halves shipped; ruff hygiene |
 | 2026-06-12 | `1801a577e` | Regenerate inventories with main's full dep set (fixes inventory-freshness test) |
-| 2026-06-12 | `35eafa87d` | Sentinel files findings as GitHub issues listed on the roadmap |
-| 2026-06-12 | `75aaa9218` | fix: a11y: <html> element must have a lang attribute (html-has-la (#380) |
-| 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
-| 2026-06-12 | `f015dddd5` | Final check green: 4,465 passed, 1 skip, 0 failures on the merged tree |
-| 2026-06-12 | `be391a5d7` | Wrap long breaker-skip raise for ruff-format (CI hygiene hook) |
-| 2026-06-12 | `18543124a` | Fix silent SearXNG outage and add log sentinel watchdog |
-| 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
