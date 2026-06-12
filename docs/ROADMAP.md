@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `1fa8328e4` · Merge pull request #375: bump python from 3.12-slim to 3.14-slim
+**Last updated:** 2026-06-12 · `7e56545b5` · Merge pull request #404 from elijahkendrick04/claude/jolly-mayer-lzc59j
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -623,13 +623,13 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `2e72597c4` | Roadmap bot: sweep completed items off the to-do lists automatically |
 | 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
 | 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
 | 2026-06-12 | `68d386a49` | Docker image: Node 20 -> 22 LTS, and fail loudly if the NodeSource setup fails |
 | 2026-06-12 | `19ed2f0fb` | Migrate Remotion tsconfig to moduleResolution=bundler |
 | 2026-06-12 | `be40c4da4` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
 | 2026-06-12 | `1443cf581` | build(deps): bump actions/setup-python from 5 to 6 |
-| 2026-06-12 | `c3d4f2763` | Auto-merge Dependabot GitHub-Actions bumps on all-green checks |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
