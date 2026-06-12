@@ -20468,10 +20468,6 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             status,
         )
 
-    def _client_addr() -> str:
-        fwd = request.headers.get("X-Forwarded-For", "")
-        return (fwd.split(",")[0].strip() if fwd else "") or (request.remote_addr or "")
-
     @app.route("/login", methods=["POST"])
     def login_post():
         from mediahub.compliance.security_log import record_event as _sec_event
@@ -20483,10 +20479,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
-        addr = _client_addr()
         # Lockout BEFORE password verification: a locked key gets the same
         # response whether or not the password would have been right.
-        if _auth.login_locked(email, addr):
+        if _auth.login_locked(email):
             _sec_event("login_locked_attempt", actor=_auth.normalize_email(email), outcome="blocked")
             return _login_error_page(
                 email, "Too many failed attempts — try again in 15 minutes.", 429
@@ -20495,7 +20490,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         try:
             user = store.authenticate(email, password)
         except _auth.AuthError as exc:
-            locked_now = _auth.record_login_failure(email, addr)
+            locked_now = _auth.record_login_failure(email)
             _sec_event(
                 "login_lockout" if locked_now else "login_failed",
                 actor=_auth.normalize_email(email),
@@ -20507,7 +20502,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         if user.totp_secret:
             session["pending_2fa_email"] = user.email
             return redirect(url_for("login_2fa"))
-        _auth.clear_login_failures(email, addr)
+        _auth.clear_login_failures(email)
         # Session rotation on privilege change: drop everything the
         # pre-login session held before granting the signed-in identity.
         session.clear()
@@ -20543,8 +20538,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </div>
 """
             return _layout("Two-factor", body, active="")
-        addr = _client_addr()
-        if _auth.login_locked(email, addr):
+        if _auth.login_locked(email):
             return _layout(
                 "Two-factor",
                 '<div class="card"><p class="tag bad">Too many failed attempts — try again later.</p></div>',
@@ -20553,7 +20547,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         user = _user_store().get(email)
         code = request.form.get("totp") or ""
         if user is None or not _auth.totp_verify(user.totp_secret, code):
-            locked_now = _auth.record_login_failure(email, addr)
+            locked_now = _auth.record_login_failure(email)
             _sec_event(
                 "login_lockout" if locked_now else "login_2fa_failed",
                 actor=email,
@@ -20565,7 +20559,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<p><a href="{url_for("login_2fa")}">Try again</a></p></div>',
                 active="",
             ), 401
-        _auth.clear_login_failures(email, addr)
+        _auth.clear_login_failures(email)
         session.clear()
         _auth.login_user(user)
         _sec_event("login", actor=user.email, detail="2fa")

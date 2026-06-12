@@ -1,4 +1,4 @@
-"""security/authn-authz: argon2id, lockout, session rotation, TOTP 2FA.
+"""security/authn-authz: argon2id, account lockout, session rotation, TOTP 2FA.
 
 ASVS L2 chapters 2 (authentication) and 3 (session management).
 """

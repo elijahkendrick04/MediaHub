@@ -12,7 +12,7 @@
 | ASVS chapter | Items | Control | Evidence (tests) |
 |---|---|---|---|
 | **V1 Architecture** | 1.1.2 threat modelling | STRIDE threat model incl. OWASP LLM Top 10; every threat mapped to a capability or accepted | `THREAT_MODEL.md` |
-| **V2 Authentication** | 2.2.1 anti-automation | Two layers: per-IP request limiter on auth endpoints (PR #352) + failure lockout (5 failures/15 min per email AND per client address, checked before verification); lockouts logged | `test_authn_hardening.py` (lockout trio) |
+| **V2 Authentication** | 2.2.1 anti-automation | Two layers: per-IP request limiter on auth endpoints (per-app, PR #352) + per-ACCOUNT failure lockout (5 failures/15 min per email, checked before verification — deliberately not IP-keyed so one bad actor behind a club's NAT can't lock out the club); lockouts logged | `test_authn_hardening.py` (lockout trio) |
 | | 2.4.x password storage | **argon2id** (argon2-cffi defaults) for new + rehashed; legacy bcrypt verifies and upgrades on next login; constant-time, timing-equalised unknown-email path | `test_authn_hardening.py`, `test_auth.py` |
 | | 2.7/2.8 MFA | Optional **TOTP 2FA** (RFC 6238, stdlib): enable/disable with valid code; password alone never grants a session when enabled; failures share lockout counters | `test_authn_hardening.py::test_2fa_*` |
 | **V3 Session** | 3.2.1 rotation | `session.clear()` before login/signup grants | `test_session_rotated_on_login` |
@@ -60,7 +60,7 @@ Explicitly accepted, with rationale — revisit at least annually:
 | R5 | **CSP `unsafe-inline`** for script/style | Required by the f-string monolith's inline idiom; CSP still blocks remote script injection, object embedding, base/form hijack. Tightening to nonces is a refactor of every inline block — roadmapped, not pretended |
 | R6 | **CSRF on legacy JSON-fetch routes** relies on SameSite=Lax + content-type discipline rather than per-request tokens | Lax blocks cross-site POSTs in all evergreen browsers; token enforcement covers all form posts |
 | R7 | **Cross-tenant PB warm cache** (`data/discovered/swimmers/`) not tenant-scoped | 30-day retention bound; erasure reaches it; full scoping needs a cache-key migration (roadmapped; DATA_MAP S7) |
-| R8 | **In-memory login throttle** resets on process restart | Lockouts are logged (pattern evidence survives); persistent counters would need a shared store — accepted at current scale |
+| R8 | **In-memory lockout/limiter** reset on process restart; lockout is email-keyed so an attacker rotating emails is bounded only by the per-IP limiter | Lockouts are logged (pattern evidence survives); persistent counters would need a shared store — accepted at current scale |
 | R9 | **Docker non-root build not build-verified in this environment** (no Docker daemon available) | Change is review-verified; CI/staging build will exercise it — verify before next deploy |
 | R10 | **Published content** lives on social platforms beyond MediaHub's reach | Stated in notices, erasure reports, and the DPIA — a legal/communications control, not a technical one |
 | R11 | **Backup archives** can outlive an erasure request | Erasure reports list them as residual; backup retention documented; operators must rotate backups within the retention window |

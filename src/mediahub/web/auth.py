@@ -159,10 +159,14 @@ def password_needs_rehash(hashed: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Login throttling / lockout (ASVS V2.2): per normalised email AND per client
-# address, in-process. 5 failures in 15 minutes locks the key for 15 minutes.
-# In-memory by design (a restart clears it); every lockout is written to the
-# security event log so a pattern survives restarts as evidence.
+# Account lockout (ASVS V2.2): per normalised email, in-process. 5 failures
+# in 15 minutes locks the ACCOUNT for 15 minutes. Deliberately NOT keyed on
+# client address: per-IP volume limiting is the web layer's per-app auth
+# limiter (web.py _auth_rate_limited) — an address key here would let one
+# bad actor behind a club's shared NAT lock out the whole club (and lets a
+# spoofed X-Forwarded-For lock arbitrary keys). In-memory by design (a
+# restart clears it); every lockout is written to the security event log so
+# a pattern survives restarts as evidence.
 # ---------------------------------------------------------------------------
 
 LOGIN_FAILURE_LIMIT = 5
@@ -171,46 +175,35 @@ _failed_logins: dict[str, list[float]] = {}
 _FAIL_LOCK = threading.Lock()
 
 
-def _throttle_keys(email: str, remote_addr: str) -> list[str]:
-    keys = []
+def login_locked(email: str) -> bool:
+    norm = normalize_email(email)
+    if not norm:
+        return False
+    now = time.time()
+    with _FAIL_LOCK:
+        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
+        _failed_logins[norm] = window
+        return len(window) >= LOGIN_FAILURE_LIMIT
+
+
+def record_login_failure(email: str) -> bool:
+    """Record one failure; returns True when this failure triggers a lockout."""
+    norm = normalize_email(email)
+    if not norm:
+        return False
+    now = time.time()
+    with _FAIL_LOCK:
+        window = [t for t in _failed_logins.get(norm, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
+        window.append(now)
+        _failed_logins[norm] = window
+        return len(window) == LOGIN_FAILURE_LIMIT
+
+
+def clear_login_failures(email: str) -> None:
     norm = normalize_email(email)
     if norm:
-        keys.append(f"email:{norm}")
-    addr = (remote_addr or "").strip()
-    if addr:
-        keys.append(f"addr:{addr}")
-    return keys
-
-
-def login_locked(email: str, remote_addr: str = "") -> bool:
-    now = time.time()
-    with _FAIL_LOCK:
-        for key in _throttle_keys(email, remote_addr):
-            window = [t for t in _failed_logins.get(key, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
-            _failed_logins[key] = window
-            if len(window) >= LOGIN_FAILURE_LIMIT:
-                return True
-    return False
-
-
-def record_login_failure(email: str, remote_addr: str = "") -> bool:
-    """Record one failure; returns True when this failure triggers a lockout."""
-    now = time.time()
-    locked = False
-    with _FAIL_LOCK:
-        for key in _throttle_keys(email, remote_addr):
-            window = [t for t in _failed_logins.get(key, []) if now - t < LOGIN_FAILURE_WINDOW_SECS]
-            window.append(now)
-            _failed_logins[key] = window
-            if len(window) == LOGIN_FAILURE_LIMIT:
-                locked = True
-    return locked
-
-
-def clear_login_failures(email: str, remote_addr: str = "") -> None:
-    with _FAIL_LOCK:
-        for key in _throttle_keys(email, remote_addr):
-            _failed_logins.pop(key, None)
+        with _FAIL_LOCK:
+            _failed_logins.pop(norm, None)
 
 
 # ---------------------------------------------------------------------------
