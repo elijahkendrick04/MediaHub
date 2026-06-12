@@ -13,6 +13,15 @@ regexes = [
   # swimmer_key ("jane-smith-001"); the generic-api-key rule matches the
   # `..._key="..."` assignment shape. Synthetic fixture, not a secret.
   '''swimmer_key="[a-z-]+-\d{3}"''',
+  # Billing/webhook tests use self-describing placeholder Stripe keys
+  # ("sk_test_placeholder", "sk_test_placeholder_not_a_real_key"); the
+  # stripe-access-token rule matches the bare quoted form. Synthetic, never
+  # a real credential — real keys are env-only (CLAUDE.md secrets rule).
+  '''"sk_test_placeholder(_[a-z_]+)?"''',
+  # tests/test_caption_assist.py's module docstring — the generic-api-key
+  # rule matches the prose "…empty/invalid guards, honest no-key handling…"
+  # in five historical commits. Documentation text, not a credential.
+  '''empty/invalid guards, honest no-key handling''',
 ]
 paths = [
   # Vendored reference material (never executed) and binary corpora.

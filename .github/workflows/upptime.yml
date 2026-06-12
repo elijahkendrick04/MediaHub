@@ -37,7 +37,7 @@ jobs:
           if [ -z "$GH_PAT" ]; then
             echo "::warning::Upptime not configured — add a GH_PAT secret to enable (monitoring/README.md)."
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: ${{ env.GH_PAT != '' }}
       - uses: upptime/uptime-monitor-action@v1
         if: ${{ env.GH_PAT != '' }}

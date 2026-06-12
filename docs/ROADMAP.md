@@ -20,9 +20,10 @@ Signup, billing code, multi-tenancy, the generative design engine, fourteen
 swimming-depth features and a UK legal-compliance baseline have all shipped.
 What we do **not** have is a single paying club. The bottleneck is no longer
 engineering — it is (1) a short list of real-world tasks only you can do
-(register with the ICO, set the Stripe keys, get the legal drafts signed off,
-sell to the first clubs) and (2) a handful of remaining compliance code tasks
-Fable 5 can build. Both lists are right below, in that order.
+(choose the real company name and register the company at Companies House,
+register with the ICO, set the Stripe keys, get the legal drafts signed off,
+buy the domain, sell to the first clubs) and (2) a handful of remaining code
+tasks Fable 5 can build. Both lists are right below, in that order.
 
 The plan is organised into phases:
 
@@ -52,7 +53,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `b86abbb18` · Merge pull request #367: SearXNG outage root-cause fix + log sentinel watchdog
+**Last updated:** 2026-06-12 · `ed5242476` · Merge pull request #400: Roadmap — prioritise company identity, own .co.uk domain & cheaper hosting 
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -71,12 +72,24 @@ the lists, put a directive line in any commit message:
 
 Fable 5 cannot register a business, sign a contract, spend your money, or sit
 in front of a swim-club committee. Each item below has a **step-by-step
-guide** in the next section. Recommended order: **F.1–F.4** make the first
-sale lawful (the [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) sell
-gate — no club pays before these hold), **F.5 / PC.4 / PC.6** are the selling
-motion itself, **F.6–F.8** are housekeeping that runs alongside.
+guide** in the next section. Recommended order (re-prioritised 2026-06-12):
+**F.9 → F.10 → F.11** settle the business identity first — the real company
+name (MediaHub is a filler), the Companies House company, and the .co.uk
+domain — because every filing after them (Stripe, ICO, the solicitor's
+letters, the Swim England application) embeds that identity and would have to
+be re-done, and re-paid, under a rename. Then **F.1–F.4** make the first sale
+lawful (the [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) sell gate —
+no club pays before these hold), **F.5 / PC.4 / PC.6** are the selling motion
+itself, **F.6–F.8** are housekeeping that runs alongside. **F.12** (the
+cheaper-hosting move off Render) is deliberately sequenced *after* F.11 —
+once your own domain fronts the app, changing host is an invisible DNS flip —
+and it must never displace a selling week.
 
 <!-- ROADMAP:TODO_FOUNDER -->
+- **F.9** · Choose the real company name (MediaHub is a filler): run the four-register name diligence — Companies House, UK trade marks, domain, social handles — and make the call · ❌ **NOT STARTED**
+- **F.10** · Register the company at Companies House: verify your identity, file online (£100), then the post-registration basics — Corporation Tax, business bank account, statutory diary · ❌ **NOT STARTED**
+- **F.11** · Buy the .co.uk domain in the company's name and point it at the live app (custom domain + TLS on Render today; Stripe webhook and base URL move with it) · ❌ **NOT STARTED**
+- **F.12** · Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
 - **F.1** · Turn payments on: create the Stripe account, set the four `STRIPE_*` keys on Render, switch on renewal reminders, decide VAT · ❌ **NOT STARTED**
 - **F.2** · Register with the ICO and fill in the business identity (company name, address, contact email, ICO number) · ❌ **NOT STARTED**
 - **F.3** · Get the five legal drafts solicitor-reviewed and signed off (Terms, Privacy, Cookies, DPA, DPIA) · ❌ **NOT STARTED**
@@ -91,22 +104,221 @@ motion itself, **F.6–F.8** are housekeeping that runs alongside.
 
 ### Step-by-step guides (one per item above)
 
+#### F.9 — Choose the real company name (the naming diligence)
+
+"MediaHub" was always a working title: it is generic, shared by other
+companies, and could never be defended as a brand or trade mark. The real
+name comes **first** — before Companies House, Stripe, the ICO, the
+solicitor's letters and the domain — because every one of those filings
+embeds it, and renaming later means re-doing (and re-paying) the lot.
+
+**What "due diligence" means here, in plain words:** before you commit to a
+name, check that nobody else already owns it — as a registered company, as a
+trade mark, as the domain, or as the obvious social handles — so that no one
+can force you to rebrand (or sue you) later, and so you are never pushed into
+a worse spelling of your own name. It is an afternoon of free searches, done
+in the order below.
+
+1. Longlist 5–10 candidate names. The criteria that actually matter for this
+   product: **distinctive** (a coined/invented word beats a descriptive one —
+   descriptive names can't be defended and are already taken), **short and
+   unambiguous said aloud** (poolside, over the phone, on a committee call),
+   **comfortable in Wales** (check the Welsh reading/meaning — the first
+   market is Welsh clubs and the product ships Welsh-first captions, W.13),
+   and **bigger than swimming** (the vision is sport-agnostic — avoid "swim"
+   in the name unless that's a deliberate choice).
+2. **Companies House check.** Search the free register at
+   find-and-update.company-information.service.gov.uk and run GOV.UK's
+   "Check if a company name is available" service. The rules: the registered
+   name ends "Ltd"/"Limited" (you can trade without the suffix), it can't be
+   the "same as" an existing name, and "sensitive words" (Royal, British,
+   Institute, …) need permission. An existing dormant or different-sector
+   company with a similar name isn't automatically fatal — but prefer a clear
+   field.
+3. **Trade mark check — the one that can actually force a rebrand.** Search
+   UK trade marks (GOV.UK "Search for a trade mark") in **class 9**
+   (software), **class 42** (software-as-a-service) and **class 41**
+   (sport/education services). A live mark on a confusingly similar name in
+   those classes = drop the candidate. Registering a company name gives you
+   **no** trade-mark rights — they are separate systems.
+4. **Domain check.** Is the exact-match `.co.uk` free at any registrar
+   (≈£5–15/yr)? Don't buy yet — that's F.11, after F.10 locks the name. If
+   the `.com` is parked at a four-figure aftermarket price, let it go; the
+   `.co.uk` is the brand at home and a sane `.com` variant can come later.
+5. **Handles check.** Instagram, Facebook, X, TikTok, Bluesky, YouTube,
+   GitHub. The product's whole job is social content — clubs *will* search
+   the name. Exact or near-exact handles should be free.
+6. **The passing-off sniff test.** Plain web search for the name plus
+   "swim", "sport", "club", "software". Anyone already trading under it in an
+   adjacent space — even without a registered trade mark — can claim
+   "passing off" in the UK. Avoid names with active neighbours.
+7. Pick the winner and sleep on it once. Say it in the three sentences it
+   must live in: "___ has signed up to ___", "Powered by ___", "___ Ltd".
+8. *(Optional, cheap insurance once revenue starts:)* file your own UK trade
+   mark — £205 online for one class, +£60 per extra class (fees rose
+   1 Apr 2026); classes 9 + 42 first. This can wait for the first paying
+   clubs.
+9. **Verify:** the name passes all four registers (Companies House, trade
+   marks, domain, handles), with screenshots/notes kept in one folder — then
+   tell Fable 5 the chosen name so the rebrand sweep (PC.15) can be built and
+   F.2's legal placeholders get the real value.
+
+#### F.10 — Register the company at Companies House
+
+About 30 minutes online once F.9 has settled the name. The company is the
+legal identity everything else hangs off — Stripe onboarding (F.1), ICO
+registration (F.2), the solicitor's sign-off (F.3), the Swim England
+application (F.5), insurance (F.6) and the domain registration (F.11). This
+supersedes the old "sole trader is fine to start" note in F.2: decided
+2026-06-12 — name first, company second, everything files once under it.
+
+1. **Verify your identity first** (mandatory for new directors since
+   18 Nov 2025): create a GOV.UK One Login and complete Companies House
+   identity verification — you receive a personal code that the
+   incorporation filing now requires.
+2. Decide the basics — the answers are mostly "you": sole director = you;
+   shareholder = you (1 or 100 ordinary £1 shares — either is fine; 100
+   makes a future split easier); Person with Significant Control = you.
+3. Choose the **registered office address** — it is public, forever. Your
+   home address works but is published; a registered-office service
+   (≈£20–50/yr, often bundled by accountants) keeps your home address off
+   the register. You also need a registered email address (not published).
+4. Pick the **SIC code** (what the company does): 62012 "business and
+   domestic software development" fits; add 63120 (web portals) if you like —
+   up to four, all changeable later.
+5. **File online**: GOV.UK "Set up a private limited company" → register the
+   company. £100 digital fee (it rose from £50 on 1 Feb 2026), model
+   articles of association are fine, and registration usually completes
+   within 24 hours. You get the certificate of incorporation + company
+   number.
+6. **Within 3 months of starting to trade** (the first sale is the trigger):
+   register for Corporation Tax — HMRC posts the company's UTR to the
+   registered office.
+7. **Open a business bank account in the company's name** (Starling, Tide,
+   Monzo Business — free tiers are fine). Company money and your money never
+   mix; Stripe payouts (F.1) land here.
+8. Set up the books and **diary the annual duties** so they never surprise
+   you: the confirmation statement each year (£50 online — also where
+   directors' ID verification is enforced), annual accounts (micro-entity
+   accounts are tiny), and the Corporation Tax return. Simplest: a fixed-fee
+   accountant for a micro company (≈£300–700/yr `[ESTIMATE]`); or
+   FreeAgent/Xero solo.
+9. VAT: nothing to do below the registration threshold — F.1 step 7 already
+   covers the decision; just keep records.
+10. Feed the new identity into everything queued behind it: Stripe (F.1) as
+    the Ltd, ICO (F.2) in the company's name — and give Fable 5 the five
+    identity values so the legal placeholders fill — the solicitor (F.3),
+    Swim England (F.5), insurance (F.6).
+11. **Verify:** the company appears on the public register; the certificate,
+    personal code, UTR letter and bank details live in the records folder;
+    after F.2 step 4, `/terms` and `/privacy` show the real company name and
+    number.
+
+#### F.11 — Own domain: buy the .co.uk and point it at the live app
+
+Today the public URL is the borrowed `mediahub-gzwc.onrender.com`. Your own
+domain is the **portable** identity: once every printed QR code, embedded
+wall, bookmark and Stripe webhook points at your own `.co.uk`, the hosting
+underneath (F.12) can change with a DNS flip and nobody notices. That is why
+the domain comes before the host move — and after F.10, so the company owns
+it.
+
+1. Register `<name>.co.uk` at any Nominet-accredited registrar (Namecheap,
+   Porkbun, Gandi, Ionos/123-reg, Krystal, … ≈£5–15/yr `[ESTIMATE]`).
+   Register it **in the company's name** with the company's contact email —
+   not as a personal possession; clean ownership matters if you ever sell or
+   raise. Take the bare `.uk` too if it's pennies; skip aftermarket-priced
+   `.com` offers.
+2. Decide the canonical host once: `www.<name>.co.uk` (recommended —
+   CNAME-friendly everywhere) with the apex redirecting to it.
+3. *(Recommended)* put the DNS on a provider you won't outgrow — Cloudflare's
+   free tier works with a domain bought anywhere (add the site, switch the
+   two nameservers at the registrar). Registrar DNS also works; pick one.
+4. Wire it to Render **now** — don't wait for F.12: Render dashboard → the
+   service → Settings → Custom Domains → add `www.<name>.co.uk` (+ apex);
+   create the CNAME/A records it shows; TLS certificates are automatic.
+5. Update what knows the URL: the `MEDIAHUB_PUBLIC_BASE_URL` env var on
+   Render; the Stripe webhook endpoint (F.1 step 4) to
+   `https://www.<name>.co.uk/webhooks/stripe`; and when transactional email
+   goes live, send as `no-reply@<name>.co.uk` with the SPF + DKIM DNS
+   records your email provider gives you (`MEDIAHUB_EMAIL_FROM` — mail from
+   your own domain lands in inboxes; mail from borrowed domains lands in
+   spam).
+6. Ask Fable 5 for the small code half (rides with PC.15): a canonical-host
+   redirect so the old `*.onrender.com` URLs 301 to the new domain — every
+   old link keeps working forever.
+7. **Verify:** `https://www.<name>.co.uk` serves the app with a padlock and
+   the apex redirects; `/try`, a `/wall/<token>` page and a Stripe **test**
+   webhook all work on the new URL; the old onrender.com URL redirects.
+
+#### F.12 — Move hosting off Render to a cheaper host
+
+The honest numbers first: Render's standard instance — the 2 GB the
+Chromium/Remotion renders need — is **$25/mo ≈ £20/mo** plus the disk. A
+capable EU VPS runs **€3.79–€7.59/mo** (Hetzner CX22 4 GB → CX32 8 GB,
+verified June 2026), so the move saves roughly **£150–200/yr** `[ESTIMATE]`.
+Real money, but small against one paying club (~£588–1,188/yr) — which is
+why F.12 is queued **behind** the identity work and must never displace a
+selling week. The trade: a VPS hands you the ops the platform did (OS
+updates, monitoring, disk space). The app is deliberately a single-box shape
+— one container, SQLite under `DATA_DIR` — so a single VPS fits it exactly,
+and the backup/restore drill (PC.14) already rehearses the actual move.
+
+1. **Decide between three honest options.**
+   **(a) EU/UK VPS + Docker** — the recommended target: Hetzner (Germany/
+   Finland, EU) at €3.79–7.59/mo, or a UK-soil VPS (≈£5–15/mo `[ESTIMATE]`)
+   if "your data stays in the UK" plays better with clubs. Either improves
+   on today's hosting, which stores Club Data in the **US** (see the DPA's
+   subprocessor register) — the move shrinks F.4's transfer homework.
+   **(b) A cheaper managed platform** (Fly.io London, Railway, …) — less ops,
+   smaller savings once a persistent volume + 2 GB RAM are priced; check
+   their current calculators.
+   **(c) Stay on Render and revisit at traction** — £0 effort, a legitimate
+   choice while selling time is the binding constraint. If (c): stop here
+   and diary it for after the first ~3 paying clubs.
+2. If (a) or (b): ask Fable 5 to build **PC.16** (the code half) — the
+   compose + reverse-proxy TLS template, the off-site backup-target
+   preflight, the log-sentinel log-source seam (it currently reads logs via
+   the Render API and must honest-disable or grow a journald/file source off
+   Render), the staged subprocessor-register + privacy-notice hosting/region
+   update, and the written cutover runbook.
+3. Provision the box; deploy the **same Dockerfile** with the same `.env`;
+   point a temporary subdomain (e.g. `next.<name>.co.uk`) at it.
+4. **Rehearse the move with the shipped drill:** take the latest production
+   backup ZIP, `python -m mediahub.backup restore` onto the new box, then
+   smoke-test the primary flow (upload → pack → review → approve → export),
+   one reel render, `/healthz`, and a Stripe **test** webhook against the
+   temporary subdomain.
+5. Cut over: lower the DNS TTL the day before; pause uploads briefly (tell
+   any live pilot club); final backup → restore → flip the `www` record to
+   the new box; watch `/healthz` and the uptime readout.
+6. Keep Render alive for ~1 week as the instant rollback (flip DNS back),
+   then download a final disk snapshot, delete the service, detach the card.
+   Point the off-site backup target somewhere that is **not** the new box —
+   a backup living on the machine it protects isn't one.
+7. **Verify:** a full green week on the new host (uptime, scheduler runs,
+   off-site backups arriving, one real run end-to-end); the DPA's
+   subprocessor register and the Privacy Notice name the new host and
+   region (PC.16); and the bill actually dropped.
+
 #### F.1 — Turn payments on
 
 The billing code shipped in PR #267 and deliberately refuses to run (an
 honest "billing not configured" message) until you give it real Stripe keys.
 
 1. Create an account at stripe.com and complete Stripe's business onboarding
-   (it asks for the legal identity you settle in F.2 — a sole trader is fine
-   to start).
+   (it asks for the legal identity you create in F.10 — onboard as the
+   limited company from the start, so its KYC never has to be re-done after
+   a switch from a personal account).
 2. In the Stripe dashboard, create two Products with recurring annual Prices:
    **Club** and **Federation**. Copy each Price id (`price_…`).
 3. Developers → API keys: copy the Secret key. Use the `sk_test_…` key first
    if you want to rehearse the whole flow with the card number
    `4242 4242 4242 4242`, then swap to `sk_live_…`.
 4. Developers → Webhooks → Add endpoint:
-   `https://<your-app-domain>/webhooks/stripe`, subscribed to the
-   checkout/subscription events; copy the Signing secret (`whsec_…`).
+   `https://<your-app-domain>/webhooks/stripe` (the F.11 domain once it's
+   live — update the endpoint here if you wire Stripe first), subscribed to
+   the checkout/subscription events; copy the Signing secret (`whsec_…`).
 5. Render dashboard → your service → Environment: set `STRIPE_SECRET_KEY`,
    `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CLUB`, `STRIPE_PRICE_FEDERATION`.
    Redeploy.
@@ -126,9 +338,10 @@ You process personal data (largely children's), so UK law requires
 registering with the Information Commissioner's Office and paying the small
 annual data-protection fee.
 
-1. Decide what the business legally is. Sole trader under your own name is
-   the simplest start; a limited company can come later (one conversation
-   with an accountant settles this if unsure).
+1. The business identity is the F.10 limited company (decided 2026-06-12:
+   name first, company second, everything else files once under it) — do
+   F.9/F.10 before this, so the ICO entry never needs re-registering under
+   a rename.
 2. Register as a data controller at **ico.org.uk/registration** and pay the
    fee (tier 1 covers a small business; it renews annually).
 3. Note the ICO registration number you receive.
@@ -258,11 +471,15 @@ The boring decisions a paying customer silently assumes someone has made.
 4. Decide reels: buy the Remotion company licence, **or** set
    `MEDIAHUB_REEL_ENGINE=ffmpeg` (the free engine). Don't ship for-profit on
    unlicensed Remotion.
-5. Open the bundled demo sample (`samples/MISM-2024-Results.pdf`) and confirm
-   you are comfortable it contains no real children's data you lack a basis
-   to show; if not, have Fable 5 swap in a synthetic file.
+5. ~~Open the bundled demo sample and confirm it contains no real children's
+   data~~ **Done (PC.12, 2026-06-12):** the public demo sample is now the
+   synthetic `samples/demo-meet-results.pdf` (fictional swimmers, generated
+   by `scripts/make_demo_sample.py`); the real meet PDF survives only as a
+   parser-regression fixture in `sample_data/`, which no route serves. See
+   [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md).
 6. Confirm Render disk snapshots are on (the off-site backup + rehearsed
-   restore is PC.14's code half).
+   restore is PC.14's code half) — and re-confirm the equivalent on the new
+   host if/when F.12 moves hosting.
 
 #### F.7 — Seasonal qualifying-times refresh (recurring)
 
@@ -284,7 +501,8 @@ work approaches. Until then, P4.1 (Bluesky/Mastodon) and P4.6 (Telegram) need
 no review at all.
 
 1. Create a Meta Business Portfolio and complete Business Verification
-   (company documents — F.2's identity helps here).
+   (company documents — F.10's certificate of incorporation is exactly
+   this).
 2. Create the Meta app; request `instagram_content_publish` and
    `pages_manage_posts` via App Review, with screen recordings of the
    connect-and-post flow.
@@ -293,10 +511,12 @@ no review at all.
 
 ## To do — things Fable 5 can build
 
-Ask in any session ("build PC.9"). Order = recommended priority: the four
-**sell-gate code remainders** (PC.11–PC.14) make the founder list's first
-sale lawful and trustworthy, so they outrank everything; then the referral
-engine; then the gated expansion phases. **Phases 3–6 are gated** — they wait
+Ask in any session ("build PC.15"). Order = recommended priority: the four
+**sell-gate code remainders** (PC.11–PC.14) made the founder list's first
+sale lawful and trustworthy and have shipped, as has the referral engine
+(PC.9); **PC.15/PC.16 are next up** — Phase C work, *not* behind the exit
+gates, each waiting only on its founder input (PC.15 on F.9's chosen name,
+PC.16 on F.12's go decision); then the gated expansion phases. **Phases 3–6 are gated** — they wait
 until a club can sign up, pay and publish with zero founder involvement,
 **and** ≥10 clubs pay annually, **and** the lawful-to-sell gate holds (see
 Phase C). Two flagged exceptions: P4.5 (email digests) and P4.6 (Telegram)
@@ -304,11 +524,13 @@ are review-free, sell-supporting **pull-forward candidates** at your
 discretion.
 
 <!-- ROADMAP:TODO -->
-- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder: a guard test pinning the subprocessor register to the env-flag surface, and resolve the two unlicensed `vendor/` reference dirs (founder half = F.2/F.3/F.4) · 🔵 **IN PROGRESS**
-- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder: surface W.2 consent state on the public wall + a documented Children's-Code pass over `/wall`, the embed, the feeds and `/try` · 🔵 **IN PROGRESS**
-- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder: whole-org deletion cascade + org-level takeout ZIP (runs, media, captions, consent state, audit log) · 🔵 **IN PROGRESS**
-- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder: transactional-email seam (password reset, verification, member invites, breach notice), off-site `DATA_DIR` backup + rehearsed restore, incident runbook, invoice/VAT hygiene (founder half = F.1/F.6) · 🔵 **IN PROGRESS**
-- **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
+- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: subprocessor register pinned to the env-flag surface by a guard test (`legal.SUBPROCESSORS` + `tests/test_subprocessor_register_guard.py` — caught two undisclosed flows on day one), the two unlicensed `vendor/` dirs removed (`tests/test_vendor_licences.py` keeps it that way). Founder half open = F.2/F.3/F.4
+- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: W.2 consent enforced on every public-wall exit (page, embed, feeds, card PNGs — blocked athletes unreachable, settings page explains why) + the Children's-Code pass recorded ([CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md)); the `/try` demo sample is now synthetic (finding F1)
+- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: whole-org deletion cascade (`privacy/org_lifecycle.py`, POST `/organisation/delete`) + org takeout ZIP (GET `/organisation/export` — runs, media, captions, consent state, ledgers, audit log) under the ADR-0003/0014 isolation invariants
+- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: transactional-email seam (`notify/email.py`, honest-503) driving password reset, verification, invite delivery and `/operator/notify-users` breach channel; daily `backup_sweep` + restore rehearsed on every test run (`tests/test_backup_restore.py`) + [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md); invoice/receipt surfacing on `/billing`. Founder half open = F.1/F.6
+- **PC.9** · Phase C 🥇 — In-product referral engine · ✅ **BUILT (2026-06-12)**: per-org shareable codes (`/signup?ref=`), code-tracked leads in the PC.6 funnel, amount-verified payment auto-grants the referrer a free month (Stripe coupon at the referrer's own annual/12; honest `pending_manual` fallbacks), live readout on `/operator/commercial`
+- **PC.15** · Phase C — Rebrand sweep, waits on F.9's name: one product-name source of truth threaded through every customer-facing surface (UI chrome, legal pages, wall badge + embeds, email from-name, `/try`, README) plus the F.11 canonical-host redirect; `mediahub` package/env names stay internal · ❌ **NOT STARTED**
+- **PC.16** · Phase C — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -359,6 +581,8 @@ list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-12 | **Business identity, own domain & cheaper hosting prioritised (F.9–F.12 + PC.15/PC.16):** the real company name comes before any further filings (MediaHub is an indefensible filler), then Companies House registration (£100 digital; director ID-verification mandatory since Nov 2025), then the .co.uk domain wired to the live app — so Stripe/ICO/solicitor/Swim England paperwork files **once**, under the real name, and every printed/shared link survives any future host. The Render→VPS move (≈£20/mo → ≈£4–8/mo, prices verified June 2026) is sequenced last, as a DNS flip, and must never displace selling. | Founder guides F.9–F.12 · Phase C section |
+| 2026-06-12 | **Sell-gate code remainders + referral engine shipped (PC.9, PC.11–PC.14 code halves):** subprocessor-register guard test (caught 3 undisclosed flows) + unlicensed vendor dirs removed; W.2 consent enforced on the public wall + Children's-Code pass recorded (synthetic `/try` sample replaces real minors' data); whole-org deletion + takeout ZIP; transactional-email seam (password reset / verification / invites / breach channel), daily backups + rehearsed restore, incident runbook; in-product referral engine with auto-granted Stripe rewards. Remaining on the sell gate is founder-only (F.1–F.8). | Phase C section · [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) · [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) |
 | 2026-06-12 | **UK legal compliance baseline shipped (PR #352):** in-product Terms / accurate Privacy Notice / Cookie Policy / Art. 28 DPA with versioned, recorded acceptance; erasure cascades, account deletion + export; correction/takedown workflow; retention sweep; CCR/DMCCA pre-contract checkout; auth rate-limiting + security headers; DPIA draft. PC.11/PC.13 mostly delivered, PC.12/PC.14 started; the founder half became the F.* list above. | [COMPLIANCE_AUDIT](COMPLIANCE_AUDIT.md) · [COMPLIANCE_HANDOVER](COMPLIANCE_HANDOVER.md) |
 | 2026-06-12 | **Compliance-readiness audit:** Phase C had been pushing "go sell" with zero legal surface — compliance had no owning channel because Phase C was composed from a revenue diligence. Fix: a third **lawful-to-sell exit gate** + four sell-gate items **PC.11–PC.14**; no paid contract before gate 3 holds. | [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) |
 | 2026-06-11 | **Phase C build-out:** PC.7 try-before-signup demo, PC.8 sponsor manager + exposure reports, PC.10 public achievements wall shipped; `/pricing` now enforces PC.4's revealed-WTP gate (≥5 paid annual); PC.6 audited build-complete. What remains on PC.4/PC.6 is the founder's selling motion. | Phase C section |
@@ -370,18 +594,14 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
-| 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
-| 2026-06-12 | `1801a577e` | Regenerate inventories with main's full dep set (fixes inventory-freshness test) |
-| 2026-06-12 | `35eafa87d` | Sentinel files findings as GitHub issues listed on the roadmap |
-| 2026-06-12 | `75aaa9218` | fix: a11y: <html> element must have a lang attribute (html-has-la (#380) |
-| 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
-| 2026-06-12 | `f015dddd5` | Final check green: 4,465 passed, 1 skip, 0 failures on the merged tree |
-| 2026-06-12 | `be391a5d7` | Wrap long breaker-skip raise for ruff-format (CI hygiene hook) |
-| 2026-06-12 | `18543124a` | Fix silent SearXNG outage and add log sentinel watchdog |
-| 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
-| 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
-| 2026-06-12 | `8e03f502d` | Fix full-suite cross-test pollution: lockout re-keyed to per-account |
+| 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
+| 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
+| 2026-06-12 | `19ed2f0fb` | Migrate Remotion tsconfig to moduleResolution=bundler |
+| 2026-06-12 | `be40c4da4` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
+| 2026-06-12 | `1443cf581` | build(deps): bump actions/setup-python from 5 to 6 |
+| 2026-06-12 | `c3d4f2763` | Auto-merge Dependabot GitHub-Actions bumps on all-green checks |
+| 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
+| 2026-06-12 | `8129ca971` | Apply CI-pinned ruff format to test_dev_login.py |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
@@ -477,16 +697,18 @@ Completed phases (0, 1, 2, W) and shipped Phase C items live under
 **Goal.** Make MediaHub sellable without the founder in the loop — and lawful
 to sell.
 
-**State (2026-06-12).** The engineering is essentially done: signup/auth
-(PC.1), Stripe billing code (PC.2), org→workspace multi-tenancy (PC.3,
-[ADR-0014](adr/0014-org-workspace-multitenancy-schema.md)), the revealed-WTP
-pricing machinery and warm-first funnel tooling on `/operator/commercial`
-(PC.4/PC.6 build halves), the `/try` demo (PC.7), the sponsor manager (PC.8),
-the public wall (PC.10) and the UK legal-compliance baseline (PR #352) have
-all shipped — condensed records under "Done". Still open: the four
-**sell-gate code remainders** (PC.11–PC.14 — Fable 5 list) and the founder's
-selling + paperwork motion (F.1–F.8, PC.4, PC.6 — founder list). **Zero
-paying clubs today; code is no longer the excuse.**
+**State (2026-06-12, second pass).** The engineering is essentially done:
+signup/auth (PC.1), Stripe billing code (PC.2), org→workspace multi-tenancy
+(PC.3, [ADR-0014](adr/0014-org-workspace-multitenancy-schema.md)), the
+revealed-WTP pricing machinery and warm-first funnel tooling on
+`/operator/commercial` (PC.4/PC.6 build halves), the `/try` demo (PC.7), the
+sponsor manager (PC.8), the public wall (PC.10), the UK legal-compliance
+baseline (PR #352), **and now the four sell-gate code remainders
+(PC.11–PC.14 code halves) plus the referral engine (PC.9)** — all shipped.
+Still open: the founder's identity + selling + paperwork motion (F.1–F.12,
+PC.4, PC.6 — founder list) and the two code halves the new identity items
+unlock (PC.15 rebrand sweep, PC.16 hosting cutover). **Zero paying clubs
+today; code is no longer the excuse.**
 
 **Exit criteria (three hard gates).**
 
@@ -552,20 +774,69 @@ application is drafted and submission-ready (F.5). The channel evidence:
   solo). Realistic timeline **~3–6+ months**. The *outcome* is unproven and
   IS the validation — it also closes PC.4.
 
-#### PC.9 — In-product referral engine · ❌ **NOT STARTED** (Fable 5)
+#### F.9–F.12 — Business identity, own domain, cheaper hosting · ❌ founder work (guides above; added & prioritised 2026-06-12) + PC.15/PC.16 code halves
+
+Why this workstream jumped to the head of the founder list:
+
+- **The name is upstream of every filing.** Stripe's KYC (F.1), the ICO
+  register entry (F.2), the solicitor-reviewed legal pack (F.3), the Swim
+  England application (F.5), insurance (F.6), the Meta verification dossier
+  (F.8) and the domain itself (F.11) all embed the legal identity. File them
+  under a throwaway name and a later rename re-does — and re-pays — the lot.
+  "MediaHub" was always a filler: generic, shared with other companies,
+  indefensible as a brand or trade mark. So: **F.9 name → F.10 company →
+  F.11 domain → only then the identity-bearing paperwork.**
+- **"Due diligence", defined once:** the free checks that prove nobody
+  already owns the name — Companies House register, UK trade marks (classes
+  9/41/42), the domain, the social handles, and a passing-off web search —
+  done *before* committing, so nobody can force a rebrand later. The F.9
+  guide is that checklist in order; it costs an afternoon and £0.
+- **Domain before host.** Every printed QR code, embedded wall, bookmark and
+  webhook that points at `mediahub-gzwc.onrender.com` dies with that
+  subdomain. Pointing them at our own `.co.uk` first (F.11 — Render serves
+  custom domains + TLS today) makes the later host move an invisible DNS
+  flip and unbreaks every link forever.
+- **The hosting numbers, honestly** (verified June 2026): Render standard —
+  the 2 GB the Chromium/Remotion renders need — is **$25/mo ≈ £20/mo** +
+  disk; a capable EU VPS (Hetzner CX22 4 GB → CX32 8 GB) is
+  **€3.79–7.59/mo**; UK-soil VPS ≈ £5–15/mo `[ESTIMATE]`. Saving ≈
+  **£150–200/yr** `[ESTIMATE]` — real, but less than a fifth of one paying
+  club, which is why F.12 sits *behind* the identity work, offers an
+  explicit "stay and revisit at traction" option, and may never displace a
+  selling week. A side benefit if taken: today's host stores Club Data in
+  the **US** (per the DPA's subprocessor register); an EU/UK box simplifies
+  F.4's transfer-mechanism homework.
+- **The move is already cheap to execute.** The deploy is one Dockerfile
+  (compose + `fly.toml` templates exist), all state lives under `DATA_DIR`,
+  and PC.14 shipped daily backups with a restore drill rehearsed on every
+  test run — restoring a production backup onto a new box *is* the
+  migration. PC.16 packages the remainder: reverse-proxy TLS template,
+  off-site backup preflight, a Render-API-free log-sentinel source, the
+  staged subprocessor/privacy updates, and the cutover runbook.
+- **What this is *not*:** a self-host tier. ADR-0011's hosted-only principle
+  is untouched — the operator's one deployment changes data centre;
+  customers still only ever get a URL.
+
+#### PC.9 — In-product referral engine · ✅ **BUILT (2026-06-12)**
 
 Runs PC.6's compounding mechanism (2 named intros per signed club) inside
-the product instead of operator ledgers. **Build:** referral codes per org;
-signup accepts a code and records the lead in `commercial/pipeline.py` with
-source=referral; the reward (a free month as a Stripe coupon via
-`web/billing.py`) auto-grants when the referred club's first annual payment
-lands amount-verified in `commercial/wtp.py` (the idempotent webhook hook
-already exists); the referral-debt readout on `/operator/commercial` switches
-from manual entries to live code-tracked state. **Exit:** a signed club has a
-shareable code; a paid referral auto-grants the reward and updates the funnel
-ledger with zero operator typing.
+the product instead of operator ledgers. **Shipped:**
+`commercial/referrals.py` — per-org shareable codes (Organisation page +
+`/signup?ref=CODE`), referred signups recorded as `source=referral` leads
+with the referrer attributed; the reward (one free month as a Stripe
+amount-off coupon via `billing.grant_referral_reward`, valued at the
+referrer's own verified annual price / 12 — never an invented figure)
+auto-grants when the referred club's first annual payment lands
+amount-verified in `commercial/wtp.py` (the idempotent webhook hook **and**
+the operator manual-payment path), with honest `pending_manual` records when
+the value or the Stripe customer can't be resolved; the referral-debt
+readout on `/operator/commercial` counts code-tracked signups as delivered
+intros and a live referral section shows codes/signups/rewards. **Exit
+met:** a signed club has a shareable code; a paid referral auto-grants the
+reward and updates the funnel ledger with zero operator typing
+(`tests/test_referrals.py` pins the whole flow end to end).
 
-#### PC.11 — Legal & privacy pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.11 — Legal & privacy pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
 
 The contractual minimum to take a club's money: MediaHub is a **processor**
 for clubs (the controllers) over personal data that is largely **children's**.
@@ -573,16 +844,24 @@ for clubs (the controllers) over personal data that is largely **children's**.
 `/cookies`, `/dpa`; versioned signup acceptance recorded in
 `legal_acceptances.jsonl` with forced re-acceptance on a `TERMS_VERSION`
 bump; per-workspace DPA acceptance + lawful-basis attestation; subprocessor +
-transfer disclosures. **Remaining — code:** a guard test pinning the
-subprocessor register to the env-flag surface (a new provider can't ship
-undisclosed); resolve the two unlicensed `vendor/` reference dirs.
-**Remaining — founder:** ICO registration + identity placeholders (F.2),
-solicitor sign-off (F.3), vendor DPAs (F.4). **Exit:** an account cannot be
-created without recorded acceptance of a versioned ToS + Privacy Notice; an
-org owner has a recorded DPA acceptance; the subprocessor guard test is
-green; ICO registration is logged on the operator console.
+transfer disclosures. **Shipped (2026-06-12, code remainder):** the
+subprocessor register is now a data structure (`legal.SUBPROCESSORS`) the
+DPA table renders from, pinned to the env-flag surface by
+`tests/test_subprocessor_register_guard.py` — a provider-shaped env key not
+in the register (or the reasoned-exclusion list) turns the build red. The
+guard immediately surfaced two undisclosed flows (operator-configured
+OpenAI-compatible endpoints; edge-tts voiceover → Microsoft), now disclosed,
+and later caught the backup-upload target the same day — working as
+designed. The two unlicensed `vendor/` dirs (`agent-skills-main`,
+`bencium-marketplace-main`) are removed; `tests/test_vendor_licences.py`
+keeps vendor/ licence-clean. **Remaining — founder:** ICO registration +
+identity placeholders (F.2), solicitor sign-off (F.3), vendor DPAs (F.4).
+**Exit:** an account cannot be created without recorded acceptance of a
+versioned ToS + Privacy Notice; an org owner has a recorded DPA acceptance;
+the subprocessor guard test is green ✅; ICO registration is logged on the
+operator console.
 
-#### PC.12 — Minors' consent & safeguarding gate · 🔵 **IN PROGRESS** *(sell gate — W.2 promoted 2026-06-12)*
+#### PC.12 — Minors' consent & safeguarding gate · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — W.2 promoted 2026-06-12)*
 
 The product's core output is *publishing children's achievements*; consent
 handling stops being optional the day money changes hands. **Shipped:** W.2
@@ -590,15 +869,23 @@ itself — the per-athlete consent registry (photo OK / full name / initials-
 only / do-not-feature; most-restrictive default; CSV import) enforced
 deterministically at generation, in photo scoring and at the publish gate
 (see "Done" → W.2) — plus workspace-setup parental-consent attestation
-(PR #352). **Remaining — code:** surface W.2 consent state on the public
-wall (beyond the initials-first default), and a documented
-**Children's-Code (Age Appropriate Design) pass** over the public surfaces
-(`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a no-consent
+(PR #352). **Shipped (2026-06-12, code remainder):** W.2 consent is enforced
+on every public-wall exit — wall text, embed, JSON/RSS feeds and the card
+PNG route. A blocked athlete (do-not-feature, or no consent on file under an
+active regime) is unreachable, an initials-only athlete is initialled even
+with the blanket toggle off (most restrictive always wins), and the
+members-only settings page explains each consent-hidden card. The
+**Children's-Code pass** over `/wall`, embed, feeds and `/try` is recorded
+at [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) with both
+findings fixed — including replacing the real-meet `/try` sample (real named
+under-18s) with a synthetic deterministic one
+(`scripts/make_demo_sample.py`). **Exit met:** a card for a no-consent
 athlete cannot render a name/photo, cannot pass the gate, and cannot appear
-on the wall; the review UI explains why; the Children's-Code pass is
-recorded; the NGB application's safeguarding claims are all true in code.
+on the wall; the settings UI explains why; the Children's-Code pass is
+recorded; the NGB application's safeguarding claims are all true in code
+(`tests/test_wall_consent.py`, `tests/test_childrens_code_public_surfaces.py`).
 
-#### PC.13 — Data lifecycle & rights · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.13 — Data lifecycle & rights · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — ADR-0015)*
 
 The data-subject-rights plumbing a controller club will ask its processor
 for. **Shipped (PR #352):** self-serve account deletion (compacting,
@@ -606,42 +893,61 @@ tombstone-free), athlete erasure cascading through runs / rendered assets /
 PB + research caches / caption memory / posting-log excerpts (test-pinned),
 account export, a correction/takedown workflow, and the retention schedule
 published in the Privacy Notice + enforced by the `MEDIAHUB_RETENTION_DAYS`
-sweep. **Remaining — code:** whole-org deletion cascading runs, media,
-content packs, wall token, sponsor/exposure ledgers and the consent registry
-(Stripe customer handled per the DPA), plus an org-level **takeout ZIP**
-(runs JSON, media, captions, consent state, audit log — serves SARs and
-portability in one mechanism). **Exit:** a club owner can delete their org or
-export everything it holds without founder involvement; deletion verifiably
-removes the data from `DATA_DIR` (pinned under the ADR-0003/0014 isolation
-invariants); the published schedule matches what the code does.
+sweep. **Shipped (2026-06-12, code remainder):**
+`privacy/org_lifecycle.py` — whole-org deletion (POST `/organisation/delete`,
+owner-or-operator with typed-id + password re-verify) cascading runs (through
+the per-run erasure cascade), media library, uploaded logos, content packs,
+the wall token (structurally — the profile dies), sponsor/exposure ledgers,
+the consent + athletes registries, club records, corrections, posting/
+telemetry logs, caption memory and memberships, with the Stripe customer and
+org-scoped acceptance evidence retained per the DPA and said so; plus the
+org-level **takeout ZIP** (GET `/organisation/export` — profile, runs JSON +
+workflow states, media blobs, captions, consent CSV, athletes, ledgers,
+audit log, manifest) serving SARs and portability in one mechanism. **Exit
+met:** a club owner can delete their org or export everything it holds
+without founder involvement; deletion verifiably removes the data from
+`DATA_DIR` under the ADR-0003/0014 isolation invariants
+(`tests/test_org_lifecycle.py` — a second org stays byte-intact); the
+published schedule matches what the code does.
 
-#### PC.14 — Operational trust pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+#### PC.14 — Operational trust pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
 
 The boring things a paying customer silently assumes. **Shipped (PR #352):**
 the CCR/DMCCA pre-contract checkout (`/billing/confirm`: price honesty,
 auto-renewal disclosure, cancellation parity, recorded cooling-off
 acknowledgement) and the support contact surfaced in footer/ToS (placeholder
-until F.2). **Remaining — code:**
+until F.2). **Shipped (2026-06-12, code remainder):**
 
-- **Transactional-email seam** (Resend-style HTTP API behind an env key,
-  honest-503 unconfigured — pulls P4.5's seam forward without the digest
-  product): password reset (signed expiring token), email verification,
-  member-invite delivery, and an operator "notify all users" path for breach
-  notification — the ICO's 72-hour clock needs a working channel, not a plan
-  to build one.
-- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
-  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs), and a
-  *documented, rehearsed* restore — an unrestored backup is a hypothesis.
-- **Support + incident runbook** checked into `docs/` (detect → contain →
-  assess → notify ICO/clubs).
-- **Billing hygiene:** Checkout emits an invoice/receipt a volunteer
-  treasurer can file; VAT decision implemented per F.1.
+- **Transactional-email seam** (`notify/email.py` — Resend-style HTTP API
+  behind `RESEND_API_KEY` + `MEDIAHUB_EMAIL_FROM`, honest-503 unconfigured,
+  P4.5's seam pulled forward): password reset (`/password/forgot` +
+  `/password/reset/<token>` — signed expiring single-use tokens, no account
+  enumeration), email verification (`/verify-email/<token>`), member-invite
+  delivery from the members page, and `/operator/notify-users` — the breach
+  channel, every send recorded with per-recipient counts in
+  `operator_notices.jsonl` (the ICO 72-hour evidence trail). Resend joined
+  the subprocessor register the same day (the PC.11 guard enforced it).
+- **Backups + restore drill:** daily `backup_sweep` scheduler task —
+  `data.db`/`memory.db` via the SQLite online-backup API, every root JSONL
+  ledger, profiles + logos, commercial/sponsor/audit ledgers, runs JSON +
+  workflow states (renders/caches excluded as re-derivable) — pruned, with
+  optional off-site HTTP PUT; restore via `python -m mediahub.backup
+  restore` with a traversal guard, **rehearsed automatically on every test
+  run** (`tests/test_backup_restore.py`), state surfaced on the operator
+  console.
+- **Support + incident runbook:**
+  [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) (intake, detect →
+  contain → assess → notify ICO/clubs, backup/restore procedure, drill log).
+- **Billing hygiene:** `/billing` and `/billing/confirm` state where every
+  payment's invoice/receipt lives (Stripe customer portal).
 
 **Remaining — founder:** renewal reminders + VAT decision (F.1), breach owner
-+ insurance (F.6). **Exit:** a user can reset their password unaided; an
-invite email actually arrives; a restore from backup has been performed and
-documented; the support contact and runbook exist; a test payment produces an
-expensable invoice.
++ insurance (F.6), confirm Render disk snapshots + point the backup target
+off-site. **Exit:** a user can reset their password unaided ✅; an invite
+email actually arrives ✅; a restore from backup has been performed and
+documented ✅ (automated drill); the support contact and runbook exist ✅;
+a test payment produces an expensable invoice (Stripe portal — verify with
+the first test payment, F.1).
 
 #### Strategy notes — the three credible £1M+ routes (context, *not* build items)
 
@@ -888,7 +1194,7 @@ cloud provider on the same seam). Feeds back into **PC.4** packaging
 | Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions land in the immutable per-org ledger. |
 | Product design / UI polish | ❌ open | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
 | Test-suite stability | ✅ | Full suite green (~3,576 passed / 1 skipped, 2026-06-09 — see CLAUDE.md "Running Tests"). Keep green. |
-| Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. |
+| Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. F.12/PC.16 add a cheaper-VPS target on the same Dockerfile (decision pending — see the F.12 guide). |
 
 ---
 

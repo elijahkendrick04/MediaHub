@@ -93,6 +93,7 @@ def swimmer_audit_to_dict(sa: PBAudit) -> dict:
         "achievements_suppressed": sa.achievements_suppressed,
         "fetch_ok": sa.fetch_ok,
         "fetch_error": sa.fetch_error,
+        "no_history": sa.no_history,
         "source_urls": sa.source_urls,
         "fetched_at": sa.fetched_at,
     }
@@ -107,6 +108,7 @@ def run_audit_to_dict(ra: RunPBAudit) -> dict:
         "swimmers_needs_verification": ra.swimmers_needs_verification,
         "swimmers_no_id": ra.swimmers_no_id,
         "swimmers_fetch_failed": ra.swimmers_fetch_failed,
+        "swimmers_no_history": ra.swimmers_no_history,
         "pb_decisions_count": ra.pb_decisions_count,
         "pb_confirmed_count": ra.pb_confirmed_count,
         "pb_confirmed_official_count": ra.pb_confirmed_official_count,
@@ -141,7 +143,6 @@ def aggregate_run_audit(
     budget_exceeded: bool,
 ) -> RunPBAudit:
     """Build a RunPBAudit from per-swimmer audit data."""
-    import time
     now = datetime.now(timezone.utc).isoformat()
 
     total = len(per_swimmer)
@@ -152,6 +153,8 @@ def aggregate_run_audit(
     no_id = sum(1 for sa in per_swimmer
                 if sa.identity and sa.identity.method == "no_id")
     fetch_failed = sum(1 for sa in per_swimmer if not sa.fetch_ok)
+    no_history = sum(1 for sa in per_swimmer
+                     if sa.fetch_ok and getattr(sa, "no_history", False))
 
     cache_hits = sum(1 for fr in fetch_results.values() if getattr(fr, "from_cache", False))
     cache_misses = sum(1 for fr in fetch_results.values() if not getattr(fr, "from_cache", False))
@@ -184,6 +187,7 @@ def aggregate_run_audit(
         swimmers_needs_verification=needs_verif,
         swimmers_no_id=no_id,
         swimmers_fetch_failed=fetch_failed,
+        swimmers_no_history=no_history,
         pb_decisions_count=len(all_decisions),
         pb_confirmed_count=confirmed,
         pb_confirmed_official_count=confirmed_official,

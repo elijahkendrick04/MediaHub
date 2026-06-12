@@ -78,6 +78,9 @@ class User:
     plan: str = PLAN_FREE
     stripe_customer_id: str = ""
     created_at: str = ""
+    # When the address proved it can receive our mail (PC.14). Empty = not
+    # verified; purely informational — no feature gates on it.
+    email_verified_at: str = ""
     totp_secret: str = ""  # empty = 2FA off; set via /account/2fa
 
     def to_record(self) -> dict:
@@ -91,6 +94,7 @@ class User:
             plan=_coerce_plan(d.get("plan")),
             stripe_customer_id=str(d.get("stripe_customer_id", "") or ""),
             created_at=str(d.get("created_at", "") or ""),
+            email_verified_at=str(d.get("email_verified_at", "") or ""),
             totp_secret=str(d.get("totp_secret", "") or ""),
         )
 
@@ -384,6 +388,34 @@ class UserStore:
             self._append(user)
             return user
 
+    def set_password(self, email: str, new_plaintext: str) -> Optional[User]:
+        """Replace an account's password (PC.14 reset flow). Returns the
+        user, or None for an unknown email. Raises AuthError on a weak
+        password — same rule as signup."""
+        if len(new_plaintext or "") < 8:
+            raise AuthError("Password must be at least 8 characters.")
+        with _LEDGER_LOCK:
+            user = self._read_all().get(normalize_email(email))
+            if user is None:
+                return None
+            user.hashed_password = hash_password(new_plaintext)
+            self._append(user)
+            return user
+
+    def mark_email_verified(self, email: str) -> Optional[User]:
+        """Stamp the account as having received our verification mail."""
+        with _LEDGER_LOCK:
+            user = self._read_all().get(normalize_email(email))
+            if user is None:
+                return None
+            user.email_verified_at = _utc_now_iso()
+            self._append(user)
+            return user
+
+    def all_emails(self) -> list[str]:
+        """Every account email (the operator breach-notice audience)."""
+        return sorted(self._read_all().keys())
+
     def delete(self, email: str) -> bool:
         """Erase an account from the ledger entirely (UK GDPR Art. 17).
 
@@ -447,16 +479,43 @@ def _users_path() -> Path:
 _SESSION_KEY = "user_email"
 
 # ---- Operator / developer access ---------------------------------------
-# An env-gated, no-paywall sign-in for the operator running the deployment. It
-# does not exist unless MEDIAHUB_DEV_KEY is set in the environment, so it is
-# never a public backdoor. The key is read from the environment only — never
+# An env-gated, no-paywall sign-in for the operator running the deployment.
+#
+# Two ways to enable it, both opt-in and OFF by default:
+#   * MEDIAHUB_DEV_KEY  — keyed sign-in: visit /developer, enter the key.
+#   * MEDIAHUB_DEV_OPEN — PASSWORDLESS sign-in: one click, no key. A deliberate,
+#       TEMPORARY development backdoor — while it is on, anyone who can reach
+#       /developer can take an unrestricted session. Keep it off on any
+#       deployment that holds real customer data and remove it before
+#       onboarding real customers (the page shows a standing reminder).
+#
+# With neither set the route 404s and the affordance vanishes, so it is never an
+# accidental backdoor. Both values are read from the environment only — never
 # hardcoded, never logged — matching the project's API-keys-in-env rule.
 _DEV_SESSION_KEY = "dev_operator"
 
 
+def dev_login_open() -> bool:
+    """True when PASSWORDLESS operator sign-in is explicitly enabled.
+
+    Temporary development backdoor: when ``MEDIAHUB_DEV_OPEN`` is truthy the
+    ``/developer`` route grants an unrestricted (Owner-plan) session with **no
+    key**. OFF by default; opt in per deployment. Unset the env var to close the
+    door instantly (it also revokes any outstanding open-mode session, since
+    ``is_dev_operator`` re-checks ``dev_login_enabled`` on every request).
+    """
+    raw = (os.environ.get("MEDIAHUB_DEV_OPEN") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def dev_login_enabled() -> bool:
-    """True only when the operator has configured MEDIAHUB_DEV_KEY in env."""
-    return bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
+    """True when the developer sign-in affordance should exist at all.
+
+    Either a key is configured (keyed sign-in) **or** passwordless open mode is
+    on. Gates the ``/developer`` route and the nav/footer links so they
+    404/vanish when the operator has opted into neither.
+    """
+    return dev_login_open() or bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
 
 
 def _dev_operator_email() -> str:

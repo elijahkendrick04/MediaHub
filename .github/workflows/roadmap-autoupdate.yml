@@ -62,11 +62,11 @@ jobs:
       (!contains(github.event.head_commit.message, 'bot/roadmap-autoupdate') &&
        !startsWith(github.event.head_commit.message, 'docs: auto-update roadmap'))
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # full history for the commit range + activity feed
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 

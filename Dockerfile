@@ -31,7 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 libdrm2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
     libxshmfence1 libxkbcommon0 \
     fonts-liberation \
-  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+  && curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource-setup.sh \
+  && bash /tmp/nodesource-setup.sh \
+  && rm -f /tmp/nodesource-setup.sh \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
