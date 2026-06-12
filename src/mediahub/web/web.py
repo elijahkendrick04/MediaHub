@@ -12684,6 +12684,43 @@ Relay team broke club record"></textarea>
 """
         return _layout("Complaint received", body, active="privacy")
 
+    # ---- SUB-PROCESSOR DISCLOSURE (public) ------------------------------
+    # The public page clubs/parents can check. Keep in sync with
+    # docs/compliance/SUBPROCESSORS.md (the canonical inventory) — the
+    # test suite pins the provider set on both.
+
+    _SUBPROCESSORS_PUBLIC = [
+        ("Render Services, Inc.", "Hosting (application, database, files)", "United States", "UK–US data bridge (DPF-certified); SCC fallback", "Always"),
+        ("Google LLC (Gemini API)", "AI caption & creative-brief generation", "United States / global", "Google Cloud DPA: SCCs + UK Addendum", "When configured by the operator"),
+        ("Anthropic, PBC (Claude API)", "AI captioning failover", "United States", "DPA with SCCs + UK IDTA/Addendum", "When configured by the operator"),
+        ("Photoroom SAS", "Photo background removal", "France (sub-processors may be outside the EEA)", "GDPR processor terms", "Only if the club/operator enables cloud cutout"),
+        ("Replicate, Inc.", "Photo background removal", "United States", "Processor terms; SCCs/IDTA", "Only if the club/operator enables cloud cutout"),
+        ("Buffer, Inc.", "Relay of approved posts to social platforms", "United States", "DPA; SCCs/IDTA", "Only if the club connects publishing"),
+    ]
+
+    @app.route("/legal/subprocessors")
+    def legal_subprocessors():
+        rows = "".join(
+            f"<tr><td>{_h(name)}</td><td>{_h(role)}</td><td>{_h(where)}</td>"
+            f"<td>{_h(mechanism)}</td><td>{_h(when)}</td></tr>"
+            for name, role, where, mechanism, when in _SUBPROCESSORS_PUBLIC
+        )
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Who we <em class="editorial">work with.</em></h1>
+  <p class="lede">Every third party that can touch personal data processed by this service, what they do, where they do it, and the legal safeguard for the transfer. Social platforms (Instagram, Facebook, TikTok) are not processors — once a club approves a post, the platform handles it under its own terms.</p>
+</section>
+<div class="card">
+  <table>
+    <thead><tr><th>Provider</th><th>What they do</th><th>Where</th><th>Transfer safeguard</th><th>When engaged</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p class="muted">Clubs are notified before a new sub-processor is added and may object (see the Data Processing Agreement). The swimmingresults.org rankings site is a public data <em>source</em>, not a processor — nothing is sent to it beyond the lookup itself.</p>
+</div>
+"""
+        return _layout("Sub-processors", body, active="privacy")
+
     @app.route("/admin/compliance")
     def admin_compliance():
         if not _auth.is_dev_operator():
