@@ -2451,7 +2451,7 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
             }).join('');
             pickerHtml = '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-right:4px">Variants</span>' + pills + '</div>';
           }
-          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap">' + safeText(active) + '</span>' + fallbackNote;
+          captionDiv.innerHTML = pickerHtml + '<span style="white-space:pre-wrap" dir="auto">' + safeText(active) + '</span>' + fallbackNote;
           captionDiv.querySelectorAll('.cap-var-pill').forEach(function(btn) {
             btn.addEventListener('click', function() { _renderActive(parseInt(btn.dataset.idx, 10) || 0); });
           });
@@ -2459,14 +2459,16 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         if (textarea) { textarea.value = active; }
       }
       _renderActive(0);
-      // W.13: Welsh variant for bilingual workspaces — shown beside the
-      // English caption so both are approved in one pass.
-      if (captionDiv && j.caption_cy) {
-        var cyBox = document.createElement('div');
-        cyBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
-        cyBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Cymraeg</div>'
-          + '<span style="white-space:pre-wrap">' + safeText(j.caption_cy) + '</span>';
-        captionDiv.appendChild(cyBox);
+      // W.13 (generalised): bilingual workspaces get the side-by-side
+      // translation (Cymraeg, Gaeilge, 中文, …) beside the English caption
+      // so both are approved in one pass. Label + text direction come from
+      // the server's language registry, so new languages need no JS change.
+      if (captionDiv && j.caption_secondary) {
+        var secBox = document.createElement('div');
+        secBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
+        secBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' + safeText(j.secondary_language_label || 'Translation') + '</div>'
+          + '<span style="white-space:pre-wrap" dir="' + (j.secondary_rtl ? 'rtl' : 'auto') + '">' + safeText(j.caption_secondary) + '</span>';
+        captionDiv.appendChild(secBox);
       }
       // W.11: result-grounded alt text — editable, saved with the card so
       // every export/publish surface carries what the approver saw.
@@ -3270,7 +3272,7 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             f'<div class="caption-text" style="font-size:12px;color:var(--ink);white-space:pre-wrap">'
             f'<span class="caption-placeholder" style="color:var(--ink-muted);font-style:italic">'
             f"Click to generate&hellip;</span></div>"
-            f'<textarea class="caption-textarea" style="display:none"></textarea>'
+            f'<textarea class="caption-textarea" dir="auto" style="display:none"></textarea>'
             f"</div>"
         )
 
@@ -12122,16 +12124,21 @@ function copyWhyCard(btn, taId) {{
                         return None
 
                 # W.11/W.13: the PRIMARY variant rides the bundle call so the
-                # result-grounded alt text (and the Welsh variant for cy/
-                # bilingual workspaces) arrive in the SAME provider call —
+                # result-grounded alt text (and the side-by-side translation
+                # for bilingual workspaces) arrive in the SAME provider call —
                 # zero added latency. Extra variants stay caption-only.
                 from mediahub.web.ai_caption import (
                     generate_caption_bundle as _gen_bundle,
                 )
+                from mediahub.web.languages import (
+                    get_language as _get_language,
+                    language_setting_for as _language_setting_for,
+                )
 
-                _pw_language = (getattr(club_profile_obj, "language", "en") or "en").strip().lower()
+                _pw_language = _language_setting_for(club_profile_obj)
                 alt_text = ""
-                caption_cy = None
+                caption_secondary = None
+                secondary_language = None
 
                 def _gen_primary():
                     try:
@@ -12156,7 +12163,8 @@ function copyWhyCard(btn, taId) {{
                 _bundle = _gen_primary()
                 if _bundle:
                     alt_text = _bundle.get("alt_text") or ""
-                    caption_cy = _bundle.get("caption_cy")
+                    caption_secondary = _bundle.get("caption_secondary")
+                    secondary_language = _bundle.get("secondary_language")
                     variants = [_bundle.get("caption") or ""]
                     extra_needed = max(0, n_variants - 1)
                 else:
@@ -12205,6 +12213,7 @@ function copyWhyCard(btn, taId) {{
                 # to widen the "avoid" window in one go.
                 for v in variants:
                     _v9_save_caption_history(run_id, swim_id_dec, v)
+                _sec_lang = _get_language(secondary_language) if secondary_language else None
                 return jsonify(
                     {
                         "caption": caption_text,
@@ -12219,8 +12228,14 @@ function copyWhyCard(btn, taId) {{
                         # W.11: result-grounded alt text from the same call,
                         # editable in review and threaded into exports.
                         "alt_text": alt_text,
-                        # W.13: Welsh variant for bilingual workspaces.
-                        "caption_cy": caption_cy,
+                        # W.13 (generalised): side-by-side translation for
+                        # bilingual workspaces, plus the display metadata
+                        # (native-name label, text direction) the review UI
+                        # needs to render it for ANY registry language.
+                        "caption_secondary": caption_secondary,
+                        "secondary_language": secondary_language,
+                        "secondary_language_label": (_sec_lang.native_name if _sec_lang else ""),
+                        "secondary_rtl": bool(_sec_lang and _sec_lang.rtl),
                         "language": _pw_language,
                     }
                 )
@@ -19433,9 +19448,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 existing.org_type = (request.form.get("org_type") or "other").strip()
                 existing.governing_body = (request.form.get("governing_body") or "").strip()
                 existing.country = (request.form.get("country") or "").strip()
-                # W.13: caption language (en / cy / bilingual)
-                _lang = (request.form.get("language") or "en").strip().lower()
-                existing.language = _lang if _lang in ("en", "cy", "bilingual") else "en"
+                # W.13 (generalised): caption language — any web.languages
+                # registry code ("en", "cy", "ga", "zh", …) or an English-led
+                # bilingual pair ("en+cy", "en+hi", …). The registry
+                # normaliser is the single validator: junk falls back to
+                # "en", legacy "bilingual" becomes "en+cy".
+                from mediahub.web.languages import (
+                    normalise_language_setting as _norm_lang,
+                )
+
+                existing.language = _norm_lang(request.form.get("language"))
                 # W.4: which qualifying standards this club cares about
                 existing.important_standards = [
                     s.strip() for s in request.form.getlist("important_standards") if s.strip()
@@ -19613,14 +19635,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
         voice_examples_text = "\n".join(profile.voice_examples or [])
 
-        # W.13: caption language picker
-        _LANGS = [
-            ("en", "English"),
-            ("cy", "Cymraeg (Welsh)"),
-            ("bilingual", "Bilingual — English + Cymraeg"),
-        ]
-        language_opts = "".join(
-            _opt(v, l, v == (getattr(profile, "language", "en") or "en")) for v, l in _LANGS
+        # W.13 (generalised): caption language picker — registry-driven
+        # (web/languages.py: top-10 world languages + Welsh + Irish), each
+        # available alone or bilingual beside English. Adding a language to
+        # the registry surfaces it here with no further code change. Legacy
+        # "bilingual" profiles normalise to "en+cy" so they preselect
+        # correctly.
+        from mediahub.web.languages import (
+            bilingual_language_options as _bilingual_language_options,
+            normalise_language_setting as _norm_lang_setting,
+            single_language_options as _single_language_options,
+        )
+
+        _lang_now = _norm_lang_setting(getattr(profile, "language", "en"))
+        _lang_singles = "".join(_opt(v, l, v == _lang_now) for v, l in _single_language_options())
+        _lang_pairs = "".join(_opt(v, l, v == _lang_now) for v, l in _bilingual_language_options())
+        language_opts = (
+            f'<optgroup label="One language">{_lang_singles}</optgroup>'
+            f'<optgroup label="Bilingual — English + a side-by-side translation">'
+            f"{_lang_pairs}</optgroup>"
         )
 
         # W.4: qualifying-standards picker (season packs + quals registry)
@@ -19986,7 +20019,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <div>
       <label>Caption language</label>
       <select name="language" style="{_input_style}">{language_opts}</select>
-      <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Bilingual writes every caption in English and Cymraeg side by side.</p>
+      <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Captions and alt text are written in this language. Bilingual options write every caption in English with a side-by-side translation, approved together in one pass.</p>
     </div>
     <div>
       <label>Result file codes</label>
@@ -30225,7 +30258,7 @@ voice, and queues them for one-click approval.</p>
   <h2>{_h(a.get("headline", ""))}</h2>
   {block_html}
   <form method="POST" action="{action_url}">
-    <textarea name="caption" rows="3" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
+    <textarea name="caption" rows="3" dir="auto" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
     <div class="btns">
       <button class="approve" name="action" value="approve" {"disabled" if blocked else ""}>Approve</button>
       <button class="save" name="action" value="save_caption" {"disabled" if blocked else ""}>Save edit</button>

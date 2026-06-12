@@ -1,72 +1,313 @@
 # MediaHub Roadmap
 
-The plan — **one document, in depth**. It opens with the two live lists (what’s
-**to do** and what’s **completed**; one line per item, each with a stable ID),
-and the rest of the document is the full long-form plan those lists index: the
-plain-words overview, the commercial reality check, the phase essays with
-per-item detail, the cross-cutting investments, and **Appendices A/B/C** (the
-PAR-*/SEQ-*/Step-N build & verification prompts). The decided strategy lives in
-the ADRs and companion docs linked under [Standing context](#standing-context).
+The plan — **one document, in priority order**. It reads top-to-bottom the way
+you should work it: first the two live to-do lists (**things only you can do**,
+each with a step-by-step guide, then **things Fable 5 can build**), then the
+changelog, then the rules every change must respect, then the in-depth plan
+for the open phases — and only at the bottom, the record of everything already
+done. Appendices A/B/C (the PAR-\*/SEQ-\*/Step-N build & verification prompts,
+kept for AI sessions to read) close the document.
 
-## Changelog (manual — strategy/roadmap engine)
+## In plain words (start here)
 
-Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
+MediaHub turns a swim meet's results file into ready-to-post club content:
+upload the results, the app works out what matters (PBs, medals, club
+records), designs branded cards and reels, writes the captions, and a human
+approves everything before it goes anywhere.
 
-- **2026-06-12** — **UK legal compliance baseline shipped (PR #352)** (maintainer instruction "UK legal compliance audit + remediation"): a full code-evidence audit against UK GDPR/DPA 2018, PECR, CRA 2015, CCR 2013, DMCCA 2024, E-Commerce Regs, IP/licensing, OSA 2023 and publication risk ([`COMPLIANCE_AUDIT.md`](COMPLIANCE_AUDIT.md)), then the remediation build: ToS / accurate Art. 13/14 Privacy Notice / Cookie Policy / Art. 28 DPA in-product with versioned, timestamped acceptance (signup, re-acceptance on version bump, per-workspace DPA + parental-consent attestation at org setup); cascading erasure (runs → rendered assets, PB/research caches, caption memory, posting-log excerpts, motion cache), athlete-level erasure, password-verified account deletion, account export; correction/takedown workflow; `MEDIAHUB_RETENTION_DAYS` sweep; CCR/DMCCA pre-contract checkout (`/billing/confirm` + recorded cooling-off acknowledgement); auth rate limiting + security headers + `MEDIAHUB_LLM_PSEUDONYMISE`; DPIA draft ([`compliance/DPIA.md`](compliance/DPIA.md)); font/vendor licence records. This moves PC.11 and PC.13 to mostly-delivered and starts PC.12/PC.14 — the sell gate still needs the founder half (ICO registration, identity placeholders, vendor DPAs/transfer mechanisms, Stripe renewal reminders, solicitor sign-off) tracked in [`COMPLIANCE_HANDOVER.md`](COMPLIANCE_HANDOVER.md). [compliance build]
-- **2026-06-12** — **Compliance-readiness audit: Phase C was pushing "go sell" with zero legal/compliance surface in place** (maintainer instruction "assess how the roadmap told me to sell with no compliance"). Root cause: Phase C was composed entirely from the 2026 *scaling* diligence, whose question was "what blocks revenue?" — so every PC item is a revenue mechanic, and "lawful to operate" was never an exit criterion. Compliance only ever entered the plan through side doors: as a data-*acquisition* risk (PC.6(a)'s "prefer the official API over scraping") and as a sellable *feature* (W.2 consent manager, filed in the optional pick-list). Engineering-shaped safety shipped (ADR-0003 isolation, publish-gate safeguarding rule, initials-first wall) because code review owns it; the document/contract/registration half (terms, privacy notice, DPA, ICO registration, deletion/export rights, breach process) had no owning channel and fell through. Fix: a third **compliance-readiness ("lawful-to-sell") exit gate** on Phase C — no paid contract before it holds — implemented as four new sell-gate items **PC.11–PC.14** (legal & privacy pack; minors' consent gate, promoting W.2 to load-bearing; data lifecycle & rights; operational trust pack: transactional email/password reset, backups + restore drill, support + incident runbook, billing hygiene). Decision recorded in [`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md). [compliance audit]
-- **2026-06-11** — **Phase C build-out: PC.7 + PC.8 + PC.10 shipped; PC.4's `/pricing` gate enforced** (maintainer instruction "complete PC.4/6/7/8/10"): the public try-before-signup demo (`/try`, watermarked ≤3-card preview, capped, sandboxed, self-cleaning, claimable on conversion), the sponsor manager + per-sponsor exposure reports (`/sponsors`, deterministic rotation, exposure ledger, monthly report), and the public achievements wall + embed + RSS/JSON (`/wall/<token>`, opt-in, approved-only, initials-first, structurally revocable). PC.4's remaining engineering gap closed — `/pricing` now reads `pc4_pricing_gate` and commits a list price only from ≥5 revealed annual payments (the highest tested price that cleared). PC.6 was audited build-complete (lead ledger, cold-share + referral-debt readouts, NGB application drafted + tracked); what remains on PC.4/PC.6 is the founder's selling motion, which code cannot close. [completion pass]
-- **2026-06-11** — **Phase 6 — Creative-suite breadth added** (maintainer instruction): every content-creation feature in the two checked-in competitor inventories ([Canva](research/CANVA_FEATURE_INVENTORY_2026.md), [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)) now has a MediaHub-shaped build plan — **our own first-party versions, not integrations of theirs** — organised into 24 gated work packages (P6.1–P6.24) with a feature-by-feature coverage index proving nothing was missed. Long-form mapping: [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). Phase 6 sits behind the Phase C gates like P3/P4/P5; standing rules (hosted-only, approval-first, deterministic engine, Gemini-first honest-error AI, GWS exclusion) all hold. [roadmap engine]
-- **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
+**Where we are right now (June 2026):** the product is built and live.
+Signup, billing code, multi-tenancy, the generative design engine, fourteen
+swimming-depth features and a UK legal-compliance baseline have all shipped.
+What we do **not** have is a single paying club. The bottleneck is no longer
+engineering — it is (1) a short list of real-world tasks only you can do
+(register with the ICO, set the Stripe keys, get the legal drafts signed off,
+sell to the first clubs) and (2) a handful of remaining compliance code tasks
+Fable 5 can build. Both lists are right below, in that order.
+
+The plan is organised into phases:
+
+- **Phase C — Commercialise** · 🔵 in progress, top priority: get paid,
+  lawfully. Everything else waits behind its three exit gates.
+- **Phases 3–6** · ❌ gated: more sports (P3), posting straight to platforms
+  (P4), zero-fee local AI (P5), our own full creative suite (P6). None of
+  these start until Phase C's gates are met.
+- **Phases 0, 1, 2 and W** · ✅ done: cost/licence de-risking, the planning
+  brain, the autonomy controls, and fourteen swimming-wedge features. Their
+  records are at the bottom under **"Done"**.
+
+Every task carries a badge: ✅ done · 🔵 in progress · ⚠️ stuck · ❌ not
+started.
+
+**What updates itself, and what doesn't.** Exactly five marked blocks in this
+file are rewritten by a robot on every push to `main`: the **Last updated**
+line, the **Recent code activity** table, and the items inside the **two
+to-do lists and the Completed list** (moved by `roadmap: <ID> <status>` lines
+in commit messages — see *Status* below). Every other word is written by
+hand, usually by Fable 5 in a session — so if a paragraph looks stale, it
+will not fix itself; say so and it gets rewritten.
+
+> New here? Read **[START_HERE.md](../START_HERE.md)** first, then come back.
+> Odd word? See the **[GLOSSARY](../GLOSSARY.md)**.
 
 ## Status (auto-updated)
 
-Refreshes on every push to `main` via
-[`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml)
-(landed through an auto-merge PR — `main` requires PRs). Put a directive line
-in any commit message to move an item:
-
-> `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below
-> (`PC.3`, `P1.2`, …); `<status>` is `done` · `wip` · `blocked` · `todo`.
-> `done` **moves the item to Completed** (date-stamped); any other status
-> moves it back to To do with the matching badge.
-
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `030bc35eb` · Merge pull request #352: UK legal compliance — audit + remediation baseline
+**Last updated:** 2026-06-12 · `26d56a28b` · Merge pull request #365 from elijahkendrick04/claude/bold-lovelace-3lryuf
 <!-- /ROADMAP:LAST_UPDATED -->
 
-**Recent activity**
+The stamp above, the activity table in the Changelog, and the list items below
+refresh on every push to `main` via
+[`.github/workflows/roadmap-autoupdate.yml`](../.github/workflows/roadmap-autoupdate.yml)
+(landed through an auto-merge PR — `main` requires PRs). To move an item in
+the lists, put a directive line in any commit message:
 
-<!-- ROADMAP:ACTIVITY -->
-| Date | Commit | Summary |
-|---|---|---|
-| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
-| 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
-| 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
-| 2026-06-12 | `56d01c8fa` | docs(roadmap): record the UK legal compliance baseline against the PC.11-PC.14 sell gate |
-| 2026-06-12 | `cd34d6807` | style: apply pre-commit ruff-format (fixes Repo hygiene CI) |
-| 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
-| 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
-| 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
-| 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
-| 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
-| 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
-| 2026-06-12 | `81d6ee69e` | docs(compliance): handover — commit map, placeholder list, operational checklist, closing verdict |
-<!-- /ROADMAP:ACTIVITY -->
+> `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below
+> (`F.2`, `PC.9`, `P4.1` …); `<status>` is `done` · `wip` · `blocked` ·
+> `todo`. `done` **moves the item to Completed** (date-stamped); any other
+> status moves it back to its to-do list with the matching badge (`F.*` ids
+> return to the founder list, everything else to the Fable 5 list).
 
-## To do
+## To do — things only you can do
 
-Ordered by priority: **Phase C (commercialise) outranks everything**; **Phase W**
-(deepen the swimming wedge) is an ungated, selectable backlog picked from only in
-support of the sell; P3/P4/P5 are gated behind Phase C's exit criteria (see
-Standing context).
+Fable 5 cannot register a business, sign a contract, spend your money, or sit
+in front of a swim-club committee. Each item below has a **step-by-step
+guide** in the next section. Recommended order: **F.1–F.4** make the first
+sale lawful (the [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) sell
+gate — no club pays before these hold), **F.5 / PC.4 / PC.6** are the selling
+motion itself, **F.6–F.8** are housekeeping that runs alongside.
+
+<!-- ROADMAP:TODO_FOUNDER -->
+- **F.1** · Turn payments on: create the Stripe account, set the four `STRIPE_*` keys on Render, switch on renewal reminders, decide VAT · ❌ **NOT STARTED**
+- **F.2** · Register with the ICO and fill in the business identity (company name, address, contact email, ICO number) · ❌ **NOT STARTED**
+- **F.3** · Get the five legal drafts solicitor-reviewed and signed off (Terms, Privacy, Cookies, DPA, DPIA) · ❌ **NOT STARTED**
+- **F.4** · Accept each vendor's data-processing terms and pin the hosting region · ❌ **NOT STARTED**
+- **F.5** · Adapt and submit the drafted Swim England API application · ❌ **NOT STARTED**
+- **PC.4** · Phase C 🥇 — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling) · 🔵 **IN PROGRESS**
+- **PC.6** · Phase C 🥇 — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling) · 🔵 **IN PROGRESS**
+- **F.6** · Production ops decisions: retention period, breach contact, insurance, Remotion licence (or the free ffmpeg engine), demo-sample check · ❌ **NOT STARTED**
+- **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
+- **F.8** · When direct Instagram/Facebook posting nears (P4.2): start the Meta Business Verification + App Review paperwork early · ❌ **NOT STARTED**
+<!-- /ROADMAP:TODO_FOUNDER -->
+
+### Step-by-step guides (one per item above)
+
+#### F.1 — Turn payments on
+
+The billing code shipped in PR #267 and deliberately refuses to run (an
+honest "billing not configured" message) until you give it real Stripe keys.
+
+1. Create an account at stripe.com and complete Stripe's business onboarding
+   (it asks for the legal identity you settle in F.2 — a sole trader is fine
+   to start).
+2. In the Stripe dashboard, create two Products with recurring annual Prices:
+   **Club** and **Federation**. Copy each Price id (`price_…`).
+3. Developers → API keys: copy the Secret key. Use the `sk_test_…` key first
+   if you want to rehearse the whole flow with the card number
+   `4242 4242 4242 4242`, then swap to `sk_live_…`.
+4. Developers → Webhooks → Add endpoint:
+   `https://<your-app-domain>/webhooks/stripe`, subscribed to the
+   checkout/subscription events; copy the Signing secret (`whsec_…`).
+5. Render dashboard → your service → Environment: set `STRIPE_SECRET_KEY`,
+   `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CLUB`, `STRIPE_PRICE_FEDERATION`.
+   Redeploy.
+6. In Stripe → Settings → Billing: switch **on** renewal-reminder emails for
+   annual subscriptions (the Terms and `/billing/confirm` promise a reminder
+   before renewal — make it true), and confirm the customer-portal
+   cancellation flow is enabled (cancelling must stay as easy as signing up).
+7. Decide VAT: below the registration threshold, do nothing but keep records;
+   otherwise enable Stripe Tax. Confirm Checkout emits an invoice/receipt a
+   volunteer treasurer can put through club accounts.
+8. **Verify:** `/billing` on the live site no longer shows "billing not
+   configured", and a test-mode payment runs end-to-end.
+
+#### F.2 — Register with the ICO + fill in the business identity
+
+You process personal data (largely children's), so UK law requires
+registering with the Information Commissioner's Office and paying the small
+annual data-protection fee.
+
+1. Decide what the business legally is. Sole trader under your own name is
+   the simplest start; a limited company can come later (one conversation
+   with an accountant settles this if unsure).
+2. Register as a data controller at **ico.org.uk/registration** and pay the
+   fee (tier 1 covers a small business; it renews annually).
+3. Note the ICO registration number you receive.
+4. Give Fable 5 the five values — trading/company name, company number (or
+   "sole trader"), business address, contact email, ICO number — and ask it
+   to fill the placeholders in `web/legal.py` (one edit fixes every legal
+   page and the footer; the canonical list is `legal.PLACEHOLDERS`).
+5. **Verify:** open `/terms` and `/privacy` on the live site — no
+   `[COMPANY_NAME]`-style brackets remain anywhere.
+
+#### F.3 — Solicitor sign-off on the legal drafts
+
+The five documents are drafted and live, but headed "DRAFT — requires
+solicitor review". A human professional must sign them off before the first
+paid contract.
+
+1. Find a solicitor with data-protection/commercial experience (the Law
+   Society finder, or a fixed-fee online firm; budget a few hundred pounds).
+2. Send them the four live pages (`/terms`, `/privacy`, `/cookies`, `/dpa`),
+   the DPIA draft (`docs/compliance/DPIA.md`), and the specific open
+   questions listed in [`COMPLIANCE_AUDIT.md`](COMPLIANCE_AUDIT.md) §4(d).
+3. Feed their edits back through Fable 5 — it updates `web/legal.py` and
+   bumps the document version, which automatically routes every signed-in
+   account through re-acceptance. That's the mechanism, not a promise.
+4. When they sign off, ask Fable 5 to remove the DRAFT banners and record the
+   sign-off date.
+5. **Verify:** the four pages render without DRAFT banners and carry dated
+   versions.
+
+#### F.4 — Vendor data-processing terms + hosting region
+
+MediaHub sends data to a handful of providers; each needs its processing
+terms accepted and a lawful UK→US transfer mechanism confirmed.
+
+1. Work down the live-provider list: Google (Gemini API), Anthropic, Stripe,
+   Render — plus any you have switched on (Buffer, Photoroom, Replicate,
+   ntfy).
+2. For each: accept/execute their data-processing terms (usually a dashboard
+   checkbox or a published DPA) and keep a dated copy in one folder.
+3. For US vendors, confirm UK–US Data Bridge certification, or execute their
+   IDTA/UK Addendum.
+4. Where a "don't train on my data" toggle exists (Google AI, Anthropic),
+   switch it off and screenshot it.
+5. In Render: pin the region, confirm disk encryption, confirm TLS/HSTS at
+   the edge.
+6. **Verify:** every subprocessor named in the Privacy Notice §7 has a
+   recorded agreement in your folder — and tell Fable 5 about any provider
+   you add or drop so the notice stays true.
+
+#### F.5 — Submit the Swim England API application
+
+Swim England's approved-systems API grants official swim-times data (not
+promotion — see [ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)).
+The application is already drafted and submission-ready.
+
+1. Open [`commercial/SWIM_ENGLAND_API_APPLICATION.md`](commercial/SWIM_ENGLAND_API_APPLICATION.md)
+   and fill in the founder/identity details (same values as F.2).
+2. Re-verify the submission contact from Swim England's 1 Oct 2025
+   approved-systems announcement — it may have moved.
+3. Send it, and record "applied" on the operator console
+   (`/operator/commercial`).
+4. Chase politely after ~4 weeks.
+5. The standing threshold: if no NGB movement after ~6 months, deprioritise
+   the channel and lean on direct + referrals.
+
+#### PC.4 — Quote real prices (the pricing gate)
+
+Don't publish a price — *discover* one. `/pricing` deliberately shows
+"Pricing TBC" until **≥5 clubs have paid an annual prepay at a tested
+price**; it then derives the public list price from the highest tested figure
+that cleared. Everything below is already built.
+
+1. For each interested club, pick a real annual figure inside the candidate
+   band (**£49–£99/mo billed annually ≈ £588–£1,188/yr**) and vary it across
+   clubs — that variation *is* the price discovery.
+2. Record the quote on `/operator/commercial` (the quote ledger). It gives
+   you a per-quote Stripe Checkout link that charges exactly the quoted
+   figure (needs F.1 done).
+3. Send the link. The signed webhook records the payment automatically,
+   idempotently and amount-verified.
+4. Record declines too — a "no" at £1,188 teaches as much as a "yes" at £708.
+5. Annual prepay is non-negotiable: volunteer-org churn runs 3–7 %/month and
+   annual billing cuts it ~30–40 %.
+6. **Done when:** the console's pricing gate shows ≥5 paid annual —
+   `/pricing` switches itself on at the highest cleared price.
+
+#### PC.6 — Win the first ~10 paying clubs (the traction gate)
+
+This is *the* Phase C exit gate. The evidence says it is reached by warmth
+and referrals, never cold broadcast (warm founder-led sales close ~30–50 %;
+cold-to-paid runs ~0.3–1 %, which would need 1,000–3,000 quality contacts —
+not viable solo).
+
+1. Read [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md). The first club doubles as
+   the pilot and will surface UX holes no audit can.
+2. List 10–15 warm clubs from the Swansea / South-East-Wales network — clubs
+   you can reach through someone they already know (Swim Wales has ~80–90
+   affiliated clubs; it is a tight community).
+3. Book in-person demos. The sharpest demo: open `/try` with **their own
+   latest meet results** — watermarked branded cards in front of them, no
+   account needed.
+4. Close warm leads with PC.4 quotes (annual prepay only). Aim for ~3–5
+   paying clubs from the local base, high-touch.
+5. Ask every signed club for **two named introductions** to peer clubs — the
+   designed route from 5 to 10. Track who still owes intros on
+   `/operator/commercial` (the referral-debt readout).
+6. Manufacture warmth at county/regional meets: produce real branded output
+   for host and visiting clubs at the event.
+7. Use cold outreach only as a capped supplement to book a handful of
+   discovery calls — the console's cold-share readout flags when it creeps
+   up.
+8. **Done when:** ≥10 clubs pay annually. Expect ~3–6+ months; the dominant
+   failure mode is the motion not being run, not the close rate.
+
+#### F.6 — Production ops decisions
+
+The boring decisions a paying customer silently assumes someone has made.
+
+1. Set `MEDIAHUB_RETENTION_DAYS` on Render to the retention period you want —
+   and tell Fable 5 if you change it later, so the Privacy Notice's retention
+   table keeps matching what the code does.
+2. Name the breach owner (you): the person who notifies affected clubs
+   without undue delay and the ICO within 72 hours. The incident runbook
+   (PC.14's code half) records this once it lands.
+3. Get professional-indemnity + cyber insurance quotes (small-SaaS brokers
+   cover this cheaply).
+4. Decide reels: buy the Remotion company licence, **or** set
+   `MEDIAHUB_REEL_ENGINE=ffmpeg` (the free engine). Don't ship for-profit on
+   unlicensed Remotion.
+5. Open the bundled demo sample (`samples/MISM-2024-Results.pdf`) and confirm
+   you are comfortable it contains no real children's data you lack a basis
+   to show; if not, have Fable 5 swap in a synthetic file.
+6. Confirm Render disk snapshots are on (the off-site backup + rehearsed
+   restore is PC.14's code half).
+
+#### F.7 — Seasonal qualifying-times refresh (recurring)
+
+"Qualified for Counties!" cards (W.4) depend on season-current tables that
+are curated, not scraped.
+
+1. Each season, follow the runbook in `data/standards/README.md`: download
+   the new county/regional/national qualifying-time PDFs.
+2. Hand them to Fable 5 to convert into the versioned dataset format under
+   `data/standards/<season>/` with per-table provenance (source URL + date).
+3. **Verify:** one known qualifying swim produces a "qualified" card naming
+   the new standard and its source.
+
+#### F.8 — Meta verification paperwork (parked until P4.2 nears)
+
+Instagram/Facebook auto-posting needs Meta Business Verification + App
+Review — $0 but **weeks of calendar time**, so start the clock early when P4
+work approaches. Until then, P4.1 (Bluesky/Mastodon) and P4.6 (Telegram) need
+no review at all.
+
+1. Create a Meta Business Portfolio and complete Business Verification
+   (company documents — F.2's identity helps here).
+2. Create the Meta app; request `instagram_content_publish` and
+   `pages_manage_posts` via App Review, with screen recordings of the
+   connect-and-post flow.
+3. Expect ~2–4 weeks per permission; one review covers Facebook Pages +
+   Instagram (Threads is scoped separately).
+
+## To do — things Fable 5 can build
+
+Ask in any session ("build PC.9"). Order = recommended priority: the four
+**sell-gate code remainders** (PC.11–PC.14) make the founder list's first
+sale lawful and trustworthy, so they outrank everything; then the referral
+engine; then the gated expansion phases. **Phases 3–6 are gated** — they wait
+until a club can sign up, pay and publish with zero founder involvement,
+**and** ≥10 clubs pay annually, **and** the lawful-to-sell gate holds (see
+Phase C). Two flagged exceptions: P4.5 (email digests) and P4.6 (Telegram)
+are review-free, sell-supporting **pull-forward candidates** at your
+discretion.
 
 <!-- ROADMAP:TODO -->
-- **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
-- **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
-- **PC.11** · Phase C 🥇 (sell gate) — Legal & privacy pack: public Terms + Privacy Notice with versioned signup acceptance, club DPA (Art. 28 processor terms), published subprocessor register + transfer disclosures, ICO registration (founder action) · 🔵 **IN PROGRESS — code surface shipped (PR #352); remaining: ICO registration, identity placeholders, solicitor sign-off, subprocessor guard test**
-- **PC.12** · Phase C 🥇 (sell gate) — Minors' consent & safeguarding gate: W.2's consent ledger enforced at generation + public wall + publish gate, plus a Children's-Code pass on the public surfaces · 🔵 **IN PROGRESS — onboarding parental-consent attestation shipped (PR #352); the per-athlete consent registry (W.2) and Children's-Code pass remain**
-- **PC.13** · Phase C 🥇 (sell gate) — Data lifecycle & rights: self-serve account/org deletion, org-level data export (SAR/portability), documented retention schedule · 🔵 **IN PROGRESS — account deletion, athlete erasure cascade, account export, retention schedule + sweep shipped (PR #352); remaining: whole-org deletion + org takeout ZIP**
-- **PC.14** · Phase C 🥇 (sell gate) — Operational trust pack: transactional-email seam (password reset, verification, breach notice, member invites), DATA_DIR backup + restore drill, support contact + incident runbook, VAT/invoice hygiene · 🔵 **IN PROGRESS — CCR/DMCCA pre-contract checkout + support-contact surface (placeholder) shipped (PR #352); email seam, backups, runbook, VAT remain**
+- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder: a guard test pinning the subprocessor register to the env-flag surface, and resolve the two unlicensed `vendor/` reference dirs (founder half = F.2/F.3/F.4) · 🔵 **IN PROGRESS**
+- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder: surface W.2 consent state on the public wall + a documented Children's-Code pass over `/wall`, the embed, the feeds and `/try` · 🔵 **IN PROGRESS**
+- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder: whole-org deletion cascade + org-level takeout ZIP (runs, media, captions, consent state, audit log) · 🔵 **IN PROGRESS**
+- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder: transactional-email seam (password reset, verification, member invites, breach notice), off-site `DATA_DIR` backup + rehearsed restore, incident runbook, invoice/VAT hygiene (founder half = F.1/F.6) · 🔵 **IN PROGRESS**
 - **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
@@ -108,7 +349,555 @@ Standing context).
 - **P6.24** · Phase 6 (gated) — Pro editor & round-trip: layers/align/guides/page management as validated spec patches, vector node/boolean ops, curves/levels recipes, layered SVG/PSD export-import; deep darkroom/DTP stays a round-trip non-goal · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO -->
 
-## Completed
+## Changelog
+
+### Strategy changelog (hand-written — newest first)
+
+One table row per strategy/roadmap change, added by hand (the daily roadmap
+engine or a Fable 5 session). Engineering ships are tracked by the Completed
+list and the auto table below, not here.
+
+| Date | Change | Read more |
+|---|---|---|
+| 2026-06-12 | **UK legal compliance baseline shipped (PR #352):** in-product Terms / accurate Privacy Notice / Cookie Policy / Art. 28 DPA with versioned, recorded acceptance; erasure cascades, account deletion + export; correction/takedown workflow; retention sweep; CCR/DMCCA pre-contract checkout; auth rate-limiting + security headers; DPIA draft. PC.11/PC.13 mostly delivered, PC.12/PC.14 started; the founder half became the F.* list above. | [COMPLIANCE_AUDIT](COMPLIANCE_AUDIT.md) · [COMPLIANCE_HANDOVER](COMPLIANCE_HANDOVER.md) |
+| 2026-06-12 | **Compliance-readiness audit:** Phase C had been pushing "go sell" with zero legal surface — compliance had no owning channel because Phase C was composed from a revenue diligence. Fix: a third **lawful-to-sell exit gate** + four sell-gate items **PC.11–PC.14**; no paid contract before gate 3 holds. | [ADR-0015](adr/0015-compliance-readiness-sell-gate.md) |
+| 2026-06-11 | **Phase C build-out:** PC.7 try-before-signup demo, PC.8 sponsor manager + exposure reports, PC.10 public achievements wall shipped; `/pricing` now enforces PC.4's revealed-WTP gate (≥5 paid annual); PC.6 audited build-complete. What remains on PC.4/PC.6 is the founder's selling motion. | Phase C section |
+| 2026-06-11 | **Phase 6 added:** every content-creation feature in the two competitor inventories (Canva, Adobe Express) gets a MediaHub-shaped, first-party build plan — 24 gated work packages (P6.1–P6.24) with a coverage index. | [CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) |
+| 2026-06-11 | **Daily scan — no material change:** competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion move; platform policies unchanged; Swim England club-API news only reinforces the queued Route C go/no-go. | [ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md) |
+
+### Recent code activity (auto-updated — newest first)
+
+<!-- ROADMAP:ACTIVITY -->
+| Date | Commit | Summary |
+|---|---|---|
+| 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
+| 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
+| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
+| 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
+| 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
+| 2026-06-12 | `56d01c8fa` | docs(roadmap): record the UK legal compliance baseline against the PC.11-PC.14 sell gate |
+| 2026-06-12 | `cd34d6807` | style: apply pre-commit ruff-format (fixes Repo hygiene CI) |
+| 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
+| 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
+| 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
+<!-- /ROADMAP:ACTIVITY -->
+
+## The rules we build by
+
+Decisions already made — don't re-open them mid-build. Full reasoning lives
+in the linked records. (An **ADR** is an Architecture Decision Record: a
+short note of a decision and why, kept in [`docs/adr/`](adr/).)
+
+1. **Hosted only.** Clubs use MediaHub in the browser on our deployment. We
+   never offer a copy to run themselves, free or paid — that would hand power
+   users a permanent zero-revenue escape hatch.
+   ([ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md))
+2. **Commercialise before generalise.** Phase C outranks all capability
+   work. P3–P6 wait for gate 1 (zero-founder onboarding) and gate 2 (≥10
+   clubs paying annually).
+   ([SCALING_DILIGENCE_2026](research/SCALING_DILIGENCE_2026.md))
+3. **Lawful-to-sell before sold.** Gate 3: no paid contract before the legal
+   pack, the minors' consent gate, deletion/export rights, and the
+   password-reset/breach/backup basics hold.
+   ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md))
+4. **Stop polishing and sell.** The generative engine cleared the "sellable
+   wedge" bar (P1.4); further graphics polish sits strictly behind sell-side
+   progress.
+5. **Facts are code; judgement is AI; errors are honest.** Parsers,
+   detectors, the ranker and the colour-science stay deterministic — never an
+   AI guess. Creative judgement goes through `media_ai.llm` / `ai_core.llm`
+   (Gemini first, Anthropic failover); with no provider configured the app
+   shows an honest error, never a faked caption or palette.
+   (See [`../CLAUDE.md`](../CLAUDE.md).)
+6. **A human approves before anything publishes. Always.** The single
+   exception: a workspace may opt one post type into `fully_autonomous`, and
+   even then every post must pass the full publish gate — kill switch,
+   provenance, confidence, brand safety, rate caps, and **minors' content
+   never auto-publishes**. ([AUTONOMY_MODEL](AUTONOMY_MODEL.md))
+7. **Swim England: data yes, promotion no.** Apply for the official data API
+   (real, dated — F.5); do not plan around NGB promotional endorsement (no
+   evidence it exists for content tools).
+   ([ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md))
+8. **Do / don't (only what the evidence supports).**
+   **DO:** warm-first hand-sell from the Swansea network · annual prepay ·
+   a referral engine (2 named intros per signed club) · the Swim England API
+   application · Bluesky + Mastodon as the first free publish targets.
+   **DON'T:** paid ads · viral-growth assumptions · VC fundraising · US
+   expansion before UK validation · multi-sport before ≥10 paying clubs ·
+   reliance on NGB promotion · launch-day Instagram/TikTok auto-posting ·
+   ToS-breaching scraping of results data.
+9. **Honest money expectations (estimates, not promises).** Swimming-only
+   saturates at ≈ £150k–£400k ARR (~1,300 UK&I + ~2,740 USA clubs). The old
+   "£1M/month" goal is dropped — £1M+ ARR needs multi-sport breadth *and*
+   institutional buyers *and* almost certainly a second person. The horizons:
+
+| Horizon | Paying clubs | ARR @ £588–£1,188/club | Outcome probability `[ESTIMATE]` | Binding constraint |
+|---|---|---|---|---|
+| **H1 — Validation** (≤ ~12 mo) | ~10 (the traction gate) | ≈ £6k–£12k | **~40–55%**, *conditional on the founder actually running the warm + referral motion* | Founder selling-time; first revealed WTP (PC.4) |
+| **H2 — Early scale** (~1–2 yr) | ~30–60 | ≈ £18k–£71k | **~25–40%** — needs H1 + referral compounding + retention (annual prepay) | Support capacity (multi-tenancy already shipped — PC.3) |
+| **H3 — Swimming ceiling** (~2–4+ yr) | ~125–680 (price-dependent) | **≈ £150k–£400k** | **~10–20%** — needs UK *and* US penetration + a second person | Market size + support capacity |
+| **H4 — £1M+ ARR** | (out of wedge) | **≥ £1M** | **low-double-digit-%** — multi-sport (Route A) + institutional buyers (Route B) + a second person | Out-of-wedge expansion |
+
+10. **The head start is real but undefended.** Verified June 2026: no swim
+    incumbent ingests a result file and emits branded ranked content — but
+    that is a *time advantage, not a moat*. Watch item: Gipper adding
+    result-file ingestion would close it.
+
+**Companion docs:** [POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md) ·
+[CONTENT_PLANNER](CONTENT_PLANNER.md) · [AUTONOMY_MODEL](AUTONOMY_MODEL.md) ·
+[SPORT_PROFILES](SPORT_PROFILES.md) ·
+[ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md) ·
+[DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md) · [THEMING](THEMING.md) ·
+[GENERATION](GENERATION.md) ·
+[CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) (Phase 6 long-form) ·
+evidence base in
+[research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md) and
+[research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md) ·
+ideas backlog in
+[research/PRODUCT_IDEAS_2026-06.md](research/PRODUCT_IDEAS_2026-06.md).
+
+---
+
+## The plan in depth — open phases
+
+The long-form plan for everything still open, highest priority first.
+Completed phases (0, 1, 2, W) and shipped Phase C items live under
+**"Done"** at the bottom.
+
+### Phase C — Commercialise & Distribute · PC · 🔵 **IN PROGRESS** · 🥇 TOP PRIORITY
+
+> **Why "Phase C", not a number:** it is lettered because it does not sit
+> *after* Phase 5 — it sits **ahead of every numbered expansion phase in
+> priority**. Added in the 2026-06 diligence reconcile
+> ([ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md)); evidence in
+> [SCALING_DILIGENCE_2026](research/SCALING_DILIGENCE_2026.md).
+
+**Goal.** Make MediaHub sellable without the founder in the loop — and lawful
+to sell.
+
+**State (2026-06-12).** The engineering is essentially done: signup/auth
+(PC.1), Stripe billing code (PC.2), org→workspace multi-tenancy (PC.3,
+[ADR-0014](adr/0014-org-workspace-multitenancy-schema.md)), the revealed-WTP
+pricing machinery and warm-first funnel tooling on `/operator/commercial`
+(PC.4/PC.6 build halves), the `/try` demo (PC.7), the sponsor manager (PC.8),
+the public wall (PC.10) and the UK legal-compliance baseline (PR #352) have
+all shipped — condensed records under "Done". Still open: the four
+**sell-gate code remainders** (PC.11–PC.14 — Fable 5 list) and the founder's
+selling + paperwork motion (F.1–F.8, PC.4, PC.6 — founder list). **Zero
+paying clubs today; code is no longer the excuse.**
+
+**Exit criteria (three hard gates).**
+
+1. **Commercial-readiness gate:** a club can sign up, pay, and publish with
+   **zero founder involvement**. No scaling work (P3–P6) starts until this
+   holds.
+2. **Traction gate:** **≥10 clubs paying annually** before any new sport. If
+   the wedge stalls below ~50 clubs over time, that is a retention/PMF
+   problem to fix — **not** a signal to add sports.
+3. **Compliance-readiness ("lawful-to-sell") gate** (added 2026-06-12,
+   [ADR-0015](adr/0015-compliance-readiness-sell-gate.md)): **no paid
+   contract** before versioned Terms + Privacy Notice are live and accepted
+   at signup, the club DPA exists, ICO registration is done, the minors'
+   consent gate enforces end-to-end, deletion + export work, and
+   password-reset / breach-notice / verified-backup basics are in place.
+   Quotes (PC.4) and the funnel (PC.6) keep moving; a quote may not convert
+   to payment until this gate holds.
+
+#### PC.4 — Pricing by revealed willingness-to-pay · 🔵 founder work (guide above)
+
+Build shipped 2026-06-11: a quote ledger (`commercial/wtp.py`,
+`DATA_DIR/commercial/wtp_quotes.jsonl`), per-quote Stripe Checkout charging
+exactly the quoted figure, an idempotent amount-verified webhook, and both
+gates live on `/operator/commercial`. `/pricing` reads the gate and stays at
+the honest "Pricing TBC" until **≥5 clubs have paid annual at a tested
+price**, then commits the highest cleared figure. The rule (the
+>95 %-confidence step): under-pricing is hard to reverse and over-pricing
+with no buyers teaches nothing — only revealed WTP from real annual payments
+de-risks the tier. The price *levels* remain an unvalidated hypothesis:
+
+| Comparator | Segment | Current price | What it anchors |
+|---|---|---|---|
+| **Gipper** (closest analog) | US K-12/college athletic depts | **$625 / $1,500 / $3,000 per year, annual-only** *(verified 2026-06-09)* | The institutional ceiling with a sales motion |
+| **Predis.ai** (horizontal AI) | Any SMB / creator | **$19 / $40 / $212 per month** *(verified 2026-06-09)* | The buyer's mental ceiling for "AI makes my posts" |
+| **SwimTopia** (swim incumbent) | Swim clubs | ~$150–$699/yr annual | What a club pays when software is mission-critical |
+| **Canva Free** | Volunteer creator | **£0** | The free substitute every volunteer already has |
+| **Swim Wales affiliation** | Whole NGB relationship | £150/yr | The volunteer treasurer's anchor for "what anything costs" |
+
+Read together: the commodity floor and the £150/yr NGB anchor pull the Club
+tier down; Gipper proves a far higher institutional ceiling — but only for a
+schools/federation buyer with a budget. That gap is why Routes B/C carry the
+revenue weight and why the Club tier must be set by revealed WTP, not assumed.
+
+#### PC.6 — Go-to-market / distribution · 🔵 founder work (guide above)
+
+Distribution kills solo ventures, not product gaps. Instrumented 2026-06-11:
+lead ledger by source, cold-share readout, referral-debt readout
+(`commercial/pipeline.py` on `/operator/commercial`); the Swim England
+application is drafted and submission-ready (F.5). The channel evidence:
+
+- **NGB, split in two** (reality-checked, [ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)):
+  **(a) data-API access is real — apply** (Swim England approved-systems API,
+  announced 1 Oct 2025; grants data + credibility, not promotion);
+  **(b) promotional endorsement is speculative** — partner slots are
+  category-exclusive and already held; if no NGB movement after ~6 months,
+  lean on direct + word-of-mouth. The down-weight reinforces **Route C**
+  (incumbent integration) as the realistic distribution partner.
+- **Warm-first design** (the >95 %-confidence part): warm/in-person
+  founder-led sales convert ~30–50 % vs ~2–5 % cold reply; SaaS referrals
+  drive 20–50 % of new B2B customers. Honest funnel to the gate: **~5
+  local-warm + ~5 referral**, cold as a capped supplement
+  (~0.3–1 % cold-to-paid ⇒ 1,000–3,000 contacts to do it cold — not viable
+  solo). Realistic timeline **~3–6+ months**. The *outcome* is unproven and
+  IS the validation — it also closes PC.4.
+
+#### PC.9 — In-product referral engine · ❌ **NOT STARTED** (Fable 5)
+
+Runs PC.6's compounding mechanism (2 named intros per signed club) inside
+the product instead of operator ledgers. **Build:** referral codes per org;
+signup accepts a code and records the lead in `commercial/pipeline.py` with
+source=referral; the reward (a free month as a Stripe coupon via
+`web/billing.py`) auto-grants when the referred club's first annual payment
+lands amount-verified in `commercial/wtp.py` (the idempotent webhook hook
+already exists); the referral-debt readout on `/operator/commercial` switches
+from manual entries to live code-tracked state. **Exit:** a signed club has a
+shareable code; a paid referral auto-grants the reward and updates the funnel
+ledger with zero operator typing.
+
+#### PC.11 — Legal & privacy pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+
+The contractual minimum to take a club's money: MediaHub is a **processor**
+for clubs (the controllers) over personal data that is largely **children's**.
+**Shipped (PR #352):** `/terms`, `/privacy` (accurate Art. 13/14 notice),
+`/cookies`, `/dpa`; versioned signup acceptance recorded in
+`legal_acceptances.jsonl` with forced re-acceptance on a `TERMS_VERSION`
+bump; per-workspace DPA acceptance + lawful-basis attestation; subprocessor +
+transfer disclosures. **Remaining — code:** a guard test pinning the
+subprocessor register to the env-flag surface (a new provider can't ship
+undisclosed); resolve the two unlicensed `vendor/` reference dirs.
+**Remaining — founder:** ICO registration + identity placeholders (F.2),
+solicitor sign-off (F.3), vendor DPAs (F.4). **Exit:** an account cannot be
+created without recorded acceptance of a versioned ToS + Privacy Notice; an
+org owner has a recorded DPA acceptance; the subprocessor guard test is
+green; ICO registration is logged on the operator console.
+
+#### PC.12 — Minors' consent & safeguarding gate · 🔵 **IN PROGRESS** *(sell gate — W.2 promoted 2026-06-12)*
+
+The product's core output is *publishing children's achievements*; consent
+handling stops being optional the day money changes hands. **Shipped:** W.2
+itself — the per-athlete consent registry (photo OK / full name / initials-
+only / do-not-feature; most-restrictive default; CSV import) enforced
+deterministically at generation, in photo scoring and at the publish gate
+(see "Done" → W.2) — plus workspace-setup parental-consent attestation
+(PR #352). **Remaining — code:** surface W.2 consent state on the public
+wall (beyond the initials-first default), and a documented
+**Children's-Code (Age Appropriate Design) pass** over the public surfaces
+(`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a no-consent
+athlete cannot render a name/photo, cannot pass the gate, and cannot appear
+on the wall; the review UI explains why; the Children's-Code pass is
+recorded; the NGB application's safeguarding claims are all true in code.
+
+#### PC.13 — Data lifecycle & rights · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+
+The data-subject-rights plumbing a controller club will ask its processor
+for. **Shipped (PR #352):** self-serve account deletion (compacting,
+tombstone-free), athlete erasure cascading through runs / rendered assets /
+PB + research caches / caption memory / posting-log excerpts (test-pinned),
+account export, a correction/takedown workflow, and the retention schedule
+published in the Privacy Notice + enforced by the `MEDIAHUB_RETENTION_DAYS`
+sweep. **Remaining — code:** whole-org deletion cascading runs, media,
+content packs, wall token, sponsor/exposure ledgers and the consent registry
+(Stripe customer handled per the DPA), plus an org-level **takeout ZIP**
+(runs JSON, media, captions, consent state, audit log — serves SARs and
+portability in one mechanism). **Exit:** a club owner can delete their org or
+export everything it holds without founder involvement; deletion verifiably
+removes the data from `DATA_DIR` (pinned under the ADR-0003/0014 isolation
+invariants); the published schedule matches what the code does.
+
+#### PC.14 — Operational trust pack · 🔵 **IN PROGRESS** *(sell gate — ADR-0015)*
+
+The boring things a paying customer silently assumes. **Shipped (PR #352):**
+the CCR/DMCCA pre-contract checkout (`/billing/confirm`: price honesty,
+auto-renewal disclosure, cancellation parity, recorded cooling-off
+acknowledgement) and the support contact surfaced in footer/ToS (placeholder
+until F.2). **Remaining — code:**
+
+- **Transactional-email seam** (Resend-style HTTP API behind an env key,
+  honest-503 unconfigured — pulls P4.5's seam forward without the digest
+  product): password reset (signed expiring token), email verification,
+  member-invite delivery, and an operator "notify all users" path for breach
+  notification — the ICO's 72-hour clock needs a working channel, not a plan
+  to build one.
+- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
+  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs), and a
+  *documented, rehearsed* restore — an unrestored backup is a hypothesis.
+- **Support + incident runbook** checked into `docs/` (detect → contain →
+  assess → notify ICO/clubs).
+- **Billing hygiene:** Checkout emits an invoice/receipt a volunteer
+  treasurer can file; VAT decision implemented per F.1.
+
+**Remaining — founder:** renewal reminders + VAT decision (F.1), breach owner
++ insurance (F.6). **Exit:** a user can reset their password unaided; an
+invite email actually arrives; a restore from backup has been performed and
+documented; the support contact and runbook exist; a test payment produces an
+expensable invoice.
+
+#### Strategy notes — the three credible £1M+ routes (context, *not* build items)
+
+The only routes the diligence considers arithmetically credible for £1M+,
+recorded so the expansion phases stay sequenced with revenue in mind. **All
+figures are estimates.**
+
+- **Route A — Multi-sport UK grassroots** (broadest TAM, weakest moat;
+  confidence of £1M ~15–20 %) → sequences **P3**.
+- **Route B — US schools/colleges** (highest WTP, proven by Gipper/FanWord at
+  $625–$3,000/yr; needs US presence; <15 % solo, higher with a partner).
+- **Route C — Content/integration layer for swim-data incumbents** (license
+  the engine to SwimTopia/TeamUnify rather than fight them; trades upside for
+  survival; ~50/50 it beats going direct).
+
+**Highest-leverage combination:** NGB data-API access + incumbent integration
+(Route C) for *distribution* + US-schools repositioning (Route B) for
+*revenue*.
+
+**Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the
+existing `DATA_DIR` ledgers (no SQLAlchemy); the shipped ADR-0003 isolation
+invariant; Postiz / Mixpost org→workspace schemas as *reference only* over a
+network boundary (never embed AGPL —
+[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
+
+**Dependencies.** Upstream of **P3 / P4 / P5 / P6** — all gated behind the
+three exit criteria above.
+
+---
+
+### Phase 3 — Broaden ingestion spokes · P3 · ❌ **NOT STARTED (gated)**
+
+**Goal.** Ingest beyond swimming and normalise every spoke to the canonical
+schema, so a second sport produces real content end-to-end.
+
+**Exit criterion.** **≥1 non-swimming sport** produces real content
+end-to-end from a real data source (football via openfootball, or basketball
+via nba_api), with a registered `recognition_<sport>` adapter and its sport
+profile wired in.
+
+- **P3.1 — Second-sport engine adapter.** `recognition_football` or
+  `recognition_basketball` + `register_sport(...)` (the seam exists —
+  [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the
+  profile.
+- **P3.2 — Sports-data API spokes.** `nba_api`, `openfootball`, fixture
+  generators; each normalised to `canonical.*`.
+- **P3.3 — Running/athletics parsers.** Chip-timing CSV + client-side Garmin
+  `FIT` parsing. This sport needs custom parsers — open-source coverage is
+  sparse.
+- **P3.4 — Normalise all spokes to the canonical schema.** Separate raw
+  extraction from cleaned canonical data; flag ambiguous rows for review.
+
+**Building blocks.** `swar/nba_api` (open, keyless — *verify*), `openfootball`
+(**public domain**), `ndPPPhz/Fixture-Generator` (MIT). ⚠️ `statsbomb/open-data`
+is a **non-OSS data agreement** — use openfootball as the free default.
+([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
+
+**Dependencies.** Needs **P1 ✅** (sport profiles + taxonomy). Pairs with
+**P4** (new sports → new audiences → more publishing targets). Note:
+`results_fetch/` already does sport-agnostic *ingestion* from a URL; P3 adds
+the per-sport *detector* quality.
+
+---
+
+### Phase 4 — Direct-to-platform publishing · P4 · ❌ **NOT STARTED (gated; P4.5/P4.6 pull-forward candidates)**
+
+**Goal.** Replace the paid Buffer dependency with direct platform adapters,
+prioritising the genuinely-free targets.
+
+**Exit criterion.** Posts publish via **direct APIs to ≥2 platforms including
+a genuinely-free one** (Bluesky and/or Mastodon), with Buffer demoted to
+optional.
+
+#### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌
+
+The free/open posting targets — build these first. **Build detail (June 2026
+feasibility pass):** `publishing/bluesky.py` (AT Protocol; app-password or
+OAuth — **no app review or business verification exists at all**) and
+`publishing/mastodon.py` (per-instance REST; apps register programmatically),
+both beside `buffer.py`, both gated by the P2.3 publish gate and writing
+`publishing/posting_log.py`; per-workspace account binding in Settings; image
++ W.11 alt-text first, video where the instance allows. Each adapter is days,
+not weeks — they rehearse the connector pattern (connect → gate → post → log
+→ audit) before the Meta review lands, and they make the autonomy story
+demonstrable end-to-end on a zero-risk network.
+
+#### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌
+
+Least-privilege per integration; a human connects each account. **Platform
+API policy gates auto-posting (verified June 2026):** Instagram
+content-publishing needs a Business/Creator account + a connected Facebook
+Page + Meta **App Review** (~2–4 weeks/permission) + **Business
+Verification**; TikTok's *unaudited* Content-Posting client can post only
+**private (SELF_ONLY), ≤5 users/24h** until it passes an audit. That is *why*
+P4.1 ships first and why F.8 starts the Meta paperwork early — the clock runs
+in parallel instead of after. Code needs when it opens: a Pillow **JPEG
+export** path in `graphic_renderer` (the IG API is JPEG-only), a "Connect
+Instagram" flow, and `publishing/meta.py` behind an operator flag + the
+publish gate. IG limits are workable (100 API-published posts/24h incl.
+Reels/Stories/carousels); group packs as **carousels** by default (the
+engagement format in the 2025 benchmarks). **TikTok and YouTube stay deferred
+until clubs demand them.**
+
+#### P4.3 — X adapter · ❌
+
+X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
+
+#### P4.4 — Demote Buffer to optional · ❌
+
+**Resilience work, not preference:** Buffer's classic developer API has been
+closed to new developers since 2019, remaining third-party integrations were
+cut off 1 Mar 2025, and the 2026 beta API lacks third-party OAuth — so the
+current connector (`publishing/buffer.py`) runs on borrowed time and cannot
+onboard new clubs' accounts. P4.1/P4.5/P4.6 are the replacement paths; keep
+Buffer only while the legacy token still functions, and surface an honest
+error the day it stops.
+
+#### P4.5 — Email digest delivery · ❌ *(pull-forward candidate during Phase C)*
+
+The v7.3 grouped newsletter already builds
+(`/api/runs/<run_id>/newsletter`, `content_pack/builder.py`) — nothing can
+send it. Email needs no platform review, clubs already run parent lists, and
+costs are trivial (Resend: free to 3k emails/mo). **Build:**
+`publishing/email.py` behind a provider seam (Resend first; honest-error
+unkeyed); a per-workspace member list (CSV import with consent capture,
+one-click unsubscribe + suppression list — unsubscribes honoured before any
+send); a weekly `scheduler/` job assembling approved-card digests; the PC.8
+sponsor slot and W.11 alt text in the template; W.9 approval links ride the
+same channel. **Exit:** a club imports members and receives a weekly digest
+of approved content; unsubscribes stick; unkeyed deployments honest-error.
+
+#### P4.6 — Telegram channel publishing (+ WhatsApp share stopgap) · ❌ *(pull-forward candidate during Phase C)*
+
+The best effort-to-value publish target found in the June 2026 feasibility
+pass: the Telegram Bot API is free, needs no review, and sends **PNG and MP4
+natively** — reels currently have no scheduled outlet anywhere. WhatsApp has
+no official Channels API, so the legitimate answer today is a share
+affordance. **Build:** `publishing/telegram.py` (per-workspace bot token +
+channel binding; `sendPhoto`/`sendVideo` with caption + W.11 alt text) behind
+the publish gate + posting log; a review-UI "share to WhatsApp" button (copy
+caption, download media, open `wa.me`). **Exit:** an approved card *and* a
+reel both land in a connected Telegram channel through the gate with full
+audit; the WhatsApp button works on mobile.
+
+**Building blocks.** Bluesky / Mastodon (free/open) first; the Telegram Bot
+API and a Resend-seamed email channel join the genuinely-free tier; Postiz
+adapters as *reference only* (**AGPL** — read the patterns or call over its
+API; never embed).
+
+**Dependencies.** Needs **P2 ✅** (autonomy + guardrails govern what may
+auto-publish) and **P0 ✅** (Buffer is a flagged, optional paid path).
+
+---
+
+### Phase 5 — Local-AI substitution everywhere · P5 · ❌ **NOT STARTED (gated)**
+
+**Goal.** Give every AI call a zero-cost local path, completing the
+no-hidden-fees discipline for the hosted deployment's margins.
+
+**Exit criterion.** With **no cloud keys configured**, the full pipeline
+(caption, cutout, voice, graphics, reels) runs **locally end-to-end** —
+honest-erroring only where a local model is genuinely unavailable.
+
+- **P5.1 — Ollama LLM provider.** Both wrappers already accept a keyless
+  OpenAI-compatible endpoint (`MEDIAHUB_LLM_ENDPOINTS=http://localhost:11434/v1`
+  reaches a running Ollama today — P0.4); what remains is shipping/operating
+  the model runtime, model-selection defaults, and the operator workflow.
+- **P5.2 — Piper TTS replaces edge-tts.** The provider slot is already
+  registered (`MEDIAHUB_TTS_PROVIDER=piper` honest-errors until this lands) —
+  P5.2 fills the slot with the real backend.
+- **P5.3 — whisper.cpp / faster-whisper ASR.** Local transcription for reel
+  captions / word-level burn-in. Must land behind a provider seam — the P0.4
+  guard fails the build on any unslotted ASR import.
+- **P5.4 — Satori graphics fast-path.** ~100× lighter card rendering than
+  headless Chromium. A *performance* play, not a licensing one (P0.1's ffmpeg
+  engine already removed the Remotion requirement); slots into the same
+  `MEDIAHUB_REEL_ENGINE` seam. (The placeholder `satori` engine name was
+  removed in the dormant-features audit — register it again when the engine
+  actually ships.)
+
+**Building blocks.** All **ADOPT-NOW** licences: Ollama (MIT), Piper (MIT),
+whisper.cpp / faster-whisper (MIT), Satori (MPL-2.0). ⚠️ Avoid Coqui XTTS
+weights commercially (CPML, non-commercial) — Piper instead.
+
+**Dependencies.** Set up by **P0 ✅** (the local-capable interfaces all
+exist — P0.4). Note P5.5 (cutout) shipped long ago — rembg is already the
+default; see "Done".
+
+---
+
+### Phase 6 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · ❌ **NOT STARTED (gated)**
+
+**Goal.** Build **MediaHub's own first-party version of every
+content-creation capability Canva and Adobe Express ship** — re-expressed
+through this product's thesis (data in → meaningful, branded, approval-gated
+content out), never by integrating their tools or becoming a blank-template
+shop. The evidence base is two exhaustive competitor inventories
+([Canva](research/CANVA_FEATURE_INVENTORY_2026.md),
+[Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)); **every
+bullet in both** is mapped — feature by feature, with a completeness index —
+in [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). The 24 one-line
+work packages (P6.1–P6.24) are in the Fable 5 to-do list above; the companion
+doc carries each package's build depth and per-item exit criterion.
+
+**Gating & order.** Behind the same Phase C gates as P3/P4/P5. Within the
+phase, order is **pull-driven** — build what paying clubs ask for first; the
+numbering is a default sequence, not a promise. Standing rules hold
+everywhere: hosted-only, approval-first publishing + the P2.3 gate, the
+deterministic-engine boundary, Gemini→Anthropic honest-error AI, self-hosted
+fonts, and the GWS / 9router exclusions. External services appear only as
+optional flag-gated provider slots behind our own interfaces where
+first-party is impossible (model hosting, platform APIs, print fulfilment,
+music rights).
+
+**Exit criterion.** A club can run its **entire content life inside
+MediaHub** — social, print, email, microsite, video, documents — without
+reaching for Canva/Express; measured per-item (each P6 item carries its own
+exit in the companion doc) and in aggregate by wedge clubs actually
+cancelling their Canva habit.
+
+**Building blocks.** Almost entirely seams that already ship: the design-spec
+director + archetypes (P1.4), `graphic_renderer` + autofit + saliency, both
+reel engines (P0.1), the cutout layer, the TTS/ASR/LLM provider slots (P0.4),
+`media_library`, `workflow` + publish gate, `scheduler/`, `notify/`,
+`observability/`, PC.3 tenancy. New heavy deps stay licence-vetted per
+[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
+
+**Dependencies.** Gated behind **Phase C** (all three gates). P6.16's
+analytics loop and P6.14's send adapter additionally need **P4** adapters;
+P6.2 voice input and P6.5 captions need the **P5.3** ASR seam filled (or a
+cloud provider on the same seam). Feeds back into **PC.4** packaging
+(quotas/tiers).
+
+---
+
+### Cross-cutting investments (all phases)
+
+| Investment | Status | Notes |
+|---|---|---|
+| No-hidden-fees discipline | ✅ enforced | The [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) register is pinned by the Phase-0 guard suites: every paid path optional with a free default; every AI surface admits a local provider; no AGPL in-process. |
+| Multi-tenancy: org → workspace | ✅ shipped | PC.3 (ADR-0014) on top of the ADR-0003 invariant; pinned by `tests/test_workspace_membership_invariant.py`. |
+| Go-to-market / distribution | 🔵 selling open | The #1 risk. Tooling + drafted NGB application live on `/operator/commercial`; the founder's motion (PC.6) and the ≥10-club gate remain open. |
+| Safeguarding / minors' data | ✅ locked, extending | ADR-0003 isolation invariant + W.2 consent registry; PC.12 finishes the public-surface half. |
+| Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions land in the immutable per-org ledger. |
+| Product design / UI polish | ❌ open | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
+| Test-suite stability | ✅ | Full suite green (~3,576 passed / 1 skipped, 2026-06-09 — see CLAUDE.md "Running Tests"). Keep green. |
+| Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. |
+
+---
+
+## Done — everything shipped so far
+
+The record of completed work, kept so the plan above stays short. Order:
+the live Completed list first, then what's live today, then the completed
+phases' condensed records (newest first). Deep detail lives in the linked
+ADRs, build reports and tests.
+
+### Completed (the live list)
 
 <!-- ROADMAP:DONE -->
 - ✅ **W.1** · Phase W — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
@@ -134,7 +923,7 @@ Standing context).
 - ✅ **PC.5** · Phase C — Free-self-host tension resolved: **hosted-only**, no customer self-host tier (maintainer decision; ADR-0011) *(completed 2026-06-09)*
 - ✅ **P2.4** · Phase 2 — Per-type autonomy controls in the workspace: Settings → Autonomy tab, per-profile per-type policy defaulting to approval_required, publish gate + global kill switch *(completed 2026-06-09, PR #297)*
 - ✅ **P1.4** · Phase 1 — Generative Content Engine v2, complete: Appendix A spine SEQ-0→4 (tokens, Tier B director/pool/APCA compliance ranking, gated SEQ-3 cutover with the A/B review approved, data-driven video) + the full PAR-1→8 bucket (12/12 archetype catalog); v2 is the default engine, `MEDIAHUB_GEN_V2=0` is the kill switch; evidence in `build_reports/SEQ_SPINE_2026-06-10.md` and `build_reports/GEN_QUALITY_BASELINE.md` *(completed 2026-06-10, PRs #259/#300/#301)*
-- ✅ **P0.1** · Phase 0 — Free reel fallback shipped: `MEDIAHUB_REEL_ENGINE=ffmpeg` renders story cards + meet reels from the cards’ own still graphics via FFmpeg (`visual/reel_ffmpeg.py`) — no Node, no Remotion license *(completed 2026-06-10)*
+- ✅ **P0.1** · Phase 0 — Free reel fallback shipped: `MEDIAHUB_REEL_ENGINE=ffmpeg` renders story cards + meet reels from the cards' own still graphics via FFmpeg (`visual/reel_ffmpeg.py`) — no Node, no Remotion license *(completed 2026-06-10)*
 - ✅ **P0.3** · Phase 0 — Every paid dependency provably optional behind a flag with a free default wired — pinned by `tests/test_paid_deps_optional.py` against the DEPENDENCY_LICENSING §2 register *(completed 2026-06-10)*
 - ✅ **P0.4** · Phase 0 — Local-capable provider slot on every AI surface: LLM (OpenAI-compatible endpoints incl. Ollama, both wrappers), TTS (`MEDIAHUB_TTS_PROVIDER` with the `piper` slot), ASR (guarded — none may land unslotted), graphics (server-side stills + ffmpeg reel engine + cutout `server` default) — pinned by `tests/test_local_provider_slots.py` *(completed 2026-06-10)*
 - ✅ **P0.5** · Phase 0 — AGPL isolation enforced: SearXNG stays a stock, venv-isolated, HTTP-only sidecar; `tests/test_agpl_isolation.py` fails the build on any in-process AGPL import, manifest entry, or Dockerfile drift *(completed 2026-06-10)*
@@ -143,1823 +932,221 @@ Standing context).
 - ✅ **P1.5** · Phase 1 — Brand-DNA-from-URL with no paid API (local scrape + local model + material-color-utilities) *(completed 2026-06-11)*
 - ✅ **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) *(completed 2026-06-11)*
 - ✅ **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums *(completed 2026-06-11)*
-- ✅ **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant *(completed 2026-06-11)*
+- ✅ **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs); Council-pressure-tested + operator-signed-off schema, ADR-0014 *(completed 2026-06-11)*
 - ✅ **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account *(completed 2026-06-12)*
 - ✅ **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) *(completed 2026-06-12)*
 - ✅ **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") *(completed 2026-06-12)*
 <!-- /ROADMAP:DONE -->
 
-## Standing context
-
-The short list of decided, load-bearing principles — full reasoning in the
-linked ADRs and research docs:
-
-- **Hosted-only SaaS.** No customer self-host or local-install path, free or
-  paid — a decided commercial principle
-  ([ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md)).
-- **Commercialise before generalise.** Phase C outranks all capability work.
-  Two hard gates before P3/P4/P5 start: *(1)* a club can sign up, pay, and
-  publish with zero founder involvement; *(2)* **≥10 clubs paying annually**
-  ([SCALING_DILIGENCE_2026](research/SCALING_DILIGENCE_2026.md)).
-- **Stop polishing and sell.** P1.4 cleared the "sellable wedge" bar; further
-  graphics work sits strictly behind Phase C sell-side progress.
-- **Lawful-to-sell before sold.** No paid contract before the
-  compliance-readiness gate holds: versioned Terms + Privacy Notice accepted at
-  signup, a club DPA, ICO registration, the minors' consent gate (PC.12),
-  deletion/export rights (PC.13), and password-reset / breach-notice / backup
-  basics (PC.14)
-  ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
-- **The deterministic engine is the moat.** Parsers, detectors, the ranker,
-  and colour-science stay AI-free; AI judgement goes through
-  `media_ai.llm`/`ai_core.llm` with honest errors, never heuristic fakes
-  (see [`../CLAUDE.md`](../CLAUDE.md)).
-- **Human approval before anything publishes externally. Always.**
-- **PC.3 is Council-gated.** The org → workspace schema touches the locked
-  cross-tenant isolation invariant
-  ([ADR-0003](adr/0003-pilot-safety-invariant-lock.md)) and needs
-  operator/Council sign-off before implementation.
-- **NGB channel, reality-checked.** Swim England **data-API access is real —
-  apply**; promotional NGB endorsement is down-weighted to speculative
-  ([ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)).
-
-**Companion docs:** [POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md) ·
-[CONTENT_PLANNER](CONTENT_PLANNER.md) ·
-[AUTONOMY_MODEL](AUTONOMY_MODEL.md) · [SPORT_PROFILES](SPORT_PROFILES.md) ·
-[ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md) ·
-[DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md) · [THEMING](THEMING.md) ·
-[GENERATION](GENERATION.md) ·
-[CREATIVE_SUITE_PARITY](CREATIVE_SUITE_PARITY.md) (Phase 6 long-form) ·
-research base in
-[research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md) ·
-June 2026 ideas backlog (feeds Phase W + PC.7–PC.10 + P4.5/P4.6) in
-[research/PRODUCT_IDEAS_2026-06.md](research/PRODUCT_IDEAS_2026-06.md) ·
-new-starter path: [START_HERE](../START_HERE.md) + [GLOSSARY](../GLOSSARY.md).
-
-The long-form plan follows — same document, full depth.
-
----
-
-
-## In plain words (start here)
-
-A **roadmap** is our plan for what to build next, and *why*. MediaHub is being
-**redirected**: from "swimming results → social posts" into a **content-strategy
-brain** for sports teams — software that works out *what a team should post*,
-drafts it, and (where a team allows it) publishes it largely on its own. Swimming
-becomes the **first example** of a general pattern, not the whole product.
-
-The plan now has **seven stages, Phase 0 to Phase 6**:
-
-- **Phase 0 — De-risk:** make sure nothing in the core forces a hidden fee.
-  *(✅ done — 2026-06-10.)*
-- **Phase 1 — Strategy brain:** the "what should we post?" thinking, the list of
-  post types, and a settings sheet per sport.
-- **Phase 2 — Autonomy:** per-post-type controls for how much MediaHub may post on
-  its own, with strong safety guardrails.
-- **Phase 3 — More sports & inputs:** football, basketball, running, and more.
-- **Phase 4 — Post directly:** publish straight to the platforms (and stop needing
-  the paid Buffer service).
-- **Phase 5 — Free AI everywhere:** run the AI locally so there are no per-use fees.
-- **Phase 6 — Our own creative suite:** MediaHub's own version of everything
-  Canva and Adobe Express can make — but filled in automatically from the
-  club's data instead of starting from a blank page.
-
-> These stages **supersede** the previous three-stage plan (*Parity →
-> Distinction → Leadership*). That older plan's detailed build prompts are kept in
-> the appendices for reference.
-
-> **Ahead of all six in priority (added 2026-06)** sits a new
-> **Phase C — Commercialise & Distribute**: self-serve signup, billing, true
-> multi-tenancy, sane pricing, a real way to reach clubs — and, added
-> 2026-06-12, the **legal/compliance pack** (terms, privacy, a club data
-> agreement, minors' consent, data rights, backups) that makes the first sale
-> lawful and trustworthy. The numbered phases
-> describe *capability*; **Phase C is about getting paid for it** — and a hard-nosed
-> scaling diligence
-> ([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md))
-> concludes that **comes first.** So the order is now *commercialise, then generalise*:
-> the expansions (Phases 3–5) wait until clubs can sign up and pay on their own. The
-> reasoning sits under **"A commercial reality check"** below and is recorded in
-> **[adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md)**.
-
-> **Beside the stages sits a pick-list (added 2026-06-11): Phase W — make the
-> swimming product deeper.** Fourteen researched extras — things like club
-> records, photo-consent tracking, live updates during a gala, printable
-> certificates, Welsh captions. **All fourteen were built in one integration
-> pass on 2026-06-12** (council-pressure-tested placement in
-> [`adr/0016-phase-w-integration-plan.md`](adr/0016-phase-w-integration-plan.md));
-> only W.14's platform-metrics half still waits for the P4.2 connectors. The
-> research behind all of it (22 ideas; the other eight became Phase C and
-> Phase 4 items) lives in
-> [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).
-
-Each task carries a little badge so you can see how it's going:
-✅ done · 🔵 in progress · ⚠️ stuck · ❌ not started yet.
-
-The **"Last updated"** line and the **"Recent activity"** table further down update
-themselves automatically whenever we ship something — you don't edit those by hand.
-
-> New to the team? Read **[../START_HERE.md](../START_HERE.md)** first, then come
-> back here. Tricky word? See **[../GLOSSARY.md](../GLOSSARY.md)**. The strategy
-> behind this rebuild lives in five companion docs —
-> **[POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md)** ·
-> **[AUTONOMY_MODEL](AUTONOMY_MODEL.md)** ·
-> **[SPORT_PROFILES](SPORT_PROFILES.md)** ·
-> **[ARCHITECTURE_TARGET](ARCHITECTURE_TARGET.md)** ·
-> **[DEPENDENCY_LICENSING](DEPENDENCY_LICENSING.md)** — with the evidence base in
-> **[research/ROADMAP_RESEARCH_2026.md](research/ROADMAP_RESEARCH_2026.md)** and the
-> decision recorded in
-> **[adr/0004-roadmap-rebuild-multisport-autonomy.md](adr/0004-roadmap-rebuild-multisport-autonomy.md)**.
-
----
-
-> **Reading this:** the single forward-looking roadmap for MediaHub, organised as
-> **Phase 0–6**. Only *not-yet-done* work is tracked in detail; shipped work is
-> summarised under **"Where we are today."** The previous spine's build and
-> verification prompts live in the appendices: **Appendix A** (Generative Content
-> Engine v2), **Appendix B** (growth & expansion — *legacy sequence, superseded*),
-> and **Appendix C** (Adaptive Theming Engine verification).
-
-**Strategic thesis:** MediaHub is a **content-strategy brain, not a results
-parser.** The moat is the intelligence layer — ingest → detect → rank → brand →
-generate → approve → export — now **generalised across sports** and made **largely
-autonomous**, delivered as a **hosted SaaS** (hosted-only — no customer self-host
-tier; a decided principle, see [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)).
-Results ingestion is one spoke among many.
-
-**A commercial reality check (2026-06) — *commercialise before generalising*.** The
-thesis above is a **capability** thesis. A 2026 scaling diligence
-([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md)) weighed it
-against market data and concluded the **binding constraint is distribution and
-monetisation, not more capability** — and that this roadmap, being 100% an engineering
-plan with no commercial track, was missing its most important phase. The load-bearing
-conclusions, now encoded below:
-
-> ⚠️ **All revenue figures here are hypotheses/estimates, not facts** — see the
-> diligence report and its caveats. No pre-launch solo venture can have high confidence
-> of any specific revenue number; the confidence attaches to the *decisions*, not the
-> outcome.
-
-- **Swimming-only is mathematically capped at ≈ £150k–£400k ARR** (~1,300 UK&I
-  affiliated clubs; ~2,740 USA Swimming clubs). £1M ARR at £30/mo would need ~2,778
-  paying clubs — more than *every* UK affiliated club. **£1M+ requires multi-sport
-  breadth *and* institutional buyers (schools / governing bodies) *and* almost certainly
-  a second person.**
-- **"£1M/month" (~£12M ARR) is dropped as a stated goal** — not realistic for a
-  solo→small team on any evidence reviewed. The most likely *good* outcome is a
-  £150k–£400k sustainable swimming business, with a low-double-digit-% shot at £1M+ only
-  via sport/segment expansion plus a second person.
-- **Single-instance-per-club can't scale**, and **"truly free, no hidden fees"
-  self-host — as framed — cannibalises revenue.** True multi-tenancy is delivered by
-  **Phase C**. The self-host tension is now **resolved (2026-06-09): hosted-only, no
-  customer self-host tier** — the "no-hidden-fees / truly-free self-host" product
-  principle is retired in favour of hosted SaaS (maintainer decision, see
-  [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)).
-- **The incumbent-bolts-on-content threat is currently LOW but is a *time advantage,
-  not a moat*;** the horizontal commodity (Canva / Predis / Gipper's auto-achievement
-  graphics) is the real pressure on price and narrative.
-
-**Consequence for the plan:** a new **Phase C — Commercialise & Distribute** becomes the
-**top priority**, ahead of the expansion phases. P3 (multi-sport), P4 (direct publishing)
-and P5 (local-AI) are **deferred — not deleted** — behind two gates: *a club can sign up,
-pay, and publish with zero founder involvement*, and *≥10 clubs paying annually*. Recorded
-in [adr/0011-commercial-reconcile-revenue-reality.md](adr/0011-commercial-reconcile-revenue-reality.md).
-
-**Realistic revenue by horizon (estimates — outcome odds, not guarantees).** The
-≈ £150k–£400k swimming-only ceiling above is a *saturation* figure; the table below
-decomposes it into horizons tied to the **PC.6 warm-first funnel's** club-count trajectory
-and the candidate **Club £49–£99/mo billed annually** price (≈ £588–£1,188 per club per
-year — **PC.4, unvalidated**). The *club-count↔ARR arithmetic and the sequencing are
->95%-confidence-correct*; the *probability bands are honest estimates of the outcome*,
-flagged `[ESTIMATE]`, not commitments — they decline across horizons because each is
-conditional on the one before (compounding execution risk).
-
-| Horizon | Paying clubs | ARR @ £588–£1,188/club | Outcome probability `[ESTIMATE]` | Binding constraint |
-|---|---|---|---|---|
-| **H1 — Validation** (≤ ~12 mo) | ~10 (the traction gate) | ≈ £6k–£12k | **~40–55%**, *conditional on the founder actually running the warm + referral motion* — the dominant failure mode is the motion not being run, not the close rate | Founder selling-time; first revealed WTP (PC.4) |
-| **H2 — Early scale** (~1–2 yr) | ~30–60 | ≈ £18k–£71k | **~25–40%** — conditional on H1 + referral compounding + retention holding (annual prepay essential) | **PC.3 multi-tenancy** — single-instance ops collapse ~15–40 clubs |
-| **H3 — Swimming ceiling** (~2–4+ yr) | ~125–680 (price-dependent) | **≈ £150k–£400k** | **~10–20%** — needs sustained multi-year execution, meaningful UK *and* US penetration, and almost certainly a second person | Market size (~1,300 UK&I + ~2,740 USA clubs) + support capacity |
-| **H4 — £1M+ ARR** | (out of wedge) | **≥ £1M** | **low-double-digit-%** — only via multi-sport breadth (Route A) *and* institutional buyers (Route B) *and* a second person | Out-of-wedge expansion; not swimming-only |
-| **£1M/month (~£12M ARR)** | — | ~£12M | **not realistic** on any evidence reviewed | Directional north star only |
-
-> **Sequencing caveat (load-bearing):** every horizon past **~15–40 clubs is gated on PC.3
-> (true multi-tenancy)**, which is currently ⚠️ BLOCKING / escalated. Without it, per-club
-> ops cost rises linearly against fixed founder hours and caps revenue *below* the H3
-> market math regardless of demand — so the £150k–£400k ceiling is only reachable *if PC.3
-> ships*. Club-count↔ARR arithmetic and the ~£150k–£400k anchor derive from the sourced
-> market sizes and candidate price above (see
-> [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)); the
-> per-horizon probability bands are flagged estimates, consistent with the diligence's
-> low-double-digit-% confidence on £1M+.
-
-### External research pass — June 2026 (confirms & sharpens)
-
-A fresh external market-and-scalability pass (June 2026) re-ran the diligence against
-current sources. It **changed no figure** — the ≈ £150k–£400k swimming-only ceiling, the
-dropped "£1M/month" goal, and the H1–H4 horizons above all stand — and **sharpened three
-points** (full evidence + sources:
-[`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md), *Evidence
-refresh — cycle 5*):
-
-- **White-space, verified and narrowed.** No swim-data incumbent — **SwimTopia,
-  TeamUnify / SportsEngine, Swimcloud, Hy-Tek / MeetMobile, Swim Club Manager, Swim
-  Manager** — ingests a result file and emits branded, ranked content; they stop at
-  PB / results display + *manual* sharing. **Gipper** ships swimming graphic *templates*
-  (meet-day, results, commitment) but **does not ingest HY3 / SDIF / result files** — a
-  volunteer still keys the numbers in. So the *result-file → ranked, branded content* path
-  is undefended **today** — a **time advantage, not a moat** (no patent; any incumbent
-  holding clean results + PBs could bolt it on). **Watch item: Gipper adding result-file
-  ingestion would close the head-start.**
-- **Platform publishing is gated by API policy** (sharpens Phase 4): Instagram needs a
-  Business / Creator account + a connected Facebook Page + Meta **App Review**
-  (~2–4 weeks/permission) + **Business Verification**; TikTok's *unaudited* Content-Posting
-  client can post only **private (SELF_ONLY), ≤5 users / 24h** until it passes an audit. So
-  ship **Bluesky + Mastodon first** (P4.1) and keep Instagram / TikTok behind human approval
-  and the audit timeline (P4.2) — "launch-day IG/TikTok auto-posting" is on the EXCLUDE list.
-- **Results-data acquisition is a ToS / CMA / GDPR question** — much of it is *minors'*
-  competition data. **Prefer the official Swim England approved-systems API over scraping**
-  (reinforces PC.6(a) and the [ADR-0003](adr/0003-pilot-safety-invariant-lock.md) isolation
-  lock).
-
-**The high-probability do / don't filter (only what the evidence supports):**
-
-- **✅ INCLUDE:** warm-first hand-sell from the Swansea / South-East-Wales swim network ·
-  manual-first (concierge) delivery · flat **annual** pricing set by revealed WTP (PC.4) ·
-  a referral engine (2 named intros per signed club) · the Swim England approved-systems
-  API application (PC.6(a)) · Stripe switched on (PC.2 ✅) · ship **PC.3** true
-  multi-tenancy (the #1 operator/Council-gated scaling fix) · **Bluesky + Mastodon** as the
-  first free publish targets (P4.1).
-- **🚫 EXCLUDE:** paid ads · viral-growth assumptions · VC fundraising · US expansion
-  before UK validation · multi-sport before ≥10 paying clubs · reliance on NGB
-  *promotional* endorsement ([ADR-0012](adr/0012-ngb-distribution-channel-reality-check.md)) ·
-  launch-day Instagram / TikTok auto-posting · ToS-breaching scraping of results data.
-
----
-
----
-
-## Where we are today (June 2026)
-
-Three facts shape the work ahead.
-
-1. **The intelligence layer is the moat and is already ahead — for swimming.**
-   Brand-DNA + guidelines ingestion, voice imitation, the AI-derived operating
-   profile, the Adaptive Theming Engine, swim recognition, and the
-   render/caption/pack pipeline all ship and are live. The reframe does not throw
-   any of this away — it **generalises** it.
-
-2. **The product is operator-managed and turnkey.** Configuration (LLM keys, Buffer
-   token, cutout provider) is set once via env vars at deploy time; the end user
-   never sees a settings screen.
-
-3. **Most of the new architecture already has a home in the code.** The new
-   concepts map onto existing seams — `recognition.registry.register_sport`,
-   `club_platform.content_types`, `workflow.CardStatus`, `ClubProfile.org_type` —
-   so this is generalisation, not a rewrite. See
-   [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md).
-
-**Verified shipped (✅)** — confirmed against the code this rebuild:
-
-- Brand-DNA / guidelines ingestion (`brand/dna_capture.py`, `guidelines.py`),
-  voice imitation (`brand/voice_imitation.py`, `voice/learned/`), and the AI
-  operating profile (`brand/derived.py`).
-- Adaptive Theming Engine (`theming/`, the former §1.6 — see [`THEMING.md`](THEMING.md)
-  and Appendix C); single DTCG palette consumed by web + motion + email + graphic.
-- Swim recognition (`recognition_swim/` on the sport-agnostic `recognition` bus),
-  PB verification (`pb_discovery/`), ranker (deterministic).
-- `graphic_renderer` (Playwright → PNG) and Remotion reels (`remotion/` +
-  `visual/motion.py`).
-- `edge-tts` voiceover (optional, `MEDIAHUB_VOICEOVER=1`, honest-errors when absent).
-- Buffer publishing path (`publishing/buffer.py`; human clicks Schedule — no autopost).
-- Content packs (`content_pack/`, `workflow/pack.py`).
-- **Free cutout by default** — in-process `rembg` (`MEDIAHUB_CUTOUT_PROVIDER=server`);
-  Replicate/PhotoRoom are optional paid alternates. *(This is Phase-5 substitution
-  already done.)*
-- Cross-tenant run isolation invariant (`_can_access_run`,
-  `tests/test_run_route_isolation_invariant.py`) — see
-  [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md).
-- Gemini→Anthropic provider failover (`media_ai/llm.py`, `ai_core/llm.py`).
-- **Self-serve signup + auth + Stripe billing** (`web/auth.py`, `web/billing.py`): routes
-  `/signup` `/login` `/logout`, bcrypt + a signed session cookie, a `users.jsonl` ledger,
-  plus Stripe Checkout + Customer Portal + a signed webhook. Merged **PR #267**
-  (2026-06-09); billing **honest-503s until `STRIPE_*` keys are set**. This is
-  **PC.1 + PC.2** — see Phase C.
-
-**Not yet shipped (❌)** — the reframe's new surface:
-
-- ~~The content-strategy brain as the hub~~ → **shipped 2026-06-10 (P1.3):**
-  the cross-source planner fuses own/external/direct signals into a ranked,
-  explainable per-org plan keyed by sport profile (`/plan`); its external
-  spokes stay thin until P3's data sources land.
-- Multi-sport beyond swimming (the `register_sport` seam exists; only swimming is
-  registered; `football.yaml` now *plans* via the profile but has no detector engine).
-- Per-content-type **autonomy toggles in the UI** (the *runner* now exists — see
-  below — but the per-post-type toggle and workspace control do not, and the
-  `sport_profiles.AutonomyLevel` enum that was meant to drive them is still inert).
-- **Direct-to-platform** publishing (only Buffer today).
-- The **local-AI substitution layer** (Ollama / Piper / whisper.cpp / Satori absent;
-  rembg present).
-- **The rest of the commercial layer** — ~~true multi-tenancy missing~~ → **shipped
-  2026-06-11 (PC.3,** [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md)**)**:
-  org → workspace membership binding in one shared instance, with PC.4's revealed-WTP
-  instrumentation and PC.6's funnel tooling landing alongside it on
-  `/operator/commercial`. The **build side of Phase C is now fully closed**; what stays
-  open is the sell side — billing keys unset, prices unvalidated (**PC.4** gate), no
-  clubs sold (**PC.6** gate) — so there are still **zero paying customers**. The
-  "build/sell imbalance" of the 2026 scaling diligence is now entirely a *selling*
-  imbalance; see Phase C below.
-
-**Shipped (✅ 2026-06-10):** the Generative Content Engine v2 — the full
-Appendix A **Sequential Spine** (SEQ-0 → SEQ-4) merged in **PR #301** on top of
-Tier A (PR #259): the DesignTokens contract (`brand/design_tokens.py` +
-lockup selection), the Tier B design-spec director with the candidate
-pool / APCA compliance ranking / additive `?candidates=N` route, the **SEQ-3
-cutover** (the old enum-permutation engine removed under the gated 15+15-step
-process; `MEDIAHUB_GEN_V2=0` remains the kill switch; the "A/B beats the old
-engine" gate was reviewed and approved — 6/6 vs ≤1/6 approvable), and the
-SEQ-4 video stage (data-driven reel scene structure, archetype-matched
-motion, opt-in `MEDIAHUB_GEN_BG`). v2 is the **default engine**; the
-archetype library stands at 11/12 (PAR-7's `duo_athlete_split` outstanding,
-picked up automatically when it lands). Evidence:
-[`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md);
-suite 3628 passed / 1 skipped. The sport-profile scaffolding remains inert.
-
-**Shipped (✅ 2026-06-10): Phase 0 complete.** The de-risk phase closed in one
-pass: the **P0.1 free reel engine** (`MEDIAHUB_REEL_ENGINE=ffmpeg` — story cards
-and meet reels rendered from the cards' own still graphics by FFmpeg, no
-Node/Remotion), the **P0.4 provider slots** (OpenAI-compatible/Ollama LLM
-endpoints in both wrappers, the `MEDIAHUB_TTS_PROVIDER` seam with the `piper`
-local slot, the no-unslotted-ASR guard, on-server graphics defaults), and the
-**P0.3/P0.5 guard suites** that turn the dependency register's promises into
-build-failing invariants (paid paths provably optional; AGPL strictly behind a
-network boundary — SearXNG venv-isolated, HTTP-only). Details in the Phase 0
-section below.
-
-#### Also shipped since this plan was written — *not* in the Phase 0–5 spine
-
-A whole stream of work landed after this roadmap was last rewritten and has **no
-item here**. It was driven by a separate "**Capabilities 1–5 / Section 6**" report
-(referenced in the council transcripts and in `.env.example`, but never checked in
-as a doc) and by day-to-day product-quality passes. Folding it in so the roadmap is
-honest:
-
-- **Capability 1 — `ai_core` LLM client + bounded tool-loop.** A provider-agnostic
-  OpenAI-compatible client and `ask_with_tools(tools, on_tool_call, max_rounds)`
-  (the substrate the autonomy + research loops ride on). *Wired.*
-- **Capability 2 — semantic caption memory** (`memory/`). Embeddings + a `sqlite-vec`
-  store; recalls a club's prior accepted captions into the caption/voice flow.
-  Off until an embed endpoint is configured. *Wired.*
-- **Capability 3 — web research** (`web_research/`). DuckDuckGo by default, optional
-  self-hosted SearXNG, plus a bounded deep-research ReAct loop; converged with
-  PB-baseline discovery behind a type-safe gate (the model proposes URLs, the
-  deterministic parser still asserts the time). *Wired, £0 default.*
-- **Section 6 — the autonomy substrate.** `scheduler/` (an exactly-once, atomic-claim
-  SQLite job runner — *not* Temporal; the council chose in-process Flask+threading
-  over new infra), `notify/` (ntfy + webhook pings), and `autonomy/` — a **bounded,
-  narrow-tool autonomy runner** that prepares + *queues for human review* and can
-  never publish. All **off by default**. This is a real, if partial, down-payment on
-  **Phase 2** via a different architecture than P2.1 proposed.
-- **Results from a link** (`results_fetch/`). Paste a results URL → 3-tier crawl
-  (static → headless Chromium → AI vision) → mirror ZIP → the existing pipeline.
-  Sport-agnostic *ingestion*; production-ready. See [`RESULTS_FROM_URL.md`](RESULTS_FROM_URL.md).
-  (Detector *quality* for non-swim sports still needs a registered sport — so this
-  advances **P3** ingestion without yet satisfying its per-sport exit criterion.)
-- **Observability** (`observability/`) — LLM-usage + uptime tracking. **Graphics /
-  caption / brand-fidelity polish** — new card layouts, AI-palette-from-usage, logo
-  vision colours, caption tone/jargon/locale fixes (the bulk of recent commits).
-
-> **The two same-named autonomy enums are reconciled (P2.3, 2026-06-11):** the
-> runner's pre-approval reach axis is renamed `autonomy.tools.RunnerReach`
-> (`OFF`/`SUGGEST`/`DRAFT`/`PREPARE`), leaving
-> `sport_profiles.autonomy.AutonomyLevel` (`draft_only`/`approval_required`/
-> `fully_autonomous`) as the single enum called AutonomyLevel — the publishing
-> policy axis. Different axes, now structurally impossible to conflate.
-
-> **Test baseline (point-in-time):** the full suite is green — **2836 passed, 1
-> skipped** in a fully-provisioned environment after merging `main` (the lone skip
-> is the opt-in render-diff regression). Skips are environmental, never structural.
-
----
-
-## Phase 0 — De-risk licensing & cost · P0 · ✅ **COMPLETE (2026-06-10)**
-
-**Goal.** Keep the **operator's hosting cost and licensing liability low** in the
-critical path — no mandatory paid API and no embedded-AGPL lock-in. (Originally framed
-as guaranteeing a "truly-free self-host" promise; that promise is **retired** —
-hosted-only, see [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md) — but the
-cost/licensing de-risk still matters, now for the *hosted* deployment's margins.)
-
-**Exit criterion — MET.** Zero **mandatory** paid API or dependency in the critical
-path; every paid option is behind a flag/env var with a documented free default; AGPL
-services are isolated behind a network boundary (never embedded). The criterion is
-now **continuously enforced**, not just satisfied: three guard suites
-(`tests/test_paid_deps_optional.py`, `tests/test_local_provider_slots.py`,
-`tests/test_agpl_isolation.py`) fail the build on any regression. See
-[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
-
-### P0.1 — Make the Remotion reel engine optional with a free fallback · ✅ **DONE (2026-06-10)**
-Remotion was the single biggest hidden-cost liability (Company License for for-profit
-orgs >3 people). It is now optional behind `MEDIAHUB_REEL_ENGINE`: the **`ffmpeg`
-engine** (`visual/reel_ffmpeg.py`) renders the same story-card and meet-reel MP4s
-with zero licensing cost — each beat is the card's **own still graphic** (the
-existing Playwright/Chromium renderer, already a hard dependency), given a
-deterministic Ken Burns zoom and stitched with crossfades by FFmpeg (static binary
-via the `imageio-ffmpeg` wheel; system ffmpeg / `MEDIAHUB_FFMPEG` also honoured).
-Where a card has a persisted CreativeBrief, the frame renders from that exact brief
-at story size, so the reel literally animates the card's approved design — brand
-parity *better* than a parallel template. Reel length keeps the same data-driven
-`reel_duration_for` arithmetic; cache keys are engine-separated; a missing binary
-raises an honest `ReelEngineUnavailable`. Remotion remains the default for
-deployments that license it; `/healthz/deps` reports both engines' availability and
-gates "motion ok" on the *active* engine. The originally-sketched **Satori** path
-remains P5.4 — it is a *performance* fast-path (lighter than Chromium), not the
-licensing fix; this fallback closes the licensing risk without it. (Bonus fix
-shipped with it: `reel_cover`'s mega headline now auto-fits long meet names via the
-PAR-2 autofit helper instead of overflowing the frame.)
-
-### P0.2 — Keep cutout free-by-default · ✅ **DONE**
-Already shipped: in-process `rembg` is the default (`MEDIAHUB_CUTOUT_PROVIDER=server`);
-Replicate/PhotoRoom are opt-in paid alternates. Retained here as the de-risk record.
-
-### P0.3 — Flag every paid dependency with a free substitute · ✅ **DONE (2026-06-10)**
-The register ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) §2) is now
-**provable**: `tests/test_paid_deps_optional.py` pins, per register row, that with
-zero paid configuration each paid path is off (or substituted by its free default)
-and honest-errors rather than spending or faking — Remotion (optional behind the
-P0.1 engine flag), edge-tts (`MEDIAHUB_VOICEOVER` opt-in), Buffer (token-gated,
-`BufferAuthError` when absent), Replicate/PhotoRoom (cutout defaults to in-process
-`server`), hosted LLM keys (`ProviderNotConfigured`, never a heuristic caption),
-Stripe (honest-503 `billing_configured()` gate), and Imagen backgrounds
-(`MEDIAHUB_GEN_BG` opt-in, default off).
-
-### P0.4 — A local-capable default for every AI call · ✅ **DONE (2026-06-10)**
-Precondition for Phase 5, now in place — every AI surface *admits* a local provider
-so no cloud key is required by any interface (full local implementations remain
-Phase 5 work): **LLM** — both wrappers (`ai_core.llm`, `media_ai.llm`) accept an
-OpenAI-compatible endpoint via `MEDIAHUB_LLM_ENDPOINTS`, keyless local servers
-(Ollama / llama.cpp / vLLM) included; **TTS** — `MEDIAHUB_TTS_PROVIDER` seam on the
-voiceover surface with `piper` registered as the local slot (honest error until
-P5.2 implements it; surfaced in `/healthz/deps`); **ASR** — no ASR call exists yet
-(arrives with P5.3), and a guard fails the build if a speech-to-text import ever
-lands outside a provider seam; **graphics** — rendering is already on-server
-(Playwright stills; P0.1 ffmpeg reels), cutout defaults to in-process rembg, and
-the one cloud-only image call (Imagen backgrounds) is opt-in with the procedural
-backdrop as the no-key default. Pinned by `tests/test_local_provider_slots.py`.
-
-### P0.5 — Isolate any AGPL service behind a network boundary · ✅ **DONE (2026-06-10)**
-The deployed AGPL service is **SearXNG**: installed stock and unmodified into an
-isolated virtualenv (`$SEARXNG_VENV`), run as its own process only when
-`MEDIAHUB_RUN_SEARXNG=1`, queried exclusively over HTTP
-(`web_research/searxng_client.py`) — never imported in-process. That boundary is
-now **enforced**: `tests/test_agpl_isolation.py` fails the build on any in-process
-import of a known-AGPL module, any AGPL distribution appearing in
-`requirements.txt`/`pyproject.toml` (incl. `minio` — policy prefers cloud S3), or
-the Dockerfile installing SearXNG outside its venv. If/when Postiz/MinIO/MediaCMS
-are ever used, the same separate-service-over-API rule applies. Policy in
-[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) §3.
-
-**Building blocks (as shipped).** FFmpeg (LGPL/GPL, free — static binary via
-`imageio-ffmpeg`, invoked strictly as a subprocess) + the existing Playwright still
-renderer for reels; `rembg` (MIT, free) — the cutout default; OpenAI-compatible
-endpoints (Ollama, MIT) as the LLM local slot; Piper (MIT) reserved as the TTS local
-slot. Remotion Company License is *not* a hard requirement; no AGPL is embedded.
-Satori (MPL-2.0) stays on the board for P5.4 as a render fast-path.
-
-**Dependencies.** None upstream. **Feeds every later phase** — especially P4
-(publishing) and P5 (local-AI), whose free defaults this phase guarantees.
-
----
-
-## Phase 1 — Strategy brain + post-type taxonomy + sport profiles · P1 · ✅ **COMPLETE (2026-06-10)**
-
-**Goal.** Build the planner that fuses **three-source intelligence** (own + external
-+ direct signals) into a ranked content plan; realise the cross-sport **post-type
-taxonomy**; and ship the **sport-profile** config. Ship swimming + one other profile.
-
-**Exit criterion — MET (2026-06-10).** A profile-driven planner produces a ranked,
-explainable content plan for **≥2 sport profiles** (swimming end-to-end; football
-on profile + direct/external signals, honestly noting its missing engine), grounded
-in the three sources — not just from a results file. Pinned by
-`tests/test_cross_source_planner.py`; product surface `/plan`. The external-signal
-spokes are deliberately thin until P3's data sources land (discovered-context +
-calendar today; fixtures/news feeds arrive with the sport spokes).
-
-### P1.1 — Sport-profile schema + loader + AutonomyLevel + 2 profiles · ✅ **DONE**
-Shipped this rebuild: `mediahub.sport_profiles` (`SportProfile`/`PostTypeConfig`,
-`AutonomyLevel`), `data/sport_profiles/{swimming,football}.yaml`, unit tests.
-Originally inert scaffolding; **now live** — the P1.3 planner enumerates profiles
-at runtime, P2.4's per-type policy uses its `AutonomyLevel` as the canonical
-publishing-policy enum, and both shipped profiles carry every implemented
-universal surface. See [`SPORT_PROFILES.md`](SPORT_PROFILES.md).
-
-### P1.2 — Realise the post-type taxonomy in code · ✅ **DONE (2026-06-10)**
-The Council-gated extend-vs-layer call was pressure-tested (5 advisors + peer
-review, unanimous direction) and decided: **layer, on a slug-canonical spine**
-([`adr/0013-post-type-taxonomy-slug-canonical.md`](adr/0013-post-type-taxonomy-slug-canonical.md)).
-Shipped as `club_platform/post_types.py` — taxonomy slugs are the canonical
-post-type identity (universal slugs in code, sport-specific in profile YAML);
-`ContentType` is demoted to the implemented-surface badge (subset invariant
-test-pinned; never grows an unimplemented member, so no "Coming soon" leakage);
-the two historic mismatches were renamed under the gated 15+15-step process
-(`WEEKEND_PREVIEW`→`EVENT_PREVIEW`, `SPONSOR_POST`→`SPONSOR_ACTIVATION`) with
-read-tolerant legacy aliases at every persistence boundary (per-org autonomy
-policy keys, saved stub packs, the type gate) so operator-set autonomy levels
-survive. `tests/test_post_types.py`.
-
-### P1.3 — Cross-source planner (the strategy brain) · ✅ **DONE (2026-06-10)**
-Shipped in `content_engine`: `signals.py` gathers the three sources (own = runs +
-workflow states + draft packs + posting recency; external = discovered meet
-context + calendar anniversaries; direct = operator-entered upcoming events,
-structured goals targeting a post type, blackout dates, sponsor-configured fact),
-and `planner.py` fuses them into a ranked, explainable `ContentPlan` keyed by
-sport profile — the swim newsworthiness ranker's transparent additive-scoring
-pattern, generalised; deterministic (no LLM in the ranking loop), every item
-carrying signal-grounded reasons including the honest negative ("no football
-results ingested yet"). Per-org persistence under `DATA_DIR/content_plans/` and
-an org-scoped product surface: **Plan** in the nav (`/plan`) +
-`/api/plan/{generate,latest,inputs}`. See [`CONTENT_PLANNER.md`](CONTENT_PLANNER.md);
-`tests/test_cross_source_planner.py`.
-
-### P1.4 — Generative Content Engine v2 (distinctive, on-brand output) · ✅ **DONE**
-The asset-quality stream: replace the enum-permutation variation mechanism with an
-archetype library + design-spec director, keeping the deterministic engine. Decided
-in [`adr/0001-generation-engine-v2.md`](adr/0001-generation-engine-v2.md); runnable
-build prompts in **Appendix A** (PAR-\* / SEQ-\*). **Complete (2026-06-10):** Tier A
-(SEQ-1, PR #259) + the full Sequential Spine SEQ-0→SEQ-4 (PR #301) — tokens, the
-Tier B director/pool/compliance ranking, the gated SEQ-3 cutover (old engine
-removed; A/B review approved; `MEDIAHUB_GEN_V2=0` kill switch retained), and the
-SEQ-4 video stage. All seven Appendix A §5 acceptance criteria met; evidence in
-[`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md).
-The **parallel bucket (PAR-1 → PAR-8) is likewise all shipped** (PR #300):
-captions live end-to-end (approval seam → few-shot store → route injection,
-also feeding the SEQ-0 voice block), autofit with measured Anton calibration,
-saliency, the design-spec contract, variant metrics, brand bootstrap aligned to
-the DesignTokens lockup vocabulary, the complete 12-archetype catalog
-(`duo_athlete_split` closes it) with every archetype's authored notes briefing
-the director's catalog, and the docs/ADR refresh — plus the renderer
-self-hosted-font fix, regression-pinned.
-
-### P1.5 — Local brand-DNA-from-URL · ✅ **DONE (2026-06-10)**
-The Open-Pomelli-style flow now runs with **zero paid APIs**: the scrape is
-local and **SSRF-hardened** (public-host gate re-validated per redirect hop on
-page/CSS/image fetches); the colour science is local — `brand/palette_evidence.py`
-quantizes the club's real logo/og-image **pixels** through
-`material-color-utilities` (`QuantizeCelebi` → `Score`, the theming engine's own
-maths) and merges them with site-wide CSS-usage frequencies into
-provenance-carrying evidence; and the one judgement step (semantic role
-assignment + voice) rides `media_ai.llm`, which serves keyless local
-OpenAI-compatible endpoints (Ollama via `MEDIAHUB_LLM_ENDPOINTS`, P0.4) exactly
-like the hosted providers. LLM palette picks are validated against the evidence
-universe (an invented hex is dropped and backfilled from real evidence — the
-`bootstrap_extract` anti-hallucination doctrine); with no provider at all the
-palette stays evidence-grounded and the voice fields stay honestly empty
-(`no_provider`). Per-slot provenance persists to `brand_palette_sources` /
-`brand_palette_reasoning`. `tests/test_brand_dna_local.py`.
-
-**Building blocks.** crewAI / LangGraph **patterns** (free frameworks — *verify
-MIT-family*) paired with **Ollama** (MIT, free) for the planner;
-`material-color-utilities` (Apache-2.0) — already in use; Satori for graphics
-(Phase 5 overlap). All AI calls must keep the honest-error rule.
-
-**Dependencies.** Needs **P0** (a free AI path). **Feeds P2** (autonomy needs a
-plan to act on) and **P3** (new sports need profiles).
-
----
-
-## Phase 2 — Autonomy toggles + orchestration backbone · P2 · ✅ **COMPLETE (2026-06-11)**
-
-**Goal.** Put every content type on a durable workflow with an **optional
-human-approval signal**; implement the guardrails + kill switch + audit trail;
-expose the per-type `autonomy_level` in the workspace.
-
-**Exit criterion — MET (2026-06-11).** A content type can be set to any
-`AutonomyLevel` (P2.4 store + Settings → Autonomy); `fully_autonomous` publishes
-**only** when all guardrails + the confidence gate pass (the P2.3 publish gate,
-evaluated against the exact caption that would ship); the kill switch halts
-publishing instantly — checked first on every gate evaluation and re-asserted
-inside the Buffer call, so a mid-cycle engagement still halts; every autonomous
-decision (allowed AND blocked verdicts, auto-approvals, publish attempts) lands
-in the immutable per-org audit ledger. Pinned end-to-end by
+### What's live today (verified against the code)
+
+- **The pipeline:** upload (HY3 / SDIF / LENEX / PDF / CSV, OCR fallback for
+  scans, results-from-a-URL crawl) → deterministic recognition (PBs via
+  `pb_discovery/`, club records, milestones, qualifying times) →
+  deterministic ranker → branded stills (`graphic_renderer`, 12-archetype
+  catalog + design-spec director) and reels (Remotion or the free ffmpeg
+  engine) → captions (Gemini→Anthropic, honest errors; Welsh bilingual;
+  result-grounded alt text) → approval workflow → export / Buffer / public
+  wall / print certificates.
+- **Brand intelligence:** brand-DNA-from-URL (SSRF-hardened, evidence-
+  grounded), guidelines ingestion, voice imitation, the Adaptive Theming
+  Engine (APCA/CIEDE2000-gated, single DTCG palette across web + motion +
+  email + graphic), self-hosted fonts on every surface.
+- **Platform:** self-serve signup/auth + Stripe billing code, org → workspace
+  multi-tenancy (ADR-0014) on the ADR-0003 isolation invariant, per-type
+  autonomy + the publish gate + global kill switch, the exactly-once
+  scheduler, ntfy/webhook notifications, LLM-usage + uptime observability,
+  semantic caption memory, bounded web research, the `/try` demo, sponsor
+  manager + exposure reports, the public achievements wall, magic-link mobile
+  approvals, live meet mode, season wraps, and the UK legal-compliance
+  baseline (PR #352).
+- **Substrate capabilities** (shipped outside the numbered phases):
+  `ai_core` provider-agnostic LLM client + bounded `ask_with_tools` loop;
+  `memory/` semantic caption recall; `web_research/` (DuckDuckGo default,
+  optional SearXNG sidecar); `results_fetch/` 3-tier crawl → mirror ZIP →
+  pipeline; `scheduler/` + `autonomy/` (queues for review, structurally
+  cannot publish); `notify/`; `observability/`.
+
+### Phase C — items already shipped (the build half)
+
+- **PC.1 — Self-serve signup + auth** *(2026-06-09, PR #267)*:
+  `/signup` `/login` `/logout`, bcrypt, signed session cookie, `users.jsonl`
+  ledger; auth stays optional when no accounts/billing are configured.
+- **PC.2 — Stripe billing + subscription lifecycle** *(2026-06-09, PR #267)*:
+  Checkout, Customer Portal, signed webhook driving plan state; honest-503
+  until the operator sets `STRIPE_*` keys (F.1), so zero added running cost
+  until then.
+- **PC.3 — True multi-tenancy: org → workspace** *(2026-06-11,
+  [ADR-0014](adr/0014-org-workspace-multitenancy-schema.md))*: per-org
+  membership binding in one shared instance (`web/tenancy.py`,
+  `memberships.jsonl`); orgs with no members behave standalone, so pilots are
+  untouched; ADR-0003 strengthened (ownerless legacy runs refuse signed-in
+  foreign accounts); pinned by `tests/test_workspace_membership_invariant.py`
+  + `tests/test_tenancy.py`. Council-pressure-tested and operator-signed-off.
+- **PC.5 — Free-self-host tension resolved: hosted-only** *(2026-06-09,
+  [ADR-0011](adr/0011-commercial-reconcile-revenue-reality.md))*: no customer
+  self-host tier, free or capped; the old "truly-free self-host" principle is
+  retired; `CLAUDE.md` is the authoritative statement.
+- **PC.7 — Instant try-before-signup demo** *(2026-06-12)*: public `/try`
+  (org-gate-exempt) → watermarked ≤3-card preview from the club's own file or
+  the bundled sample; sandboxed `demo-try` org, per-IP + global daily caps,
+  per-browser-session visibility, 24h self-cleaning sweep, signup CTA +
+  claim-on-conversion. Pinned by `tests/test_try_demo.py`.
+- **PC.8 — Sponsor manager + exposure reports** *(2026-06-12)*: sponsor
+  registry on `ClubProfile` + `/sponsors` page; deterministic per-card
+  sponsor rotation (`club_platform/sponsors.py`) consistent across stills,
+  motion and re-renders; exposure ledger + branded monthly per-sponsor report
+  joining approvals and the posting log. Pinned by `tests/test_sponsors.py`.
+- **PC.10 — Public achievements wall + embed/RSS** *(2026-06-12)*:
+  `/wall/<token>` + iframe embed + RSS/JSON feeds, approved-only and
+  side-effect-free, initials-first by default, per-card hide/show, token
+  revocation 404s the old URL, "powered by MediaHub" badge; cross-tenant
+  isolation pinned by `tests/test_public_wall.py`.
+
+### Phase W — Deepen the swimming wedge · ✅ **BUILT (all 14 items, 2026-06-12, one integration pass — [ADR-0016](adr/0016-phase-w-integration-plan.md))**
+
+Wedge-sellability work on existing seams; no new paid dependency; AI surfaces
+honest-error. Provenance: the June 2026 ideas research
+([`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md), 22
+ideas — four became PC.7–PC.10, the distribution slice became P4.5/P4.6).
+What each item shipped:
+
+- **W.1 — Athlete registry + milestone detectors:** workspace-scoped athlete
+  identity across runs in `data.db` (canonical name + variants, back-filled),
+  a review-time "same swimmer?" merge UI with persisted decisions, and
+  deterministic milestone detectors (first-ever event, Nth race, first gala,
+  comeback). No LLM anywhere in identity or milestones.
+- **W.2 — Consent & safeguarding manager:** per-athlete consent registry on
+  the W.1 spine (photo / full name / initials-only / do-not-feature;
+  most-restrictive default; CSV import), enforced deterministically at
+  generation, in photo scoring, and as a publish-gate check; welfare-officer
+  export; audited changes. Load-bearing for PC.12.
+- **W.3 — Club records engine:** per-workspace records store seeded by CSV
+  import, updated **on approval only**; deterministic `ClubRecordDetector`
+  ranked above PB; "approaching the record" planner signal; records block on
+  the public wall.
+- **W.4 — Qualifying-time packs:** versioned curated standards under
+  `data/standards/<season>/` with per-table provenance + the seasonal refresh
+  runbook (F.7); wired to the existing `QualifyingTimeDetector` + a dedicated
+  archetype.
+- **W.5 — LENEX ingestion:** `interpreter/lenex_parser.py` (.lef/.lxf via the
+  bomb-safe unzip), normalised to the same canonical shape as HY3/SDIF;
+  output parity pinned against the HY3 path.
+- **W.6 — Data-driven meet previews:** entry files / LENEX entries / PDF
+  psych sheets → an approvable "good luck this weekend" pack with zero
+  typing; ambiguous rows flagged, never guessed.
+- **W.7 — Live meet mode:** a watched club-controlled results URL polled
+  politely as a `scheduler/` task; per-swim dedupe; new results → cards
+  queued for approval (structurally cannot publish); ntfy push into review;
+  watches auto-expire.
+- **W.8 — Season wraps / monthly recaps:** deterministic aggregation across
+  workspace history (PBs, medals, records, debuts, biggest improver) → a
+  recap pack + reel; monthly draft through the autonomy queue.
+- **W.9 — Magic-link mobile approvals:** HMAC-signed, expiring, run-scoped
+  tokens; a mobile-first approve/edit/reject surface driving the same
+  `workflow.CardStatus` transitions with full audit; revocable per run.
+- **W.10 — OCR fallback:** Tesseract/RapidOCR behind the interpreter's
+  low-confidence path for scans/photos; per-row confidence into the existing
+  flag-for-review surface (the engine ships in the Docker image; sandbox runs
+  the honest no-engine path).
+- **W.11 — Result-grounded alt text:** an `alt_text` field produced in the
+  same caption LLM call, threaded through pack ZIP, newsletter, public wall
+  and publish payloads; editable in review; honest-error when no provider.
+- **W.12 — Print exports:** A4 certificate + noticeboard-poster layouts in
+  `graphic_renderer/layouts/` (Playwright prints PDF natively); per-swimmer
+  batch export on the pack; BrandKit tokens reused; W.2 consent honoured.
+- **W.13 — Bilingual captions (Welsh first):** per-workspace language setting
+  (en / cy / bilingual); both variants in one provider call; review shows and
+  edits both; gate length checks account for doubled text. *Generalised
+  2026-06-12 (PR #363): registry-driven, now covering the top-10 world
+  languages + Irish.*
+- **W.14 — Engagement feedback loop, phase 1:** per-club approval/edit/reject
+  telemetry feeding the caption few-shot store, `memory/` and the planner's
+  explainable reasons. *Phase 2 (platform metrics) waits for P4.2.*
+
+### Phase 2 — Autonomy toggles + orchestration backbone · ✅ **COMPLETE (2026-06-11)**
+
+Exit met: a content type can be set to any `AutonomyLevel`;
+`fully_autonomous` publishes only when every guardrail + the confidence gate
+pass; the kill switch halts instantly; every decision audited. Pinned
+end-to-end by
 `tests/test_autonomous_publishing.py::test_phase2_exit_criterion_end_to_end`.
 Full model: [`AUTONOMY_MODEL.md`](AUTONOMY_MODEL.md).
 
-### P2.1 — ~~Temporal orchestration adapter~~ → in-process scheduler + bounded runner · ✅ **DONE (in-process, not Temporal)**
-Superseded by a council decision: instead of a Temporal adapter, durability is the
-`scheduler/` atomic-claim SQLite runner + the `autonomy/` bounded loop, both riding
-`ai_core.ask_with_tools`. `workflow.store` remains the card-state precursor. Temporal
-is **not** being adopted; this item is closed by the in-process substrate.
-*Quality-reviewed 2026-06-11:* security strong (atomic claim, fixed tool
-allow-list, structural no-publish, strict tenancy), with five hardening fixes
-applied — the audit ledger no longer raises/corrupts on oversized args (it
-always writes valid JSON), the ledger and the posting log resolve `DATA_DIR`
-per call instead of freezing it at import, a scheduler claim hiccup no longer
-aborts the tick for remaining tasks, the silent busy-timeout fallback is now
-logged, and the runner's enum is renamed (see P2.3).
-
-### P2.2 — Human-approval signal = the autonomy toggle · ✅ **DONE (2026-06-11)**
-Shipped as `workflow/approval.py::apply_approval_signal` on the existing
-`workflow.CardStatus` QUEUE → APPROVED → POSTED transition: gated types
-**pause on the signal** (cards stay QUEUE/EDITED until a human approves);
-a `fully_autonomous` type's cards run the P2.3 publish gate against the exact
-caption that would ship — passing cards auto-APPROVE and, when the org has
-chosen autonomous channels (Settings → Autonomy; per-org Buffer token),
-publish through the same Buffer path a human click uses (workflow
-schedule-state + posting log + audit identical to the human path). Failing
-cards stay queued for the human with blockers recorded — autonomy degrades to
-approval, never the reverse; human decisions are never revisited.
-Triggers: `POST /api/autonomy/sweep` (org-scoped) and the `approval_signal`
-scheduler task type. Machine-approved captions deliberately don't feed the
-voice-learning store.
-
-### P2.3 — Guardrails: provenance/trust · brand-safety · rate limit · kill switch · audit · ✅ **DONE (2026-06-11)**
-The single per-type publish gate shipped: `publishing/publish_gate.py` —
-kill switch → per-type policy → provenance (`recognition.schema.SafeToPost`
-plus the run trust report's post/review/hold vocabulary, fail-closed on
-missing/unknown) → per-type confidence threshold (default 0.85, floor 0.5,
-operator-tunable per type in Settings → Autonomy) → deterministic
-brand-safety (AI-tell ban-list, the org's `brand_phrases_to_avoid`, platform
-length) → safeguarding (a card concerning a minor never auto-publishes,
-ADR-0003) → per-org rate caps over the posting log
-(`MEDIAHUB_AUTONOMOUS_HOURLY_CAP`/`MEDIAHUB_AUTONOMOUS_DAILY_CAP`). Every
-verdict is explainable per check and audited. The two `AutonomyLevel` enums
-are **reconciled**: the runner's reach axis is renamed
-`autonomy.tools.RunnerReach` (OFF/SUGGEST/DRAFT/PREPARE), leaving
-`sport_profiles.autonomy.AutonomyLevel` as the single publishing-policy enum.
-`/healthz/deps` reports the gate (`publish_gate`) alongside the P2.4 policy.
-
-### P2.4 — Per-type autonomy controls in the workspace · ✅ **DONE**
-Surface the toggle; default everything gated; warn before enabling `fully_autonomous`.
-Shipped + live (PR #297): Settings>Autonomy tab with per-profile per-type policy defaulting to approval_required; publish gate consults the policy behind the global kill switch; /healthz/deps exposes per_type_autonomy. Canonical enum = sport_profiles.autonomy.AutonomyLevel (the runner's separate reach axis was renamed RunnerReach in P2.3). *Extended 2026-06-11 (P2.3):* the tab also carries the per-type auto-publish confidence threshold and the org's autonomous-channel list.
-
-**Building blocks.** **Temporal** (MIT — truly free to self-host; 3,000+ paying
-customers incl. Snap/Netflix/Stripe) for the backbone + human-in-the-loop signal.
-The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as reference.
-
-**Dependencies.** Needs **P1** (a content plan) and **P0** (free path). Gates **P4**
-(publishing must obey autonomy + guardrails).
-
----
-
-## Phase C — Commercialise & Distribute · PC · 🔵 **sell side open — compliance build-out reopened 2026-06-12 (PC.11–PC.14)** · 🥇 TOP PRIORITY
-
-> **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
-> *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
-> numbered phases are *capability*; Phase C is *commercialisation*. Added in the 2026-06
-> diligence reconcile
-> ([`adr/0011-commercial-reconcile-revenue-reality.md`](adr/0011-commercial-reconcile-revenue-reality.md));
-> evidence base in
-> [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). It does not
-> invent new work — it **promotes and reconciles** Appendix B **Step 7** (commercial
-> layer), Appendix B **Step 14** (multi-club orchestration), and the cross-cutting
-> **"Multi-tenancy: org → workspace"** item into one front-of-queue track.
-
-**Goal.** Make MediaHub **sellable without the founder in the loop**: self-serve signup +
-auth, Stripe billing, **true multi-tenancy** (org → workspace in one shared instance),
-validated pricing with annual prepay, a resolved free-self-host position (**resolved:
-hosted-only** — [adr/0011](adr/0011-commercial-reconcile-revenue-reality.md)), and a
-go-to-market motion. **Update 2026-06-09:** the *build* half is now half-closed —
-self-serve signup + auth (**PC.1**) and Stripe billing (**PC.2**) shipped and are live
-(merged PR #267). But billing **honest-503s until the operator sets `STRIPE_*` keys**, so
-there are still **zero paying customers** against ~164k LOC. The diligence's central
-"build/sell imbalance" is therefore **half-closed on the build side and entirely open on
-the sell side** — the remaining gates are true multi-tenancy (**PC.3**), validated
-pricing (**PC.4**) and a go-to-market motion (**PC.6**).
-
-**Update 2026-06-11 — the build side is now fully closed.** **PC.3 shipped** (org →
-workspace membership binding, Council-pressure-tested, [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md)),
-and the engineering halves of **PC.4** (revealed-WTP quote ledger + per-quote Stripe
-Checkout + verified payment recording) and **PC.6** (warm-first pipeline tooling + the
-drafted Swim England application) landed with it on the operator console
-(`/operator/commercial`). Everything that remains in Phase C is selling: set the
-`STRIPE_*` keys, pre-bind the pilot clubs, quote real annual prices, run the warm +
-referral motion, submit the NGB application. The exit gates are unchanged and unmet —
-**zero paying clubs** today; code can no longer be the excuse.
-
-**Update 2026-06-12 — the build side is reopened: the compliance surface was never
-built.** A compliance-readiness audit (maintainer-instructed) found that "sell now"
-was being pushed with **no Terms of Service, no Privacy Notice (the existing
-`/privacy` route is a data-inventory/delete tool, not a policy), no club DPA, no
-ICO registration, no terms acceptance at signup, no account deletion, no data
-export, no password reset (no transactional email at all), and no backup/restore
-story** — while the product processes **minors'** names, ages, performance data and
-photos for UK clubs and publishes them on a public wall. Root cause and decision in
-[`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md):
-Phase C was composed from a *revenue* diligence, so "lawful to operate" was never an
-exit criterion. **PC.11–PC.14** close the gap and a third exit gate below makes it
-structural. The selling motion can be *prepared* in parallel (warm conversations,
-the NGB application, the demo), but **no club pays before gate 3 holds.**
-
-**Exit criteria (all three are hard gates; 1–2 gate later phases, 3 gates the first paid contract).**
-1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
-   involvement.* No scaling work (P3/P4/P5) starts until this holds.
-2. **Traction gate:** *≥10 clubs paying annually* before any new sport (P3). If the wedge
-   stalls below ~50 clubs over time, that is a retention/PMF problem to fix — **not** a
-   signal to add sports.
-3. **Compliance-readiness ("lawful-to-sell") gate — added 2026-06-12:** *no paid
-   contract before* versioned Terms + Privacy Notice are live and accepted at signup,
-   the club DPA exists, ICO registration is done, the minors' consent gate (PC.12)
-   enforces at generation/wall/publish, deletion + export (PC.13) work end-to-end,
-   and password reset / breach notice / verified backups (PC.14) are in place.
-   PC.4's pricing ledger and PC.6's funnel keep moving, but a quote may not convert
-   to payment until this gate holds ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
-
-### PC.1 — Self-serve signup + auth · ✅ **DONE**
-The signup/login/session half of Appendix B **Step 7** (email+password, hashed; signed
-session cookie), promoted from "alongside Phase 1" to the front of the queue. Self-hosted
-deployments without billing env vars keep working (auth optional). *Ref: Appendix B Step 7.*
-Shipped in PR #267 (signup/login/logout, bcrypt, signed session cookie, users.jsonl ledger); live-verified 2026-06-09. Auth stays optional when no accounts/billing are configured.
-
-### PC.2 — Stripe billing + subscription lifecycle · ✅ **DONE (code-complete; awaits operator STRIPE_* keys)**
-The billing half of Appendix B **Step 7**: Stripe Checkout, the Customer Portal, and a
-signed webhook that drives plan state. Annual prepay is the default (see PC.4). Billing
-routes honest-error (`503 "billing not configured"`) when `STRIPE_*` is unset, so the
-free/self-host path is unaffected. *Ref: Appendix B Step 7.*
-Shipped in PR #267 (Checkout, Customer Portal, signed webhook driving plan state). Routes honest-503 when STRIPE_* is unset so there is zero added running cost until the operator sets keys; live-verified 2026-06-09.
-
-### PC.3 — True multi-tenancy: org → workspace · ✅ **DONE (2026-06-11)**
-**The #1 architectural fix — shipped.** Single-instance-per-club rises linearly in
-ops/support against fixed founder hours and collapses around 15–40 clubs; MediaHub now
-runs **org → workspace isolation in one shared instance.** The 2026-06-09 escalation was
-resolved exactly as governance required: the schema was **Council-pressure-tested**
-(five advisors + anonymous peer review + chairman) and **operator-signed-off** (the
-operator's direct instruction to complete Phase C), with the verdict recorded in
-[`adr/0014-org-workspace-multitenancy-schema.md`](adr/0014-org-workspace-multitenancy-schema.md).
-What shipped:
-
-- **Per-org membership binding** (`web/tenancy.py` + `DATA_DIR/memberships.jsonl`,
-  mirroring the `users.jsonl` ledger): an org with ≥1 ACTIVE membership is **bound** —
-  members-only at every choke point (the `_active_profile_id()` resolver, set-active,
-  the `/sign-in` picker, `/organisation` edits, deletion, run stamping) — while an org
-  with no members behaves exactly as before (Step 14's standalone default), so pilot
-  deployments and the existing anonymous fixtures are untouched.
-- **Zero-founder-involvement first claim:** orgs created by a signed-in user are born
-  bound to their creator; existing pilot orgs are pre-bound by a one-time operator
-  invite (`invited` rows deliberately do not lock the org) that **auto-activates at
-  signup**. Owners manage members at `/organisation/members` (pending invites by
-  email — no email-sending infrastructure pretended).
-- **ADR-0003 strengthened, never weakened:** `_can_access_run` is untouched for owned
-  runs; the ownerless-legacy-run branch now refuses signed-in *foreign* accounts (the
-  shared-instance blast-radius fix the Council made a precondition), while anonymous
-  pilot and operator behaviour is preserved.
-- **Pinned by a second invariant suite** — `tests/test_workspace_membership_invariant.py`
-  sweeps the pinning surfaces the ADR-0003 test never covered (plus an ownerless-run
-  route sweep under account mode), alongside `tests/test_tenancy.py` unit coverage.
-
-*Ref: cross-cutting "Multi-tenancy: org → workspace"; Appendix B Step 14 (Step 14's
-federation dashboards / template-push surfaces remain later-stage work — NOT pulled
-forward).*
-
-### PC.4 — Repricing & packaging (validate, don't assume) · 🔵 **IN PROGRESS (build complete 2026-06-11; evidence gate open)**
-**Build side fully shipped; the gate is now a selling exercise.** Completion pass
-2026-06-11: `/pricing` now actually **reads the PC.4 gate** instead of merely defaulting
-to TBC — `commercial/wtp.py:public_list_price` returns a committed price only once ≥5
-distinct clubs have paid annual, and the figure is *derived from the paid ledger* (the
-highest tested price that cleared), never typed in. Until then the page shows "Pricing
-TBC" even when Stripe price ids are configured. The revealed-WTP machinery
-landed with PC.3 (same PR, [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md) §7):
-a quote ledger (`commercial/wtp.py`, `DATA_DIR/commercial/wtp_quotes.jsonl`) records every
-real annual price quoted per club; **per-quote Stripe Checkout** charges exactly the
-quoted annual figure (`billing.create_quote_checkout_session`, ad-hoc `price_data`,
-quote-id metadata); and the signed webhook records the payment **idempotently and
-amount-verified** — a figure that doesn't match the quote is stored as a mismatch and
-never counts. Both gates render live on the operator console (`/operator/commercial`):
-the **≥5 clubs paid annual** pricing gate and the **≥10 paying clubs** traction gate.
-`/pricing` still honestly shows "Pricing TBC" and stays that way until the pricing gate
-is met. What remains is not code: quote real prices to real clubs and record what clears.
-The original evidence-gate design (unchanged, still the rule):
-
-- **Candidate hypothesis (to test, not to publish):** Club **£49–£99/mo billed
-  annually**, Federation **£250+/mo**. Annual prepay is non-negotiable — SMB/volunteer
-  churn runs 3–7%/mo and annual billing cuts it ~30–40% ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md)).
-- **Validation method:** treat the first ~10 hand-sold clubs (**PC.6**) as live price
-  discovery. Quote a *real* annual price, vary it across clubs, and record accept/decline
-  plus the price each club will actually pay — i.e. **revealed** WTP from real payments,
-  not survey-stated WTP.
-- **Gate (the >95%-confidence-correct step):** keep `/pricing` at the honest
-  *"Pricing TBC"* it already shows until **≥5 clubs have paid an annual prepay at a tested
-  price**; only then commit a public list price, set at the highest tested point that
-  still cleared. Below that signal, any fixed list price is a guess.
-- **Why this sequencing:** under-pricing is hard to reverse (re-pricing existing annual
-  contracts upward churns volunteer buyers), and over-pricing with no buyers teaches
-  nothing. Revealed WTP from real annual payments is the only evidence that de-risks the
-  tier — and it costs nothing extra because the first ~10 sales happen anyway under PC.6.
-
-**Sourced price comparators (anchor the hypothesis; every figure dated):**
-
-| Comparator | Segment | Current price | What it anchors |
-|---|---|---|---|
-| **Gipper** (closest analog) | US K-12/college athletic depts | **$625 / $1,500 / $3,000 per year, annual-only** *(gipper.com/pricing, verified 2026-06-09)* | The institutional ceiling a results-graphics tool can reach *with a sales motion*. |
-| **Predis.ai** (horizontal AI) | Any SMB / creator | **$19 / $40 / $212 per month** *(predis.ai/pricing, verified 2026-06-09)* | The buyer's mental price ceiling for "AI makes my posts." |
-| **SwimTopia** (swim incumbent that touches money) | Swim clubs | ~$150–$699/yr annual *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | What a club *will* pay when software is mission-critical (registration/billing) — MediaHub is not, yet. |
-| **Canva Free** | Volunteer creator | **£0** | The free substitute every volunteer already has. |
-| **Swim Wales affiliation** | Whole NGB relationship | £150/yr *([`SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))* | The volunteer treasurer's anchor for "what anything costs." |
-
-Read together: the commodity floor (£0 Canva / ~$19/mo Predis) and the £150/yr NGB anchor
-pull the Club tier **down**, while Gipper proves the institutional ceiling is far higher
-($625–$3,000/yr) **but only for a schools/federation buyer with a budget, not a volunteer
-club.** That gap is exactly why Route B (US schools) and PC.6 governing-body endorsement
-carry the revenue weight, and why the Club tier must be set by revealed WTP rather than
-assumed.
-
-*Confidence: the **step** — gate the public price on ≥5 revealed annual payments before
-publishing a list price — is >95%-confidence-correct; it is what a hard-nosed operator
-would insist on. The **price levels themselves remain an unvalidated hypothesis** and are
-flagged as such, not stated as fact. Ref: Appendix B Step 7 tiers (⚠️ unvalidated there);
-[`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).*
-
-### PC.5 — Free-self-host tension · ✅ **RESOLVED (2026-06-09): hosted-only**
-"Truly free, no hidden fees" self-host, as framed, hands power users a permanent
-zero-revenue escape hatch. **Resolved 2026-06-09 (maintainer decision): hosted-SaaS
-only — no customer self-host tier, free or capped.** Both earlier options — a capped
-lead-gen tier (the default recommendation) and keeping true-free self-host — were
-rejected in favour of hosted-only, the simplest principle that removes the zero-revenue
-escape hatch entirely rather than half-closing it. The standing **no-hidden-fees /
-truly-free self-host** product principle is retired; [`CLAUDE.md`](../CLAUDE.md) is the
-authoritative statement. Recorded in
-[adr/0011](adr/0011-commercial-reconcile-revenue-reality.md).
-
-### PC.6 — Go-to-market / distribution · 🔵 **IN PROGRESS (tooling + NGB application drafted 2026-06-11; the selling is founder work)**
-Distribution kills solo ventures, not product gaps. **Instrumented 2026-06-11:** the
-warm-first funnel now has an operational home on the operator console
-(`/operator/commercial`, backed by `commercial/pipeline.py`): a lead ledger by source
-(warm_local / referral / meet_presence / cold), a **cold-share readout** that flags when
-cold stops being the capped supplement, and a **referral-debt readout** listing every won
-club still owing its **2 named intros** (the 5 → 10 compounding mechanism). The Swim
-England approved-systems application is **drafted and submission-ready** at
-[`commercial/SWIM_ENGLAND_API_APPLICATION.md`](commercial/SWIM_ENGLAND_API_APPLICATION.md)
-(safeguarding/isolation evidence included), with its status tracked on the console
-(PC.6(a) — the founder must actually submit it). The clubs themselves cannot be built in
-code: the funnel below is the founder's motion, unchanged. The sub-track:
-- **Governing-body channel — split into two mechanisms with very different evidence (reality-checked 2026-06-09):**
-  - **(a) Official data-API access — REAL, dated, the concrete first NGB action.** Swim England launched a secure **approved-systems API** (announced 1 Oct 2025) letting approved platforms read official swim times/PBs directly from its databases; initial partners are the club-admin platforms Swim Club Manager and Swim Manager, and it explicitly invites *“commercial organisations interested in benefiting from the Swim England API”* to apply, with *“more to follow in 2026”* toward a “connected digital eco-system.” Applying for approved access is high-confidence-available and strengthens the deterministic data moat + credibility — but it grants **data, not promotion.** *(>95% this step is correct/available; sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md).)*
-  - **(b) Promotional NGB endorsement to hundreds of clubs — DOWN-WEIGHTED to speculative.** No evidence any NGB promotes a third-party *content* tool to its member clubs. Swim England’s partner slots are **category-exclusive and already held** (SportsEngine = “preferred technology supplier” for swim schools; GoCardless = “Official Payments Partner”); the corporate-partner tier (Speedo, Sport England, SportsHotels) is sponsorship-based and slow. So “one deal reaches hundreds of clubs” is a *possibility, not the assumed highest-leverage channel.* **Threshold: if no NGB/region will pilot or promote after ~6 months, treat it as speculative and lean on direct + word-of-mouth.** This re-weighting reinforces **Route C** — the incumbents who already hold the endorsement *and* the official data integration are the realistic distribution partners. *([adr/0012](adr/0012-ngb-distribution-channel-reality-check.md).)*
-- **Hand-sell the first ~10 clubs yourself — the traction gate, designed as a warm-first sequence (expanded + evidence-banded 2026-06-09).** This is *the* Phase C exit gate, not a growth tactic, and it is now the **de-facto primary channel** after the promotional-endorsement down-weight (PC.6(b) / ADR-0012). The base rates say the gate is reached by **manufactured warmth + referral chains, not cold broadcast**:
-  - **(i) Local-warm base first (Swansea / South-East Wales).** The founder is locally embedded; Swim Wales has ~80–90 affiliated clubs (~11,000 members) — a tight regional network. Warm / in-person founder-led sales convert at **~30–50%** vs **~2–5%** for cold. *Win the first ~3–5 paying clubs here, high-touch, in person.* `[Founder-led sales benchmark — ESTIMATE; warm 30–50% vs cold 2–5%.]`
-  - **(ii) Referral engine on every signed club.** Coaches and volunteers know each other across county squads and meets. In SaaS, **20–50% of new customers come from referral / word-of-mouth** (≈65% of B2B new business; referred customers ~37% higher retention) — *amplified* in a community this tight. Ask each signed club for **2 named intros** to peer clubs; warm-intro close stays in the 30–50% band. *This is the mechanism that compounds 5 → 10.* `[SaaS referral benchmark — ESTIMATE.]`
-  - **(iii) Meet / event presence as warmth-manufacture.** County and regional meets are where the community physically gathers; producing real branded output for host / visiting clubs turns strangers into warm leads — it is not cold outreach.
-  - **(iv) Cold outreach = a capped supplement, never the path to the gate.** The public Swim England (~1,200+ clubs) and Swim Wales club directories make contacts reachable, but the honest funnel for a brand-new, unproven tool sold to a no-budget volunteer buyer is brutal: cold reply **~2–5%** × reply→meeting **~30–50%** × meeting→paid **~15–30%** ≈ **~0.3–1.0% cold-to-paid.** Reaching 10 clubs cold would need **~1,000–3,000 quality contacts** — not achievable solo at quality. *Use cold only to book a handful of discovery calls; do not plan the gate around it.* `[Blended from cold-email + founder-led benchmarks — ESTIMATE.]`
-  - **Honest funnel to the gate:** ~5 local-warm + ~5 referral; cold supplements top-of-funnel only. **Realistic timeline ~3–6+ months** to 10 paying clubs given seasonal calendars, volunteer decision-making and no standing budget line (founder-led SaaS cycles run 4–8 weeks for *budgeted* buyers; volunteer clubs are slower). `[ESTIMATE — flagged, not a commitment.]`
-  - **Confidence split (the >95% discipline):** the *design* — warm + referral over cold broadcast — is **>95%-confidence-correct** on the cited base rates; the *outcome* (10 paying clubs in N months at price X) is **unproven and IS the validation** (it also closes the PC.4 willingness-to-pay gap). Do not conflate the two. Sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) (Evidence refresh cycle 4).
-- **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
-
-### PC.7 — Instant try-before-signup demo · ✅ **DONE (2026-06-11)**
-**The sales motion's sharpest tool — shipped as specced.** PC.6's warm-first
-hand-sell needs a shareable magic moment, and the June 2026 competitive pass verified
-nobody can copy this demo — no competitor ingests a results file at all. *(Ideas
-research #1 — [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).)*
-What shipped:
-- **Public `/try` flow** (no account, org-gate-exempt): upload a results file — or one
-  click on the bundled `samples/MISM-2024-Results.pdf` — answer one question ("which
-  club is yours?", parsed from the file), and the normal pipeline runs into a
-  watermarked top-≤3-card preview with deterministic brand captions and the same
-  "why this card" explainer the product shows (honest error text when no AI provider).
-- **Demo restrictions:** runs are stamped to the sandboxed, unbound `demo-try` org
-  (`web/demo_try.py:ensure_demo_profile`); `pb_discovery` web-verification is forced
-  off (`fetch_pbs=False` — no third-party calls on unauthenticated traffic); every
-  card renders through the new `watermark_text` overlay layer in
-  `graphic_renderer/render.py` (a repeated diagonal stamp injected above every layout
-  family).
-- **Caps + isolation + self-cleaning:** per-IP and global daily caps
-  (`MEDIAHUB_TRY_IP_DAILY_CAP` / `MEDIAHUB_TRY_GLOBAL_DAILY_CAP`, fail-closed),
-  per-browser-session run visibility (one visitor can never open another's demo run,
-  and demo routes 404 for any non-demo-org run), and a daily `demo_sweep` scheduler
-  task deleting demo runs older than 24h. `MEDIAHUB_TRY_DEMO=0` switches the whole
-  surface off.
-- **Conversion carry:** the signup CTA rides the preview, and a signed-in club can
-  claim the run (`POST /try/<run_id>/claim`) — it re-stamps to their org, leaves the
-  sandbox and the sweep's reach, and opens in their review queue.
-Pinned by `tests/test_try_demo.py` (caps, sandbox isolation, demo restrictions,
-claim, sweep).
-
-### PC.8 — Sponsor manager + sponsor exposure reports · ✅ **DONE (2026-06-11)**
-**Makes the subscription revenue-positive for the club — direct PC.4 leverage.**
-*(Idea #3.)* What shipped:
-- **Sponsor registry** on `web/club_profile.py` (`ClubProfile.sponsors`: name, logo
-  as a media-library asset reference, tier, active window, website) with a `/sponsors`
-  workspace page to add/remove sponsors and pick the logo from the org's media
-  library. The legacy single `sponsor_name` field stays a fallback — pre-PC.8
-  profiles render exactly as before (sponsor only on the dedicated Sponsor Variant).
-- **Deterministic rotation** (`club_platform/sponsors.py:sponsor_for_card`): the
-  (run, card) identity seeds which active sponsor's slot a card carries — sha256
-  rotation in the `auto_variation_seed_for` mould, so stills, motion, and re-renders
-  agree. Wired into the standard create-graphic path (single render + Tier B
-  candidate pool) and the sponsor-variant surface; the sponsor's logo rides the
-  renderer's sponsor strip (`render_brief(sponsor_logo_path=…)`).
-- **Exposure ledger + monthly report:** every sponsor-stamped render appends
-  idempotently to `DATA_DIR/sponsors/<org>__exposure.jsonl`; `/sponsors/report`
-  joins it with `workflow` approval states and `publishing/posting_log.py` into a
-  branded, downloadable per-sponsor monthly report (cards carried / approved /
-  posted / publish attempts, per run). Reach lands later with W.14 phase 2; email
-  delivery with P4.5.
-Pinned by `tests/test_sponsors.py` (registry, windows, rotation determinism, legacy
-fallback, ledger idempotency, report arithmetic, route flows, and the
-no-behaviour-change guarantee for legacy profiles).
-
-### PC.9 — In-product referral engine · ❌ **NOT STARTED**
-**Runs PC.6's compounding mechanism (2 named intros per signed club) inside the
-product instead of operator ledgers.** *(Idea #4.)* **Build:** referral codes per
-org; signup accepts a code and records the lead in `commercial/pipeline.py` with
-source=referral; the reward (a free month as a Stripe coupon via `web/billing.py`)
-auto-grants when the referred club's first annual payment lands amount-verified in
-`commercial/wtp.py` (the idempotent webhook hook already exists); the
-referral-debt readout on `/operator/commercial` switches from manual entries to
-live code-tracked state. **Exit:** a signed club has a shareable code; a paid
-referral auto-grants the reward and updates the funnel ledger with zero operator
-typing.
-
-### PC.10 — Public club achievements page + website embed · ✅ **DONE (2026-06-11)**
-**A zero-gating distribution surface and a standing referral advert.** *(Idea #2.)*
-What shipped:
-- **Public read-only surfaces** (`web/public_wall.py` + routes): `/wall/<token>`
-  (hosted celebration page), `/wall/<token>/embed` (iframe-ready), per-club
-  `/wall/<token>/feed.rss` + `/feed.json`, and the card-image route — all keyed by
-  an unguessable per-org token, all with cache headers, all carrying the
-  "powered by MediaHub" badge into the signup funnel. First-party Flask; no
-  platform review anywhere.
-- **Approved-only, side-effect-free:** pages read `workflow.CardStatus` APPROVED
-  (and POSTED — an approved card that has since published) and serve only
-  already-rendered PNGs with result-grounded alt text; QUEUE/EDITED/REJECTED never
-  appear, and the public reader never mutates anything (no caption-memory capture).
-- **Opt-in + structural revocation:** the `/public-wall` workspace page switches the
-  wall on (token minted) and off (**token cleared** — the old URL 404s, not an "off"
-  page).
-- **Safeguarding-conservative until W.2:** initials-only display toggle (default ON)
-  applied to all wall text and alt text, plus per-card hide/show
-  (`public_wall_excluded_cards`).
-- **ADR-0003 holds:** the token scopes exactly one org — wall queries are pinned to
-  the org's own runs, the run JSON's owner is re-checked, and a cross-tenant card
-  fetch 404s.
-Pinned by `tests/test_public_wall.py` (token resolution, approved-only, initials,
-exclusions, revocation, feeds, and cross-tenant isolation).
-
-### PC.11 — Legal & privacy pack · 🔵 **IN PROGRESS — code surface shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
-
-> **2026-06-12 status:** the in-product half is built — `/terms`, `/privacy`
-> (rewritten as an accurate Art. 13/14 notice), `/cookies`, `/dpa`; versioned
-> signup acceptance recorded in `legal_acceptances.jsonl` with re-acceptance
-> forced on a `TERMS_VERSION` bump; per-workspace DPA acceptance + lawful-basis
-> attestation at org setup; subprocessor + transfer disclosures inside the
-> Privacy Notice §3/§7 and DPA §6. Remaining: the founder checklist (ICO
-> registration, `[COMPANY_NAME]`-style identity placeholders, solicitor
-> sign-off — see `COMPLIANCE_HANDOVER.md`) and a guard test pinning the
-> subprocessor register against the env-flag surface.
-
-**The contractual minimum to take a club's money.** MediaHub is a **processor**
-for clubs (the controllers) over personal data that is largely **children's** —
-names, ages, race performance, photos — and today there is no Terms of Service,
-no Privacy Notice, no DPA, and signup records no acceptance of anything.
-**Build:**
-- Public **Terms of Service** + **Privacy Notice** routes (e.g. `/legal/terms`,
-  `/legal/privacy` — the existing `/privacy` data-inventory tool keeps its URL),
-  versioned documents stored in-repo; signup requires an explicit acceptance
-  checkbox and records `{terms_version, accepted_at}` in the `users.jsonl`
-  ledger; material changes force re-acceptance at next login.
-- A club-facing **Data Processing Agreement** (UK GDPR Art. 28 processor terms,
-  minors' data explicitly in scope) presented to the org owner at org creation /
-  first paid quote, acceptance recorded per org.
-- A published **subprocessor register** with transfer mechanisms, kept truthful
-  against the dependency register: Render (hosting + disk), Stripe (payments),
-  Google Gemini + Anthropic (LLM — athlete names/results ride in prompts),
-  Buffer (when scheduled), Replicate/PhotoRoom (opt-in cutouts), the TTS
-  provider when voiceover is on. A guard test pins the register against the
-  env-flag surface so a new provider can't ship undisclosed.
-- **Founder (non-code) checklist, tracked on `/operator/commercial`:** ICO
-  registration (data-protection fee), and a professional review of the three
-  documents before the first paid contract — drafts can be assembled in-repo,
-  but sign-off is a human act.
-**Exit:** an account cannot be created without recorded acceptance of a
-versioned ToS + Privacy Notice; an org owner has a recorded DPA acceptance;
-the subprocessor page renders and its guard test is green; ICO registration is
-logged on the operator console.
-
-### PC.12 — Minors' consent & safeguarding gate · 🔵 **IN PROGRESS — attestation shipped 2026-06-12 (PR #352); consent registry outstanding** · *(sell gate — W.2 promoted 2026-06-12)*
-
-> **2026-06-12 status:** workspace setup now requires a recorded
-> parental-consent / lawful-basis attestation from the club, and the Privacy
-> Notice carries the children's-data section. The load-bearing half — W.2's
-> per-athlete consent registry enforced at generation, photo scoring, the
-> public wall and the publish gate — plus the Children's-Code pass are still
-> to build.
-
-**W.2 stops being optional the day money changes hands.** The product's core
-output is *publishing children's achievements*; Swim England's Social Media
-Good Club Guide expects photo-consent handling, the drafted NGB application
-already cites safeguarding evidence, and the public wall (PC.10) currently
-leans on an initials-only default rather than recorded consent. **Build:** ship
-**W.2** (per-athlete consent registry — photo OK / full name OK / initials-only /
-do-not-feature; most-restrictive default; CSV import; enforced deterministically
-at generation, in `media_library/selector.py` photo scoring, on the public wall,
-and as a publish-gate check; welfare-officer export; audited changes). A
-name-keyed minimal ledger is acceptable for this gate if W.1's full athlete
-registry hasn't landed; it migrates onto the W.1 spine when that ships. Plus a
-documented **Children's-Code (Age Appropriate Design) pass** over the public
-surfaces (`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a
-no-consent athlete cannot render a name/photo and cannot pass the gate or
-appear on the wall; the review UI explains why; the Children's-Code pass is
-recorded; the NGB application's safeguarding claims are all true in code.
-
-### PC.13 — Data lifecycle & rights · 🔵 **IN PROGRESS — rights plumbing shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
-
-> **2026-06-12 status:** shipped — self-serve account deletion (compacting,
-> tombstone-free across `users.jsonl` / acceptances / memberships), athlete
-> erasure cascading through runs, rendered assets, PB + research caches,
-> caption memory and posting-log excerpts (test-pinned), account export,
-> a post-publication correction/takedown workflow, and the retention schedule
-> published in the Privacy Notice + enforced by the `MEDIAHUB_RETENTION_DAYS`
-> daily sweep. Remaining: whole-org deletion and the org-level takeout ZIP
-> (runs + media + consent state + audit log in one bundle).
-
-**Deletion, export, retention — the data-subject-rights plumbing a controller
-club will ask its processor for.** Today `/privacy` deletes individual runs,
-demo runs sweep at 24h — and that's the whole story: no account deletion, no
-org deletion, no export, no retention schedule. **Build:**
-- **Self-serve account deletion** (user row + memberships) and **org deletion**
-  cascading runs, media assets, content packs, wall token, sponsor/exposure
-  ledgers, consent registry — with the Stripe customer handled per the DPA
-  (financial records have their own statutory retention).
-- **Org-level data export** (takeout ZIP: runs JSON, media, captions, consent
-  state, audit log) — serves SARs and portability in one mechanism.
-- A documented **retention schedule** (runs, uploads, media, logs, audit
-  trails, demo runs, deleted-org grace window) published in the Privacy Notice
-  and enforced by scheduler jobs where automatic.
-**Exit:** a club owner can delete their org or export everything it holds
-without founder involvement; deletion verifiably removes the data from
-`DATA_DIR` (pinned by tests under the ADR-0003/0014 isolation invariants);
-the retention schedule in the Privacy Notice matches what the code does.
-
-### PC.14 — Operational trust pack · 🔵 **IN PROGRESS — billing-hygiene slice shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
-
-> **2026-06-12 status:** the CCR/DMCCA pre-contract checkout shipped
-> (`/billing/confirm`: price honesty, auto-renewal disclosure, cancellation
-> parity, recorded cooling-off acknowledgement) and the support contact is
-> surfaced in the footer/ToS (as a `[CONTACT_EMAIL]` placeholder until the
-> founder fills it). Still to build: the transactional-email seam (password
-> reset / verification / breach notice / invites), backups + restore drill,
-> the incident runbook, and VAT/invoice hygiene. Stripe renewal-reminder
-> emails are a dashboard setting — tracked in `COMPLIANCE_HANDOVER.md`.
-
-**The boring things a paying customer silently assumes.** Found missing in the
-2026-06-12 audit: there is **no transactional email at all** (so no password
-reset — a locked-out volunteer is locked out forever; PC.3's member invites
-never send; a breach could not be notified), **no backup story** beyond the
-single 1 GB Render disk that holds `users.jsonl`, the payment/WTP ledgers and
-every run, and no support or incident path. **Build:**
-- **Transactional-email seam** (Resend-style HTTP API behind an env key,
-  honest-503 unconfigured — pulls P4.5's seam forward without the digest
-  product): password reset (signed expiring token), email verification,
-  member-invite delivery, and an operator "notify all users" path for breach
-  notification (the ICO's 72-hour clock needs a working channel, not a plan to
-  build one).
-- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
-  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs) with the
-  key material handled per the DPA, and a *documented, rehearsed* restore —
-  an unrestored backup is a hypothesis.
-- **Support + incident runbook:** a real support contact surfaced in-product
-  and in the ToS; a short incident/breach runbook (detect → contain → assess →
-  notify ICO/clubs) checked into `docs/`; `/healthz` uptime already exists —
-  surface it honestly to customers.
-- **Billing hygiene:** decide VAT handling (Stripe Tax vs below-threshold
-  statement), and ensure Checkout emits an invoice/receipt a volunteer
-  treasurer can put through club accounts.
-**Exit:** a user can reset their password unaided; an invite email actually
-arrives; a restore from backup has been performed and documented; the support
-contact and runbook exist; a test payment produces an expensable invoice.
-
-**Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
-`DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the
-shipped cross-tenant isolation invariant (ADR-0003) as the multi-tenancy seed; Postiz /
-Mixpost org→workspace schemas as *reference only* over a network boundary (never embed
-AGPL — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
-
-**Dependencies.** Upstream of **P3 / P4 / P5** — those are gated behind PC's exit
-criteria. Independent of P0–P2 capability work, which may continue *to the bar needed to
-make the swim wedge sellable* (see P1.4 and "Immediate next moves") but **not ahead of
-billing**.
-
-### Strategy notes — the three credible £1M+ routes (context, *not* build items)
-
-These are **not roadmap work** — they are the only routes the diligence considers
-arithmetically credible for £1M+, recorded so the expansion phases are sequenced with
-revenue in mind. Each carries the report's confidence band. **All figures are estimates.**
-
-- **Route A — Multi-sport UK grassroots** (broadest TAM, weakest moat). ~151,000 UK
-  sports clubs; even a fraction at £49–£99/mo annual reaches £1M. *Risk: per-sport data
-  integrations are non-transferable engineering, head-on vs Canva/Predis. Confidence of
-  £1M: ~15–20%.* → sequences **P3**.
-- **Route B — US schools/colleges** (highest WTP, proven by Gipper/FanWord). Reposition
-  as results-driven achievement graphics at $625–$3,000/yr. *Needs US sales presence;
-  strongest math plus a wedge incumbents lack. Confidence of £1M solo: <15%; higher with
-  a US partner/hire.*
-- **Route C — Content/integration layer for swim-data incumbents** (de-risks
-  distribution). License/sell the content engine to SwimTopia/TeamUnify rather than fight
-  them. *Trades upside for survival probability; possibly the most realistic high-value
-  exit. Confidence it beats going direct: ~50/50.*
-
-**Highest-leverage combination:** governing-body **data-API access + incumbent integration (Route C)** (PC.6) for *distribution* +
-US-schools repositioning (Route B) for *revenue*.
-
----
-
-## Phase W — Deepen the swimming wedge · W · ✅ **BUILT (all 14 items landed 2026-06-12 — single integration pass, ADR-0016; W.14 phase 2 still waits for P4.2)**
-
-**Goal.** Make the swim wedge easier to sell, safer to run, and richer in content
-moments — without waiting for, or blocking, the P3/P4/P5 gates. Every item is
-deterministic-engine or workflow work on existing seams; none adds a mandatory paid
-dependency; AI-judgement surfaces ride `media_ai.llm`/`ai_core.llm` with honest
-errors, per the standing rules.
-
-**Provenance.** The June 2026 ideas research pass —
-[`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md) (22
-researched candidates with competitive, data-ecosystem and platform-feasibility
-sourcing). The sell-side four became **PC.7–PC.10**; the distribution slice became
-**P4.5/P4.6** plus build detail folded into **P4.1/P4.2/P4.4**; the remaining
-fourteen live here. Each item cites its idea number in that doc.
-
-**Gating position (read carefully).** Phase W sits **outside** the Phase C exit
-gates — these are wedge-sellability items in exactly the class PC.6's dependency
-note already permits ("capability work … *to the bar needed to make the swim wedge
-sellable*, but **not ahead of billing**"). The discipline: pick an item **only when
-it unblocks a sale, a pilot, the NGB application, or a known churn risk** — never
-as polish for its own sake, and never as a reason to defer the selling motion. No
-fixed phase exit; every item carries its own. Recommended first picks: **W.1 → W.2**
-(the consent story committees ask about — and W.2 is no longer merely recommended:
-it was **promoted into the PC.12 sell gate on 2026-06-12**), **W.4** (cheap,
-parent-delighting), and **W.10** (demo-day ingestion robustness).
-
-### W.1 — Athlete registry + milestone detectors · ✅ **DONE (2026-06-12)**
-**The data spine for W.2/W.3/W.8 — and per-athlete celebration at scale, which the
-competitive pass verified nobody automates.** Today there is no athlete identity
-across runs: names are per-run strings (`media_library` linking included), so
-milestones, records, consent and season totals have nothing durable to hang on, and
-the KNOWN_ISSUES twins/siblings cross-match has no fix surface. *(Idea #9.)*
-**Build:** a workspace-scoped athlete table in `data.db` (canonical name +
-variants, optional ASA number, birth year, active flag), back-filled from
-`runs_v4` snapshots; a review-time "same swimmer?" merge UI whose decisions
-persist; deterministic milestone detectors joining
-`recognition_swim/achievements/` — first-ever event, Nth race (25/50/100), first
-gala, PB-in-every-event, comeback (extending the existing `ReturnToFormDetector`
-seam). **No LLM anywhere in identity or milestone logic.** Multi-tenant: rows are
-org-scoped under the ADR-0003/ADR-0014 invariants. **Exit:** the same swimmer is
-one entity across ≥2 runs; a 50th-race card generates with a provenance trail;
-merge decisions persist and are auditable.
-
-### W.2 — Consent & safeguarding manager · ✅ **DONE (2026-06-12)** *(also load-bearing for the **PC.12 sell gate** — the registry-keyed ledger + generation/publish-gate enforcement shipped here; PC.12's remaining slice is the public-wall consent surface + the Children's-Code pass: see Phase C / ADR-0015)*
-**The committee objection-killer and the strongest §4 evidence for the Swim England
-application.** Swim England's own Social Media Good Club Guide expects photo-consent
-handling; the competitive pass found **no content tool encodes minors' rules**; the
-code today has only `media_assets.safe_for_minors` — no consent ledger. *(Idea #16.)*
-**Build:** a per-athlete consent registry on the W.1 spine — photo OK / name OK /
-initials-only / do-not-feature; CSV import from the club's existing records; default
-**most-restrictive when unknown**. Enforced twice, deterministically: at generation
-(initials-only rendering; photo suppression in `media_library/selector.py` scoring)
-and as a new publish-gate check beside the existing safeguarding rule in
-`publishing/publish_gate.py`. Review UI shows "blocked: no consent on file"; a
-welfare-officer export lists consent state; every consent change is audited.
-**Exit:** a card for a no-consent athlete cannot render a name/photo and cannot
-pass the gate; the review page explains why; pinned by tests alongside the
-ADR-0003 invariant suites.
-
-### W.3 — Club records engine + "NEW CLUB RECORD" cards · ✅ **DONE (2026-06-12)**
-**The highest-emotion moment a club posts, and no detector exists for it**
-([`DETECTOR_INVENTORY.md`](DETECTOR_INVENTORY.md)); admin incumbents *display*
-records but never generate content from them. *(Idea #10.)* **Build:** a
-per-workspace records store (event × course × age-group × gender) seeded by CSV
-import of the club's records sheet — a strong onboarding hook — and updated from
-ingested meets **on approval only**; a deterministic `ClubRecordDetector` in
-`recognition_swim/achievements/club_record.py` ranked **above** PB; "approaching
-the record" as a planner signal; a records-wall block on the PC.10 public page.
-**Exit:** importing a records sheet then uploading a record-breaking meet yields a
-ranked NEW CLUB RECORD card carrying old mark, new mark and provenance; the table
-updates only when the card is approved.
-
-### W.4 — Season-current qualifying-time packs · ✅ **DONE (2026-06-12)** *(operator curates each season's tables per the runbook in `data/standards/README.md`)*
-**"Qualified for Counties!" is a parent-shareable trigger plain PB detection
-misses — and the detector already exists** (V5 `QualifyingTimeDetector`;
-`ClubProfile.important_standards` is already a field). What's missing is **data**:
-county/regional/national QTs are published as public seasonal PDFs; times are
-facts (low licensing risk, cite the source PDF); third-party aggregators prove
-demand. *(Idea #11.)* **Build:** versioned curated datasets under
-`data/standards/<season>/` with per-table provenance (source PDF URL + curation
-date) and a documented seasonal refresh runbook; club picks its county/region in
-settings; wire the detector + a dedicated card archetype; later add USA Swimming
-motivational times (official free PDFs, fixed 4-year cycle) for US expansion.
-**Exit:** a club selects its standards and a qualifying swim yields a "qualified"
-card naming the standard and its source.
-
-### W.5 — LENEX (.lef/.lxf) ingestion · ✅ **DONE (2026-06-12)**
-**The highest-value UK ingestion add** (June 2026 data-ecosystem pass): LENEX 3.0
-is the openly licensed XML interchange format ("free of charge and without
-restriction"), it is what SportSystems exports, and Swim England's results
-uploader accepts exactly Hy-Tek + LENEX — so HY3 + LENEX covers the licensed-meet
-pipeline upstream of the NGB, and unlocks European clubs later. *(Idea #13.)*
-**Build:** `interpreter/lenex_parser.py` for the results + entries elements per
-the Lenex 3.0 spec; `.lxf` (zipped `.lef`) through the existing bomb-safe unzip
-(`interpreter/_zip_safety.py`); register in `interpreter/ingest.py` format
-detection; normalise to the same canonical shape as HY3/SDIF; fixtures = the four
-official spec example files. Deterministic throughout. **Exit:** a SportSystems
-`.lxf` export runs the full pipeline with output parity to the HY3 path on the
-same meet.
-
-### W.6 — Data-driven meet previews from entry files · ✅ **DONE (2026-06-12)**
-**Doubles content per meet (before + after) from files clubs already hold.** The
-`event_preview` type exists but is form-based — a human types everything; the
-P1.3 planner already wants upcoming-event signals. *(Idea #12.)* **Build:**
-entry-shaped ingestion — Hy-Tek entry files, LENEX `entries` (free with W.5), PDF
-psych sheets through the existing extractor with needs-review flagging — mapped to
-a preview pack (who's entered, events, sessions, squad-size stat) that feeds
-`club_platform` event_preview generation instead of the form, plus a planner
-signal for the meet date. Ambiguous rows flagged, never guessed. **Exit:**
-uploading an entry file yields an approvable "good luck this weekend" pack with
-zero typing.
-
-### W.7 — Live meet mode (watch a results URL mid-gala) · ✅ **DONE (2026-06-12)**
-**Clubs are told to post PBs on event day; nobody can without a volunteer glued to
-a laptop — and it is the most theatrical hand-sell demo available.** Ingestion
-today is single-shot. The ToS-clean path is verified: Hy-Tek "Real-Time Results"
-static HTML on the **host club's own site** (with consent) and
-results.swimming.org meet pages; **Meet Mobile and rankings scraping stay
-prohibited** (the PC.6/ADR-0012 posture is unchanged). *(Idea #14.)* **Build:** a
-watch = stored URL + polite poll interval as a `scheduler/` task type
-(`results_fetch` tier-A fetch; the robots-respecting crawl exists); diff per poll
-with per-swim dedupe keys so a swim cards exactly once; new results → recognition
-→ cards **queued for approval** through the autonomy queue (which structurally
-cannot publish); ntfy push ("3 new PBs in session 2") via `notify/channels.py`
-click-URL straight into review (pairs with W.9); watches auto-expire at meet end.
-**Exit:** a watched live meet produces incremental queued cards within one poll
-interval, with zero duplicates and zero auto-publishing, and the watch stops
-itself.
-
-### W.8 — Season wraps / monthly recap packs · ✅ **DONE (2026-06-12)**
-**Retention work that lands exactly when annual renewal (PC.4's model) comes due**
-— accumulated history becomes switching cost, Wrapped-style. The v7.3
-weekend-in-numbers pattern exists per-run; this generalises it across the season.
-*(Idea #15.)* **Build:** deterministic aggregation across a workspace's history
-(`runs_v4` snapshots + `data.db`): total PBs, medals, records (W.3), debuts and
-milestones (W.1), biggest improver, busiest swimmer; a recap pack type + reel
-sequence on the existing still/motion engines; the scheduler drafts it monthly
-through the autonomy queue for approval; a configurable season-end wrap. **Exit:**
-one click (or the monthly draft) yields an approvable "month in numbers" pack
-consistent with stored history.
-
-### W.9 — Magic-link mobile approvals · ✅ **DONE (2026-06-12)**
-**The approval bottleneck is the head coach's Sunday evening, not the software** —
-and a volunteer-shaped approval loop is unclaimed by competitors (enterprise tools
-or generic design suites only). Also closes the KNOWN_ISSUES unsigned-run-id
-defence-in-depth gap. *(Idea #17.)* **Build:** HMAC-signed, expiring, run-scoped
-tokens (`itsdangerous`, keyed off `MEDIAHUB_SECRET_KEY`) minted when a pack is
-ready; delivered by ntfy/webhook (click-URL support already in
-`notify/channels.py`; email joins via P4.5); a mobile-first lite review surface —
-approve / edit caption / reject only — driving the same `workflow.CardStatus`
-transitions with full audit (who approved, via which token); tokens revocable per
-run; org-bound, no account needed. **Exit:** an approver on a phone clears a pack
-end-to-end from the link; expiry/revocation enforced; audit parity with logged-in
-approval.
-
-### W.10 — OCR fallback for scanned PDFs · ✅ **DONE (2026-06-12)** *(engine ships in the Docker image; sandbox runs the honest no-engine path)*
-**A failed first upload during a hand-sell demo is a lost club.** KNOWN_ISSUES:
-low-DPI scans parse to gibberish; the interpreter already marks image uploads
-"needs OCR" but no OCR exists — and committee secretaries *will* upload phone
-photos of printouts. *(Idea #18.)* **Build:** an OCR step (Tesseract in the Docker
-image, or the RapidOCR wheel) behind the interpreter's existing low-confidence
-path for image-only PDFs and photos; per-row confidence carried through to the
-existing flag-for-review surface — uncertain rows are flagged, never silently
-guessed; `interpreting`-phase logs record OCR engagement. Deterministic.
-**Exit:** a phone photo of a printed results sheet produces parsed rows with
-uncertainty flags instead of gibberish or a dead end.
-
-### W.11 — Result-grounded alt-text on every export · ✅ **DONE (2026-06-12)**
-**KNOWN_ISSUES: exports carry no alt text.** Cards are data-dense graphics, so the
-alt text must restate the result ("Maya Patel, 50m freestyle, 31.24 — a 0.8s PB at
-the Swansea Spring Open"), under ~125 chars, human-reviewable — which the approval
-gate already provides. *(Idea #19.)* **Build:** extend the caption-generation
-contract with an `alt_text` field produced in the **same** `media_ai.llm` call
-(zero added latency/cost; honest-error when no provider — no heuristic fallback);
-thread through the pack ZIP, the newsletter HTML, the PC.10 page/embed (`alt=`
-attributes) and every publish payload; editable in review beside the caption.
-**Exit:** every exported or published card carries result-grounded alt text the
-approver saw.
-
-### W.12 — PB certificates + A4 noticeboard posters · ✅ **DONE (2026-06-12)**
-**Parents currently DIY this with generic certificate templates — the competitive
-pass surfaced printable certificates as the existing "solution" to per-child
-celebration.** A branded certificate carrying the verified time is the artifact
-families print and frame; zero platform dependency. *(Idea #20.)* **Build:** A4
-print layouts in `graphic_renderer/layouts/` (Playwright prints PDF natively;
-`reportlab` stays optional); a per-swimmer certificate batch export on the pack
-(ZIP of PDFs) + an A4/A3 weekend-recap poster for the leisure-centre noticeboard;
-BrandKit tokens reused so print matches cards; W.2 consent honoured in batch
-exports. **Exit:** one click exports print-ready branded certificates for every
-approved achievement in a run.
-
-### W.13 — Bilingual captions (Welsh first) · ✅ **DONE (2026-06-12)**
-**The first ten clubs are being hand-sold in Swansea / South-East Wales (PC.6) —
-bilingual posting is locally resonant and no US competitor will ever bother.**
-Marginal cost ≈ 0 on the existing Gemini call (tone-preserving in-pipeline
-translation; dedicated MT APIs only matter at scale). *(Idea #21.)* **Build:** a
-per-workspace language setting on `ClubProfile` (en / cy / bilingual); caption
-prompt extension producing both variants with swim terminology correct; review UI
-shows and edits both; publish-gate platform-length checks account for the doubled
-text; the same seam serves any future locale. Honest-error when no provider — no
-machine-translation heuristics. **Exit:** a bilingual club approves Cymraeg +
-English captions in one pass and the gate's length checks hold.
-
-### W.14 — Engagement feedback loop · ✅ **DONE — phase 1 (2026-06-12)** *(phase 2 needs P4.2)*
-**The compounding intelligence-layer moat: every approval teaches the next plan —
-template tools cannot replicate it.** *(Idea #22.)* **Build, phase 1 (no external
-APIs):** record per-club which tone variant / archetype is approved, edited or
-rejected at the existing approval seam; feed the caption few-shot store and
-`memory/`; surface "this club prefers…" in the planner's explainable reasons;
-`observability/` counters. **Phase 2 (after P4.2 connectors):** a scheduled
-per-post metrics pull — IG `views`/`reach`/`saved`/`shares` under the
-**post-Apr-2025 metric names** (`impressions` is deprecated; Page-insights
-deprecations continue through 2026) — into a per-club format ranking ("carousels
-earn saves here; reels earn reach"), feeding plan ranking **deterministically**
-(the LLM never ranks). **Exit (phase 1):** the planner's reasons cite the club's
-own approval history. **Exit (phase 2):** per-post metrics inform format choice
-with provenance.
-
-**Building blocks.** Existing seams only: `recognition_swim/achievements/` + the
-detector bus, `interpreter/` + `_zip_safety`, `results_fetch/` + `scheduler/` +
-`notify/`, `workflow/` + the P2.3 publish gate, `graphic_renderer/`,
-`media_ai.llm`/`ai_core.llm`, `memory/`, `observability/`. New paid dependencies:
-none (Tesseract/RapidOCR are open-source; everything else is already in-tree).
-
-**Dependencies.** Independent of the P3/P4/P5 gates. W.2 and W.8 lean on W.1; W.6
-is cheaper after W.5; W.12 and PC.10 should honour W.2 once it exists; W.14
-phase 2 waits for P4.2. Feeds **PC.4/PC.6** (sellability, the NGB application's
-safeguarding evidence) and **P3** (W.5/W.10 broaden ingestion patterns the
-multi-sport spokes will reuse).
-
----
-
-## Phase 3 — Broaden ingestion spokes · P3 · ❌ **NOT STARTED**
-
-**Goal.** Ingest beyond swimming and normalise every spoke to the canonical schema,
-so a second sport produces real content end-to-end.
-
-**Exit criterion.** **≥1 non-swimming sport** produces real content end-to-end from a
-real data source (football via openfootball, or basketball via nba_api), with a
-registered `recognition_<sport>` adapter and its sport profile wired in.
-
-### P3.1 — Second-sport engine adapter · ❌ **NOT STARTED**
-`recognition_football` or `recognition_basketball` + `register_sport(...)` (the seam
-exists — [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the profile.
-
-### P3.2 — Sports-data API spokes · ❌ **NOT STARTED**
-`nba_api`, `openfootball`, fixture generators; each normalised to `canonical.*`.
-
-### P3.3 — Running/athletics parsers · ❌ **NOT STARTED**
-Chip-timing CSV + client-side Garmin `FIT` parsing (the swim-data-analyser pattern).
-This sport needs custom parsers — open-source coverage is sparse.
-
-### P3.4 — Normalise all spokes to the canonical schema · ❌ **NOT STARTED**
-Separate raw extraction from cleaned canonical data; flag ambiguous rows for review.
-
-**Building blocks.** `swar/nba_api` (open, keyless — *verify*), `openfootball`
-(**public domain**), `ndPPPhz/Fixture-Generator` (MIT). ⚠️ `statsbomb/open-data` is a
-**non-OSS data agreement** (attribution / responsible use) — code-vs-data licence
-split; use openfootball as the free default. ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
-
-**Dependencies.** Needs **P1** (sport profiles + taxonomy). Pairs with **P4** (new
-sports → new audiences → more publishing targets).
-
----
-
-## Phase 4 — Direct-to-platform publishing · P4 · ❌ **NOT STARTED**
-
-**Goal.** Replace the paid Buffer dependency with direct platform adapters,
-prioritising the genuinely-free targets.
-
-**Exit criterion.** Posts publish via **direct APIs to ≥2 platforms including a
-genuinely-free one** (Bluesky and/or Mastodon), with Buffer demoted to optional.
-
-### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌ **NOT STARTED**
-The free/open posting targets — build these first. **Build detail (June 2026
-feasibility pass; ideas research #7):** `publishing/bluesky.py` (AT Protocol;
-app-password or OAuth — **no app review or business verification exists at
-all**) and `publishing/mastodon.py` (per-instance REST; apps register
-programmatically), both beside `buffer.py`, both gated by the P2.3 publish gate
-and writing `publishing/posting_log.py`; per-workspace account binding in
-Settings; image + W.11 alt-text first, video where the instance allows. Each
-adapter is days, not weeks — they also rehearse the connector pattern (connect →
-gate → post → log → audit) before the Meta review lands, and they make the
-autonomy story demonstrable end-to-end on a zero-risk network.
-
-### P4.2 — Instagram Graph / Facebook / TikTok / YouTube adapters · ❌ **NOT STARTED**
-Least-privilege per integration; human connects each account (no auto-connect).
-**Platform API policy gates auto-posting (verified June 2026 — [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) cycle 5):** Instagram content-publishing needs a Business/Creator account + a connected Facebook Page + Meta **App Review** (~2–4 weeks/permission) + **Business Verification**; TikTok's *unaudited* Content-Posting client can post only **private (SELF_ONLY), ≤5 users/24h** until it passes an audit. This is *why* **P4.1 (Bluesky + Mastodon) ships first**, and these stay behind human approval and the audit timeline.
-**Start the paperwork before the code (June 2026 pass; ideas research #8):** the
-Meta Business Verification + App Review (`instagram_content_publish`,
-`pages_manage_posts`, Threads scopes) costs $0 but burns **weeks of calendar
-time** — the application can begin while this item stays unbuilt, so the clock
-runs in parallel with Phase C instead of after it. What the code side needs when
-it opens: a Pillow **JPEG export** path in `graphic_renderer` (the IG API is
-JPEG-only), publicly URL-reachable media (already true), a "Connect Instagram"
-flow, and `publishing/meta.py` behind an operator flag + the publish gate. Current
-IG limits are workable: **100 API-published posts/24h per account, including
-Reels, Stories and carousels** — and carousels (one card per swimmer per meet) are
-the engagement/saves format in the 2025 35M-post benchmarks, so the adapter
-should group packs as carousels by default. One Meta review covers Facebook Pages
-+ Instagram (+ Threads scoped separately); **TikTok and YouTube stay deferred
-until clubs demand them** (TikTok unaudited = private-only; YouTube's default
-10k-unit quota ≈ 6 uploads/day across *all* tenants until audited).
-
-### P4.3 — X adapter (budget pay-per-use) · ❌ **NOT STARTED**
-X moved to pay-per-use (6 Feb 2026); treat as a paid, optional target.
-
-### P4.4 — Demote Buffer to optional · ❌ **NOT STARTED**
-Keep the Buffer path for those who want it; remove it from the critical path.
-**Urgency re-graded (June 2026 research):** Buffer's classic developer API has
-been **closed to new developers since 2019**, remaining third-party integrations
-were **cut off on 1 Mar 2025**, and the 2026 beta API **lacks third-party OAuth**
-— so the current connector (`publishing/buffer.py`, classic
-`/1/updates/create.json`) runs on borrowed time and cannot onboard new clubs'
-accounts under Buffer's new regime. "Demote Buffer" is therefore **resilience
-work, not preference**: P4.1/P4.5/P4.6 are the replacement paths; keep the Buffer
-path only while the legacy token still functions, and surface an honest error
-the day it stops.
-
-### P4.5 — Email digest delivery (the newsletter actually sends) · ❌ **NOT STARTED**
-**The v7.3 grouped newsletter already builds (`/api/runs/<run_id>/newsletter`,
-`content_pack/builder.py`) — nothing can send it.** Email needs no platform
-review, clubs already run parent lists, and Gipper sells newsletters as a paid
-tier; costs are trivial (Resend: free to 3k emails/mo, ~$20/mo for 50k ≈ 50 clubs
-× 200 members weekly). *(Ideas research #5.)* **Build:** `publishing/email.py`
-behind a provider seam (Resend first; honest-error unkeyed, per the P0.3/P0.4
-doctrine — no silent paid dependency); a per-workspace member list (CSV import
-with consent capture, one-click unsubscribe route + suppression list — GDPR:
-unsubscribes honoured before any send); a weekly `scheduler/` job assembling
-approved-card digests; the PC.8 sponsor slot and W.11 alt text in the template;
-W.9 approval links ride the same channel. **Pull-forward candidate during
-Phase C** at the maintainer's discretion — it is review-free and directly
-sell-supporting; it sits in P4 for thematic fit, not because it needs the gate's
-platform machinery. **Exit:** a club imports members and receives a weekly
-digest of approved content; unsubscribes stick; unkeyed deployments honest-error.
-
-### P4.6 — Telegram channel publishing (+ WhatsApp share stopgap) · ❌ **NOT STARTED**
-**The best effort-to-value publish target found in the June 2026 feasibility
-pass:** the Telegram Bot API is free with generous broadcast limits, needs no
-review, and sends **PNG and MP4 natively** — note reels currently have **no
-scheduled outlet anywhere** (the Buffer path takes a single image URL). WhatsApp
-has **no official Channels API** and the Business Platform bills per template
-message with verification friction, so the legitimate WhatsApp answer today is a
-share affordance, not an API. *(Ideas research #6.)* **Build:**
-`publishing/telegram.py` (per-workspace bot token + channel binding;
-`sendPhoto`/`sendVideo` with caption + W.11 alt text) behind the publish gate +
-posting log; a review-UI "share to WhatsApp" button (copy caption, download
-media, open `wa.me`) as the stopgap for WhatsApp-centric UK clubs. Like P4.5, a
-**pull-forward candidate during Phase C** — zero platform risk, and it proves
-the full gate→post loop (including for autonomy demos) on a real channel.
-**Exit:** an approved card *and* a reel both land in a connected Telegram channel
-through the gate with full audit; the WhatsApp button works on mobile.
-
-**Building blocks.** **Bluesky / Mastodon** (free/open) first; the **Telegram Bot
-API** and a **Resend-seamed email channel** join the genuinely-free tier
-(P4.5/P4.6); direct platform APIs.
-**Postiz** adapters as a *reference implementation only* (**AGPL** — call over its
-API or read the patterns; never embed — [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
-
-**Dependencies.** Needs **P2** (autonomy + guardrails govern what may auto-publish)
-and **P0** (Buffer is a flagged, optional paid path).
-
----
-
-## Phase 5 — Local-AI substitution everywhere · P5 · ❌ **NOT STARTED**
-
-**Goal.** Give every AI call a zero-cost local path, completing the no-hidden-fees
-guarantee.
-
-**Exit criterion.** With **no cloud keys configured**, the full pipeline (caption,
-cutout, voice, graphics, reels) runs **locally end-to-end** — honest-erroring only
-where a local model is genuinely unavailable.
-
-### P5.1 — Ollama LLM provider · ❌ **NOT STARTED**
-A local backend behind the existing `ai_core.llm` interface — the zero-key default.
-*Head start from P0.4:* both LLM wrappers already accept a keyless
-OpenAI-compatible endpoint (`MEDIAHUB_LLM_ENDPOINTS=http://localhost:11434/v1`
-reaches a running Ollama today); what remains is shipping/operating the model
-runtime itself, model selection defaults, and the operator workflow.
-
-### P5.2 — Piper TTS replaces edge-tts · ❌ **NOT STARTED**
-Local neural TTS; drops the undocumented Edge cloud-endpoint dependency. The
-provider slot is already registered (P0.4: `MEDIAHUB_TTS_PROVIDER=piper`
-honest-errors until this lands) — P5.2 fills the slot with the real backend.
-
-### P5.3 — whisper.cpp / faster-whisper ASR · ❌ **NOT STARTED**
-Local transcription for reel captions / word-level burn-in. Must land behind a
-provider seam — the P0.4 guard fails the build on any unslotted ASR import.
-
-### P5.4 — Satori graphics fast-path · ❌ **NOT STARTED**
-Lighter card rendering (~100× lighter than headless Chromium). A *performance*
-play, not a licensing one — P0.1's shipped ffmpeg engine already removed the
-Remotion requirement; this would slot into the same `MEDIAHUB_REEL_ENGINE` seam.
-(The placeholder `satori` engine name was removed in the dormant-features
-audit — register it again when the engine actually ships.)
-
-### P5.5 — rembg / MODNet cutout · ✅ **DONE**
-Already the shipped default (rembg). MODNet is an optional higher-quality matting
-alternative.
-
-**Building blocks.** All **ADOPT-NOW**: Ollama (MIT), Piper (MIT), whisper.cpp /
-faster-whisper (MIT), Satori (MPL-2.0), rembg (MIT), MODNet (Apache-2.0). ⚠️ Avoid
-Coqui **XTTS** weights commercially (CPML, non-commercial) — Piper instead.
-
-**Dependencies.** Set up by **P0 ✅** (the local-capable interfaces all exist —
-P0.4). This phase **completes the no-hidden-fees promise** the whole roadmap is
-built around.
-
----
-
-## Phase 6 — Creative-suite breadth (our own versions, MediaHub-shaped) · P6 · ❌ **NOT STARTED (gated)**
-
-**Goal.** Build **MediaHub's own first-party version of every content-creation
-capability Canva and Adobe Express ship** — re-expressed through this product's
-thesis (data in → meaningful, branded, approval-gated content out), never by
-integrating their tools or becoming a blank-template shop. The evidence base is
-two exhaustive competitor inventories checked in at
-[`research/CANVA_FEATURE_INVENTORY_2026.md`](research/CANVA_FEATURE_INVENTORY_2026.md)
-and
-[`research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md`](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md);
-**every bullet in both** is mapped — feature by feature, with a completeness
-index proving none is missed — in the long-form companion
-[`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md) (added 2026-06-11,
-maintainer instruction). The phase essay below is the summary; the companion
-doc is the build depth.
-
-**Gating & order.** Phase 6 sits behind the same two Phase C gates as P3/P4/P5
-(zero-founder onboarding; ≥10 clubs paying annually). Within the phase, order
-is **pull-driven** — build what paying clubs ask for first; the numbering is a
-default sequence, not a promise. Standing rules hold everywhere: hosted-only
-(ADR-0011), approval-first publishing + the P2.3 gate, the deterministic-engine
-boundary, Gemini→Anthropic honest-error AI, self-hosted fonts, and the GWS /
-9router exclusions. External services appear only as optional flag-gated
-provider slots behind our own interfaces where first-party is impossible
-(model hosting, platform APIs, print fulfilment, music rights).
-
-**Exit criterion.** A club can run its **entire content life inside MediaHub**
-— social, print, email, microsite, video, documents — without reaching for
-Canva/Express; measured per-item (each P6 item carries its own exit in the
-companion doc) and in aggregate by wedge clubs actually cancelling their Canva
-habit.
-
-### P6.1 — Smart format catalogue & format transformer · ❌
-Every design type both products offer becomes a data-driven club `FormatSpec`
-(certificates, posters, meet programmes, yearbooks, athlete one-pagers, season
-calendars, carousels, memes, per-channel sizes…) on the existing
-archetype/brief/renderer spine; `turn_into` v2 re-targets any approved design
-to any format/size by re-layout, not scaling. *(Companion §P6.1.)*
-
-### P6.2 — Conversational creative assistant & agentic editing · ❌
-The club content copilot: create/edit/explain by chat (and voice), executed as
-validated **design-spec patches** through `ai_core.ask_with_tools` — the agent
-never paints pixels, every step auditable; Magic-Write-class text tools; org
-assistant memory with inspect/delete. *(Companion §P6.2.)*
-
-### P6.3 — Generative imagery & image-AI services · ❌
-One `media_ai` image-provider seam (Gemini-first, honest errors) for generate /
-edit / fill / expand / remove / subject-lift / text-lift / upscale /
-style-match / mockups — scenery and fix-ups only, never fabricated results
-data; provenance-stamped (P6.22). *(Companion §P6.3.)*
-
-### P6.4 — Photo editor (deterministic recipes) · ❌
-Non-destructive `EditRecipe`s on media-library assets: filters, adjustments,
-crop/perspective/flip, crop-to-shape, frames/collages, blur brush (also the
-safeguarding tool), pool-light auto-enhance, HEIC ingest; pure pixel maths,
-selection maths untouched. *(Companion §P6.4.)*
-
-### P6.5 — Video suite (footage path) · ❌
-Phone clips → branded reels: EDL timeline over the shipped Remotion/FFmpeg
-engines, ASR captions (P5.3 seam), **Clip-Maker-for-sport** (moment detection,
-saliency reframe, caption burn-in), beat sync, browser screen/webcam recorders,
-per-clip recipes; avatars only as a disclosed, explicitly-requested opt-in.
-*(Companion §P6.5.)*
-
-### P6.6 — Audio engine · ❌
-Own licence-clean music/SFX pools with mood tags + a rights ledger
-(fingerprint checks; chart-music rights only via a flag-gated slot), the TTS
-seam grown into a voice layer (catalogue, params, athlete-name pronunciation
-lexicon), denoise/levelling, ducking; voice cloning consent-gated and audited.
-*(Companion §P6.6.)*
-
-### P6.7 — Typography system & text effects · ❌
-Curated **self-hosted** font catalogue + per-org uploads (licence-attested),
-AI pairing with reasons, deterministic text-effect tokens (shadow/lift/hollow/
-splice/echo/glitch/neon/curve/extrude/warp) policed by APCA, formatting depth,
-data-bound dynamic text. *(Companion §P6.7.)*
-
-### P6.8 — Elements, stock & drawing · ❌
-Sport-editorial element packs (SVG with brand-token slots — every element
-auto-on-brand), our own open-collection-seeded stock pools, embedding search +
-context-aware suggestions, telestration/annotate layer, club mascot/emoji
-packs. *(Companion §P6.8.)*
-
-### P6.9 — Charts, infographics & data storytelling · ❌
-The data advantage made visible: deterministic brand-styled stat graphics from
-canonical results + `history/` (progressions, PB drops, medal tables, record
-boards), AI chart recommendation and **grounded** insight takeaways (numbers
-computed first, LLM phrases), diagram formats, scroll-stories. *(Companion §P6.9.)*
-
-### P6.10 — Animation & motion system · ❌
-A tokenised brand motion vocabulary (in/loop/out presets, photo motion, motion
-paths, shared-element "match & move", page transitions, physics-flavoured
-curves) compiled once to Remotion + FFmpeg + CSS; click/step order for decks;
-reduce-motion variants everywhere. *(Companion §P6.10.)*
-
-### P6.11 — Brand platform depth · ❌
-Multi-kit (sponsor co-branding with pairing rules, event/section kits),
-deterministic brand check (ΔE/APCA/clear-space) + AI auto-fix patches, token
-locks, brand home page, kit-edit → re-render sweep across persisted briefs,
-palette-file import. *(Companion §P6.11.)*
-
-### P6.12 — Documents, decks & the PDF suite · ❌
-One paged document engine for the three club documents (meet programme, season
-report, sponsor proposal) + AGM decks: data-grounded outline→draft, presenter
-surface (notes, timer, phone remote, autoplay/kiosk), PPTX/DOCX round-trip,
-deck→MP4, honest bounded PDF utilities. *(Companion §P6.12.)*
-
-### P6.13 — Club microsites, link-in-bio, forms & widgets · ❌
-Data-generated pages (meet microsite, link-in-bio, event RSVP) on platform
-subdomains/BYO domains, forms feeding the data hub (ADR-0003 applies hard),
-vetted sandboxed widget catalogue (countdown, medal tally, polls), SEO layer,
-brand-safe QR generator. *(Companion §P6.13.)*
-
-### P6.14 — Email & newsletter design · ❌
-The `turn_into` newsletter made visual and portable: email-safe branded HTML
-auto-assembled from the period's approved content with an editorial AI pass;
-export/hosted-view first, direct-send adapter later behind the publish gate.
-*(Companion §P6.14.)*
-
-### P6.15 — Data hub, bulk generation & personalisation · ❌
-Canonical tables made user-facing (provenance per cell, CSV/XLSX round-trip,
-deterministic derived columns), club-relevant connectors (Swim England API per
-PC.6a) on `scheduler/` refresh, and review-queued **bulk generation** —
-"certificates for all 47 PB swimmers" in one click; bulk never bypasses
-approval. *(Companion §P6.15.)*
-
-### P6.16 — Planner calendar, board & performance analytics · ❌
-The P1.3 planner gets a calendar/board body (drag-reschedule re-evaluates the
-gate), club-aware key dates, per-channel previews with safe zones, and a
-first-party post-P4 metrics loop (per-type/archetype attribution feeding the
-planner's ranking); sponsor A/B creative sets — prepare, never spend.
-*(Companion §P6.16.)*
-
-### P6.17 — Collaboration & review · ❌
-Committee-shaped review on the workflow spine: anchored comment threads,
-mentions, blocking tasks, version diff/restore, element locks, roles +
-group-approver rules, expiring share tokens for outside reviewers, the
-assistant taggable in threads. *(Companion §P6.17.)*
-
-### P6.18 — Export, conversion & delivery engine · ❌
-One export engine for every surface (adds SVG/GIF/PPTX/DOCX/WAV/print-PDF,
-quality/transparency options, bulk jobs) + the quick-action toolbox on the
-media library (image/video/PDF/GIF utilities) — all deterministic code we own.
-*(Companion §P6.18.)*
-
-### P6.19 — Print & merch pipeline · ❌
-Print-readiness as engineering: physical `FormatSpec`s, CMYK PDF/X with
-bleed/marks, **deterministic preflight with explanations**, merch formats +
-mockups; fulfilment only ever as an optional flag-gated slot — the default
-deliverable is a file any printer accepts. *(Companion §P6.19.)*
-
-### P6.20 — Platform surface: public API, webhooks & MCP · ❌
-A versioned org-scoped API over what the product already does, signed
-webhooks, published iPaaS recipes (their runtimes stay theirs), an **MCP
-server** so agents (Claude/ChatGPT/Gemini-class) drive MediaHub itself,
-first-party file interop (SVG/PSD/palettes), read-only embeds; marketplace
-explicitly long-term; GWS stays excluded. *(Companion §P6.20.)*
-
-### P6.21 — Mobile, PWA & access surfaces · ❌
-Hosted-only stands: an installable PWA with share-target capture to the media
-library (the poolside killer feature), offline-tolerant approval queue,
-mobile-first review/caption/crop; guest views via share tokens; native-store
-apps only if the PWA proves insufficient. *(Companion §P6.21.)*
-
-### P6.22 — AI governance, quotas & provenance · ❌
-The Shield analogue we mostly have, completed: per-org/per-feature quota
-ledger on `observability/` with a live usage panel (tier numbers belong to
-PC.4), moderation on generative surfaces, provenance manifests on AI media
-(C2PA-style where tooling allows), role-based feature permissions.
-*(Companion §P6.22.)*
-
-### P6.23 — Localisation & translation · ❌
-Welsh-first bilingual content (a real Swansea-wedge need): glossary-protected
-translation with layout-aware re-render and autofit absorption, side-by-side
-bilingual approval, bulk per-language variants, AI-dub pipeline (labelled),
-own UI string catalogue. *(Companion §P6.23.)*
-
-### P6.24 — Pro editor & round-trip (the Affinity answer) · ❌
-A fine-control editor as validated spec patches (layers, align/distribute,
-rulers/guides, page management, vector node/boolean ops, curves/levels) — and
-**round-trip, not suite-cloning**: layered SVG/PSD export/import so power
-users finish in their own pro tool; RAW/HDR/DTP explicitly non-goals.
-*(Companion §P6.24.)*
-
-**Building blocks.** Almost entirely seams that already ship: the design-spec
-director + archetypes (P1.4), `graphic_renderer` + autofit + saliency, both
-reel engines (P0.1), the cutout layer, the TTS/ASR/LLM provider slots (P0.4),
-`media_library`, `workflow` + publish gate, `scheduler/`, `notify/`,
-`observability/`, PC.3 tenancy. New heavy deps stay licence-vetted per
-[`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) (e.g. `pillow-heif`,
-`pypdf`, `python-pptx`/`docx`, a PSD reader/writer, C2PA tooling — all behind
-our own modules).
-
-**Dependencies.** Gated behind **Phase C** (both exit gates) like P3/P4/P5.
-P6.16's analytics loop and P6.14's send adapter additionally need **P4**
-adapters; P6.2 voice input and P6.5 captions need the **P5.3** ASR seam
-filled (or a cloud provider on the same seam). Feeds back into **PC.4**
-packaging (quotas/tiers) and strengthens the wedge against the
-"volunteer-already-has-Canva" commodity pressure named in the diligence.
-
----
-
-## Cross-cutting investments (all phases)
-
-| Investment | Status | Notes |
-|---|---|---|
-| No-hidden-fees discipline | ✅ enforced | The [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) register is now pinned by the Phase-0 guard suites (P0.3/P0.4/P0.5, 2026-06-10): every paid path stays optional with a free default, every AI surface admits a local provider, and no AGPL code can enter the process. |
-| Multi-tenancy: org → workspace | ✅ shipped (2026-06-11) | **PC.3 done:** per-org membership binding in one shared instance (`web/tenancy.py`, `memberships.jsonl`, ADR-0014) on top of the ADR-0003 invariant; pinned by `tests/test_workspace_membership_invariant.py`. Postiz/Mixpost stayed reference-only — nothing embedded. |
-| Go-to-market / distribution | 🔵 instrumented; selling open | The build/sell imbalance is the #1 risk (PC.6): warm-first pipeline + referral-debt + cold-cap readouts and the drafted Swim England application now live on `/operator/commercial`; the founder's selling motion (and the ≥10-club gate) remains open. See [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md). |
-| Safeguarding / minors' data | ✅ locked | Isolation invariant per [`adr/0003-pilot-safety-invariant-lock.md`](adr/0003-pilot-safety-invariant-lock.md); applies with extra force to autonomous post types. |
-| Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions (gate verdicts, auto-approvals, publish attempts) land in the immutable per-org ledger (P2.3, 2026-06-11). |
-| Product design / UI polish | ❌ | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
-| Test-suite stability | ✅ | Full suite green (2836 passed / 1 skipped after merging main). Keep green. |
-| Operator deployment template | ✅ | `render.yaml` + `.env.example` canonical; one-click Render deploy works. |
-
----
-
-## Immediate next moves
-
-A recommended ordered backlog — each with its own exit criterion. (Full backlog in the
-rebuild's `CHANGES`/PR.)
-
-**Re-sequenced (2026-06 commercial reconcile).** The prior reconcile rightly put
-**product quality on the swim wedge** ahead of the grand expansions. The scaling
-diligence ([`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md))
-adds the missing half: **the binding constraint is monetisation/distribution, not
-capability.** So the **commercial gate (Phase C) is now #1** — ahead of *everything*,
-including more graphics polish — and P3/P4/P5 are explicitly deferred behind it **and** a
-*≥10 clubs paying annually* gate.
-
-1. **Phase C — Commercialise & Distribute (🥇 top priority).** Self-serve signup + auth
-   (PC.1), Stripe billing (PC.2), **true multi-tenancy** (PC.3), validated pricing with
-   annual prepay (PC.4), the free-self-host call (PC.5, **resolved: hosted-only**), and GTM/distribution (PC.6).
-   *Exit:* a club can sign up, pay, and publish with **zero founder involvement.**
-   **Nothing below ships ahead of this.** (Update 2026-06-11: the engineering is done —
-   PC.1 + PC.2 live, **PC.3 shipped** (Council-tested schema, ADR-0014), PC.4/PC.6
-   instrumented on `/operator/commercial`. What's left of Phase C is the founder's
-   selling motion: set `STRIPE_*`, pre-bind pilots, quote real prices, submit the Swim
-   England application, win the first 10 annual clubs.)
-2. **Phase W — the wedge-depth backlog — ✅ built (2026-06-12).** All fourteen
-   items (athlete registry, consent manager, club records, qualifying times,
-   LENEX, meet previews, live meet mode, season wraps, magic-link approvals,
-   OCR, alt-text, certificates, Welsh captions, engagement telemetry) landed in
-   one council-pressure-tested integration pass —
-   [`adr/0016-phase-w-integration-plan.md`](adr/0016-phase-w-integration-plan.md).
-   Remaining tails: W.14 phase 2 (platform metrics) waits for P4.2, and W.4's
-   seasonal tables are operator-curated per `data/standards/README.md`.
-3. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
-   director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
-   the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar
-   is cleared. **Per the standing rule: stop polishing and sell.** Anything further on
-   graphics (the 12th archetype, the floor's no-photo bias, the logo-chip polish) is
-   strictly behind Phase C sell-side work.
-4. **P0 — ✅ done (2026-06-10).** The whole de-risk phase closed in one pass:
-   the P0.1 free reel engine (still-graphics + FFmpeg behind
-   `MEDIAHUB_REEL_ENGINE=ffmpeg` — a zero-license deployment renders reels),
-   plus the three Phase-0 guard suites making paid-dep optionality (P0.3),
-   local provider slots (P0.4) and AGPL isolation (P0.5) continuously enforced.
-5. **P1.3 — Cross-source planner. ✅ done (2026-06-10)** — with P1.2's
-   slug-canonical taxonomy and P1.5's local brand-DNA flow, closing Phase 1.
-   *Exit met:* a ranked, explainable plan for ≥2 profiles at `/plan`.
-6. **P2 — ✅ done (2026-06-11).** The approval signal (P2.2), the single
-   publish gate with all guardrails (P2.3) and the enum reconciliation shipped
-   on the in-process substrate. *Exit met:* `fully_autonomous` publishes only
-   when every guardrail + the confidence gate pass; kill switch halts
-   instantly; every decision audited.
-
-**Deferred behind the commercial gate AND "≥10 clubs paying annually":**
-
-7. **P3 — Second sport end-to-end.** `recognition_football`/`_basketball` + a real data
-   spoke. (`results_fetch/` already does sport-agnostic *ingestion*; this adds the
-   per-sport *detector*.) *Gated:* no new sport until ≥10 clubs pay annually. *Exit:* one
-   non-swimming sport produces content end-to-end.
-8. **P4 — Free direct publishing.** Bluesky + Mastodon adapters (P4.1), email
-   digests (P4.5) and Telegram channels (P4.6) as the review-free tier; start the
-   Meta verification paperwork early (P4.2 note); demote the now-deprecated Buffer
-   path (P4.4 — its classic API shut to new developers in 2019; integrations cut
-   off 2025-03-01). *Exit:* publish to ≥2 platforms incl. one free.
-9. **P5 — Local AI.** Ollama + Piper + whisper.cpp. *Exit:* full pipeline runs with no
-   cloud keys.
-9. **P6 — Creative-suite breadth.** Our own first-party versions of the full
-   Canva / Adobe Express capability map, MediaHub-shaped (24 work packages,
-   P6.1–P6.24; feature-by-feature mapping + completeness index in
-   [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md)). Pull-driven order
-   once the gates open. *Exit:* a club runs its entire content life inside
-   MediaHub without reaching for Canva/Express.
-
-Run a **pilot** in parallel (one real club, the themed product) to surface UX holes the
-audits can't — see [`PILOT_PLAYBOOK.md`](PILOT_PLAYBOOK.md). The pilot now doubles as the
-first hand-sell toward the Phase C traction gate.
+- **P2.1 — In-process scheduler + bounded runner** (instead of Temporal —
+  council decision): `scheduler/` atomic-claim SQLite runner + the
+  `autonomy/` bounded narrow-tool loop on `ai_core.ask_with_tools`;
+  quality-reviewed with five hardening fixes.
+- **P2.2 — Approval signal:** `workflow/approval.py::apply_approval_signal`
+  on the QUEUE → APPROVED → POSTED transition; gated types pause for a human;
+  `fully_autonomous` cards run the gate against the exact caption that would
+  ship; autonomy degrades to approval, never the reverse.
+- **P2.3 — The publish gate:** `publishing/publish_gate.py` — kill switch →
+  per-type policy → provenance (fail-closed) → per-type confidence threshold
+  → deterministic brand-safety → safeguarding (minors never auto-publish) →
+  per-org rate caps. The two same-named enums reconciled: the runner's reach
+  axis renamed `autonomy.tools.RunnerReach`, leaving
+  `sport_profiles.autonomy.AutonomyLevel` as the single publishing-policy
+  enum.
+- **P2.4 — Workspace controls** (PR #297): Settings → Autonomy tab,
+  per-profile per-type policy defaulting to `approval_required`, plus the
+  per-type confidence threshold and autonomous-channel list.
+
+### Phase 1 — Strategy brain + post-type taxonomy + sport profiles · ✅ **COMPLETE (2026-06-10/11)**
+
+Exit met: a profile-driven planner produces a ranked, explainable content
+plan for ≥2 sport profiles, grounded in three signal sources. Pinned by
+`tests/test_cross_source_planner.py`; product surface `/plan`.
+
+- **P1.1 — Sport-profile schema + loader:** `mediahub.sport_profiles`
+  (`SportProfile`/`PostTypeConfig`, `AutonomyLevel`),
+  swimming + football YAML profiles — now live through the planner and P2.4.
+  See [`SPORT_PROFILES.md`](SPORT_PROFILES.md).
+- **P1.2 — Post-type taxonomy in code** (Council-decided: layer on a
+  slug-canonical spine,
+  [ADR-0013](adr/0013-post-type-taxonomy-slug-canonical.md)):
+  `club_platform/post_types.py`; `ContentType` demoted to the
+  implemented-surface badge; two historic renames with read-tolerant aliases.
+- **P1.3 — Cross-source planner:** `content_engine` — `signals.py` (own +
+  external + direct) fused by `planner.py` into a ranked, explainable
+  `ContentPlan`; deterministic scoring (no LLM in the loop); `/plan` +
+  `/api/plan/*`. See [`CONTENT_PLANNER.md`](CONTENT_PLANNER.md).
+- **P1.4 — Generative Content Engine v2:** the full Appendix A programme —
+  DesignTokens contract, 12-archetype catalog, design-spec director with
+  candidate pool + APCA compliance ranking, gated SEQ-3 cutover (A/B review
+  approved 6/6 vs ≤1/6), data-driven video. v2 is the default;
+  `MEDIAHUB_GEN_V2=0` is the kill switch. Evidence:
+  [`build_reports/SEQ_SPINE_2026-06-10.md`](build_reports/SEQ_SPINE_2026-06-10.md).
+- **P1.5 — Brand-DNA-from-URL, zero paid APIs:** SSRF-hardened local scrape;
+  real-pixel palette evidence through `material-color-utilities`; the one
+  judgement step on `media_ai.llm` with anti-hallucination validation against
+  the evidence universe; honest `no_provider` behaviour.
+  `tests/test_brand_dna_local.py`.
+
+### Phase 0 — De-risk licensing & cost · ✅ **COMPLETE (2026-06-10)**
+
+Exit met and **continuously enforced**: zero mandatory paid API in the
+critical path; every paid option behind a flag with a free default; AGPL
+isolated behind a network boundary. Three guard suites fail the build on any
+regression. See [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md).
+
+- **P0.1 — Free reel engine:** `MEDIAHUB_REEL_ENGINE=ffmpeg`
+  (`visual/reel_ffmpeg.py`) renders story cards + meet reels from the cards'
+  own still graphics (Ken Burns + crossfades; CreativeBrief-exact frames) —
+  no Node, no Remotion licence; honest `ReelEngineUnavailable` when missing.
+- **P0.2 — Cutout free-by-default:** in-process rembg
+  (`MEDIAHUB_CUTOUT_PROVIDER=server`); Replicate/PhotoRoom opt-in. (Also
+  closes P5.5.)
+- **P0.3 — Paid deps provably optional:** `tests/test_paid_deps_optional.py`
+  pins, per register row, that with zero paid configuration each paid path is
+  off or substituted and honest-errors rather than spending or faking.
+- **P0.4 — Local-capable slot on every AI surface:** OpenAI-compatible LLM
+  endpoints (incl. keyless Ollama) in both wrappers; the
+  `MEDIAHUB_TTS_PROVIDER` seam with `piper` registered; the no-unslotted-ASR
+  guard; on-server graphics defaults. `tests/test_local_provider_slots.py`.
+- **P0.5 — AGPL isolation:** SearXNG stock + venv-isolated + HTTP-only;
+  `tests/test_agpl_isolation.py` fails the build on any in-process AGPL
+  import, manifest entry, or Dockerfile drift.
 
 ---
 
@@ -1981,7 +1168,7 @@ this lineage note:
   Where it conflicts with the new strategy, **the Phase C + 0–5 spine wins.** Retained for
   step-level execution detail only.
 - **Appendix C — Adaptive Theming Engine verification.** Current. Verifies the
-  **shipped** theming engine summarised under "Where we are today" (see
+  **shipped** theming engine summarised under "What's live today" (see
   [`THEMING.md`](THEMING.md)).
 
 > **Lineage in one line:** the new **Phase 0–5** spine supersedes the old **Phase 1
@@ -1992,7 +1179,7 @@ this lineage note:
 
 ## Appendix A — Generative Content Engine v2: Build Prompts
 
-> *Section numbers in this appendix (§0–§5) and item IDs (PAR-\*, SEQ-\*) are local to the appendix. This was previously a standalone doc; it is merged into the roadmap so there is a single reference. It is the build breakdown for §1.7 above.*
+> *Section numbers in this appendix (§0–§5) and item IDs (PAR-\*, SEQ-\*) are local to the appendix. This was previously a standalone doc; it is merged into the roadmap so there is a single reference. It is the build breakdown for **P1.4** (see "Done" above).*
 
 **What this is.** An execution roadmap that turns the recommendations in
 `docs/research/mediahub-generative-ai-thesis.md` and
@@ -2549,7 +1736,7 @@ Sequential Spine (§3) in order.*
 
 ---
 
-## Appendix B — Growth & Expansion: Build Prompts (not yet done)
+## Appendix B — Growth & Expansion: Build Prompts (legacy sequence — prompts retained)
 
 > *Runnable implementation + verification prompts for the Phase 2/3 growth work (commercial, sport expansion, athlete surfaces, integrations, enterprise, agentic editing, marketplace, sponsor-side). The earlier steps (brand DNA, voice imitation, visible intelligence, output expansion, turn-into, publishing) are already shipped and are intentionally omitted. Step/Phase numbers below are local to this appendix.*
 
@@ -3695,7 +2882,7 @@ Return a structured audit report:
 
 ## Appendix C — Adaptive Theming Engine (1.6): Verification Prompts
 
-> *Stage IDs in this appendix (A–J) map 1:1 to the §1.6 Stage table above. §1.6 is **shipped** — all ten stages are in `main`, live by default, and green. Unlike Appendix A (which builds an as-yet-unbuilt engine), this appendix is **verification-only**: paste-into-a-session acceptance audits that independently confirm each shipped stage still meets its part of the §1.6 acceptance criteria. There are no implementation prompts here — the code already exists.*
+> *Stage IDs in this appendix (A–J) map 1:1 to the previous roadmap revision's §1.6 Stage table. §1.6 (the Adaptive Theming Engine) is **shipped** — all ten stages are in `main`, live by default, and green. Unlike Appendix A (which builds an as-yet-unbuilt engine), this appendix is **verification-only**: paste-into-a-session acceptance audits that independently confirm each shipped stage still meets its part of the §1.6 acceptance criteria. There are no implementation prompts here — the code already exists.*
 
 **What this is.** A per-stage acceptance-audit harness for the now-shipped
 Adaptive Theming Engine. Each stage below has a **Context** (what shipped +

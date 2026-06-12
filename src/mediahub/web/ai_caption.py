@@ -34,6 +34,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from mediahub.web.languages import (
+    caption_language_instruction,
+    get_language,
+    language_setting_for,
+    normalise_language_setting,
+    primary_language_for,
+    secondary_caption_rules,
+    split_language_setting,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -427,14 +436,22 @@ def generate_caption_for_tone(
     club_profile=None,
     recent_captions: Optional[list[str]] = None,
     *,
+    language: Optional[str] = None,
     brief_prose: Optional[str] = None,
     direction: Optional[dict] = None,
     requirements: str = "",
     few_shot_examples: Optional[list[str]] = None,
 ) -> str:
-    """Generate one caption in plain English. Raises ClaudeUnavailableError
-    if no provider can answer. NO heuristic fallback — that's intentional;
-    a fake caption is worse than an honest error.
+    """Generate one caption. Raises ClaudeUnavailableError if no provider
+    can answer. NO heuristic fallback — that's intentional; a fake caption
+    is worse than an honest error.
+
+    The caption is written in the workspace's primary caption language:
+    ``language`` (a ``web.languages`` code) when given, otherwise derived
+    from ``club_profile.language``. Every caller that passes a
+    ``club_profile`` — content engine, turn-into, sponsor variants,
+    caption assist, autonomy — honours the workspace language with no
+    per-caller wiring, and the same holds for future callers.
 
     ``recent_captions`` is an optional list of the last few captions the
     user has seen for this card; when provided the system prompt tells
@@ -457,6 +474,7 @@ def generate_caption_for_tone(
         voice_profile=voice_profile,
         club_profile=club_profile,
         recent_captions=recent_captions,
+        language=language,
         brief_prose=brief_prose,
         direction=direction,
         requirements=requirements,
@@ -500,6 +518,7 @@ def _compose_caption_prompt(
     voice_profile: Optional[dict] = None,
     club_profile=None,
     recent_captions: Optional[list[str]] = None,
+    language: Optional[str] = None,
     brief_prose: Optional[str] = None,
     direction: Optional[dict] = None,
     requirements: str = "",
@@ -507,9 +526,17 @@ def _compose_caption_prompt(
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair shared by the caption-only
     primitive and the W.11/W.13 bundle. Raises ClaudeUnavailableError when
-    the source facts are too thin to write from."""
+    the source facts are too thin to write from.
+
+    ``language`` is the primary caption language (a ``web.languages``
+    code); when None it is derived from ``club_profile.language``, so any
+    caller passing a profile writes in the workspace's language without
+    extra wiring. Unknown codes fall back to English."""
     from mediahub.ai_core import narrate_achievement, narrate_brand
 
+    primary_language, _ = split_language_setting(
+        language if language is not None else language_setting_for(club_profile)
+    )
     tone_desc = _resolve_tone_descriptor(club_profile, tone)
     resolved_vp = _resolve_voice_profile(club_profile) or (
         voice_profile if isinstance(voice_profile, dict) else None
@@ -539,7 +566,14 @@ def _compose_caption_prompt(
         "different rhythm, different lens (e.g. swimmer's effort vs. "
         "the team's reaction vs. the numbers vs. the milestone).",
     ]
-    locale_line = _locale_instruction(club_profile)
+    # Workspace caption language (W.13, generalised): one registry-driven
+    # instruction line makes the model write in the workspace's primary
+    # language. English-variant spelling guidance only applies when the
+    # output actually IS English.
+    language_line = caption_language_instruction(primary_language)
+    if language_line:
+        system_parts.append(language_line)
+    locale_line = _locale_instruction(club_profile) if not language_line else ""
     if locale_line:
         system_parts.append(locale_line)
     if recent_captions:
@@ -687,26 +721,35 @@ def generate_caption_bundle(
     club_profile=None,
     recent_captions: Optional[list[str]] = None,
     *,
-    language: str = "en",
+    language: Optional[str] = None,
     brief_prose: Optional[str] = None,
     direction: Optional[dict] = None,
     requirements: str = "",
     few_shot_examples: Optional[list[str]] = None,
 ) -> dict:
-    """One LLM call → caption + result-grounded alt text (+ Welsh variant).
+    """One LLM call → caption + result-grounded alt text (+ translated
+    variant for bilingual workspaces).
 
-    W.11/W.13: the alt text and the Cymraeg caption ride the SAME provider
-    call as the caption — zero added latency or cost. Returns
-    ``{"caption": str, "alt_text": str, "caption_cy": str|None}``.
+    W.11/W.13 (generalised beyond Welsh): the alt text and the
+    side-by-side translation ride the SAME provider call as the caption —
+    zero added latency or cost. Returns ``{"caption": str, "alt_text":
+    str, "caption_secondary": str|None, "secondary_language": str|None}``.
 
-    ``language``: ``en`` (caption in English), ``cy`` (caption in Welsh),
-    or ``bilingual`` (caption in English + ``caption_cy`` Welsh variant).
-    Raises ClaudeUnavailableError on no provider or a malformed bundle —
-    NO heuristic fallback, per the standing AI rule.
+    ``language`` accepts any ``web.languages`` setting: a single code
+    ("en", "cy", "ga", "zh", …) writes the caption AND alt text in that
+    language; an English-led pair ("en+cy", "en+hi", …) writes the caption
+    in English plus a ``caption_secondary`` translation in the paired
+    language. The legacy W.13 value "bilingual" still means "en+cy". When
+    None, the setting is derived from ``club_profile.language``. Raises
+    ClaudeUnavailableError on no provider or a malformed bundle — NO
+    heuristic fallback, per the standing AI rule.
     """
-    lang = (language or "en").strip().lower()
-    if lang not in ("en", "cy", "bilingual"):
-        lang = "en"
+    setting = (
+        normalise_language_setting(language)
+        if language is not None
+        else language_setting_for(club_profile)
+    )
+    primary_language, secondary_language = split_language_setting(setting)
     system, user_prose = _compose_caption_prompt(
         achievement_dict,
         club_brand=club_brand,
@@ -714,6 +757,7 @@ def generate_caption_bundle(
         voice_profile=voice_profile,
         club_profile=club_profile,
         recent_captions=recent_captions,
+        language=primary_language,
         brief_prose=brief_prose,
         direction=direction,
         requirements=requirements,
@@ -721,22 +765,9 @@ def generate_caption_bundle(
     )
     keys = ["caption", "alt_text"]
     lang_rules = []
-    if lang == "cy":
-        lang_rules.append(
-            "Write the caption AND alt_text in natural Welsh (Cymraeg), with "
-            "swimming terminology correct (e.g. dull rhydd = freestyle, dull "
-            "cefn = backstroke, dull broga = breaststroke, dull pili-pala = "
-            "butterfly, record personol = personal best). Keep names and "
-            "times exactly as given."
-        )
-    elif lang == "bilingual":
-        keys.append("caption_cy")
-        lang_rules.append(
-            "caption_cy: the same caption written in natural Welsh (Cymraeg) "
-            "— a tone-preserving translation, not word-for-word; swimming "
-            "terminology correct (dull rhydd, dull cefn, dull broga, dull "
-            "pili-pala, record personol); names and times exactly as given."
-        )
+    if secondary_language:
+        keys.append("caption_secondary")
+        lang_rules.append(secondary_caption_rules(secondary_language))
     contract = (
         "OUTPUT CONTRACT — this overrides any earlier output instruction: "
         "respond with ONLY a JSON object (no markdown fences, no prose) with "
@@ -770,16 +801,29 @@ def generate_caption_bundle(
     if not caption:
         raise ClaudeUnavailableError("provider returned a malformed caption bundle")
     alt_text = (bundle.get("alt_text") or "").strip()
-    caption_cy = (bundle.get("caption_cy") or "").strip() or None
-    if lang == "bilingual" and not caption_cy:
-        raise ClaudeUnavailableError("provider returned no Welsh variant")
+    # Only read the translation when one was asked for — a spurious
+    # caption_secondary key in monolingual mode is a contract violation
+    # and must not leak a translation box into the review UI.
+    caption_secondary = None
+    if secondary_language:
+        caption_secondary = (bundle.get("caption_secondary") or "").strip() or None
+        if not caption_secondary:
+            sec = get_language(secondary_language)
+            raise ClaudeUnavailableError(
+                f"provider returned no {sec.name if sec else secondary_language} variant"
+            )
     if pseudonymised:
         caption = _restore_pseudonym(caption, swimmer_name)
         if alt_text:
             alt_text = _restore_pseudonym(alt_text, swimmer_name)
-        if caption_cy:
-            caption_cy = _restore_pseudonym(caption_cy, swimmer_name)
-    return {"caption": caption, "alt_text": alt_text, "caption_cy": caption_cy}
+        if caption_secondary:
+            caption_secondary = _restore_pseudonym(caption_secondary, swimmer_name)
+    return {
+        "caption": caption,
+        "alt_text": alt_text,
+        "caption_secondary": caption_secondary,
+        "secondary_language": secondary_language if caption_secondary else None,
+    }
 
 
 def _parse_bundle_json(text: str) -> dict:
@@ -959,6 +1003,11 @@ def generate_platform_variants(
 
     from mediahub.ai_core import narrate_brand
 
+    # Workspace caption language: platform adaptations must stay in the
+    # language the approved caption was written in (bilingual workspaces
+    # adapt the English primary, exactly as before).
+    language_line = caption_language_instruction(primary_language_for(club_profile))
+
     results: dict[str, str] = {}
     for platform in target_platforms:
         spec = _PLATFORM_SPECS[platform]
@@ -971,7 +1020,9 @@ def generate_platform_variants(
             _AI_TELL_SYSTEM_INSTRUCTION,
             _NO_COURSE_ABBREV_INSTRUCTION,
         ]
-        locale_line = _locale_instruction(club_profile)
+        if language_line:
+            system_parts.append(language_line)
+        locale_line = _locale_instruction(club_profile) if not language_line else ""
         if locale_line:
             system_parts.append(locale_line)
         if few_shot_examples:

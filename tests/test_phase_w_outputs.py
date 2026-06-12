@@ -80,7 +80,7 @@ class TestMagicLinks:
 
 
 # ---------------------------------------------------------------------------
-# W.11 / W.13 — caption bundle (caption + alt text + Welsh, one call)
+# W.11 / W.13 — caption bundle (caption + alt text + translation, one call)
 # ---------------------------------------------------------------------------
 
 _ACH = {
@@ -116,32 +116,109 @@ class TestCaptionBundle:
         out = generate_caption_bundle(_ACH)
         assert out["caption"] == "Maya flies to 1:05.32!"
         assert "1:05.32" in out["alt_text"]
-        assert out["caption_cy"] is None
+        assert out["caption_secondary"] is None
+        assert out["secondary_language"] is None
         assert len(calls) == 1  # caption + alt text ride ONE provider call
         assert "alt_text" in calls[0]["system"]
 
-    def test_bilingual_contract(self, monkeypatch):
+    def test_legacy_bilingual_value_still_means_english_plus_welsh(self, monkeypatch):
         calls = self._patch(
             monkeypatch,
             json.dumps(
-                {"caption": "A new PB!", "alt_text": "alt", "caption_cy": "Record personol newydd!"}
+                {
+                    "caption": "A new PB!",
+                    "alt_text": "alt",
+                    "caption_secondary": "Record personol newydd!",
+                }
             ),
         )
         out = generate_caption_bundle(_ACH, language="bilingual")
-        assert out["caption_cy"] == "Record personol newydd!"
-        assert "caption_cy" in calls[0]["system"]
+        assert out["caption_secondary"] == "Record personol newydd!"
+        assert out["secondary_language"] == "cy"
+        assert "caption_secondary" in calls[0]["system"]
         assert "Cymraeg" in calls[0]["system"]
 
-    def test_bilingual_without_welsh_is_honest_error(self, monkeypatch):
+    def test_bilingual_pair_value(self, monkeypatch):
+        calls = self._patch(
+            monkeypatch,
+            json.dumps(
+                {
+                    "caption": "A new PB!",
+                    "alt_text": "alt",
+                    "caption_secondary": "Record personol newydd!",
+                }
+            ),
+        )
+        out = generate_caption_bundle(_ACH, language="en+cy")
+        assert out["secondary_language"] == "cy"
+        assert "Cymraeg" in calls[0]["system"]
+
+    def test_bilingual_irish_contract(self, monkeypatch):
+        calls = self._patch(
+            monkeypatch,
+            json.dumps({"caption": "A new PB!", "alt_text": "alt", "caption_secondary": "PB nua!"}),
+        )
+        out = generate_caption_bundle(_ACH, language="en+ga")
+        assert out["caption_secondary"] == "PB nua!"
+        assert out["secondary_language"] == "ga"
+        assert "Irish" in calls[0]["system"]
+        assert "Gaeilge" in calls[0]["system"]
+
+    def test_bilingual_top10_contract(self, monkeypatch):
+        calls = self._patch(
+            monkeypatch,
+            json.dumps({"caption": "A new PB!", "alt_text": "alt", "caption_secondary": "नया PB!"}),
+        )
+        out = generate_caption_bundle(_ACH, language="en+hi")
+        assert out["secondary_language"] == "hi"
+        assert "Hindi" in calls[0]["system"]
+
+    def test_bilingual_without_translation_is_honest_error(self, monkeypatch):
         self._patch(monkeypatch, json.dumps({"caption": "x", "alt_text": "y"}))
         with pytest.raises(ClaudeUnavailableError):
             generate_caption_bundle(_ACH, language="bilingual")
+        with pytest.raises(ClaudeUnavailableError):
+            generate_caption_bundle(_ACH, language="en+ga")
 
     def test_welsh_only_instruction(self, monkeypatch):
         calls = self._patch(monkeypatch, json.dumps({"caption": "Cymraeg!", "alt_text": "alt"}))
         out = generate_caption_bundle(_ACH, language="cy")
         assert out["caption"] == "Cymraeg!"
+        assert out["caption_secondary"] is None
         assert "Welsh" in calls[0]["system"]
+        assert "dull rhydd" in calls[0]["system"]  # curated swim terms kept
+
+    def test_irish_only_instruction(self, monkeypatch):
+        calls = self._patch(monkeypatch, json.dumps({"caption": "Gaeilge!", "alt_text": "alt"}))
+        out = generate_caption_bundle(_ACH, language="ga")
+        assert out["caption"] == "Gaeilge!"
+        assert "Irish" in calls[0]["system"]
+
+    def test_language_derived_from_club_profile(self, monkeypatch):
+        from mediahub.web.club_profile import ClubProfile
+
+        calls = self._patch(monkeypatch, json.dumps({"caption": "Allez!", "alt_text": "alt"}))
+        prof = ClubProfile(profile_id="t", display_name="Club T", language="fr")
+        out = generate_caption_bundle(_ACH, club_profile=prof)
+        assert out["caption"] == "Allez!"
+        assert "French" in calls[0]["system"]
+
+    def test_unknown_language_falls_back_to_english(self, monkeypatch):
+        calls = self._patch(monkeypatch, json.dumps({"caption": "c", "alt_text": "a"}))
+        out = generate_caption_bundle(_ACH, language="klingon")
+        assert out["caption_secondary"] is None
+        assert "caption_secondary" not in calls[0]["system"]
+
+    def test_spurious_translation_ignored_in_monolingual_mode(self, monkeypatch):
+        # A caption_secondary key the contract never asked for must not
+        # leak a translation box into the review UI.
+        self._patch(
+            monkeypatch,
+            json.dumps({"caption": "c", "alt_text": "a", "caption_secondary": "spurious"}),
+        )
+        out = generate_caption_bundle(_ACH, language="en")
+        assert out["caption_secondary"] is None
+        assert out["secondary_language"] is None
 
     def test_code_fences_tolerated(self, monkeypatch):
         self._patch(
@@ -161,6 +238,80 @@ class TestCaptionBundle:
         monkeypatch.setattr(ai_caption, "call_claude", lambda **kw: boom())
         with pytest.raises(ClaudeUnavailableError):
             generate_caption_bundle(_ACH)
+
+
+# ---------------------------------------------------------------------------
+# W.13 (generalised) — the workspace language threads through EVERY caption
+# path, not just the bundle: plain regenerates, extra variants and platform
+# adaptations all derive the language from the club profile.
+# ---------------------------------------------------------------------------
+
+
+class TestCaptionLanguageThreading:
+    def _profile(self, language: str, **kw):
+        from mediahub.web.club_profile import ClubProfile
+
+        return ClubProfile(profile_id="t", display_name="Club T", language=language, **kw)
+
+    def test_caption_only_path_honours_workspace_language(self, monkeypatch):
+        captured = {}
+
+        def fake_call(system, user, max_tokens=400, **kw):
+            captured["system"] = system
+            return "Llongyfarchiadau Maya!"
+
+        monkeypatch.setattr(ai_caption, "call_claude", fake_call)
+        out = ai_caption.generate_caption_for_tone(
+            _ACH, tone="ai", club_profile=self._profile("cy")
+        )
+        assert out == "Llongyfarchiadau Maya!"
+        assert "Welsh" in captured["system"]
+        assert "Cymraeg" in captured["system"]
+
+    def test_bilingual_workspace_keeps_english_primary(self, monkeypatch):
+        captured = {}
+
+        def fake_call(system, user, max_tokens=400, **kw):
+            captured["system"] = system
+            return "Well swum, Maya!"
+
+        monkeypatch.setattr(ai_caption, "call_claude", fake_call)
+        prof = self._profile("en+cy", country="United Kingdom")
+        ai_caption.generate_caption_for_tone(_ACH, tone="ai", club_profile=prof)
+        # Primary stays English: UK spelling guidance applies, no
+        # write-in-Welsh instruction on the caption-only path.
+        assert "British English" in captured["system"]
+        assert "Cymraeg" not in captured["system"]
+
+    def test_explicit_language_overrides_profile(self, monkeypatch):
+        captured = {}
+
+        def fake_call(system, user, max_tokens=400, **kw):
+            captured["system"] = system
+            return "¡Vamos Maya!"
+
+        monkeypatch.setattr(ai_caption, "call_claude", fake_call)
+        ai_caption.generate_caption_for_tone(
+            _ACH, tone="ai", club_profile=self._profile("cy"), language="es"
+        )
+        assert "Spanish" in captured["system"]
+        assert "Cymraeg" not in captured["system"]
+
+    def test_platform_variants_stay_in_workspace_language(self, monkeypatch):
+        systems = []
+
+        def fake_call(system, user, max_tokens=400, **kw):
+            systems.append(system)
+            return "variante"
+
+        monkeypatch.setattr(ai_caption, "call_claude", fake_call)
+        out = ai_caption.generate_platform_variants(
+            "Maya wins gold!",
+            club_profile=self._profile("es"),
+            platforms=["feed", "linkedin"],
+        )
+        assert set(out) == {"feed", "linkedin"}
+        assert all("Spanish" in s and "Español" in s for s in systems)
 
 
 # ---------------------------------------------------------------------------
