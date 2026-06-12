@@ -4,7 +4,7 @@ Every Claude / LLM prompt template in the source. Search performed across all `*
 
 | File | Constant | First line of prompt |
 |---|---|---|
-| `src/mediahub/web/ai_caption.py` | `_SYSTEM_PROMPT` | Format the achievement dict as a structured user message. |
+| `src/mediahub/web/ai_caption.py` | `_SYSTEM_PROMPT` | Kept for back-compat with tests that import it. The new pipeline |
 
 ## Where to read the full prompts
 

@@ -16,6 +16,7 @@ User-visible features, mapped to the routes / modules that implement them.
 | Ground-truth eval | GET/POST `/ground-truth/<id>` | `mediahub.web.ground_truth` |
 | Brand kit upload | POST `/api/brand-kit/upload` | `mediahub.web.brand_kit_upload` |
 | Live AI caption | POST `/api/ai-caption` | `mediahub.web.ai_caption` |
+| Manage secrets | GET/POST `/settings/secrets` | `mediahub.web.secrets_store` |
 | Health check | GET `/healthz` | `mediahub.web.web` |
 | Research roadmap | GET `/research` | `mediahub.web.web` |
 | Voice list | GET `/api/voices` | `mediahub.voice.learned.store` |
@@ -24,7 +25,3 @@ User-visible features, mapped to the routes / modules that implement them.
 | Creative brief vision | internal | `mediahub.creative_brief.generator` |
 | PB verification | internal | `mediahub.pb_discovery.discover` |
 | Content pack ZIP | internal | `mediahub.content_pack.builder` |
-
-> **Configuration:** Secrets and operator config are env-var only (see
-> `.env.example` and `docs/ENV_INVENTORY.md`). The previous in-app
-> `/settings/secrets` page was removed in the operator-config rewrite.

@@ -52,14 +52,12 @@ def test_engine_name_normalised_to_lowercase(monkeypatch):
     assert select_reel_engine() == "remotion"
 
 
-def test_satori_is_a_recognised_registered_engine(monkeypatch):
-    """satori is registered as a future placeholder — select_reel_engine
-    returns 'satori' rather than raising, so reel_engine_status() can
-    surface the configured engine name.  The render functions raise
-    ReelEngineUnavailable before touching Node (tested separately).
-    """
+def test_satori_placeholder_was_removed(monkeypatch):
+    """The never-implemented 'satori' placeholder is no longer registered —
+    selecting it gets the same honest unknown-engine error as any typo."""
     monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "satori")
-    assert select_reel_engine() == "satori"
+    with pytest.raises(ReelEngineUnavailable, match="not a recognised engine"):
+        select_reel_engine()
 
 
 def test_ffmpeg_is_a_recognised_engine(monkeypatch):
@@ -80,7 +78,7 @@ def test_unknown_engine_error_names_valid_choices(monkeypatch):
         select_reel_engine()
     msg = str(exc_info.value)
     assert "remotion" in msg
-    assert "satori" in msg
+    assert "ffmpeg" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +94,6 @@ def test_reel_engine_status_has_required_keys(monkeypatch):
         "active",
         "remotion_available",
         "ffmpeg_available",
-        "satori_available",
         "available_engines",
     }
     missing = required - set(status.keys())
@@ -110,23 +107,10 @@ def test_reel_engine_status_default_active_is_remotion(monkeypatch):
     assert status["configured"] == ""
 
 
-def test_reel_engine_status_satori_available_always_false(monkeypatch):
-    monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
-    status = reel_engine_status()
-    assert status["satori_available"] is False
-
-
 def test_reel_engine_status_available_engines_is_list(monkeypatch):
     monkeypatch.delenv("MEDIAHUB_REEL_ENGINE", raising=False)
     status = reel_engine_status()
     assert isinstance(status["available_engines"], list)
-
-
-def test_reel_engine_status_surfaces_satori_as_active(monkeypatch):
-    monkeypatch.setenv("MEDIAHUB_REEL_ENGINE", "satori")
-    status = reel_engine_status()
-    assert status["configured"] == "satori"
-    assert status["active"] == "satori"
 
 
 def test_reel_engine_status_surfaces_bad_engine_verbatim(monkeypatch):

@@ -1,6 +1,6 @@
 """Phase W web-surface integration tests.
 
-True-integration coverage for the Phase W build (ADR-0015): the Club data
+True-integration coverage for the Phase W build (ADR-0016): the Club data
 pages (athletes/consent, records, live meet, wraps), magic-link mobile
 approvals, the approval-seam hooks (telemetry + records-on-approval), the
 W.11/W.13 caption bundle response, and org isolation on every new surface.

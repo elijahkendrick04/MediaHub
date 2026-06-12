@@ -17,7 +17,7 @@ class SportConfig:
     sport: str
     display_name: str
     detectors: list  # list of AchievementDetector instances
-    history_provider: Optional[object] = None  # HistoryProvider implementation
+    history_provider: Optional[object] = None  # per-sport history source (unused for swimming)
     default_voice_templates: dict = field(default_factory=dict)
 
 

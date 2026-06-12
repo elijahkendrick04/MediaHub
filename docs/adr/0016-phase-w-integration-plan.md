@@ -1,4 +1,4 @@
-# ADR 0015 — Phase W (W.1–W.14) integration placement, order and scope
+# ADR 0016 — Phase W (W.1–W.14) integration placement, order and scope
 
 **Status:** Accepted
 **Date:** 2026-06-12
