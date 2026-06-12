@@ -30,7 +30,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `779536d62` · Merge pull request #351 from elijahkendrick04/claude/sharp-keller-wpxhbg
+**Last updated:** 2026-06-12 · `a12e76317` · Merge pull request #353: Phase W complete — all 14 wedge-depth items (ADR-0016)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -38,17 +38,18 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
 | 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
 | 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
 | 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
 | 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
+| 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
+| 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
 | 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
+| 2026-06-12 | `7394cb396` | Phase W web integration: Club data hub, athletes/consent/records pages, live meet + wraps UI, magic- |
 | 2026-06-12 | `4ca993ccd` | Apply pre-commit formatting (ruff-format line collapses) |
 | 2026-06-12 | `1e77c9b06` | docs(roadmap): compliance-readiness sell gate — PC.11–PC.14 + ADR-0015 |
-| 2026-06-12 | `d7383fb79` | Wire up dormant features: autonomy cadence, official-PB detection, venue backdrops, audit surfaces |
-| 2026-06-12 | `950a19f7e` | Full-suite verification fixes: env inventory, wall-token route swept by isolation invariants |
-| 2026-06-11 | `943dff64a` | Phase C build-out: PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall; close PC.4's /pricing gat |
-| 2026-06-11 | `23b91e2ed` | chore: format the whole back-catalogue and make repo hygiene blocking |
+| 2026-06-12 | `b9397321f` | Phase W engines: live watch (W.7), season wraps (W.8), magic links (W.9), OCR seam (W.10), caption b |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
