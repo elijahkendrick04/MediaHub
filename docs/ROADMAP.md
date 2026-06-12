@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `aac7903b3` · Merge pull request #412 from elijahkendrick04/claude/brave-ptolemy-65ahf4
+**Last updated:** 2026-06-12 · `2380b439c` · Merge pull request #414 from elijahkendrick04/revert-412-claude/brave-ptolemy-65ahf4
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -692,6 +692,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `22224083a` | Revert "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `1c0dd8c48` | Declare MEDIAHUB_DEV_KEY in render.yaml so it surfaces in the Render dashboard |
 | 2026-06-12 | `0c85734c3` | Make the home-page developer-login footer link clearly visible |
 | 2026-06-12 | `19947ecf2` | fix: a11y: Form elements must have labels (label) (#409) |
@@ -700,7 +701,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `2e72597c4` | Roadmap bot: sweep completed items off the to-do lists automatically |
 | 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
 | 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
-| 2026-06-12 | `68d386a49` | Docker image: Node 20 -> 22 LTS, and fail loudly if the NodeSource setup fails |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
