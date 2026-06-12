@@ -11,18 +11,22 @@ from swim_content_v5.achievements import get_all_detectors
 from .achievements.official_pb import OfficialPBDetector
 
 
+def production_detectors() -> list:
+    """The full swimming detector set: OfficialPBDetector first (it covers
+    the swim-equals-listed-PB case the plain PB detectors can't fire on),
+    then the V5 detector suite."""
+    return [OfficialPBDetector()] + get_all_detectors()
+
+
 def init():
     """Register swimming in the sport registry with all detectors."""
-    detectors = get_all_detectors()
-    # Prepend OfficialPBDetector so it runs before other PB detectors
-    official_pb = OfficialPBDetector()
-    all_detectors = [official_pb] + detectors
+    all_detectors = production_detectors()
 
     register_sport(
         "swimming",
         display_name="Swimming",
         detectors=all_detectors,
-        history_provider=None,  # set later when swim_content_pb is wired
+        history_provider=None,  # history flows via the V5 SwimmerHistory wrapper
         default_voice_templates={
             "pb_confirmed": "{name} goes {time} in {event} — a new personal best!",
             "medal_gold": "{name} wins gold in {event} at {meet}!",

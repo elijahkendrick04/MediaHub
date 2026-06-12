@@ -30,7 +30,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `7b8d8b8bb` · Merge pull request #348: docs(roadmap): compliance-readiness sell gate — PC.11–PC.14 + ADR-0015
+**Last updated:** 2026-06-12 · `613352c93` · Merge pull request #354 from elijahkendrick04/claude/dormant-features-audit-xv760j
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -38,15 +38,16 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
+| 2026-06-12 | `4ca993ccd` | Apply pre-commit formatting (ruff-format line collapses) |
 | 2026-06-12 | `1e77c9b06` | docs(roadmap): compliance-readiness sell gate — PC.11–PC.14 + ADR-0015 |
+| 2026-06-12 | `d7383fb79` | Wire up dormant features: autonomy cadence, official-PB detection, venue backdrops, audit surfaces |
 | 2026-06-12 | `950a19f7e` | Full-suite verification fixes: env inventory, wall-token route swept by isolation invariants |
 | 2026-06-11 | `943dff64a` | Phase C build-out: PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall; close PC.4's /pricing gat |
 | 2026-06-11 | `23b91e2ed` | chore: format the whole back-catalogue and make repo hygiene blocking |
 | 2026-06-11 | `db4953273` | style: ruff-format (pinned 0.8.4) on touched files |
 | 2026-06-11 | `64ca81ee6` | Motion ↔ still parity: archetype scenes, motion intents, role parity, formats, reel narrative |
 | 2026-06-11 | `fe6e607c3` | docs(roadmap): add Phase 6 — our own creative suite (P6.1–P6.24) |
-| 2026-06-11 | `eaf6da84b` | docs(roadmap): absorb the June 2026 ideas backlog into the plan |
-| 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -1606,8 +1607,9 @@ provider seam — the P0.4 guard fails the build on any unslotted ASR import.
 ### P5.4 — Satori graphics fast-path · ❌ **NOT STARTED**
 Lighter card rendering (~100× lighter than headless Chromium). A *performance*
 play, not a licensing one — P0.1's shipped ffmpeg engine already removed the
-Remotion requirement; this slots into the same `MEDIAHUB_REEL_ENGINE` seam
-(the `satori` engine name is registered and honest-errors until it ships).
+Remotion requirement; this would slot into the same `MEDIAHUB_REEL_ENGINE` seam.
+(The placeholder `satori` engine name was removed in the dormant-features
+audit — register it again when the engine actually ships.)
 
 ### P5.5 — rembg / MODNet cutout · ✅ **DONE**
 Already the shipped default (rembg). MODNet is an optional higher-quality matting

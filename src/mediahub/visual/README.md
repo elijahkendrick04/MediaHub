@@ -26,8 +26,7 @@ sidecar — a single picked frame to use as the thumbnail.
 
 `reel_engine.py` is the little switchboard that reads the env var and says which
 engine is active (the health page shows its answer). Asking for an engine that
-isn't ready produces a clear, honest error — never a fake video. The `satori`
-name is reserved for a future faster engine (roadmap P5.4).
+isn't recognised produces a clear, honest error — never a fake video.
 
 ## voiceover.py + pronunciation.py
 

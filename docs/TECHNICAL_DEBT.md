@@ -11,12 +11,14 @@ These packages live in `legacy/` and are imported by `pipeline_v4`:
 | `swim_content_pb` | First-gen PB engine | Superseded by `mediahub.pb_discovery` | Delete after one production cycle without imports |
 | `engine_v4` | V4-era pre-cursor of `pipeline_v4` | Reference for diff'ing decisions; not imported live | Delete |
 
-## Dual canonical schema
+## Dual canonical schema — resolved
 
-`mediahub.canonical` (sport-agnostic SportEvent / SwimMeet) coexists with
-`mediahub.web.canonical` (the V4 `Meet` dataclass). Both are alive because
-`pipeline_v4` consumes the V4 `Meet` shape and downstream code converts.
-Plan: pick one, write a 1-pass converter, delete the other.
+`mediahub.canonical` (sport-agnostic SportEvent / SwimMeet) coexisted with
+`mediahub.web.canonical` (the V4 `Meet` dataclass). The V4 shape won by usage:
+`pipeline_v4` and every downstream consumer read `web.canonical.Meet`, while
+`mediahub.canonical` accumulated zero production imports. Deleted in the
+dormant-features audit (2026-06-12); `mediahub.web.canonical` is the single
+canonical schema.
 
 ## sys.path hack for legacy/
 

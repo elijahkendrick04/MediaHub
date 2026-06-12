@@ -455,6 +455,18 @@ def _write_render_manifest(cached: Path, manifest: dict) -> None:
         pass
 
 
+def _publish_sidecar(cached: Path, out_path: Path) -> None:
+    """Ship the explainability manifest with the MP4 it explains. Cache hits
+    carry the sidecar from the original render; best-effort like the write."""
+    try:
+        src = cached.with_suffix(".json")
+        dst = out_path.with_suffix(".json")
+        if src.exists() and src.resolve() != dst.resolve():
+            shutil.copyfile(src, dst)
+    except Exception:
+        pass
+
+
 def _card_manifest_axes(card_props: dict) -> dict:
     """The per-card explainability axes worth recording (no photo bytes)."""
     return {
@@ -578,8 +590,9 @@ def _finish_cached_video(cached: Path, *, kind: str, plan, duration_sec: float) 
 
 
 def _publish(cached: Path, out_path: Path) -> Path:
-    """Copy the cached MP4 (and its poster sidecar, when present) to the
-    caller-requested path. No-op when they are the same file."""
+    """Copy the cached MP4 — plus its explainability manifest and poster
+    sidecars, when present — to the caller-requested path. No-op when they
+    are the same file."""
     from mediahub.visual.audio_mux import poster_path_for
 
     cached = Path(cached)
@@ -588,6 +601,7 @@ def _publish(cached: Path, out_path: Path) -> Path:
         return cached
     out_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(cached, out_path)
+    _publish_sidecar(cached, out_path)
     cached_poster = poster_path_for(cached)
     if cached_poster.exists():
         try:
@@ -690,20 +704,8 @@ def _dispatch_engine() -> str:
     resolves to 'remotion' (the default) the existing _run_remotion path
     continues completely unchanged.  'ffmpeg' routes to the free fallback
     in :mod:`mediahub.visual.reel_ffmpeg` (roadmap P0.1).
-
-    The 'satori' engine is registered as a future placeholder (P5.4) but
-    is not yet implemented; callers receive an honest ReelEngineUnavailable
-    rather than a fake/placeholder asset (CLAUDE.md AI-surfaces rule).
     """
-    engine = select_reel_engine()
-    if engine == "satori":
-        raise ReelEngineUnavailable(
-            "The 'satori' render engine is not yet implemented. "
-            "Set MEDIAHUB_REEL_ENGINE=remotion (or leave it unset) for the "
-            "production Remotion renderer, or MEDIAHUB_REEL_ENGINE=ffmpeg "
-            "for the free still-graphic + FFmpeg fallback."
-        )
-    return engine
+    return select_reel_engine()
 
 
 # ---------------------------------------------------------------------------
