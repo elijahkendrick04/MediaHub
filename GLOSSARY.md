@@ -120,5 +120,10 @@ break the program. Each of these folders also has its own short `README.md`.
   [`docs/RESULTS_FROM_URL.md`](docs/RESULTS_FROM_URL.md).
 - **`web_research`** — A helper that looks things up on the internet when MediaHub
   needs extra facts.
+- **`log_sentinel`** — The app's night guard. It reads MediaHub's own server logs
+  every minute, sends the operator a push message when something known goes wrong,
+  and (only if you switch it on) can apply a small approved fix itself — like
+  restarting the server — with strict daily limits and a written record of
+  everything it did. See [`docs/LOG_SENTINEL.md`](docs/LOG_SENTINEL.md).
 
 Want the full engineer version? See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

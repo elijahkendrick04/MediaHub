@@ -83,6 +83,26 @@ services:
         value: "1"
       - key: MEDIAHUB_SEARCH_ENDPOINT
         value: http://127.0.0.1:8888
+      # --- Log sentinel (OPTIONAL watchdog; docs/LOG_SENTINEL.md) ---
+      # Polls this service's own logs via the Render API, notifies on known
+      # failure patterns, and (double-opt-in, rate-capped, kill-switched)
+      # auto-applies the playbook fix. Inert until both secrets are set in
+      # the dashboard. Notifications need MEDIAHUB_NTFY_TOPIC or
+      # MEDIAHUB_NOTIFY_WEBHOOK (also sync: false, operator-set).
+      - key: RENDER_API_KEY
+        sync: false
+      - key: RENDER_SERVICE_ID
+        sync: false
+      - key: MEDIAHUB_NTFY_TOPIC
+        sync: false
+      - key: MEDIAHUB_NOTIFY_WEBHOOK
+        sync: false
+      # Auto-fix stays notify-only until the operator flips these to "1"
+      # per docs/LOG_SENTINEL.md (double opt-in + kill switch + caps).
+      - key: MEDIAHUB_SENTINEL_AUTOFIX
+        value: "0"
+      - key: MEDIAHUB_PUBLIC_BASE_URL
+        value: https://mediahub-gzwc.onrender.com
     disk:
       name: mediahub-data
       mountPath: /var/mediahub

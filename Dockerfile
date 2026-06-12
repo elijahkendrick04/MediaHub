@@ -98,13 +98,25 @@ RUN cd /app/src/mediahub/remotion && npm install --no-audit --no-fund
 # the image still builds and MediaHub just uses DuckDuckGo. SearXNG only RUNS
 # when MEDIAHUB_RUN_SEARXNG=1 (see scripts/docker-entrypoint.sh); off => 0 RAM.
 # SearXNG is AGPL-3.0 — installed stock, queried only over localhost HTTP, never
-# modified. Pin SEARXNG_REF to a specific commit for full reproducibility.
-ARG SEARXNG_REF=master
+# modified.
+#
+# Install shape matters (June 2026 prod incident): SearXNG's setup.py imports
+# the `searx` package itself, so a plain `pip install git+…` fails inside pip's
+# isolated build env ("No module named 'msgspec'") — and the `|| echo` below
+# swallowed that, shipping images with NO SearXNG while render.yaml still
+# pointed MEDIAHUB_SEARCH_ENDPOINT at 127.0.0.1:8888 (log spam + silent DDG
+# fallback). Fix: install SearXNG's own pinned requirements.txt FIRST, then
+# install with --no-build-isolation so setup.py sees them. SEARXNG_REF is
+# pinned to the commit this sequence was verified against (install + boot +
+# /search?format=json) — bump deliberately, not via `master`.
+ARG SEARXNG_REF=4dd0bf48670727f6ae1086ffa72e76f6eb869741
 ENV SEARXNG_VENV=/opt/searxng-venv \
     SEARXNG_SETTINGS_PATH=/app/deploy/searxng/settings.yml
 RUN python -m venv "$SEARXNG_VENV" \
  && ( "$SEARXNG_VENV/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel \
    && "$SEARXNG_VENV/bin/pip" install --no-cache-dir \
+        -r "https://raw.githubusercontent.com/searxng/searxng/${SEARXNG_REF}/requirements.txt" \
+   && "$SEARXNG_VENV/bin/pip" install --no-cache-dir --no-build-isolation \
         "git+https://github.com/searxng/searxng.git@${SEARXNG_REF}" \
    && "$SEARXNG_VENV/bin/python" -c "import searx; print('searxng OK')" ) \
  || echo "WARN: in-container SearXNG install failed; MediaHub will use DuckDuckGo."

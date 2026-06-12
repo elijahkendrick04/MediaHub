@@ -49,6 +49,7 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | The **club records** book | `src/mediahub/club_records/` |
 | **Qualifying times** ("made Counties!") | `src/mediahub/standards/` + `data/standards/` |
 | Watching a **live meet** during a gala | `src/mediahub/results_fetch/live_watch.py` |
+| Watching the **server's own logs** for trouble (and safe auto-fixes) | `src/mediahub/log_sentinel/` |
 | **Month / season recap** numbers | `src/mediahub/season_wrap/` |
 | The founder's **selling notebook** (quotes, leads) | `src/mediahub/commercial/` |
 

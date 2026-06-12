@@ -109,6 +109,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `healthz_memory` | `GET` | `/healthz/memory` |
 | `healthz_ping` | `GET` | `/healthz/ping` |
 | `healthz_search` | `GET` | `/healthz/search` |
+| `healthz_sentinel` | `GET` | `/healthz/sentinel` |
 | `healthz_usage` | `GET` | `/healthz/usage` |
 | `legal_accept_page` | `GET` | `/legal/accept` |
 | `legal_accept_post` | `POST` | `/legal/accept` |

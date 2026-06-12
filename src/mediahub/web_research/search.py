@@ -148,14 +148,30 @@ class WebResearcher:
         # MEDIAHUB_SEARCH_ENDPOINT unset this block is skipped and behaviour is
         # byte-for-byte unchanged — and MediaHub never provisions or hosts
         # SearXNG, so it adds no running cost.
+        #
+        # A failure opens the client's circuit breaker: SearXNG is skipped
+        # (silently, debug-level) for a cooldown window instead of re-probing a
+        # dead endpoint and warning on every single query. One warning per
+        # window, with the operator pointer, is the whole story in the logs.
         try:
             from mediahub.web_research import searxng_client
 
             if searxng_client.is_configured():
-                try:
-                    results = searxng_client.search(query, num)
-                except searxng_client.SearxngUnavailable as e:
-                    log.warning("SearXNG unavailable, falling back to DuckDuckGo: %s", e)
+                if searxng_client.breaker_open():
+                    log.debug(
+                        "SearXNG circuit open, using fallback engines: %s",
+                        searxng_client.breaker_reason(),
+                    )
+                else:
+                    try:
+                        results = searxng_client.search(query, num)
+                    except searxng_client.SearxngUnavailable as e:
+                        log.warning(
+                            "SearXNG unavailable, falling back to DuckDuckGo "
+                            "(pausing SearXNG attempts for ~%ds; check /healthz/search): %s",
+                            int(searxng_client.breaker_cooldown()),
+                            e,
+                        )
         except Exception:
             pass
 
