@@ -53,7 +53,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `7602f2ef5` · Merge pull request #395: Migrate Remotion tsconfig to moduleResolution=bundler
+**Last updated:** 2026-06-12 · `d76e8c208` · Merge pull request #394 from elijahkendrick04/dependabot/github_actions/actions/setup-python-6
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -595,14 +595,13 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-12 | `19ed2f0fb` | Migrate Remotion tsconfig to moduleResolution=bundler |
+| 2026-06-12 | `be40c4da4` | build(deps): bump the remotion-deps group across 1 directory with 4 updates |
+| 2026-06-12 | `1443cf581` | build(deps): bump actions/setup-python from 5 to 6 |
 | 2026-06-12 | `c3d4f2763` | Auto-merge Dependabot GitHub-Actions bumps on all-green checks |
 | 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
 | 2026-06-12 | `8129ca971` | Apply CI-pinned ruff format to test_dev_login.py |
 | 2026-06-12 | `d11cf8c38` | Add opt-in passwordless developer sign-in + home-page footer link |
 | 2026-06-12 | `b58c21fcd` | Disclose log-sentinel providers in the register (guard catch #4 and #5) |
-| 2026-06-12 | `aae3242f3` | Align the DSR erasure test with the canonical discovered-cache root |
-| 2026-06-12 | `ef5e3112c` | Fix the PB auditor in the meet-recap pipeline: real decisions, honest lookups, run guards |
-| 2026-06-12 | `9bacf51fe` | docs: regenerate inventories on the merged tree |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
