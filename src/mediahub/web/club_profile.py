@@ -40,7 +40,12 @@ class ClubProfile:
     country: str = ""
     notes: str = ""
 
-    # W.13: caption language — "en" | "cy" (Welsh) | "bilingual" (both)
+    # W.13 (generalised): caption language — a web.languages registry code
+    # ("en", "cy", "ga", "zh", …: top-10 world languages + Welsh + Irish)
+    # or an English-led bilingual pair ("en+cy", "en+hi", …). The legacy
+    # value "bilingual" (= "en+cy") still loads; web.languages
+    # .normalise_language_setting() is the single validator and is applied
+    # on every read, so old JSON needs no migration.
     language: str = "en"
 
     # ---- V7 extensions (all optional with defaults so old JSON still loads) ----
