@@ -7135,6 +7135,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
     </div>
+    {% if dev_login_enabled and active == 'home' %}
+    <div class="mh-footer-meta" style="margin-top:8px;opacity:0.4;font-size:11px">
+      <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access</a>
+    </div>
+    {% endif %}
   </div>
 </footer>
 <nav class="mh-bottomnav" aria-label="Primary (mobile)">
@@ -21177,7 +21182,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # correct key the operator gets an unrestricted (Owner-plan) session that
     # bypasses every paywall gate. The key is verified constant-time, never
     # logged, and never rendered back to the page.
-    def _developer_login_page(*, error: str = "") -> str:
+    def _developer_login_page(*, error: str = "", open_mode: bool = False) -> str:
         err_html = ""
         if error:
             err_html = (
@@ -21189,6 +21194,49 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'font-size:12px;letter-spacing:0.06em;text-transform:uppercase">'
                 f"[ ERROR ] {_h(error)}</div>"
             )
+        if open_mode:
+            # Passwordless temporary backdoor (MEDIAHUB_DEV_OPEN): no key field,
+            # a single button takes the unrestricted session. A standing banner
+            # reminds the operator the door is open and to remove it before real
+            # customers — matching the env var's documented intent.
+            warn_html = (
+                '<div class="mh-flash" role="alert" style="'
+                "margin:0 0 var(--sp-5);padding:14px 18px;"
+                "border:1px solid rgba(245,193,91,0.35);"
+                "border-left:3px solid var(--warn);"
+                "background:rgba(245,193,91,0.06);color:var(--ink);"
+                "border-radius:var(--radius-sm);font-family:var(--font-mono);"
+                'font-size:12px;letter-spacing:0.05em;line-height:1.5">'
+                "[ OPEN ] Passwordless operator access is ON. Anyone who reaches "
+                "this page can enter unrestricted &mdash; unset "
+                "<strong>MEDIAHUB_DEV_OPEN</strong> to close it before onboarding "
+                "real customers.</div>"
+            )
+            body = (
+                '<section class="mh-hero" style="padding-top:var(--sp-7);'
+                'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+                '<span class="mh-hero-eyebrow">Operator</span>'
+                '<h1>Developer <em class="editorial">sign-in</em>.</h1>'
+                '<p class="lede">Unrestricted, paywall-free access for the '
+                "operator running this deployment. Passwordless mode is on "
+                "&mdash; no key required.</p>"
+                "</section>"
+                f"{warn_html}"
+                f"{err_html}"
+                '<div class="card" style="padding:24px 28px;max-width:440px">'
+                f'<form method="post" action="{url_for("developer_login_post")}" '
+                'data-loader-text="Signing in&hellip;">'
+                '<button type="submit" class="btn" style="width:100%">'
+                "Enter unrestricted</button>"
+                "</form>"
+                '<div class="dim" style="font-size:13px;margin-top:18px;'
+                'text-align:center">'
+                f'Back to <a href="{url_for("login_page")}" '
+                'style="color:var(--accent);font-weight:600">normal log in</a>.'
+                "</div>"
+                "</div>"
+            )
+            return _layout("Developer sign-in", body, active="signin")
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
@@ -21225,7 +21273,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             abort(404)
         if _auth.is_dev_operator():
             return redirect(url_for("make_page"))
-        return _developer_login_page()
+        return _developer_login_page(open_mode=_auth.dev_login_open())
 
     @app.route("/developer", methods=["POST"])
     def developer_login_post():
@@ -21233,7 +21281,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             abort(404)
         if _auth_rate_limited("developer"):
             return _auth_rate_limit_response()
-        if _auth.verify_dev_key(request.form.get("dev_key")):
+        # Passwordless temporary mode (MEDIAHUB_DEV_OPEN) signs in with no key;
+        # otherwise a correct MEDIAHUB_DEV_KEY is required.
+        if _auth.dev_login_open() or _auth.verify_dev_key(request.form.get("dev_key")):
             _auth.login_dev_operator()
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
             return redirect(nxt or url_for("make_page"))

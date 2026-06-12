@@ -479,16 +479,43 @@ def _users_path() -> Path:
 _SESSION_KEY = "user_email"
 
 # ---- Operator / developer access ---------------------------------------
-# An env-gated, no-paywall sign-in for the operator running the deployment. It
-# does not exist unless MEDIAHUB_DEV_KEY is set in the environment, so it is
-# never a public backdoor. The key is read from the environment only — never
+# An env-gated, no-paywall sign-in for the operator running the deployment.
+#
+# Two ways to enable it, both opt-in and OFF by default:
+#   * MEDIAHUB_DEV_KEY  — keyed sign-in: visit /developer, enter the key.
+#   * MEDIAHUB_DEV_OPEN — PASSWORDLESS sign-in: one click, no key. A deliberate,
+#       TEMPORARY development backdoor — while it is on, anyone who can reach
+#       /developer can take an unrestricted session. Keep it off on any
+#       deployment that holds real customer data and remove it before
+#       onboarding real customers (the page shows a standing reminder).
+#
+# With neither set the route 404s and the affordance vanishes, so it is never an
+# accidental backdoor. Both values are read from the environment only — never
 # hardcoded, never logged — matching the project's API-keys-in-env rule.
 _DEV_SESSION_KEY = "dev_operator"
 
 
+def dev_login_open() -> bool:
+    """True when PASSWORDLESS operator sign-in is explicitly enabled.
+
+    Temporary development backdoor: when ``MEDIAHUB_DEV_OPEN`` is truthy the
+    ``/developer`` route grants an unrestricted (Owner-plan) session with **no
+    key**. OFF by default; opt in per deployment. Unset the env var to close the
+    door instantly (it also revokes any outstanding open-mode session, since
+    ``is_dev_operator`` re-checks ``dev_login_enabled`` on every request).
+    """
+    raw = (os.environ.get("MEDIAHUB_DEV_OPEN") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def dev_login_enabled() -> bool:
-    """True only when the operator has configured MEDIAHUB_DEV_KEY in env."""
-    return bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
+    """True when the developer sign-in affordance should exist at all.
+
+    Either a key is configured (keyed sign-in) **or** passwordless open mode is
+    on. Gates the ``/developer`` route and the nav/footer links so they
+    404/vanish when the operator has opted into neither.
+    """
+    return dev_login_open() or bool((os.environ.get("MEDIAHUB_DEV_KEY") or "").strip())
 
 
 def _dev_operator_email() -> str:
