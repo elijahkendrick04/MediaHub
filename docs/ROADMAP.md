@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `73f198afb` · Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4
+**Last updated:** 2026-06-12 · `9888b4a00` · Merge pull request #431 from elijahkendrick04/claude/nifty-brown-3i9ami
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -702,6 +702,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `3474910ad` | Remove claude-flow-dependent coding skills (no MCP/CLI access) |
 | 2026-06-12 | `73f198afb` | Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4 |
 | 2026-06-12 | `46d3616e7` | fix: a11y: Documents must have <title> element to aid in navigati (#424) |
 | 2026-06-12 | `548096e9e` | fix: a11y: Select element must have an accessible name (select-na (#422) |
