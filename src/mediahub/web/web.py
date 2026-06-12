@@ -12616,6 +12616,41 @@ Relay team broke club record"></textarea>
     <button class="btn secondary" type="submit">Erase athlete</button>
   </form>
 </div>"""
+            from mediahub.privacy import list_corrections
+
+            open_corrections = list_corrections(active_org, status="open")
+            rows_html = "".join(
+                "<li style='margin-bottom:8px'>"
+                f"<strong>#{int(c['id'])}</strong> &mdash; run <code>{_h(str(c['run_id']))}</code>, "
+                f"card <code>{_h(str(c['card_id']))}</code>: {_h(str(c['reason']))} "
+                f"<form method='post' action='{url_for('privacy_correction_resolve', correction_id=int(c['id']))}' style='display:inline'>"
+                "<button class='btn secondary' type='submit' style='padding:2px 10px;font-size:11px'>Mark resolved</button>"
+                "</form></li>"
+                for c in open_corrections
+            )
+            open_list = (
+                f"<ul style='margin-top:10px'>{rows_html}</ul>"
+                if rows_html
+                else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
+            )
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Correct a published card</h2>
+  <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
+  correction: it's recorded, the card is pulled from the public wall, and you get the
+  takedown checklist for the social platforms.</p>
+  <form method="post" action="{url_for('privacy_correction_open')}"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
+      <input type="text" name="run_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
+      <input type="text" name="card_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+    <button class="btn secondary" type="submit">Open correction</button>
+  </form>
+  {open_list}
+</div>"""
         if account_email:
             _rights_tools_html += f"""
 <div class="card">
@@ -12759,11 +12794,79 @@ Relay team broke club record"></textarea>
             "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
             "were replaced with [removed]. Content already published to social "
             "platforms must be deleted there too &mdash; use the correction tools "
-            "on the run page.</p>"
+            "on the Privacy page.</p>"
             f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
             "&larr; Back to privacy</a></p></div>"
         )
         return _layout("Athlete erased", body, active="privacy")
+
+    @app.route("/privacy/correction", methods=["POST"])
+    def privacy_correction_open():
+        """Open a correction/takedown for a published-but-wrong card.
+
+        Does everything MediaHub controls: records the request and pulls the
+        card off the public wall. The response is honest about the manual
+        remainder (deleting the post on the platform itself)."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        run_id = (request.form.get("run_id") or "").strip()
+        card_id = (request.form.get("card_id") or "").strip()
+        reason = (request.form.get("reason") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
+            and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
+            and reason
+        ):
+            return redirect(url_for("privacy_page"))
+        from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
+
+        cid = open_correction(
+            profile_id=active, run_id=run_id, card_id=card_id, reason=reason
+        )
+        # Pull the card off the public wall immediately.
+        try:
+            from mediahub.web.public_wall import card_key
+
+            prof = load_profile(active)
+            if prof is not None:
+                current = set(prof.public_wall_excluded_cards or [])
+                key = card_key(run_id, card_id)
+                if key not in current:
+                    current.add(key)
+                    prof.public_wall_excluded_cards = sorted(current)
+                    save_profile(prof)
+        except Exception:
+            log.warning("correction: wall exclusion failed", exc_info=True)
+        checklist = "".join(f"<li>{_h(item)}</li>" for item in TAKEDOWN_CHECKLIST)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Correction <em class="editorial">opened.</em></h1></section>'
+            '<div class="card">'
+            f"<p>Correction #{cid} recorded for card <code>{_h(card_id)}</code> "
+            f"in run <code>{_h(run_id)}</code>. The card has been removed from the "
+            "public wall.</p>"
+            "<h2>Still to do (outside MediaHub)</h2>"
+            f"<ul>{checklist}</ul>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Correction opened", body, active="privacy")
+
+    @app.route("/privacy/correction/<int:correction_id>/resolve", methods=["POST"])
+    def privacy_correction_resolve(correction_id: int):
+        active = _active_profile_id() or ""
+        if active:
+            from mediahub.privacy import resolve_correction
+
+            resolve_correction(
+                profile_id=active,
+                correction_id=correction_id,
+                resolution=(request.form.get("resolution") or "").strip(),
+            )
+        return redirect(url_for("privacy_page"))
 
     @app.route("/account/export")
     def account_export_route():

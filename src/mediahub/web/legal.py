@@ -564,7 +564,9 @@ def privacy_html(
     <li><strong>Access / portability:</strong> export any run as JSON; export your
         account data from the Privacy page.</li>
     <li><strong>Rectification:</strong> edit captions before approval; request
-        correction of a published item via the correction workflow on the run page.</li>
+        correction of a published item via the correction workflow on this
+        Privacy page (it records the request, pulls the card from the public
+        wall, and gives you the platform takedown checklist).</li>
     <li><strong>Objection / restriction:</strong> email
         <a href="mailto:{CONTACT_EMAIL}">{CONTACT_EMAIL}</a>.</li>
   </ul>
