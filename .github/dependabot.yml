@@ -1,5 +1,10 @@
-# Dependency update PRs (security/supply-chain-ci). Weekly, grouped, so the
-# stream is reviewable; the security workflow gates every PR anyway.
+# Dependency update PRs (security/supply-chain-ci). Weekly, grouped.
+# Policy split (2026-06-12, operator decision): github-actions bumps
+# auto-merge on all-green checks via dependabot-automerge.yml (CI-only
+# blast radius, fully exercised by the PR's own checks); pip / npm /
+# docker bumps stay a human-reviewed stream — PR checks don't run the
+# full pytest suite and main auto-deploys, so a green tick alone does
+# not validate a runtime dependency change.
 version: 2
 updates:
   - package-ecosystem: pip
