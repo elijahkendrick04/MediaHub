@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `8d1b55059` · Merge pull request #363: Multilingual captions — top-10 world languages + Irish (W.13 generalised)
+**Last updated:** 2026-06-12 · `26d56a28b` · Merge pull request #365 from elijahkendrick04/claude/bold-lovelace-3lryuf
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,6 +370,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
 | 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
 | 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 | 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
@@ -379,8 +380,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
 | 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
 | 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
-| 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
-| 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
