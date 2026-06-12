@@ -12764,6 +12764,173 @@ Relay team broke club record"></textarea>
         ComplaintsStore().acknowledge(complaint_id, via=request.form.get("via") or "")
         return redirect(url_for("admin_compliance"))
 
+    # ---- CONSENT & LAWFUL BASIS (per tenant) -----------------------------
+    # The club records its lawful basis and manages the per-athlete
+    # consent/opt-out registry. Enforcement is in mediahub.compliance.gate
+    # (approval, pack build, publish gate all ask the same function).
+
+    @app.route("/organisation/consent")
+    def org_consent_page():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return _layout(
+                "Consent",
+                '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
+                active="organisation",
+            ), 404
+        from mediahub.compliance.consent import ConsentRegistry
+
+        records = ConsentRegistry(pid).all()
+        rows = []
+        for r in records:
+            status_tag = {
+                "granted": '<span class="tag ok">granted</span>',
+                "refused": '<span class="tag bad">refused</span>',
+                "revoked": '<span class="tag bad">revoked</span>',
+            }.get(r.status, _h(r.status))
+            extra = []
+            if r.parental:
+                extra.append("parental")
+            if r.under_18 is True:
+                extra.append("under 18")
+            if r.restricted:
+                extra.append('<strong>RESTRICTED (Art 18)</strong>')
+            rows.append(
+                f"<tr><td>{_h(r.athlete_name)}</td><td>{status_tag}</td>"
+                f"<td>{', '.join(extra) or '—'}</td><td class='muted'>{_h(r.note[:160])}</td>"
+                f"<td class='muted'>{_h(r.recorded_at[:10])}</td></tr>"
+            )
+        table = (
+            "<table><thead><tr><th>Athlete</th><th>Status</th><th>Flags</th><th>Note</th><th>Recorded</th></tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="5" class="muted">No consent records yet.</td></tr>')
+            + "</tbody></table>"
+        )
+        mode = (profile.consent_mode or "").strip()
+
+        def _sel(value, current):
+            return " selected" if value == current else ""
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
+  <h1>Consent &amp; <em class="editorial">lawful basis.</em></h1>
+  <p class="lede">Record why you're allowed to post about your athletes, and who has said yes or no. A refused, revoked or restricted athlete can never be approved, packed, or published — on any setting.</p>
+</section>
+
+<div class="card">
+  <h2>Lawful basis &amp; gating mode</h2>
+  <form method="post" action="{url_for('org_consent_settings')}">
+    <label>Lawful basis for publication<br>
+      <select name="lawful_basis_publication">
+        <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_publication)}>Consent (Art 6(1)(a))</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_publication)}>Legitimate interests (Art 6(1)(f))</option>
+        <option value="other"{_sel("other", profile.lawful_basis_publication)}>Other (see notes)</option>
+      </select>
+    </label><br>
+    <label>Lawful basis for PB-history enrichment<br>
+      <select name="lawful_basis_enrichment">
+        <option value=""{_sel("", profile.lawful_basis_enrichment)}>— not recorded —</option>
+        <option value="consent"{_sel("consent", profile.lawful_basis_enrichment)}>Consent (Art 6(1)(a))</option>
+        <option value="legitimate_interests"{_sel("legitimate_interests", profile.lawful_basis_enrichment)}>Legitimate interests (Art 6(1)(f))</option>
+        <option value="other"{_sel("other", profile.lawful_basis_enrichment)}>Other (see notes)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="pb_enrichment_enabled" value="1"{" checked" if profile.pb_enrichment_enabled else ""}> Fetch PB history from public rankings (requires telling athletes/parents — Art 14 notice template in docs/compliance/templates/)</label><br>
+    <label>Consent gating mode<br>
+      <select name="consent_mode">
+        <option value=""{_sel("", mode)}>Opt-out (default) — block only recorded refusals</option>
+        <option value="opt_out"{_sel("opt_out", mode)}>Opt-out — block only recorded refusals</option>
+        <option value="opt_in"{_sel("opt_in", mode)}>Opt-in — publish ONLY athletes with recorded consent (recommended for youth squads)</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental_minors" value="1"{" checked" if profile.consent_require_parental_for_minors else ""}> Under-18s need parent/guardian consent (opt-in mode)</label><br>
+    <label>Notes (e.g. your balancing-test reference)<br><input type="text" name="lawful_basis_notes" maxlength="500" value="{_h(profile.lawful_basis_notes)}"></label><br>
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Record a consent decision</h2>
+  <form method="post" action="{url_for('org_consent_record')}">
+    <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
+    <label>Decision<br>
+      <select name="status">
+        <option value="granted">Consent granted</option>
+        <option value="refused">Refused — never publish</option>
+        <option value="revoked">Revoked — was granted, now withdrawn</option>
+      </select>
+    </label><br>
+    <label><input type="checkbox" name="parental" value="1"> Given by a parent/guardian</label>
+    <label><input type="checkbox" name="under_18" value="1"> Athlete is under 18</label>
+    <label><input type="checkbox" name="restricted" value="1"> Restrict processing (Art 18)</label><br>
+    <label>Note (how/when consent was collected)<br><input type="text" name="note" maxlength="1000"></label><br>
+    <button class="btn" type="submit">Save record</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Registry</h2>
+  {table}
+  <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
+</div>
+"""
+        return _layout("Consent & lawful basis", body, active="organisation")
+
+    @app.route("/organisation/consent/settings", methods=["POST"])
+    def org_consent_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        basis_values = ("", "consent", "legitimate_interests", "other")
+        pub = request.form.get("lawful_basis_publication") or ""
+        enr = request.form.get("lawful_basis_enrichment") or ""
+        mode = request.form.get("consent_mode") or ""
+        if pub in basis_values:
+            profile.lawful_basis_publication = pub
+        if enr in basis_values:
+            profile.lawful_basis_enrichment = enr
+        if mode in ("", "opt_out", "opt_in"):
+            profile.consent_mode = mode
+        profile.consent_require_parental_for_minors = bool(request.form.get("parental_minors"))
+        profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
+        profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/record", methods=["POST"])
+    def org_consent_record():
+        pid = _active_profile_id() or ""
+        if not pid or load_profile(pid) is None:
+            return jsonify({"error": "no active organisation"}), 404
+        from mediahub.compliance.consent import ConsentRegistry
+
+        status = request.form.get("status") or ""
+        name = (request.form.get("athlete_name") or "").strip()
+        if status not in ("granted", "refused", "revoked") or not name:
+            return _layout(
+                "Consent",
+                '<div class="card"><p class="tag bad">Athlete name and a valid decision are required.</p></div>',
+                active="organisation",
+            ), 400
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        ConsentRegistry(pid).record(
+            athlete_name=name,
+            status=status,
+            parental=bool(request.form.get("parental")),
+            under_18=True if request.form.get("under_18") else None,
+            restricted=bool(request.form.get("restricted")),
+            note=request.form.get("note") or "",
+            recorded_by=recorded_by,
+        )
+        return redirect(url_for("org_consent_page"))
+
     @app.route("/admin/compliance/incidents", methods=["POST"])
     def admin_compliance_incident():
         if not _auth.is_dev_operator():
@@ -22561,6 +22728,23 @@ function mhSetupMode(mode) {{
                 status = CardStatus(status_str)
             except (ValueError, NameError):
                 return jsonify({"error": f"invalid status: {status_str}"}), 400
+            # Consent gate: a card featuring an opted-out or no-consent
+            # athlete can never be APPROVED (or marked POSTED). One shared
+            # decision function — same rule as pack build + publish gate.
+            if status in (CardStatus.APPROVED, CardStatus.POSTED):
+                from mediahub.compliance.gate import (
+                    consent_block_reason_for_card,
+                    find_card_in_run,
+                )
+
+                run_data = _load_run(run_id) or {}
+                card = find_card_in_run(run_data, card_id)
+                reason = consent_block_reason_for_card(
+                    run_data.get("profile_id", ""), card
+                )
+                if reason:
+                    log.info("consent gate blocked approval run=%s card=%s", run_id, card_id)
+                    return jsonify({"error": "consent_blocked", "reason": reason}), 403
             notes = payload.get("notes")
             ws.set_status(run_id, card_id, status, notes=notes)
             summary = ws.summary(run_id)
@@ -22611,6 +22795,20 @@ function mhSetupMode(mode) {{
         payload = request.get_json(silent=True) or {}
         deterministic = bool(payload.get("deterministic", False))
         async_mode = bool(payload.get("async", False))
+
+        # Consent gate: blocked athletes never reach the pack builder, so
+        # they cannot be rendered into any artefact.
+        from mediahub.compliance.gate import filter_consent_blocked
+
+        run_data, _consent_excluded = filter_consent_blocked(
+            run_data.get("profile_id", ""), run_data
+        )
+        if _consent_excluded:
+            log.info(
+                "consent gate excluded %d athlete(s) from turn-into pack run=%s",
+                len(_consent_excluded),
+                run_id,
+            )
 
         def _do_generate(job_id: str) -> None:
             try:

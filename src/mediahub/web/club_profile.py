@@ -225,6 +225,22 @@ class ClubProfile:
     public_wall_initials_only: bool = True
     public_wall_excluded_cards: list[str] = field(default_factory=list)
 
+    # ---- Compliance: lawful basis + consent posture (all optional) ----
+    # The club (controller) records which UK GDPR Art 6 basis it relies on
+    # for publication and for the PB enrichment, and how consent gating
+    # behaves. consent_mode: "" (legacy → behaves as opt_out) | "opt_out" |
+    # "opt_in". Which basis/mode a club SHOULD pick is a legal-judgment
+    # call — docs/compliance/OPEN_LEGAL_QUESTIONS.md Q2. The registry and
+    # the enforcement points live in mediahub.compliance.
+    lawful_basis_publication: str = ""  # consent | legitimate_interests | other
+    lawful_basis_enrichment: str = ""  # basis for the PB-history enrichment
+    lawful_basis_notes: str = ""
+    consent_mode: str = ""
+    consent_require_parental_for_minors: bool = True
+    # Per-tenant opt-in for the swimmingresults.org PB enrichment (Art 14
+    # duty sits with the club — see DATA_MAP E4 / OPEN_LEGAL_QUESTIONS Q4).
+    pb_enrichment_enabled: bool = True
+
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).
     voice_examples: list[str] = field(default_factory=list)

@@ -349,6 +349,18 @@ def run_pipeline_v4(
     except Exception:
         _llm_provider = "heuristic"
     _skip_pb_discovery = _llm_provider == "heuristic"
+    # Per-tenant enrichment opt-in: fetching PB history from public rankings
+    # is data collection NOT from the data subject (UK GDPR Art 14) — the
+    # club must have switched it on (and owes athletes/parents the Art 14
+    # notice; template in docs/compliance/templates/). Default is on for
+    # backward compatibility; the club can turn it off on /organisation/consent.
+    if fetch_pbs and profile is not None and not getattr(profile, "pb_enrichment_enabled", True):
+        step(
+            "Skipping PB discovery: this organisation has switched off PB-history "
+            "enrichment (Privacy → Consent & lawful basis)."
+        )
+        fetch_pbs = False
+
     if fetch_pbs and our_results and effective_filter and _skip_pb_discovery:
         step(
             "Skipping PB discovery: no LLM provider configured (configure GEMINI_API_KEY or ANTHROPIC_API_KEY in the deployment environment to enable)."

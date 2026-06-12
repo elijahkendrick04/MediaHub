@@ -322,6 +322,24 @@ def _check_safeguarding(card: Optional[dict]) -> GateCheck:
     return GateCheck("safeguarding", True, detail)
 
 
+def _check_consent(org_id: str, card: Optional[dict]) -> GateCheck:
+    """Consent/opt-out gate — same decision function as approval + packs.
+
+    Fail-safe: if the registry cannot be read, the card is BLOCKED, not
+    waved through — a missing answer to "may this athlete appear?" is a
+    block, mirroring the honest-error rule everywhere else.
+    """
+    try:
+        from mediahub.compliance.gate import consent_block_reason_for_card  # noqa: PLC0415
+
+        reason = consent_block_reason_for_card(org_id, card)
+    except Exception as exc:  # pragma: no cover - defensive
+        return GateCheck("consent", False, f"consent registry unreadable ({exc}) — blocking")
+    if reason:
+        return GateCheck("consent", False, reason)
+    return GateCheck("consent", True, "no opt-out or restriction recorded for this athlete")
+
+
 def _parse_cap(raw: object, default: int) -> int:
     try:
         value = int(raw if raw not in (None, "") else default)  # type: ignore[arg-type]
@@ -439,6 +457,7 @@ def evaluate_publish_gate(
     checks.append(_check_confidence(card, threshold_for(org_id, slug, data_dir=data_dir)))
     checks.append(_check_brand_safety(caption, avoid_phrases=_avoid_phrases_for(org_id)))
     checks.append(_check_safeguarding(card))
+    checks.append(_check_consent(org_id, card))
     checks.append(_check_rate_limit(org_id, now=now))
 
     verdict = GateVerdict(
