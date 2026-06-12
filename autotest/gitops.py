@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -258,6 +259,78 @@ def count_open_fix_prs() -> int:
         return 0
 
 
+# CI verification for the "clean status" direct-merge fallthrough. GitHub
+# refuses to ARM auto-merge on a PR it deems mergeable RIGHT NOW — which is
+# true not only when every required check has passed, but ALSO when main has
+# NO required status checks configured at all. In that second case a
+# just-opened PR reads "clean" before its CI has even been created (observed:
+# fix PR #332 merged 3 seconds after creation, before any check existed). So
+# the fallthrough must verify the FULL check rollup itself and only land on
+# verified green; anything else leaves the PR open, honestly.
+_ROLLUP_OK = ("SUCCESS", "NEUTRAL", "SKIPPED")
+_ROLLUP_RED = ("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "CANCELLED")
+
+
+def _pr_checks_state(pr_ref: str) -> tuple[str, str]:
+    """One snapshot of a PR's full CI rollup: ("green"|"red"|"pending"|"unknown",
+    detail). The rollup mixes two shapes — CheckRuns (status/conclusion) and
+    commit StatusContexts (state) — both are read. ACTION_REQUIRED (a run held
+    for workflow approval) counts as PENDING, not failed: it is unresolved.
+    "unknown" (lookup/parse failure) must be treated as not-green by callers —
+    never merge on an unreadable CI state."""
+    p = subprocess.run(["gh", "pr", "view", str(pr_ref), "--json", "statusCheckRollup"],
+                       cwd=str(REPO_ROOT), capture_output=True, text=True)
+    if p.returncode != 0:
+        return "unknown", ((p.stderr or p.stdout or "").strip()[:200] or "gh pr view failed")
+    try:
+        rollup = json.loads(p.stdout or "{}").get("statusCheckRollup") or []
+    except ValueError:
+        return "unknown", "unparseable statusCheckRollup"
+    if not rollup:
+        return "pending", "no checks reported yet"
+    red: list[str] = []
+    pending: list[str] = []
+    for c in rollup:
+        name = str(c.get("name") or c.get("context") or "?")
+        state = str(c.get("state") or "").upper()         # StatusContext
+        status = str(c.get("status") or "").upper()       # CheckRun
+        concl = str(c.get("conclusion") or "").upper()
+        if state:
+            if state in _ROLLUP_OK:
+                continue
+            (red if state in ("FAILURE", "ERROR") else pending).append(name)
+        elif status == "COMPLETED":
+            if concl in _ROLLUP_OK:
+                continue
+            (red if concl in _ROLLUP_RED else pending).append(name)
+        else:
+            pending.append(name)                          # QUEUED / IN_PROGRESS / ...
+    if red:
+        return "red", "failed: " + ", ".join(red[:5])
+    if pending:
+        return "pending", "pending: " + ", ".join(pending[:5])
+    return "green", "all checks green"
+
+
+def _wait_checks_green(pr_ref: str, wait_s: float, poll_s: float = 30.0) -> tuple[bool, str]:
+    """Poll the rollup until verified green (True), red/unreadable (False), or
+    the bounded wait expires (False). wait_s=0 means a single snapshot. Bounded
+    so an approval-stuck or never-created check cannot eat the fix pass's time
+    budget — the PR is left open instead."""
+    deadline = time.time() + max(0.0, wait_s)
+    while True:
+        state, detail = _pr_checks_state(pr_ref)
+        if state == "green":
+            return True, detail
+        if state == "red":
+            return False, detail
+        if state == "unknown":
+            return False, "could not read CI state (" + detail + ")"
+        if time.time() >= deadline:
+            return False, "CI not finished within the wait budget — " + detail
+        time.sleep(min(poll_s, max(1.0, deadline - time.time())))
+
+
 def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None) -> str:
     """Arm CI-gated auto-merge for an EXISTING PR (armed by AUTOTEST_BUILD_MERGE=1).
     `gh pr merge --auto` waits for green CI so a red build never lands — but it
@@ -289,16 +362,26 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
                        cwd=str(REPO_ROOT), capture_output=True, text=True)
     if m.returncode != 0:
         err = (m.stderr or m.stdout or "").strip()
-        # GitHub refuses to ARM auto-merge on a PR whose checks are already green
-        # ("clean status") — the PR is mergeable RIGHT NOW, so merge it directly.
-        # Without this fallthrough every fast-CI fix PR was left unmerged for a
-        # human (the roadmap workflow hit the identical failure mode).
+        # GitHub refuses to ARM auto-merge on a PR it deems mergeable RIGHT NOW
+        # ("clean status"). That used to be read as "checks already green" and
+        # merged directly — but "clean" is ALSO what GitHub says when main has
+        # no required status checks AT ALL, where a just-opened PR is mergeable
+        # before its CI even starts (PR #332 landed 3s after creation that
+        # way). So verify the full rollup green ourselves before the direct
+        # merge; otherwise leave the PR open and say exactly why.
         if "clean status" in err.lower():
+            wait_s = float(os.environ.get("AUTOTEST_MERGE_CHECKS_WAIT", "600"))
+            ci_ok, ci_detail = _wait_checks_green(branch, wait_s)
+            if not ci_ok:
+                return ("auto-merge NOT armed: the PR reads mergeable, but CI is not "
+                        "verified green (" + ci_detail + ") — NOT merged; left open. "
+                        "Configure required status checks on main (plus AUTOTEST_GH_PAT "
+                        "so bot-PR workflows actually run) and auto-merge arms normally.")
             direct = subprocess.run(
                 ["gh", "pr", "merge", branch, "--squash", "--delete-branch"],
                 cwd=str(REPO_ROOT), capture_output=True, text=True)
             if direct.returncode == 0:
-                return "merged directly (PR was already clean — checks green)"
+                return "merged directly (PR was already clean — checks verified green)"
             err = (direct.stderr or direct.stdout or "").strip() or err
         return "auto-merge NOT armed: " + (err[:300] or "gh pr merge failed")
     return "auto-merge to main enabled (will land when CI is green)"
