@@ -30,7 +30,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `a12e76317` · Merge pull request #353: Phase W complete — all 14 wedge-depth items (ADR-0016)
+**Last updated:** 2026-06-12 · `8b0a3ea37` · Merge pull request #359 from elijahkendrick04/claude/eager-ride-uwc5v9
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -38,6 +38,7 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 | 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
 | 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
 | 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
@@ -48,8 +49,6 @@ in any commit message to move an item:
 | 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
 | 2026-06-12 | `7394cb396` | Phase W web integration: Club data hub, athletes/consent/records pages, live meet + wraps UI, magic- |
 | 2026-06-12 | `4ca993ccd` | Apply pre-commit formatting (ruff-format line collapses) |
-| 2026-06-12 | `1e77c9b06` | docs(roadmap): compliance-readiness sell gate — PC.11–PC.14 + ADR-0015 |
-| 2026-06-12 | `b9397321f` | Phase W engines: live watch (W.7), season wraps (W.8), magic links (W.9), OCR seam (W.10), caption b |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
