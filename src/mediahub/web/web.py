@@ -13311,58 +13311,12 @@ Relay team broke club record"></textarea>
     # docs/compliance/SUBPROCESSORS.md (the canonical inventory) — the
     # test suite pins the provider set on both.
 
-    _SUBPROCESSORS_PUBLIC = [
-        (
-            "Render Services, Inc.",
-            "Hosting (application, database, files)",
-            "United States",
-            "UK–US data bridge (DPF-certified); SCC fallback",
-            "Always",
-        ),
-        (
-            "Google LLC (Gemini API)",
-            "AI caption & creative-brief generation",
-            "United States / global",
-            "Google Cloud DPA: SCCs + UK Addendum",
-            "When configured by the operator",
-        ),
-        (
-            "Anthropic, PBC (Claude API)",
-            "AI captioning failover",
-            "United States",
-            "DPA with SCCs + UK IDTA/Addendum",
-            "When configured by the operator",
-        ),
-        (
-            "Photoroom SAS",
-            "Photo background removal",
-            "France (sub-processors may be outside the EEA)",
-            "GDPR processor terms",
-            "Only if the club/operator enables cloud cutout",
-        ),
-        (
-            "Replicate, Inc.",
-            "Photo background removal",
-            "United States",
-            "Processor terms; SCCs/IDTA",
-            "Only if the club/operator enables cloud cutout",
-        ),
-        (
-            "Buffer, Inc.",
-            "Relay of approved posts to social platforms",
-            "United States",
-            "DPA; SCCs/IDTA",
-            "Only if the club connects publishing",
-        ),
-    ]
-
     @app.route("/legal/subprocessors")
     def legal_subprocessors():
-        rows = "".join(
-            f"<tr><td>{_h(name)}</td><td>{_h(role)}</td><td>{_h(where)}</td>"
-            f"<td>{_h(mechanism)}</td><td>{_h(when)}</td></tr>"
-            for name, role, where, mechanism, when in _SUBPROCESSORS_PUBLIC
-        )
+        # One canonical register (legal.SUBPROCESSORS) renders the DPA §6
+        # table AND this public page, and the PC.11 guard test pins it to
+        # the env-flag surface — the two surfaces cannot drift apart.
+        rows = _legal.subprocessor_public_rows_html()
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Privacy &amp; data</span>
@@ -20339,6 +20293,58 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<a class="btn secondary" href="{url_for("organisation_members_page")}">'
                 "Manage members &rarr;</a></div>"
             )
+            # PC.9 — the club's shareable referral code (the 2-named-intros
+            # mechanism, in-product).
+            try:
+                from mediahub.commercial.referrals import ReferralCodeStore
+
+                _rc = ReferralCodeStore().get_or_create(profile.profile_id, profile.display_name)
+                _share_url = url_for("signup_page", ref=_rc.code, _external=True)
+                body += (
+                    '<div class="card" style="margin-top:20px;padding:20px 24px">'
+                    '<h2 style="margin-top:0;font-size:16px">Refer a club</h2>'
+                    '<p class="dim" style="font-size:13px;margin:0 0 12px">'
+                    "Know a club that should be using MediaHub? Share your link — "
+                    "when they sign up through it and pay for a year, your club "
+                    "gets <strong>a free month</strong> credited automatically.</p>"
+                    f'<p style="font-size:13px;margin:0 0 6px">Your code: '
+                    f"<code>{_h(_rc.code)}</code></p>"
+                    '<pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);'
+                    'padding:10px;border-radius:8px;border:1px solid var(--border);margin:0">'
+                    f"{_h(_share_url)}</pre></div>"
+                )
+            except Exception:
+                log.warning("referral code card failed", exc_info=True)
+            # PC.13 — org takeout + whole-org deletion (owner/operator only).
+            if _org_admin_allowed(profile.profile_id):
+                body += f"""
+<div class="card" style="margin-top:20px;padding:20px 24px">
+  <h2 style="margin-top:0;font-size:16px">Your organisation's data</h2>
+  <p class="dim" style="font-size:13px;margin:0 0 12px">Download everything this
+  workspace holds — runs, cards and captions, media, the consent registry, sponsor
+  ledger, posting log and audit log — as one ZIP (serves subject-access and
+  portability requests).</p>
+  <a class="btn secondary" href="{url_for("organisation_export")}">Download takeout ZIP</a>
+</div>
+<div class="card" style="margin-top:20px;padding:20px 24px;border-left:3px solid rgba(255,107,107,0.55)">
+  <h2 style="margin-top:0;font-size:16px">Delete this organisation</h2>
+  <p class="dim" style="font-size:13px;margin:0 0 12px">Removes the workspace and
+  everything in it from this deployment: all runs and rendered content, media
+  library, consent registry, athletes, sponsor and audit ledgers, memberships,
+  and the public wall (its link stops working immediately). Member accounts
+  themselves are not deleted. Billing records stay with Stripe per the DPA.
+  <strong>This cannot be undone</strong> — download the takeout ZIP first.</p>
+  <form method="post" action="{url_for("organisation_delete")}"
+        onsubmit="return confirm('Delete this organisation and ALL of its data? This cannot be undone.')"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">
+      Type the organisation id (<code>{_h(profile.profile_id)}</code>) to confirm
+      <input type="text" name="confirm_profile_id" required autocomplete="off" /></label>
+    {_org_delete_password_field_html()}
+    <button class="btn secondary" type="submit"
+            style="border-color:rgba(255,107,107,0.4)">Delete organisation</button>
+  </form>
+</div>"""
         return _layout("Organisation", body, active="organisation")
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
@@ -20546,6 +20552,28 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             'style="color:var(--accent)">Privacy Notice</a>.</span></label>'
         )
 
+    def _referral_field_html(prefill: str = "") -> str:
+        """PC.9 — the optional referral-code control on the signup form.
+
+        Arriving via a shared ``/signup?ref=CODE`` link pre-fills it (with a
+        visible note); otherwise it's a small optional input.
+        """
+        code = (prefill or "").strip()
+        if code:
+            return (
+                f'<input type="hidden" name="ref" value="{_h(code)}" />'
+                '<p class="dim" style="font-size:12px;margin-top:14px">'
+                f"Referred by a MediaHub club (code <code>{_h(code)}</code>) "
+                "&mdash; thanks, we'll credit them when you subscribe.</p>"
+            )
+        return (
+            '<label style="display:block;margin-top:14px;font-size:12px;'
+            'text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted)">'
+            "Referral code (optional)"
+            '<input type="text" name="ref" autocomplete="off" '
+            'style="width:100%;margin-top:6px" placeholder="e.g. aB3xY9" /></label>'
+        )
+
     @app.route("/signup", methods=["GET"])
     def signup_page():
         # Already signed in? Send them on to the app.
@@ -20565,7 +20593,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="color:var(--accent);font-weight:600">Log in</a>.'
             ),
             min_password=True,
-            extra_fields_html=_terms_checkbox_html(),
+            extra_fields_html=(
+                _referral_field_html(request.args.get("ref") or "") + _terms_checkbox_html()
+            ),
         )
 
     @app.route("/signup", methods=["POST"])
@@ -20590,7 +20620,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     prefill_email=email,
                     error=message,
                     min_password=True,
-                    extra_fields_html=_terms_checkbox_html(),
+                    extra_fields_html=(
+                        _referral_field_html(request.form.get("ref") or "") + _terms_checkbox_html()
+                    ),
                 ),
                 status,
             )
@@ -20625,6 +20657,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _tenancy.MembershipStore().activate_invites(user.email)
         except Exception:
             log.warning("invite activation failed for a new account", exc_info=True)
+        # PC.14: verification mail (best-effort; only when the email seam
+        # is configured — signup never blocks on it).
+        _send_verification_email(user.email)
+        # PC.9: a referral code records the new club as a code-tracked lead
+        # in the PC.6 funnel — zero operator typing. Best-effort: a bad
+        # code must never break a signup.
+        ref_code = (request.form.get("ref") or "").strip()
+        if ref_code:
+            try:
+                from mediahub.commercial.referrals import record_referred_signup
+
+                record_referred_signup(ref_code, user.email)
+            except Exception:
+                log.warning("referral signup recording failed", exc_info=True)
         # Land new users on the create surface (Step 7: redirect to /add-input).
         return redirect(url_for("make_page"))
 
@@ -20637,6 +20683,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         alt = (
             f'No account yet? <a href="{url_for("signup_page")}" '
             'style="color:var(--accent);font-weight:600">Create one</a>.'
+            f'<br><a href="{url_for("password_forgot")}" '
+            'style="color:var(--ink-muted);font-weight:600">Forgot your password?</a>'
         )
         if _auth.dev_login_enabled():
             alt += (
@@ -20846,6 +20894,220 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         session.pop("terms_ok_version", None)
         return redirect(url_for("home"))
 
+    # ---- PC.14 — password reset + email verification --------------------
+    #
+    # Both ride the transactional-email seam (mediahub.notify.email).
+    # Unconfigured deployments get an honest "not available here" page —
+    # never a fake "we sent you an email".
+
+    def _email_unavailable_page(title: str, *, status: int = 503):
+        """The honest "email isn't configured here" page.
+
+        Actions (POSTs) return it as a 503; informational GET surfaces
+        return it as a 200 — the B5 API contract pins that no GET route
+        answers 5xx, and the unconfigured /billing page set the precedent.
+        """
+        from mediahub.web.legal import CONTACT_EMAIL
+
+        return (
+            _layout(
+                title,
+                '<div class="card"><p class="tag bad">Email delivery is not '
+                "configured on this deployment, so this can't be done "
+                "self-serve yet.</p>"
+                f"<p>Contact support at <strong>{_h(CONTACT_EMAIL)}</strong> "
+                "and we'll sort it manually.</p></div>",
+                active="signin",
+            ),
+            status,
+        )
+
+    def _account_email_card(inner: str, *, title: str, heading: str, lede: str) -> str:
+        return (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Account</span>'
+            f"<h1>{heading}</h1>"
+            f'<p class="lede">{lede}</p></section>'
+            f'<div class="card" style="padding:24px 28px;max-width:440px">{inner}</div>'
+        )
+
+    @app.route("/password/forgot", methods=["GET", "POST"])
+    def password_forgot():
+        from mediahub.notify.email import EmailSendError, email_configured, send_email
+        from mediahub.web import account_tokens as _tokens
+
+        if not email_configured():
+            # Honest unavailable state: the GET page renders at 200 (no GET
+            # surface may 5xx — B5 API contract); the POST action is a 503.
+            return _email_unavailable_page(
+                "Password reset unavailable",
+                status=503 if request.method == "POST" else 200,
+            )
+        if request.method == "POST":
+            if _auth_rate_limited("pwreset"):
+                return _auth_rate_limit_response()
+            email = _auth.normalize_email(request.form.get("email") or "")
+            user = _user_store().get(email) if email else None
+            if user is not None:
+                token = _tokens.mint_reset_token(app.secret_key, user.email, user.hashed_password)
+                reset_url = url_for("password_reset", token=token, _external=True)
+                try:
+                    send_email(
+                        user.email,
+                        "Reset your MediaHub password",
+                        "Someone (hopefully you) asked to reset the password for "
+                        f"this MediaHub account.\n\nReset it here (link valid for "
+                        f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours, single use):\n"
+                        f"{reset_url}\n\nIf this wasn't you, ignore this email — "
+                        "your password is unchanged.",
+                    )
+                except EmailSendError:
+                    log.warning("password reset email failed", exc_info=True)
+            # Identical response whether or not the account exists — the
+            # form must not be an email-enumeration oracle.
+            body = _account_email_card(
+                "<p>If an account exists for that address, a reset link is on "
+                "its way. The link works once and expires in "
+                f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours.</p>"
+                f'<p><a class="btn secondary" href="{url_for("login_page")}">'
+                "&larr; Back to log in</a></p>",
+                title="Check your email",
+                heading='Check your <em class="editorial">email</em>.',
+                lede="We've sent a reset link if the account exists.",
+            )
+            return _layout("Check your email", body, active="signin")
+        body = _account_email_card(
+            f'<form method="post" action="{url_for("password_forgot")}">'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
+            '<input type="email" name="email" autocomplete="email" required '
+            'style="width:100%" placeholder="you@club.org" />'
+            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            "Send reset link</button></form>",
+            title="Forgot password",
+            heading='Forgot your <em class="editorial">password</em>?',
+            lede="Enter your account email and we'll send a single-use reset link.",
+        )
+        return _layout("Forgot password", body, active="signin")
+
+    @app.route("/password/reset/<token>", methods=["GET", "POST"])
+    def password_reset(token: str):
+        from mediahub.web import account_tokens as _tokens
+
+        def _hash_for(email: str):
+            u = _user_store().get(email)
+            return u.hashed_password if u else None
+
+        try:
+            email = _tokens.verify_reset_token(
+                app.secret_key, token, current_hash_for_email=_hash_for
+            )
+        except _tokens.AccountTokenExpired:
+            return _layout(
+                "Link expired",
+                '<div class="card"><p class="tag bad">This reset link has '
+                "expired.</p>"
+                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
+                "Request a new one</a></p></div>",
+                active="signin",
+            ), 410
+        except _tokens.AccountTokenError:
+            return _layout(
+                "Invalid link",
+                '<div class="card"><p class="tag bad">This reset link is invalid '
+                "or has already been used.</p>"
+                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
+                "Request a new one</a></p></div>",
+                active="signin",
+            ), 404
+        if request.method == "POST":
+            if _auth_rate_limited("pwreset"):
+                return _auth_rate_limit_response()
+            try:
+                user = _user_store().set_password(email, request.form.get("password") or "")
+            except _auth.AuthError as exc:
+                body = _account_email_card(
+                    f'<p class="tag bad">{_h(str(exc))}</p>'
+                    f'<form method="post" action="{url_for("password_reset", token=token)}">'
+                    '<label style="display:block;font-size:12px;text-transform:uppercase;'
+                    'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+                    "New password</label>"
+                    '<input type="password" name="password" required minlength="8" '
+                    'autocomplete="new-password" style="width:100%" />'
+                    '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+                    "Set new password</button></form>",
+                    title="Choose a new password",
+                    heading='Choose a new <em class="editorial">password</em>.',
+                    lede="At least 8 characters.",
+                )
+                return _layout("Choose a new password", body, active="signin"), 400
+            if user is None:
+                abort(404)
+            _auth.login_user(user)
+            if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
+                session["terms_ok_version"] = _legal.TERMS_VERSION
+            return redirect(url_for("make_page"))
+        body = _account_email_card(
+            f'<form method="post" action="{url_for("password_reset", token=token)}">'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+            f"New password for {_h(email)}</label>"
+            '<input type="password" name="password" required minlength="8" '
+            'autocomplete="new-password" style="width:100%" />'
+            '<div class="dim" style="font-size:12px;margin-top:6px">At least 8 characters.</div>'
+            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            "Set new password</button></form>",
+            title="Choose a new password",
+            heading='Choose a new <em class="editorial">password</em>.',
+            lede="This link works once.",
+        )
+        return _layout("Choose a new password", body, active="signin")
+
+    @app.route("/verify-email/<token>")
+    def verify_email(token: str):
+        from mediahub.web import account_tokens as _tokens
+
+        try:
+            email = _tokens.verify_verify_token(app.secret_key, token)
+        except _tokens.AccountTokenError:
+            return _layout(
+                "Invalid link",
+                '<div class="card"><p class="tag bad">This verification link is '
+                "invalid or has expired.</p></div>",
+                active="signin",
+            ), 404
+        user = _user_store().mark_email_verified(email)
+        if user is None:
+            abort(404)
+        return _layout(
+            "Email verified",
+            '<div class="card"><p class="tag good">Email address verified — '
+            "thanks!</p>"
+            f'<p><a class="btn secondary" href="{url_for("make_page")}">'
+            "Continue &rarr;</a></p></div>",
+            active="signin",
+        )
+
+    def _send_verification_email(email: str) -> None:
+        """Best-effort post-signup verification mail (configured-only)."""
+        from mediahub.notify.email import email_configured, send_email
+        from mediahub.web import account_tokens as _tokens
+
+        if not email_configured():
+            return
+        try:
+            token = _tokens.mint_verify_token(app.secret_key, email)
+            send_email(
+                email,
+                "Verify your MediaHub email",
+                "Welcome to MediaHub. Confirm this address so password resets "
+                "and service notices reach you:\n\n"
+                f"{url_for('verify_email', token=token, _external=True)}\n",
+            )
+        except Exception:
+            log.warning("verification email failed", exc_info=True)
+
     # ---- /legal/accept (versioned ToS re-acceptance) -------------------
 
     @app.route("/legal/accept", methods=["GET"])
@@ -20995,6 +21257,136 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             session["op_notice"] = notice
         if error:
             session["op_error"] = error
+
+    # ---- PC.14 — operator "notify all users" (the breach channel) -------
+    #
+    # The ICO's 72-hour clock needs a working channel, not a plan to build
+    # one. Every send is recorded to DATA_DIR/operator_notices.jsonl with
+    # honest per-recipient counts.
+
+    def _operator_notices_path() -> Path:
+        return DATA_DIR / "operator_notices.jsonl"
+
+    def _record_operator_notice(subject: str, result: dict) -> None:
+        try:
+            path = _operator_notices_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "sent_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "subject": subject,
+                            "recipients_sent": result.get("sent", 0),
+                            "recipients_failed": result.get("failed", []),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            os.chmod(path, 0o600)
+        except OSError:
+            log.warning("operator notice ledger write failed", exc_info=True)
+
+    @app.route("/operator/notify-users", methods=["GET", "POST"])
+    def operator_notify_users():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.backup import last_backup_state
+        from mediahub.notify.email import EmailNotConfigured, email_configured, send_to_many
+
+        emails = _user_store().all_emails()
+        sent_html = ""
+        if request.method == "POST":
+            subject = (request.form.get("subject") or "").strip()
+            message = (request.form.get("message") or "").strip()
+            if not subject or not message:
+                sent_html = (
+                    '<p class="tag bad" style="margin-bottom:16px">Subject and '
+                    "message are both required.</p>"
+                )
+            else:
+                try:
+                    result = send_to_many(emails, subject, message)
+                except EmailNotConfigured:
+                    return _email_unavailable_page("Notify users unavailable")
+                _record_operator_notice(subject, result)
+                failed = result["failed"]
+                sent_html = (
+                    f'<p class="tag good" style="margin-bottom:16px">Sent to '
+                    f"{result['sent']} of {len(emails)} account(s)."
+                    + (f" Failed: {_h(', '.join(failed))}." if failed else "")
+                    + " Recorded in the notice ledger.</p>"
+                )
+        seam_line = (
+            '<p class="tag good">Email delivery is configured.</p>'
+            if email_configured()
+            else '<p class="tag bad">Email delivery is NOT configured '
+            "(set RESEND_API_KEY + MEDIAHUB_EMAIL_FROM) — sending will fail "
+            "honestly until it is.</p>"
+        )
+        backup_state = last_backup_state()
+        backup_line = (
+            f"Last backup: <strong>{_h(str(backup_state.get('last_backup_at')))}</strong> "
+            f"({int(backup_state.get('bytes') or 0):,} bytes; "
+            f"off-site upload: {'yes' if backup_state.get('uploaded') else 'no'})"
+            if backup_state
+            else "No backup has run yet on this deployment."
+        )
+        # Ledger tail (newest 5) so the operator sees the evidence trail.
+        rows = ""
+        try:
+            if _operator_notices_path().exists():
+                lines = _operator_notices_path().read_text(encoding="utf-8").splitlines()
+                for ln in lines[-5:][::-1]:
+                    try:
+                        rec = json.loads(ln)
+                    except json.JSONDecodeError:
+                        continue
+                    rows += (
+                        f"<tr><td>{_h(str(rec.get('sent_at')))}</td>"
+                        f"<td>{_h(str(rec.get('subject')))}</td>"
+                        f"<td>{int(rec.get('recipients_sent') or 0)}</td></tr>"
+                    )
+        except OSError:
+            pass
+        ledger_html = (
+            '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            "<thead><tr style='text-align:left'><th>Sent</th><th>Subject</th>"
+            "<th>Recipients</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            if rows
+            else '<p class="dim" style="font-size:13px">No notices sent yet.</p>'
+        )
+        body = f"""
+<h1 style="margin-bottom:4px">Notify all users</h1>
+<p class="dim" style="margin-bottom:20px;max-width:640px">The breach-notification
+channel (incident runbook step 4): one message to every account email on this
+deployment. Every send is recorded. Use plain language — what happened, what data,
+what you're doing, what they should do.</p>
+{seam_line}
+{sent_html}
+<div class="card" style="max-width:640px;margin-bottom:20px">
+  <form method="post" action="{url_for("operator_notify_users")}"
+        onsubmit="return confirm('Send this to ALL {len(emails)} account(s)?')">
+    <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Subject</label>
+    <input type="text" name="subject" required style="width:100%;margin-bottom:14px" />
+    <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Message (plain text)</label>
+    <textarea name="message" required rows="10" style="width:100%"></textarea>
+    <button type="submit" class="btn" style="margin-top:16px">Send to {len(emails)} account(s)</button>
+  </form>
+</div>
+<div class="card" style="max-width:640px;margin-bottom:20px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Recovery state</h3>
+  <p style="font-size:13px">{backup_line}</p>
+</div>
+<div class="card" style="max-width:640px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Notice ledger (latest 5)</h3>
+  {ledger_html}
+</div>
+"""
+        return _layout("Notify all users", body, active="")
 
     def _pounds_to_pence(raw: str) -> int:
         from decimal import Decimal, InvalidOperation
@@ -21167,13 +21559,89 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         debt_html = ""
         if debt:
             items = "".join(
-                f"<li>{_h(d['club_name'])} — {d['intros_recorded']}/2 intros recorded</li>"
+                f"<li>{_h(d['club_name'])} — {d['intros_recorded']}/2 intros "
+                f"({d.get('intros_code_tracked', 0)} code-tracked, "
+                f"{d['intros_recorded'] - d.get('intros_code_tracked', 0)} typed)</li>"
                 for d in debt
             )
             debt_html = (
-                '<p class="tag warn" style="margin:10px 0 4px">Referral debt — ask each '
-                f"signed club for 2 named intros:</p><ul style='font-size:12px'>{items}</ul>"
+                '<p class="tag warn" style="margin:10px 0 4px">Referral debt — each '
+                "signed club owes 2 named intros (code-tracked signups count "
+                f"automatically):</p><ul style='font-size:12px'>{items}</ul>"
             )
+        # PC.9 — live referral state: codes, code-tracked signups, rewards.
+        referral_html = ""
+        try:
+            from mediahub.commercial.referrals import (
+                ReferralCodeStore,
+                ReferralRewardStore,
+            )
+
+            _codes = ReferralCodeStore()._by_profile()
+            _rewards = ReferralRewardStore().list_all()
+            referred = [ld for ld in leads if ld.source == "referral"]
+            code_rows = "".join(
+                f"<tr><td style='padding:6px 10px'><code>{_h(rc.code)}</code></td>"
+                f"<td style='padding:6px 10px'>{_h(rc.club_name or rc.profile_id)}</td>"
+                f"<td style='padding:6px 10px;font-size:11px;color:var(--ink-muted)'>"
+                f"{_h(url_for('signup_page', ref=rc.code, _external=True))}</td></tr>"
+                for rc in sorted(_codes.values(), key=lambda r: r.club_name.lower())
+            ) or (
+                "<tr><td colspan='3' style='padding:10px;color:var(--ink-muted)'>"
+                "No codes minted yet — each org gets one the first time its "
+                "Organisation page renders.</td></tr>"
+            )
+            referred_rows = "".join(
+                f"<tr><td style='padding:6px 10px'>{_h(ld.club_name)}</td>"
+                f"<td style='padding:6px 10px'>{_h(ld.referrer_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(ld.status)}</td></tr>"
+                for ld in referred
+            ) or (
+                "<tr><td colspan='3' style='padding:10px;color:var(--ink-muted)'>"
+                "No code-tracked signups yet.</td></tr>"
+            )
+            reward_rows = "".join(
+                f"<tr><td style='padding:6px 10px'>{_h(rw.referrer_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(rw.referred_club)}</td>"
+                f"<td style='padding:6px 10px'>{_h(rw.status)}"
+                + (
+                    f"<div style='font-size:11px;color:var(--ink-muted)'>{_h(rw.reason)}</div>"
+                    if rw.reason
+                    else ""
+                )
+                + "</td>"
+                f"<td style='padding:6px 10px'>{_pence_str(rw.amount_off_pence) if rw.amount_off_pence else '—'}</td></tr>"
+                for rw in _rewards
+            ) or (
+                "<tr><td colspan='4' style='padding:10px;color:var(--ink-muted)'>"
+                "No rewards yet — the first verified referred payment grants one "
+                "automatically.</td></tr>"
+            )
+            referral_html = (
+                '<div class="card" style="padding:20px 24px;margin-bottom:22px">'
+                '<h2 style="margin-top:0;font-size:16px">Referral engine (PC.9)</h2>'
+                '<p class="dim" style="font-size:12px;margin:0 0 10px">Codes are shared '
+                "by clubs from their Organisation page; signups through a code land in "
+                "the pipeline automatically and a verified annual payment grants the "
+                "referrer one free month (Stripe coupon) with zero typing.</p>"
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Code</th>"
+                "<th style='padding:6px 10px'>Org</th><th style='padding:6px 10px'>Share link</th></tr></thead>"
+                f"<tbody>{code_rows}</tbody></table>"
+                '<h3 style="font-size:13px;margin:14px 0 4px">Code-tracked signups</h3>'
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Lead</th>"
+                "<th style='padding:6px 10px'>Referred by</th><th style='padding:6px 10px'>Stage</th></tr></thead>"
+                f"<tbody>{referred_rows}</tbody></table>"
+                '<h3 style="font-size:13px;margin:14px 0 4px">Rewards</h3>'
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+                "<thead><tr style='text-align:left'><th style='padding:6px 10px'>Referrer</th>"
+                "<th style='padding:6px 10px'>Referred club</th><th style='padding:6px 10px'>Status</th>"
+                "<th style='padding:6px 10px'>Value</th></tr></thead>"
+                f"<tbody>{reward_rows}</tbody></table></div>"
+            )
+        except Exception:
+            log.warning("referral console section failed", exc_info=True)
         l_rows = ""
         for lead in leads:
             sel = "".join(
@@ -21318,6 +21786,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             + gates_html
             + quotes_html
             + pipeline_html
+            + referral_html
             + ngb_html
             + bind_html
         )
@@ -21370,6 +21839,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         f"({_pence_str(q.paid_amount_pence)} vs quoted {_pence_str(q.amount_pence)})."
                     )
                 )
+                # PC.9: an attested verified payment settles referrals the
+                # same way the webhook does (idempotent per quote).
+                try:
+                    from mediahub.commercial.referrals import on_verified_quote_payment
+
+                    on_verified_quote_payment(q)
+                except Exception:
+                    log.warning("referral settlement failed", exc_info=True)
             elif op == "checkout":
                 q = store.get(quote_id)
                 if q is None:
@@ -21660,6 +22137,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
                 "Opens the Stripe Customer Portal to change card, switch plan, "
                 "or cancel.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                "<strong>Invoices &amp; receipts:</strong> every payment's invoice "
+                "is in the portal too — download the PDF for the club's expense "
+                "records.</div>"
             )
         elif _auth.is_premium(user.plan):
             manage_html = (
@@ -21749,6 +22230,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "<p><strong>Cancelling:</strong> as easy as subscribing — open "
             "<em>Billing &rarr; Manage billing</em> any time; cancelling stops future "
             "renewals and you keep access for the period already paid.</p>"
+            "<p><strong>Invoices &amp; receipts:</strong> every payment generates an "
+            "invoice you can download from <em>Billing &rarr; Manage billing</em> — "
+            "made for a volunteer treasurer's expense file.</p>"
             "<p><strong>Your 14-day cancellation right:</strong> you can cancel within "
             "14 days of purchase for a refund. Because the service starts immediately, "
             "if you use it and then cancel within the 14 days we may deduct a "
@@ -21900,12 +22384,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             try:
                 from mediahub.commercial.wtp import QuoteStore
 
-                QuoteStore().record_stripe_payment(
+                paid_quote = QuoteStore().record_stripe_payment(
                     update.quote_id,
                     amount_total_pence=update.amount_total_pence,
                     currency=update.currency,
                     event_id=update.event_id,
                 )
+                # PC.9: a verified payment settles any referral attached to
+                # this club — the reward auto-grants (or records honestly
+                # as pending) and the funnel ledger advances itself.
+                # Idempotent per quote, so webhook retries change nothing.
+                if paid_quote is not None:
+                    try:
+                        from mediahub.commercial.referrals import on_verified_quote_payment
+
+                        on_verified_quote_payment(paid_quote)
+                    except Exception:
+                        log.warning("referral settlement failed", exc_info=True)
             except Exception:
                 log.warning("quote payment recording failed", exc_info=True)
 
@@ -22146,6 +22641,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         return redirect(url_for("sign_in_page"))
 
     # ---- /organisation/members — PC.3 workspace membership (ADR-0014) ----
+    def _send_invite_email(email: str, profile_id: str) -> bool:
+        """Deliver a workspace invite (PC.14). Returns True when a mail was
+        accepted by the provider; False when the seam is unconfigured or
+        delivery failed (the caller words the notice honestly)."""
+        from mediahub.notify.email import email_configured, send_email
+
+        if not email_configured():
+            return False
+        prof = load_profile(profile_id)
+        org_name = prof.display_name if prof else profile_id
+        try:
+            return send_email(
+                email,
+                f"You've been invited to {org_name} on MediaHub",
+                f"You've been invited to join the {org_name} workspace on "
+                "MediaHub — the club's content engine.\n\n"
+                "Create your account with this email address and the "
+                "membership activates automatically:\n\n"
+                f"{url_for('signup_page', _external=True)}\n",
+            )
+        except Exception:
+            log.warning("invite email failed", exc_info=True)
+            return False
+
     @app.route("/organisation/members", methods=["GET", "POST"])
     def organisation_members_page():
         """Who can sign in to the active workspace.
@@ -22183,14 +22702,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         invited_by=inviter,
                         invited_via_profile_id=pid,
                     )
-                    notice = (
-                        f"{m.email} added as {m.role}."
-                        if m.status == _tenancy.STATUS_ACTIVE
-                        else (
+                    if m.status == _tenancy.STATUS_ACTIVE:
+                        notice = f"{m.email} added as {m.role}."
+                    else:
+                        # PC.14: deliver the invite when the email seam is
+                        # configured; otherwise say honestly that the link
+                        # must be shared out-of-band.
+                        notice = (
                             f"{m.email} invited as {m.role} — the membership "
                             "activates when they sign up with that email."
                         )
-                    )
+                        delivered = _send_invite_email(m.email, pid)
+                        notice += (
+                            " An invite email is on its way."
+                            if delivered
+                            else " Email delivery isn't configured here, so share "
+                            "the signup link with them yourself."
+                        )
                 elif action == "remove":
                     store.remove(target, pid)
                     notice = f"{_tenancy.normalize_email(target)} removed."
@@ -22309,6 +22837,146 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
         return _layout("Workspace members", body, active="organisation")
+
+    # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
+
+    def _org_delete_password_field_html() -> str:
+        """The password re-verify input on the org-delete form — only for
+        signed-in regular users (operator and anonymous-pilot sessions have
+        no password to verify)."""
+        if not _auth.current_user_email() or _auth.is_dev_operator():
+            return ""
+        return (
+            '<label style="display:flex;flex-direction:column;gap:4px;'
+            'font-size:12px;color:var(--ink-muted)">Confirm your password'
+            '<input type="password" name="password" required '
+            'autocomplete="current-password" /></label>'
+        )
+
+    def _org_admin_allowed(profile_id: str) -> bool:
+        """May the current actor take out / delete this whole org?
+
+        Operator always; a bound org's ACTIVE owners; and for an unbound
+        (open/pilot) workspace any session that can use it — the same
+        open-workspace model that already lets such a session edit it.
+        """
+        pid = (profile_id or "").strip()
+        if not pid:
+            return False
+        if _session_owns_profile(pid):
+            return True
+        return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
+
+    @app.route("/organisation/export")
+    def organisation_export():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        if not _org_admin_allowed(pid):
+            abort(404)  # same anti-enumeration posture as the other org gates
+        import tempfile
+
+        from flask import after_this_request, send_file
+
+        from mediahub.privacy import org_export_zip
+
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"mediahub-takeout-{pid}-", suffix=".zip", delete=False
+        )
+        tmp.close()
+        try:
+            org_export_zip(pid, Path(tmp.name))
+        except Exception:
+            log.warning("org export failed for %s", pid, exc_info=True)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return _layout(
+                "Export failed",
+                '<div class="card"><p class="tag bad">The takeout export failed — '
+                "try again, and contact support if it persists.</p></div>",
+                active="organisation",
+            ), 500
+
+        @after_this_request
+        def _cleanup(resp):
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return resp
+
+        return send_file(
+            tmp.name,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"mediahub-org-{pid}-takeout.zip",
+        )
+
+    @app.route("/organisation/delete", methods=["POST"])
+    def organisation_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        if not _org_admin_allowed(pid):
+            abort(404)
+        # The typed org id is the universal irreversibility check; a signed-in
+        # (non-operator) actor must also re-verify their password so a
+        # hijacked session can't destroy the workspace (mirrors account
+        # deletion).
+        if (request.form.get("confirm_profile_id") or "").strip() != pid:
+            return _layout(
+                "Organisation not deleted",
+                '<div class="card"><p class="tag bad">The confirmation id did not '
+                "match — nothing was deleted.</p>"
+                f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
+                "&larr; Back</a></p></div>",
+                active="organisation",
+            ), 400
+        email = _auth.current_user_email()
+        if email and not _auth.is_dev_operator():
+            try:
+                _user_store().authenticate(email, request.form.get("password") or "")
+            except _auth.AuthError:
+                return _layout(
+                    "Organisation not deleted",
+                    '<div class="card"><p class="tag bad">Password check failed '
+                    "&mdash; organisation NOT deleted.</p>"
+                    f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
+                    "&larr; Back</a></p></div>",
+                    active="organisation",
+                ), 403
+        from mediahub.privacy import delete_org
+
+        report = delete_org(pid, delete_run=_delete_run)
+        session.pop("active_profile_id", None)
+        db_rows = sum(report.get("db_rows_deleted", {}).values())
+        retained = "".join(f"<li>{_h(r)}</li>" for r in report.get("retained", []))
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Organisation <em class="editorial">deleted.</em></h1></section>'
+            '<div class="card"><h2>What was removed</h2><ul>'
+            f"<li>{report['runs_deleted']} run(s) with their rendered content, "
+            "caches and caption memory</li>"
+            f"<li>{report['media_assets_deleted']} media asset(s) and "
+            f"{report['logos_deleted']} uploaded logo file(s)</li>"
+            f"<li>{db_rows} database row(s) across consent registry, athletes, "
+            "club records, corrections, posting and telemetry logs</li>"
+            f"<li>{report['memory_rows_deleted']} caption-memory row(s)</li>"
+            f"<li>{report['memberships_deleted']} workspace membership(s)</li>"
+            "<li>The organisation profile, its brand kit and the public wall "
+            "link (now dead)</li>"
+            "</ul><h2>Retained</h2>"
+            f"<ul>{retained}</ul>"
+            "<p class='muted'>Content already published to social platforms must "
+            "be deleted there too.</p>"
+            f'<p><a class="btn secondary" href="{url_for("home")}">&larr; Home</a></p>'
+            "</div>"
+        )
+        return _layout("Organisation deleted", body, active="")
 
     # ---- DPA + lawful-basis attestation at workspace setup (UK legal) ----
 
@@ -27506,7 +28174,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
         from mediahub.web import public_wall as _pw
 
         enabled = bool(prof.public_wall_enabled and prof.public_wall_token)
-        cards = _pw.wall_cards(prof) if enabled else []
+        consent_hidden: list[dict] = []
+        cards = _pw.wall_cards(prof, consent_hidden=consent_hidden) if enabled else []
         excluded = set(prof.public_wall_excluded_cards or [])
 
         if enabled:
@@ -27540,6 +28209,28 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
                     '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Show again</button>'
                     "</form></td></tr>"
                 )
+            consent_hidden_rows = ""
+            for h_item in consent_hidden:
+                from mediahub.safeguarding.consent import LEVEL_LABELS as _cl
+
+                label = _cl.get(h_item["level"], h_item["level"])
+                consent_hidden_rows += (
+                    f"<tr><td>{_h(h_item['athlete'])}</td>"
+                    f"<td class='dim'>{_h(label)}</td>"
+                    f"<td class='dim'>{_h(h_item['reason'])}</td></tr>"
+                )
+            consent_hidden_block = ""
+            if consent_hidden_rows:
+                consent_hidden_block = f"""
+<div class="card" style="margin-bottom:20px;border-left:3px solid var(--warn)">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Held off the wall by consent ({len(consent_hidden)})</h3>
+  <p class="dim" style="font-size:13px">These approved cards never appear on the public wall,
+  the embed or the feeds because the athlete's recorded consent does not allow it. Update the
+  consent registry to change this — the wall follows it automatically.</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+  <thead><tr style="text-align:left"><th>Athlete</th><th>Consent</th><th>Why hidden</th></tr></thead>
+  <tbody>{consent_hidden_rows}</tbody></table>
+</div>"""
             initials_checked = "checked" if prof.public_wall_initials_only else ""
             status_block = f"""
 <div class="card" style="margin-bottom:20px">
@@ -27551,7 +28242,8 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   <form method="post" action="{url_for("public_wall_update")}" style="display:flex;gap:14px;align-items:center;margin-top:10px">
     <input type="hidden" name="action" value="settings">
     <label style="font-size:13px"><input type="checkbox" name="initials_only" {initials_checked}>
-      Initials-only names (recommended until per-athlete consent tracking exists)</label>
+      Initials-only names for everyone (per-athlete consent from your registry is always
+      enforced on top &mdash; this blanket setting can only tighten it further)</label>
     <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
   </form>
   <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
@@ -27565,6 +28257,7 @@ workflow, and the publish log &mdash; deterministic and auditable.</p>
   {card_rows or '<tr><td class="dim" style="padding:12px">No approved, rendered cards yet — approve cards in the review queue and generate their graphics.</td></tr>'}
   </tbody></table>
 </div>
+{consent_hidden_block}
 <div class="card">
   <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Hidden cards</h3>
   <table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>
@@ -27790,7 +28483,11 @@ ever appear; queued, edited and rejected cards never do.</p>
     # converting club keeps its preview.
     # ------------------------------------------------------------------
 
-    _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "MISM-2024-Results.pdf"
+    # The bundled sample is SYNTHETIC (scripts/make_demo_sample.py): every
+    # swimmer, club and meet is fictional. The public demo must never ship
+    # real children's data — Children's-Code pass, PC.12
+    # (docs/compliance/CHILDRENS_CODE_PASS.md).
+    _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "demo-meet-results.pdf"
 
     def _demo_client_ip() -> str:
         fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
@@ -30816,6 +31513,27 @@ and can be revoked by the club.</p>
                 schedule_kind="daily",
                 schedule_expr="04:10",
             )
+        # PC.14: daily DATA_DIR backup. Handler always registered (honest
+        # no-op when no backup target is configured); the schedule row is
+        # ensured once when the operator opts in.
+        from mediahub.backup import backup_enabled as _backup_enabled
+        from mediahub.backup import sweep as _backup_sweep
+
+        def _backup_handler(params: dict) -> None:
+            _backup_sweep(params)
+
+        _register_task_type("backup_sweep", _backup_handler)
+        if _backup_enabled():
+            from mediahub.workflow.schedule import create_task as _sched_create_task3
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks3
+
+            if not any(t.task_type == "backup_sweep" for t in _sched_list_tasks3()):
+                _sched_create_task3(
+                    name="DATA_DIR backup (PC.14)",
+                    task_type="backup_sweep",
+                    schedule_kind="daily",
+                    schedule_expr="04:20",
+                )
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)

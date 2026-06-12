@@ -70,10 +70,15 @@ Document versions are date-stamped constants (`TERMS_VERSION` etc.). **Bumping
    the ICO within 72h; the posting log + autonomy audit ledger are the evidence
    sources.
 10. **Insurance**: professional indemnity / cyber.
-11. **vendor/**: resolve or remove `agent-skills-main/` and
-    `bencium-marketplace-main/` (no licence files).
-12. **Demo data**: confirm the public try-demo sample files contain no real
-    children's data (could not be verified from code).
+11. ~~**vendor/**: resolve or remove `agent-skills-main/` and
+    `bencium-marketplace-main/` (no licence files).~~ **Done (PC.11,
+    2026-06-12):** both removed; `tests/test_vendor_licences.py` keeps
+    vendor/ licence-clean.
+12. ~~**Demo data**: confirm the public try-demo sample files contain no real
+    children's data (could not be verified from code).~~ **Done (PC.12,
+    2026-06-12):** the bundled sample WAS a real meet's results; replaced
+    with the synthetic `samples/demo-meet-results.pdf` — see
+    [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) finding F1.
 
 ## 4. Closing verdict
 

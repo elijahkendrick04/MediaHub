@@ -70,6 +70,7 @@ class Lead:
     source: str = SOURCE_WARM_LOCAL
     status: str = STATUS_LEAD
     referrer_club: str = ""  # which signed club opened this door (source=referral)
+    contact_email: str = ""  # set by PC.9 code-tracked signups (quote matching)
     intros: list[str] = field(default_factory=list)  # named intros THIS club gave us
     notes: str = ""
     created_at: str = ""
@@ -93,6 +94,7 @@ class Lead:
             source=_coerce_source(d.get("source")),
             status=_coerce_status(d.get("status")),
             referrer_club=str(d.get("referrer_club", "") or "").strip(),
+            contact_email=str(d.get("contact_email", "") or "").strip().lower(),
             intros=intros,
             notes=str(d.get("notes", "") or ""),
             created_at=str(d.get("created_at", "") or ""),
@@ -168,6 +170,7 @@ class LeadStore:
         source: str,
         region: str = "",
         referrer_club: str = "",
+        contact_email: str = "",
         notes: str = "",
     ) -> Lead:
         club = (club_name or "").strip()
@@ -187,6 +190,7 @@ class LeadStore:
                 source=src,
                 status=STATUS_LEAD,
                 referrer_club=(referrer_club or "").strip(),
+                contact_email=(contact_email or "").strip().lower(),
                 notes=(notes or "").strip(),
                 created_at=now,
                 updated_at=now,
@@ -246,18 +250,32 @@ def warm_first_discipline(leads: list[Lead]) -> dict:
 
 
 def referral_debt(leads: list[Lead]) -> list[dict]:
-    """Won clubs still owing named intros (the 5 → 10 compounding mechanism)."""
+    """Won clubs still owing named intros (the 5 → 10 compounding mechanism).
+
+    Live code-tracked state (PC.9): a referred signup attributed to a won
+    club through its referral code IS a delivered intro, so it counts next
+    to the operator-typed names — the readout stops depending on manual
+    entries the moment clubs share their links.
+    """
+    code_tracked: dict[str, int] = {}
+    for lead in leads:
+        if lead.source == SOURCE_REFERRAL and lead.referrer_club.strip():
+            key = lead.referrer_club.strip().lower()
+            code_tracked[key] = code_tracked.get(key, 0) + 1
     out = []
     for lead in leads:
         if lead.status != STATUS_WON:
             continue
-        missing = REFERRAL_INTROS_PER_WIN - len(lead.intros)
+        tracked = code_tracked.get(lead.club_name.strip().lower(), 0)
+        recorded = len(lead.intros) + tracked
+        missing = REFERRAL_INTROS_PER_WIN - recorded
         if missing > 0:
             out.append(
                 {
                     "lead_id": lead.lead_id,
                     "club_name": lead.club_name,
-                    "intros_recorded": len(lead.intros),
+                    "intros_recorded": recorded,
+                    "intros_code_tracked": tracked,
                     "intros_missing": missing,
                 }
             )

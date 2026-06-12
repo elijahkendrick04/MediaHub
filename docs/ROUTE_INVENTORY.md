@@ -138,6 +138,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `operator_commercial_ngb` | `POST` | `/operator/commercial/ngb` |
 | `operator_commercial_quote_add` | `POST` | `/operator/commercial/quotes` |
 | `operator_commercial_quote_update` | `POST` | `/operator/commercial/quotes/update` |
+| `operator_notify_users` | `GET,POST` | `/operator/notify-users` |
 | `organisation_page` | `GET,POST` | `/organisation` |
 | `org_athlete_rights` | `GET` | `/organisation/athlete-rights` |
 | `org_dsr_clock` | `POST` | `/organisation/athlete-rights/<request_id>/clock` |
@@ -148,6 +149,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `org_consent_record` | `POST` | `/organisation/consent/record` |
 | `org_retention_settings` | `POST` | `/organisation/consent/retention` |
 | `org_consent_settings` | `POST` | `/organisation/consent/settings` |
+| `organisation_delete` | `POST` | `/organisation/delete` |
+| `organisation_export` | `GET` | `/organisation/export` |
 | `organisation_members_page` | `GET,POST` | `/organisation/members` |
 | `organisation_setup` | `GET` | `/organisation/setup` |
 | `organisation_setup_capture` | `POST` | `/organisation/setup/capture` |
@@ -161,6 +164,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `pack_certificates_zip` | `GET` | `/pack/<run_id>/certificates.zip` |
 | `content_pack_grouped` | `GET` | `/pack/<run_id>/grouped` |
 | `content_pack_zip` | `GET` | `/pack/<run_id>/zip` |
+| `password_forgot` | `GET,POST` | `/password/forgot` |
+| `password_reset` | `GET,POST` | `/password/reset/<token>` |
 | `plan_page` | `GET` | `/plan` |
 | `pricing_page` | `GET` | `/pricing` |
 | `privacy_page` | `GET` | `/privacy` |
@@ -208,6 +213,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `upload` | `GET,POST` | `/upload` |
 | `upload_configure` | `GET,POST` | `/upload/configure` |
 | `upload_from_url` | `POST` | `/upload/from-url` |
+| `verify_email` | `GET` | `/verify-email/<token>` |
 | `public_wall_page` | `GET` | `/wall/<token>` |
 | `public_wall_card_png` | `GET` | `/wall/<token>/card/<run_id>/<card_id>.png` |
 | `public_wall_embed` | `GET` | `/wall/<token>/embed` |
