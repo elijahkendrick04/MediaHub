@@ -13468,19 +13468,35 @@ Relay team broke club record"></textarea>
             active_n = len(_active_runs)
             active_running = sum(1 for v in _active_runs.values() if v.get("status") == "running")
             ti_n = len(_turn_into_jobs)
-        return jsonify(
-            {
-                "ok": True,
-                "rss_mb": round(rss_mb, 1),
-                "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
-                "active_runs": active_n,
-                "active_runs_running": active_running,
-                "active_runs_limit": _ACTIVE_RUNS_LIMIT,
-                "turn_into_jobs": ti_n,
-                "turn_into_jobs_limit": _TURN_INTO_LIMIT,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        payload = {
+            "ok": True,
+            "rss_mb": round(rss_mb, 1),
+            "rss_pct_of_2048": round((rss_mb / 2048.0) * 100.0, 1),
+            "active_runs": active_n,
+            "active_runs_running": active_running,
+            "active_runs_limit": _ACTIVE_RUNS_LIMIT,
+            "turn_into_jobs": ti_n,
+            "turn_into_jobs_limit": _TURN_INTO_LIMIT,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        if _wants_html_health():
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — Memory</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     @app.route("/healthz/deps")
     def healthz_deps():
