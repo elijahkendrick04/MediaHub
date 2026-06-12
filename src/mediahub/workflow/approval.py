@@ -482,8 +482,7 @@ def _org_has_autonomous_type(org_id: str) -> bool:
     except Exception:
         return False
     return any(
-        AutonomyLevel.from_str(level) is AutonomyLevel.FULLY_AUTONOMOUS
-        for level in policy.values()
+        AutonomyLevel.from_str(level) is AutonomyLevel.FULLY_AUTONOMOUS for level in policy.values()
     )
 
 

@@ -26631,9 +26631,7 @@ voice, and queues them for one-click approval.</p>
         name = f"{card_id}.json" if fmt == "story" else f"{card_id}_{fmt}.json"
         sidecar = RUNS_DIR / run_id / "motion" / name
         if not sidecar.exists():
-            return jsonify(
-                {"error": "manifest_not_found", "detail": "render this cut first"}
-            ), 404
+            return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
         try:
             return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
         except Exception as e:
@@ -27182,9 +27180,7 @@ voice, and queues them for one-click approval.</p>
             # offer backdrops with zero typing.
             run_data = _load_run(run_id) or {}
             meet = run_data.get("meet") or {}
-            q = str(
-                meet.get("venue") or run_data.get("venue") or meet.get("name") or ""
-            ).strip()
+            q = str(meet.get("venue") or run_data.get("venue") or meet.get("name") or "").strip()
         if not q:
             return jsonify({"results": [], "query": ""})
         try:
