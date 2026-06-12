@@ -62,8 +62,9 @@ lower" test → per-provider mechanisms recorded in
 
 ## Verification
 
-- **Full pytest suite green**: 4,153 passed, 1 environment skip, 0
-  failures (2026-06-12) — incl. ~120 new compliance/security tests.
+- **Full pytest suite green**: 4,465 passed, 1 environment skip, 0
+  failures (2026-06-12, post-merge with the PR #352 / Phase W baseline)
+  — incl. ~120 new compliance/security tests.
 - Definition-of-done checks: opted-out athlete provably absent from new
   packs (`test_erasure_then_new_pack_excludes_athlete`,
   `test_pack_filter_removes_blocked_athletes`); erasure provably reaches
