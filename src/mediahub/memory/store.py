@@ -303,6 +303,25 @@ def delete_run(*, tenant_id: str, run_id: str) -> int:
     return removed
 
 
+def delete_tenant(*, tenant_id: str) -> int:
+    """Erase every memory row a tenant holds (whole-org deletion cascade,
+    PC.13). Returns the number of rows removed."""
+    if not tenant_id:
+        return 0
+    removed = 0
+    with _lock:
+        conn = _connect()
+        try:
+            for d in _known_dims(conn):
+                tbl = _table_for_dim(d)
+                cur = conn.execute(f"DELETE FROM {tbl} WHERE tenant_id=?", (str(tenant_id),))
+                removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            conn.commit()
+        finally:
+            conn.close()
+    return removed
+
+
 def delete_matching(*, tenant_id: str, needle: str) -> int:
     """Erase a tenant's memory rows whose caption or event context mentions
     ``needle`` (case-insensitive) — the athlete-level erasure cascade.
@@ -341,4 +360,5 @@ __all__ = [
     "clear",
     "delete_run",
     "delete_matching",
+    "delete_tenant",
 ]

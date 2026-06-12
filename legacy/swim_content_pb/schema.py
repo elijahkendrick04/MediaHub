@@ -123,6 +123,9 @@ class PBAudit:
     achievements_suppressed: list = field(default_factory=list)  # type names + reasons
     fetch_ok: bool = False
     fetch_error: Optional[str] = None
+    # True when the lookup completed but found no verifiable online history
+    # for this swimmer — a legitimate result, distinct from a failed fetch.
+    no_history: bool = False
     source_urls: list = field(default_factory=list)
     fetched_at: Optional[str] = None
 
@@ -136,6 +139,7 @@ class RunPBAudit:
     swimmers_needs_verification: int = 0
     swimmers_no_id: int = 0
     swimmers_fetch_failed: int = 0
+    swimmers_no_history: int = 0          # lookup completed, no online history found
     pb_decisions_count: int = 0
     pb_confirmed_count: int = 0          # V7.3: includes CONFIRMED_OFFICIAL_PB + CONFIRMED_PB_IMPROVEMENT + legacy CONFIRMED_PB
     pb_confirmed_official_count: int = 0  # V7.3: NEW — only CONFIRMED_OFFICIAL_PB (time + date match)
