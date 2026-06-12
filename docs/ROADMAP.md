@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `ee7c13fa8` · Merge pull request #421 from elijahkendrick04/roadmap-engine/2026-06-12-daily-scan
+**Last updated:** 2026-06-12 · `f256ad6be` · Merge pull request #420 from elijahkendrick04/dependabot/pip/python-deps-b77e8effec
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -705,12 +705,12 @@ list and the auto table below, not here.
 | 2026-06-12 | `46d3616e7` | fix: a11y: Documents must have <title> element to aid in navigati (#424) |
 | 2026-06-12 | `548096e9e` | fix: a11y: Select element must have an accessible name (select-na (#422) |
 | 2026-06-12 | `49db59170` | docs(roadmap): 2026-06-12 daily scan — Swim England Sport:80/Rankings API note + changelog row |
+| 2026-06-12 | `31785c89e` | build(deps): bump the python-deps group with 36 updates |
 | 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
 | 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `22224083a` | Revert "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `1c0dd8c48` | Declare MEDIAHUB_DEV_KEY in render.yaml so it surfaces in the Render dashboard |
 | 2026-06-12 | `0c85734c3` | Make the home-page developer-login footer link clearly visible |
-| 2026-06-12 | `19947ecf2` | fix: a11y: Form elements must have labels (label) (#409) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
