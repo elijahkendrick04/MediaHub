@@ -143,12 +143,42 @@ def _changed_files() -> tuple[list[str], int]:
     return files, insertions
 
 
+# Identity for loop-authored fix commits — the same bot identity the workflow
+# uses for its state-branch commits. Passed per-commit with `-c` because the
+# Actions runner has NO ambient git identity: a bare `git commit` there dies
+# with "Author identity unknown" (the config step that used to provide one as
+# a side effect was removed in the 001d28a workflow refactor).
+BOT_NAME = "mediahub-autotest[bot]"
+BOT_EMAIL = "mediahub-autotest[bot]@users.noreply.github.com"
+
+
+def commit_fix(message: str) -> tuple[bool, str]:
+    """Commit the staged fix as the bot and VERIFY the commit took. Returns
+    (ok, error). The exit code matters: the old call site ignored it, so an
+    identity-less runner committed NOTHING and the loop force-pushed an EMPTY
+    branch (== the base tip) — `gh pr create` then refused it with "No commits
+    between main and ..." (the 2026-06-12 stranded fix-branch incident)."""
+    rc, out = _git("-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}",
+                   "commit", "-m", message)
+    if rc != 0:
+        return False, (out.strip()[:300] or "git commit failed with no output")
+    return True, ""
+
+
 def _classify_pr_error(err: str) -> str:
     """Turn a raw `gh pr create` failure into an actionable operator message.
-    The common silent killer is the repo policy that blocks the Actions token
-    from opening PRs — name it explicitly so the operator knows the exact fix."""
+    Matching is deliberately NARROW: every GraphQL failure of this mutation
+    mentions "createPullRequest", so only GitHub's actual policy phrase maps to
+    the Actions-permission remedy — the old catch-all keyword misdiagnosed an
+    empty pushed branch ("No commits between main and ...") as a permissions
+    problem and sent the operator to repo settings that were already correct."""
     low = err.lower()
-    if "not permitted to create" in low or "createpullrequest" in low:
+    if "no commits between" in low:
+        return ("the pushed branch has no commits on top of the base branch, so "
+                "there is no fix to open a PR for. Either the fix commit never made "
+                "it onto the branch (commit failed on the runner) or the base already "
+                "contains the change. Raw: " + (err[:300] or "non-zero exit"))
+    if "not permitted to create" in low:
         return ("GitHub Actions is not permitted to create PRs for this repo. Fix: "
                 "enable Settings → Actions → General → 'Allow GitHub Actions to create "
                 "and approve pull requests', or add an AUTOTEST_GH_PAT secret (a "

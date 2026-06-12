@@ -57,6 +57,22 @@ def test_open_pr_denied_surfaces_actionable_error(monkeypatch, gh_present):
     assert "create and approve pull requests" in err.lower()
 
 
+def test_open_pr_empty_branch_not_misread_as_permissions(monkeypatch, gh_present):
+    """Every GraphQL createPullRequest failure mentions "createPullRequest" — an
+    empty pushed branch ("No commits between ...") must be reported as exactly
+    that, NOT as the Actions PR-permission block, which sent the operator to
+    repo settings that were already correct (2026-06-12 incident)."""
+    stderr = ("pull request create failed: GraphQL: No commits between main and "
+              "autotest/fix-6df9d960412d (createPullRequest)")
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda *a, **k: _completed(1, stdout="", stderr=stderr))
+    got, err = gitops._open_pr("autotest/fix-6df9d960412d", "fix: x", "body")
+    assert got == ""
+    assert "no commits" in err.lower()
+    assert "AUTOTEST_GH_PAT" not in err
+    assert "not permitted" not in err.lower()
+
+
 def test_open_pr_already_exists_recovers_url(monkeypatch, gh_present):
     """A re-run on the same branch must read as success by recovering the PR."""
     existing = "https://github.com/acme/repo/pull/7"

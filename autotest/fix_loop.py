@@ -427,8 +427,16 @@ def fix_one(bug: dict) -> dict:
                               "pending a ground-truth repro (not retried, not closed)"}
         return _give_up_or_retry(bug, attempts, info)
 
-    gitops._git("commit", "-m", f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
-                 f"finding {fp} ({bug.get('category')}).")
+    committed, commit_err = gitops.commit_fix(
+        f"fix: {bug.get('title', '')[:60]}\n\nAutonomous fix for autotest "
+        f"finding {fp} ({bug.get('category')}).")
+    if not committed:
+        # Nothing landed on the branch — pushing now would strand an EMPTY
+        # branch on origin and a doomed PR attempt ("No commits between main
+        # and ...", the 2026-06-12 incident). Reset so the next bug in this
+        # pass starts from a clean tree; the bug stays open for retry.
+        gitops._git("reset", "--hard", f"origin/{gitops.BASE_BRANCH}")
+        return _give_up_or_retry(bug, attempts, f"commit failed: {commit_err}")
     # Advisory regression-proof (council FIX rule): did the coder's new test
     # actually exercise the bug (fail on PRE-fix source, pass after)? Hollow/no
     # test isn't fatal — many real fixes can't have a failing-first test — so it
@@ -457,7 +465,12 @@ def fix_one(bug: dict) -> dict:
     # attempt, so a leftover from a prior attempt (or a stranded no-PR push)
     # must be overwritten — a plain push would be rejected non-fast-forward,
     # which would then open the PR against the STALE branch content.
-    gitops._git("push", "-u", "--force", "origin", branch)
+    rc, push_out = gitops._git("push", "-u", "--force", "origin", branch)
+    if rc != 0:
+        # No branch reached origin → there is no PR to open; say so instead of
+        # claiming a fix was pushed. The next attempt rebuilds and re-pushes.
+        return _give_up_or_retry(
+            bug, attempts, f"push failed: {push_out.strip()[:300] or 'git push failed'}")
     pr_url, pr_err = gitops._open_pr(
         branch, f"fix: {bug.get('title', '')[:60]}",
         _pr_body(bug, fp, reg_status, reg_detail))
