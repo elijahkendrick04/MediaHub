@@ -958,11 +958,18 @@ def _build_result_chip(label: str, value: str) -> str:
     )
 
 
-def _build_sponsor_block(sponsor_name: str | None) -> str:
+def _build_sponsor_block(sponsor_name: str | None, logo_data_uri: str = "") -> str:
     if not sponsor_name:
         return ""
+    logo_html = (
+        f'<img class="logo" src="{logo_data_uri}" alt="" '
+        'style="height:1.6em;width:auto;vertical-align:middle;margin-right:0.5em"/>'
+        if logo_data_uri
+        else ""
+    )
     return (
         '<div class="sponsor-strip">'
+        f"{logo_html}"
         '<span class="label">Performance supported by</span>'
         f'<span class="name">{html_escape(sponsor_name)}</span>'
         "</div>"
@@ -2555,10 +2562,19 @@ def render_brief(
     bg_photo_path: Optional[str | Path] = None,
     brand_kit=None,
     sponsor_name: str = "",
+    sponsor_logo_path: Optional[str | Path] = None,
     venue_attribution: str = "",
     skip_cutout: bool = False,
+    watermark_text: str = "",
 ) -> RenderResult:
-    """Render a CreativeBrief into a single PNG. Returns RenderResult."""
+    """Render a CreativeBrief into a single PNG. Returns RenderResult.
+
+    ``sponsor_logo_path`` (PC.8): an optional sponsor logo image embedded in
+    the sponsor strip beside the sponsor name.
+    ``watermark_text`` (PC.7): when set, a repeated diagonal text overlay is
+    stamped across the finished canvas — used by the public try-before-signup
+    demo so preview cards are visibly non-production.
+    """
     width, height = size
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2623,6 +2639,15 @@ def render_brief(
         except Exception:
             bg_photo_uri = ""
 
+    # PC.8: sponsor logo riding the sponsor strip (best-effort — a missing
+    # or unreadable file falls back to the name-only strip).
+    _sponsor_logo_uri = ""
+    if sponsor_name and sponsor_logo_path:
+        try:
+            _sponsor_logo_uri = _img_to_data_uri(sponsor_logo_path)
+        except Exception:
+            _sponsor_logo_uri = ""
+
     # Build common replacements. The logo surface proxy is the brand primary
     # (the dark ground the bottom-left logo usually sits over) — used only to
     # pick chip vs. bare, never to recolour the logo.
@@ -2645,7 +2670,7 @@ def render_brief(
             "Time" if (brief.text_layers or {}).get("event_name") else "Result",
             (brief.text_layers or {}).get("result_value", ""),
         ),
-        sponsor_block=_build_sponsor_block(sponsor_name) if sponsor_name else "",
+        sponsor_block=_build_sponsor_block(sponsor_name, _sponsor_logo_uri) if sponsor_name else "",
         skip_ai_bg=bool(_v2_archetype),
     )
     base_repl["HERO_PHOTO_URI"] = hero_photo_uri
@@ -2785,6 +2810,26 @@ def render_brief(
     else:
         # Strip the texture-grain class so flag-off renders differ.
         html = html.replace("texture-grain", "texture-grain-disabled")
+
+    # PC.7: demo watermark overlay — a repeated diagonal text layer stamped
+    # over EVERYTHING (z-index above accent/grain), injected last so no
+    # layout family can cover it. Body-level, so it works for both v1
+    # `.canvas` layouts and v2 archetypes.
+    if watermark_text:
+        wm = html_escape(watermark_text)
+        tiles = "".join(
+            f'<div style="transform:rotate(-30deg);font:700 {max(28, width // 18)}px '
+            "system-ui,sans-serif;color:rgba(255,255,255,0.28);text-shadow:0 1px 2px "
+            'rgba(0,0,0,0.25);white-space:nowrap;letter-spacing:0.12em">'
+            f"{wm}</div>"
+            for _ in range(9)
+        )
+        watermark_html = (
+            '<div class="mh-demo-watermark" style="position:fixed;inset:0;z-index:9999;'
+            "pointer-events:none;display:grid;grid-template-columns:repeat(3,1fr);"
+            'place-items:center;overflow:hidden">' + tiles + "</div>"
+        )
+        html = html.replace("</body>", watermark_html + "</body>", 1)
 
     # Output path
     visual_id = "v_" + uuid.uuid4().hex[:12]

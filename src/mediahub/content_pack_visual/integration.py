@@ -202,6 +202,8 @@ def create_visual_for_item(
     formats: Optional[list[str]] = None,
     media_assets: Optional[list[dict]] = None,
     sponsor_name: str = "",
+    sponsor_logo_path: Optional[str] = None,
+    watermark_text: str = "",
     variation_seed: Optional[int] = None,
     variation_profile=None,
     use_ai_director: bool = False,
@@ -337,6 +339,8 @@ def create_visual_for_item(
             bg_photo_path=bg_photo_path,
             brand_kit=brand_kit,
             sponsor_name=sponsor_name,
+            sponsor_logo_path=sponsor_logo_path,
+            watermark_text=watermark_text,
         )
     except Exception as e:
         out["errors"].append(f"render_failed: {e}")
@@ -442,6 +446,7 @@ def create_candidate_pool_for_item(
     formats: Optional[list[str]] = None,
     media_assets: Optional[list[dict]] = None,
     sponsor_name: str = "",
+    sponsor_logo_path: Optional[str] = None,
     recent_signatures: Optional[list[str]] = None,
     forced_hero_asset_id: Optional[str] = None,
 ) -> dict:
@@ -603,6 +608,7 @@ def create_candidate_pool_for_item(
                 bg_photo_path=bg_photo_path,
                 brand_kit=brand_kit,
                 sponsor_name=sponsor_name,
+                sponsor_logo_path=sponsor_logo_path,
             )
             visuals_summary: list[dict] = []
             for r in results:

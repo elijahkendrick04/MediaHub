@@ -18,6 +18,7 @@ It is deliberately permissive about *how* a route refuses (404 / 403 / redirect 
 empty render are all fine) and strict about the one thing that matters: the
 owner's secret markers must never appear in a foreign org's response.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -47,7 +48,11 @@ _ARG_FILL = {
     "card_id": "card-alpha-1",
     "swimmer_key": "Alpha Athlete",
     "job_id": "job-x",
-    "pack_id": "PACK_ID",          # replaced with the real seeded pack id at runtime
+    # PC.10: the public wall's card route carries a per-org token. An
+    # unknown token must 404 before any run data is touched, so sweeping
+    # it with a junk token is exactly the guarantee to pin.
+    "token": "no-such-wall-token",
+    "pack_id": "PACK_ID",  # replaced with the real seeded pack id at runtime
 }
 
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
@@ -65,38 +70,70 @@ def two_orgs(tmp_path, monkeypatch):
 
     import mediahub.web.club_profile as cp
     import mediahub.web.web as wm
+
     importlib.reload(cp)
     importlib.reload(wm)
 
     from mediahub.web.club_profile import ClubProfile, save_profile
-    save_profile(ClubProfile(profile_id="org-alpha", display_name="Org Alpha",
-                             brand_voice_summary="Bold, energetic, club-focused."))
-    save_profile(ClubProfile(profile_id="org-beta", display_name="Org Beta",
-                             brand_voice_summary="Calm and considered."))
+
+    save_profile(
+        ClubProfile(
+            profile_id="org-alpha",
+            display_name="Org Alpha",
+            brand_voice_summary="Bold, energetic, club-focused.",
+        )
+    )
+    save_profile(
+        ClubProfile(
+            profile_id="org-beta",
+            display_name="Org Beta",
+            brand_voice_summary="Calm and considered.",
+        )
+    )
 
     run_id = "run-alpha-" + uuid.uuid4().hex[:8]
-    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps({
-        "run_id": run_id,
-        "profile_id": "org-alpha",
-        "profile_display": "Org Alpha",
-        "meet": {"name": "SECRET ALPHA INVITATIONAL"},
-        "cards": [{
-            "card_id": "card-alpha-1", "swim_id": "swim-alpha-1",
-            "swimmer_name": "Alpha Athlete", "event": "100m freestyle",
-            "headline": "Alpha-only PB", "id": "card-alpha-1",
-        }],
-        "trust": {"score": 0.92},
-        "recognition_report": {
-            "ranked_achievements": [{"achievement": {
-                "swim_id": "swim-alpha-1", "swimmer_name": "Alpha Athlete",
-                "event": "100m freestyle", "headline": "Alpha-only secret achievement",
-            }}],
-            "n_elite": 1, "n_strong": 0, "n_story": 0,
-            "n_achievements": 1, "n_swims_analysed": 1,
-        },
-        "parse_warnings": [], "self_check": {},
-        "detector_summary": {}, "dispatch_log": {},
-    }))
+    (tmp_path / "runs_v4" / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "profile_id": "org-alpha",
+                "profile_display": "Org Alpha",
+                "meet": {"name": "SECRET ALPHA INVITATIONAL"},
+                "cards": [
+                    {
+                        "card_id": "card-alpha-1",
+                        "swim_id": "swim-alpha-1",
+                        "swimmer_name": "Alpha Athlete",
+                        "event": "100m freestyle",
+                        "headline": "Alpha-only PB",
+                        "id": "card-alpha-1",
+                    }
+                ],
+                "trust": {"score": 0.92},
+                "recognition_report": {
+                    "ranked_achievements": [
+                        {
+                            "achievement": {
+                                "swim_id": "swim-alpha-1",
+                                "swimmer_name": "Alpha Athlete",
+                                "event": "100m freestyle",
+                                "headline": "Alpha-only secret achievement",
+                            }
+                        }
+                    ],
+                    "n_elite": 1,
+                    "n_strong": 0,
+                    "n_story": 0,
+                    "n_achievements": 1,
+                    "n_swims_analysed": 1,
+                },
+                "parse_warnings": [],
+                "self_check": {},
+                "detector_summary": {},
+                "dispatch_log": {},
+            }
+        )
+    )
     conn = wm._db()
     conn.execute(
         "INSERT OR REPLACE INTO runs (id, created_at, status, profile_id, "
@@ -107,17 +144,20 @@ def two_orgs(tmp_path, monkeypatch):
     conn.close()
 
     from mediahub.club_platform.stub_pack_store import save_pack
-    pack = save_pack("free_text", {"free_text": "ALPHA SECRET DRAFT"},
-                     [{"platform": "instagram", "caption": "Alpha-only secret caption",
-                       "confidence": 0.9}], profile_id="org-alpha")
+
+    pack = save_pack(
+        "free_text",
+        {"free_text": "ALPHA SECRET DRAFT"},
+        [{"platform": "instagram", "caption": "Alpha-only secret caption", "confidence": 0.9}],
+        profile_id="org-alpha",
+    )
 
     app = wm.create_app()
     app.config["TESTING"] = True
     app.config["ENFORCE_ORG_GATE"] = True
 
     with app.test_client() as c:
-        yield {"app": app, "client": c, "run_id": run_id,
-               "pack_id": pack["pack_id"]}
+        yield {"app": app, "client": c, "run_id": run_id, "pack_id": pack["pack_id"]}
 
 
 def _pin(client, profile_id):

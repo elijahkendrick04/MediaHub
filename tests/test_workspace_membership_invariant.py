@@ -19,6 +19,7 @@ decided in ADR-0014:
     blast-radius change the Council required closing before this schema
     shipped), while anonymous/legacy and operator access are preserved.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -43,6 +44,10 @@ _ARG_FILL = {
     "card_id": "card-orphan-1",
     "swimmer_key": "Orphan Athlete",
     "job_id": "job-x",
+    # PC.10: the public wall's card route carries a per-org token. An
+    # unknown token must 404 before any run data is touched, so sweeping
+    # it with a junk token is exactly the guarantee to pin.
+    "token": "no-such-wall-token",
     "pack_id": "no-such-pack",
 }
 _ARG_RE = re.compile(r"<(?:[^:>]+:)?([^>]+)>")
@@ -54,7 +59,9 @@ PASSWORD = "twelve-chars-long"
 DEV_KEY = "test-operator-key-for-invariant"
 
 
-def _seed_run(runs_dir, run_id: str, profile_id: str | None, meet: str, athlete: str, headline: str):
+def _seed_run(
+    runs_dir, run_id: str, profile_id: str | None, meet: str, athlete: str, headline: str
+):
     data = {
         "run_id": run_id,
         "meet": {"name": meet},
@@ -119,7 +126,11 @@ def shared_instance(tmp_path, monkeypatch):
 
     from mediahub.web.club_profile import ClubProfile, save_profile
 
-    for pid, name in (("org-alpha", "Org Alpha"), ("org-beta", "Org Beta"), ("org-gamma", "Org Gamma")):
+    for pid, name in (
+        ("org-alpha", "Org Alpha"),
+        ("org-beta", "Org Beta"),
+        ("org-gamma", "Org Gamma"),
+    ):
         save_profile(
             ClubProfile(
                 profile_id=pid,
@@ -130,13 +141,21 @@ def shared_instance(tmp_path, monkeypatch):
 
     run_alpha = "run-alpha-" + uuid.uuid4().hex[:8]
     _seed_run(
-        tmp_path / "runs_v4", run_alpha, "org-alpha",
-        "SECRET ALPHA INVITATIONAL", "Alpha Athlete", "Alpha-only PB",
+        tmp_path / "runs_v4",
+        run_alpha,
+        "org-alpha",
+        "SECRET ALPHA INVITATIONAL",
+        "Alpha Athlete",
+        "Alpha-only PB",
     )
     run_orphan = "run-orphan-" + uuid.uuid4().hex[:8]
     _seed_run(
-        tmp_path / "runs_v4", run_orphan, None,
-        "SECRET ORPHAN GALA", "Orphan Athlete", "Orphan-only PB",
+        tmp_path / "runs_v4",
+        run_orphan,
+        None,
+        "SECRET ORPHAN GALA",
+        "Orphan Athlete",
+        "Orphan-only PB",
     )
     conn = wm._db()
     conn.execute(
@@ -205,8 +224,12 @@ def legacy_instance(tmp_path, monkeypatch):
     )
     run_orphan = "run-orphan-" + uuid.uuid4().hex[:8]
     _seed_run(
-        tmp_path / "runs_v4", run_orphan, None,
-        "SECRET ORPHAN GALA", "Orphan Athlete", "Orphan-only PB",
+        tmp_path / "runs_v4",
+        run_orphan,
+        None,
+        "SECRET ORPHAN GALA",
+        "Orphan Athlete",
+        "Orphan-only PB",
     )
     conn = wm._db()
     conn.execute(
@@ -366,7 +389,11 @@ class TestSettingsAndDeleteGates:
             _login(c, OWNER_EMAIL)
             r = c.post(
                 "/organisation",
-                data={"profile_id": "org-alpha", "display_name": "Org Alpha Updated", "action": "save"},
+                data={
+                    "profile_id": "org-alpha",
+                    "display_name": "Org Alpha Updated",
+                    "action": "save",
+                },
             )
             assert r.status_code == 200
         assert load_profile("org-alpha").display_name == "Org Alpha Updated"
@@ -409,7 +436,11 @@ class TestCreationBinding:
         with shared_instance["app"].test_client() as c:
             r = c.post(
                 "/organisation",
-                data={"profile_id": "walkin-club", "display_name": "Walk-in Club", "action": "save"},
+                data={
+                    "profile_id": "walkin-club",
+                    "display_name": "Walk-in Club",
+                    "action": "save",
+                },
             )
             assert r.status_code == 200
         assert ms.is_bound("walkin-club") is False
@@ -436,9 +467,12 @@ class TestInviteFirstClaimPath:
         app = shared_instance["app"]
         # Operator pre-binds the pilot's contact email (one-time founder action).
         ms.add(
-            PILOT_EMAIL, "org-beta",
-            role=ROLE_OWNER, status=STATUS_INVITED,
-            invited_by="developer@mediahub.local", invited_via_profile_id="org-beta",
+            PILOT_EMAIL,
+            "org-beta",
+            role=ROLE_OWNER,
+            status=STATUS_INVITED,
+            invited_by="developer@mediahub.local",
+            invited_via_profile_id="org-beta",
         )
         # The invite must NOT lock the org — the pilot keeps working anonymously.
         assert ms.is_bound("org-beta") is False
@@ -493,8 +527,7 @@ class TestOwnerlessRunBlastRadius:
             assert len(swept) >= 20, f"Only swept {len(swept)} run routes."
             assert not leaked, (
                 "An ownerless legacy run leaked to a signed-in foreign account "
-                "(the shared-instance blast radius ADR-0014 closes):\n  "
-                + "\n  ".join(leaked)
+                "(the shared-instance blast radius ADR-0014 closes):\n  " + "\n  ".join(leaked)
             )
 
     def test_owned_run_not_reachable_by_foreign_signed_in_account(self, shared_instance):

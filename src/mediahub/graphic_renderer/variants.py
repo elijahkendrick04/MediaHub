@@ -33,8 +33,10 @@ def render_all_formats(
     bg_photo_path: Optional[str | Path] = None,
     brand_kit=None,
     sponsor_name: str = "",
+    sponsor_logo_path: Optional[str | Path] = None,
     venue_attribution: str = "",
     skip_cutout: bool = False,
+    watermark_text: str = "",
 ) -> list[RenderResult]:
     """Render the visual at multiple format sizes. Returns one ``RenderResult`` per format."""
     output_dir = Path(output_dir)
@@ -69,8 +71,10 @@ def render_all_formats(
             bg_photo_path=bg_photo_path,
             brand_kit=brand_kit,
             sponsor_name=sponsor_name,
+            sponsor_logo_path=sponsor_logo_path,
             venue_attribution=venue_attribution,
             skip_cutout=skip_cutout,
+            watermark_text=watermark_text,
         )
 
     out: list[RenderResult] = []

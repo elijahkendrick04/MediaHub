@@ -12,6 +12,7 @@ the ADRs and companion docs linked under [Standing context](#standing-context).
 
 Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
 
+- **2026-06-11** — **Phase C build-out: PC.7 + PC.8 + PC.10 shipped; PC.4's `/pricing` gate enforced** (maintainer instruction "complete PC.4/6/7/8/10"): the public try-before-signup demo (`/try`, watermarked ≤3-card preview, capped, sandboxed, self-cleaning, claimable on conversion), the sponsor manager + per-sponsor exposure reports (`/sponsors`, deterministic rotation, exposure ledger, monthly report), and the public achievements wall + embed + RSS/JSON (`/wall/<token>`, opt-in, approved-only, initials-first, structurally revocable). PC.4's remaining engineering gap closed — `/pricing` now reads `pc4_pricing_gate` and commits a list price only from ≥5 revealed annual payments (the highest tested price that cleared). PC.6 was audited build-complete (lead ledger, cold-share + referral-debt readouts, NGB application drafted + tracked); what remains on PC.4/PC.6 is the founder's selling motion, which code cannot close. [completion pass]
 - **2026-06-11** — **Phase 6 — Creative-suite breadth added** (maintainer instruction): every content-creation feature in the two checked-in competitor inventories ([Canva](research/CANVA_FEATURE_INVENTORY_2026.md), [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)) now has a MediaHub-shaped build plan — **our own first-party versions, not integrations of theirs** — organised into 24 gated work packages (P6.1–P6.24) with a feature-by-feature coverage index proving nothing was missed. Long-form mapping: [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). Phase 6 sits behind the Phase C gates like P3/P4/P5; standing rules (hosted-only, approval-first, deterministic engine, Gemini-first honest-error AI, GWS exclusion) all hold. [roadmap engine]
 - **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
 
@@ -867,8 +868,13 @@ What shipped:
 federation dashboards / template-push surfaces remain later-stage work — NOT pulled
 forward).*
 
-### PC.4 — Repricing & packaging (validate, don't assume) · 🔵 **IN PROGRESS (instrumented 2026-06-11; evidence gate open)**
-**Build side shipped; the gate is now a selling exercise.** The revealed-WTP machinery
+### PC.4 — Repricing & packaging (validate, don't assume) · 🔵 **IN PROGRESS (build complete 2026-06-11; evidence gate open)**
+**Build side fully shipped; the gate is now a selling exercise.** Completion pass
+2026-06-11: `/pricing` now actually **reads the PC.4 gate** instead of merely defaulting
+to TBC — `commercial/wtp.py:public_list_price` returns a committed price only once ≥5
+distinct clubs have paid annual, and the figure is *derived from the paid ledger* (the
+highest tested price that cleared), never typed in. Until then the page shows "Pricing
+TBC" even when Stripe price ids are configured. The revealed-WTP machinery
 landed with PC.3 (same PR, [`adr/0014`](adr/0014-org-workspace-multitenancy-schema.md) §7):
 a quote ledger (`commercial/wtp.py`, `DATA_DIR/commercial/wtp_quotes.jsonl`) records every
 real annual price quoted per club; **per-quote Stripe Checkout** charges exactly the
@@ -955,42 +961,58 @@ code: the funnel below is the founder's motion, unchanged. The sub-track:
   - **Confidence split (the >95% discipline):** the *design* — warm + referral over cold broadcast — is **>95%-confidence-correct** on the cited base rates; the *outcome* (10 paying clubs in N months at price X) is **unproven and IS the validation** (it also closes the PC.4 willingness-to-pay gap). Do not conflate the two. Sourced in [`research/SCALING_DILIGENCE_2026.md`](research/SCALING_DILIGENCE_2026.md) (Evidence refresh cycle 4).
 - **Rebalance build vs. sell** — stop adding capability surface; manufacture pipeline.
 
-### PC.7 — Instant try-before-signup demo · ❌ **NOT STARTED**
-**The sales motion's sharpest tool.** PC.6's warm-first hand-sell needs a shareable
-magic moment, and the June 2026 competitive pass verified nobody can copy this demo —
-no competitor ingests a results file at all (Gipper/Box Out templates are hand-typed;
-the swim incumbents stop at data display). *(Ideas research #1 —
-[`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md); all
-PC.7–PC.10, W.\* and P4.5/P4.6 items below cite their idea number in that doc.)*
-**Build:** a public `/try` route + a sandboxed, unbound demo org (the
-`web/tenancy.py` zero-member model already behaves anonymously) that accepts one
-results file — or one click on a bundled `samples/` meet — and runs the normal
-pipeline with two restrictions: `pb_discovery` web-verification is skipped for
-anonymous runs (no third-party calls on unauthenticated traffic) and output is the
-top ≤3 cards with captions + the "why this card" explainer, watermarked via an
-overlay layer in `graphic_renderer/render.py`. Per-IP and global daily caps (reuse
-the publish-gate rate-cap pattern); demo runs live under the demo org only and a
-scheduled sweep deletes them; signup CTA carries the run so a converting club keeps
-its preview. **Exit:** a stranger reaches 3 branded, explained, watermarked cards
-from their own file in under 5 minutes without an account; demo traffic is capped,
-isolated from real orgs, and self-cleaning.
+### PC.7 — Instant try-before-signup demo · ✅ **DONE (2026-06-11)**
+**The sales motion's sharpest tool — shipped as specced.** PC.6's warm-first
+hand-sell needs a shareable magic moment, and the June 2026 competitive pass verified
+nobody can copy this demo — no competitor ingests a results file at all. *(Ideas
+research #1 — [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).)*
+What shipped:
+- **Public `/try` flow** (no account, org-gate-exempt): upload a results file — or one
+  click on the bundled `samples/MISM-2024-Results.pdf` — answer one question ("which
+  club is yours?", parsed from the file), and the normal pipeline runs into a
+  watermarked top-≤3-card preview with deterministic brand captions and the same
+  "why this card" explainer the product shows (honest error text when no AI provider).
+- **Demo restrictions:** runs are stamped to the sandboxed, unbound `demo-try` org
+  (`web/demo_try.py:ensure_demo_profile`); `pb_discovery` web-verification is forced
+  off (`fetch_pbs=False` — no third-party calls on unauthenticated traffic); every
+  card renders through the new `watermark_text` overlay layer in
+  `graphic_renderer/render.py` (a repeated diagonal stamp injected above every layout
+  family).
+- **Caps + isolation + self-cleaning:** per-IP and global daily caps
+  (`MEDIAHUB_TRY_IP_DAILY_CAP` / `MEDIAHUB_TRY_GLOBAL_DAILY_CAP`, fail-closed),
+  per-browser-session run visibility (one visitor can never open another's demo run,
+  and demo routes 404 for any non-demo-org run), and a daily `demo_sweep` scheduler
+  task deleting demo runs older than 24h. `MEDIAHUB_TRY_DEMO=0` switches the whole
+  surface off.
+- **Conversion carry:** the signup CTA rides the preview, and a signed-in club can
+  claim the run (`POST /try/<run_id>/claim`) — it re-stamps to their org, leaves the
+  sandbox and the sweep's reach, and opens in their review queue.
+Pinned by `tests/test_try_demo.py` (caps, sandbox isolation, demo restrictions,
+claim, sweep).
 
-### PC.8 — Sponsor manager + sponsor exposure reports · ❌ **NOT STARTED**
-**Makes the subscription revenue-positive for the club — direct PC.4 leverage.** A
-club that can show its sponsor "you appeared on 14 posts this month" can fund
-MediaHub from sponsor money; TeamSnap ONE added sponsor placement as a 2026
-headline, Gipper sells sponsor graphics, and the renderer already demos a Sponsor
-Variant (`PILOT_PLAYBOOK.md` Day 1). *(Idea #3.)* **Build:** a sponsor registry on
-`web/club_profile.py` (name, logo as a media-library asset, tier, active window); a
-deterministic rotation rule in the creative-brief path deciding which card carries
-which sponsor slot (seeded like `auto_variation_seed_for`, so stills and motion
-agree); the existing `sponsor_activation` content type for dedicated posts; a
-monthly per-sponsor exposure report — cards featuring the sponsor, approved/posted
-counts from `workflow` + `publishing/posting_log.py`, reach added later by W.14
-phase 2 — rendered branded (existing renderer) and downloadable from the workspace
-(emailed via P4.5 once that ships). **Exit:** a club configures ≥1 sponsor, sees
-the logo rotate across approved cards, and downloads a monthly per-sponsor
-exposure report it can forward.
+### PC.8 — Sponsor manager + sponsor exposure reports · ✅ **DONE (2026-06-11)**
+**Makes the subscription revenue-positive for the club — direct PC.4 leverage.**
+*(Idea #3.)* What shipped:
+- **Sponsor registry** on `web/club_profile.py` (`ClubProfile.sponsors`: name, logo
+  as a media-library asset reference, tier, active window, website) with a `/sponsors`
+  workspace page to add/remove sponsors and pick the logo from the org's media
+  library. The legacy single `sponsor_name` field stays a fallback — pre-PC.8
+  profiles render exactly as before (sponsor only on the dedicated Sponsor Variant).
+- **Deterministic rotation** (`club_platform/sponsors.py:sponsor_for_card`): the
+  (run, card) identity seeds which active sponsor's slot a card carries — sha256
+  rotation in the `auto_variation_seed_for` mould, so stills, motion, and re-renders
+  agree. Wired into the standard create-graphic path (single render + Tier B
+  candidate pool) and the sponsor-variant surface; the sponsor's logo rides the
+  renderer's sponsor strip (`render_brief(sponsor_logo_path=…)`).
+- **Exposure ledger + monthly report:** every sponsor-stamped render appends
+  idempotently to `DATA_DIR/sponsors/<org>__exposure.jsonl`; `/sponsors/report`
+  joins it with `workflow` approval states and `publishing/posting_log.py` into a
+  branded, downloadable per-sponsor monthly report (cards carried / approved /
+  posted / publish attempts, per run). Reach lands later with W.14 phase 2; email
+  delivery with P4.5.
+Pinned by `tests/test_sponsors.py` (registry, windows, rotation determinism, legacy
+fallback, ledger idempotency, report arithmetic, route flows, and the
+no-behaviour-change guarantee for legacy profiles).
 
 ### PC.9 — In-product referral engine · ❌ **NOT STARTED**
 **Runs PC.6's compounding mechanism (2 named intros per signed club) inside the
@@ -1004,22 +1026,30 @@ live code-tracked state. **Exit:** a signed club has a shareable code; a paid
 referral auto-grants the reward and updates the funnel ledger with zero operator
 typing.
 
-### PC.10 — Public club achievements page + website embed · ❌ **NOT STARTED**
-**A zero-gating distribution surface and a standing referral advert.** Per-club
-hosted page of *approved* cards plus an iframe/script embed and per-club RSS/JSON
-feed for club websites — first-party Flask, no platform review anywhere; SwimTopia
-sells website embeds, and a free public celebration wall answers the swim-parent
-resentment of paywalled results (the Meet Mobile backlash). *(Idea #2.)*
-**Build:** public read-only routes keyed by an unguessable per-org token (opt-in,
-default off; switching off revokes the token); pages read `workflow.CardStatus`
-APPROVED only and serve the already-rendered PNGs with W.11 alt text; cache
-headers; a "powered by MediaHub" badge linking the signup funnel. **Safeguarding:**
-the page must honour W.2 consent flags once they exist — until then it ships with
-an initials-only display toggle and per-card include/exclude, defaulting
-conservative. **Exit:** a club can switch on a public wall and embed it in its
-website; only approved (and consent-clean) cards ever appear; switching it off
-404s the token; ADR-0003 isolation holds (the token scopes one org, nothing
-cross-tenant).
+### PC.10 — Public club achievements page + website embed · ✅ **DONE (2026-06-11)**
+**A zero-gating distribution surface and a standing referral advert.** *(Idea #2.)*
+What shipped:
+- **Public read-only surfaces** (`web/public_wall.py` + routes): `/wall/<token>`
+  (hosted celebration page), `/wall/<token>/embed` (iframe-ready), per-club
+  `/wall/<token>/feed.rss` + `/feed.json`, and the card-image route — all keyed by
+  an unguessable per-org token, all with cache headers, all carrying the
+  "powered by MediaHub" badge into the signup funnel. First-party Flask; no
+  platform review anywhere.
+- **Approved-only, side-effect-free:** pages read `workflow.CardStatus` APPROVED
+  (and POSTED — an approved card that has since published) and serve only
+  already-rendered PNGs with result-grounded alt text; QUEUE/EDITED/REJECTED never
+  appear, and the public reader never mutates anything (no caption-memory capture).
+- **Opt-in + structural revocation:** the `/public-wall` workspace page switches the
+  wall on (token minted) and off (**token cleared** — the old URL 404s, not an "off"
+  page).
+- **Safeguarding-conservative until W.2:** initials-only display toggle (default ON)
+  applied to all wall text and alt text, plus per-card hide/show
+  (`public_wall_excluded_cards`).
+- **ADR-0003 holds:** the token scopes exactly one org — wall queries are pinned to
+  the org's own runs, the run JSON's owner is re-checked, and a cross-tenant card
+  fetch 404s.
+Pinned by `tests/test_public_wall.py` (token resolution, approved-only, initials,
+exclusions, revocation, feeds, and cross-tenant isolation).
 
 **Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
 `DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the

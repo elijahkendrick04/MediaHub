@@ -131,6 +131,40 @@ def test_pricing_bakes_in_no_committed_price(monkeypatch, tmp_path):
             assert amount not in html, f"committed price {amount!r} leaked into /pricing"
 
 
+def test_pricing_stays_tbc_until_pc4_gate_met(monkeypatch, tmp_path):
+    """Even fully Stripe-configured, /pricing shows TBC while <5 clubs paid."""
+    app = _make_app(monkeypatch, tmp_path, with_stripe=True)
+    from mediahub.commercial.wtp import QuoteStore
+
+    store = QuoteStore()
+    for i, price in enumerate([58800, 82800, 118800, 70800]):  # only 4 clubs
+        q = store.create(f"Club {i}", price)
+        store.record_manual_payment(q.quote_id, amount_pence=price)
+
+    html = app.test_client().get("/pricing").get_data(as_text=True)
+    assert "Pricing TBC" in html
+    assert "/year" not in html  # no committed annual figure anywhere
+
+
+def test_pricing_commits_evidence_derived_price_once_gate_met(monkeypatch, tmp_path):
+    """Gate met (≥5 paid clubs): the Club tier shows the highest cleared price."""
+    app = _make_app(monkeypatch, tmp_path, with_stripe=False)
+    from mediahub.commercial.wtp import QuoteStore
+
+    store = QuoteStore()
+    for i, price in enumerate([58800, 58800, 82800, 118800, 70800, 99000]):
+        q = store.create(f"Club {i}", price)
+        store.record_manual_payment(q.quote_id, amount_pence=price)
+    # A mismatch at a higher figure must not move the list price.
+    bad = store.create("Mismatch Club", 200000)
+    store.record_manual_payment(bad.quote_id, amount_pence=150000)
+
+    html = app.test_client().get("/pricing").get_data(as_text=True)
+    # 118800p == £1188 — the highest tested price that actually cleared.
+    assert "&pound;1188" in html and "/year" in html
+    assert "Billed annually" in html
+
+
 # ---- configured path: checkout + portal --------------------------------
 
 

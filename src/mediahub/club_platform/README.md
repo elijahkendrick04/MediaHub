@@ -12,3 +12,11 @@ Two layers since ADR-0013:
   keeps working.
 - `content_types.py` — the **implemented surfaces**: the small subset of
   slugs that have a real clickable page today (the Create tiles).
+
+Also here:
+
+- `sponsors.py` — the club's sponsor list (who, what tier, when active),
+  the fair-rotation rule that decides which sponsor's logo rides which
+  card (the same card always gets the same sponsor), and the monthly
+  "your sponsor appeared on N posts" exposure report clubs can forward
+  to their sponsors.

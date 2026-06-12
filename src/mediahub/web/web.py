@@ -8048,6 +8048,21 @@ def create_app() -> Flask:
             "service_worker",
             "favicon",
             "static",
+            # PC.7 — the public try-before-signup demo: the entire point is
+            # a stranger with no account and no org. Caps + the sandbox demo
+            # org bound inside the handlers themselves.
+            "try_demo",
+            "try_demo_start",
+            "try_demo_run",
+            "try_demo_card_png",
+            "try_demo_claim",
+            # PC.10 — the public achievements wall + embed + feeds: token-
+            # keyed public surfaces (the token is the access control).
+            "public_wall_page",
+            "public_wall_embed",
+            "public_wall_json",
+            "public_wall_rss",
+            "public_wall_card_png",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -18390,6 +18405,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 <div class="card" style="margin-bottom:20px">
   <h2 style="margin-top:0">Sponsors</h2>
+  <p class="muted" style="font-size:13px;margin-top:0">For multiple sponsors with rotation
+  across your cards and monthly exposure reports, use the
+  <a href="{url_for("sponsors_page")}">sponsor manager</a>. The single name below is the
+  legacy field used by the per-card Sponsor Variant.</p>
   <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
     <div>
       <label>Primary sponsor name</label>
@@ -18403,6 +18422,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 style="{_ta_style}">{_h(profile.sponsor_guidelines or "")}</textarea>
     </div>
   </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h2 style="margin-top:0">Public achievements wall</h2>
+  <p class="muted" style="font-size:13px;margin:0">Share your approved cards on a public
+  celebration page, embed them in the club website, or syndicate via RSS — opt-in,
+  initials-first, instantly revocable. Manage it on the
+  <a href="{url_for("public_wall_settings")}">public wall page</a>.</p>
 </div>
 
 <div style="margin-top:8px">
@@ -19277,9 +19304,18 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # ---- /pricing -----------------------------------------------------
     @app.route("/pricing", methods=["GET"])
     def pricing_page():
+        from mediahub.commercial.wtp import QuoteStore, public_list_price
+
         configured = _billing.billing_configured()
         plan_now = _auth.current_plan(_user_store())
         signed_in = bool(_auth.current_user_email())
+        # PC.4 evidence gate (ADR-0011): a committed list price exists only
+        # once ≥5 distinct clubs have paid annual at a tested price, and it is
+        # the highest tested price that cleared — read from the quote ledger.
+        try:
+            list_price = public_list_price(QuoteStore().list_all())
+        except Exception:
+            list_price = None
 
         cards = ""
         for tier in _billing.TIERS:
@@ -19290,18 +19326,35 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"<span>{_h(f)}</span></li>"
                 for f in tier.features
             )
-            # Price line: env-/Stripe-driven only. NO hardcoded amount.
+            # Price line: ledger-/Stripe-driven only. NO hardcoded amount.
             if tier.plan == _auth.PLAN_FREE:
                 price_html = '<div style="font-size:30px;font-weight:800;line-height:1">Free</div>'
+            elif tier.plan == _auth.PLAN_CLUB and list_price is not None:
+                # PC.4 gate met: commit the evidence-derived annual price.
+                amount = list_price["amount_pence"]
+                symbol = {"gbp": "&pound;", "usd": "$", "eur": "&euro;"}.get(
+                    list_price["currency"], ""
+                )
+                if amount % 100 == 0:
+                    figure = f"{symbol}{amount // 100}"
+                else:
+                    figure = f"{symbol}{amount / 100:.2f}"
+                price_html = (
+                    f'<div style="font-size:30px;font-weight:800;line-height:1">{figure}'
+                    '<span style="font-size:14px;font-weight:600;color:var(--ink-muted)">'
+                    "/year</span></div>"
+                    '<div class="dim" style="font-size:12px;margin-top:4px">Billed annually</div>'
+                )
             else:
+                # PC.4 gate unmet (or no evidence for this tier): the honest
+                # state is "Pricing TBC" — never a guessed number. When the
+                # tier is purchasable via an env-configured Stripe Price, the
+                # exact amount still shows at checkout.
                 purchasable = _billing.plan_purchasable(tier.plan)
                 if purchasable:
-                    # The real amount lives on the Stripe Price (resolved from
-                    # the env id at checkout). We deliberately do not render a
-                    # committed number here while pricing is unvalidated.
                     price_html = (
-                        '<div style="font-size:15px;color:var(--ink-muted)">'
-                        "Pricing set at checkout</div>"
+                        '<div style="font-size:15px;color:var(--ink-muted)" '
+                        'title="The exact price is shown at checkout">Pricing TBC</div>'
                     )
                 else:
                     price_html = (
@@ -24141,6 +24194,42 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             return jsonify({"error": "forbidden"}), 403
         brand_kit = _resolve_run_brand_kit(profile_id, run_id, run_data)
 
+        # PC.8: deterministic sponsor rotation. When the org has a sponsor
+        # registry, the card's (run, card) identity decides which active
+        # sponsor's slot it carries — the same seed on every re-render, so
+        # stills and motion agree. Registry-only here: legacy single
+        # sponsor_name profiles keep their old behaviour (sponsor appears
+        # only on the dedicated sponsor-variant surface).
+        rotated_sponsor = None
+        try:
+            from mediahub.club_platform.sponsors import sponsor_for_card as _sponsor_for_card
+
+            _sponsor_profile = load_profile(profile_id)
+            if _sponsor_profile is not None:
+                rotated_sponsor = _sponsor_for_card(
+                    _sponsor_profile, run_id, card_id, include_legacy=False
+                )
+        except Exception:
+            rotated_sponsor = None
+        rotated_sponsor_name = (rotated_sponsor or {}).get("name", "")
+
+        def _record_sponsor_exposure(surface: str = "still") -> None:
+            if not rotated_sponsor:
+                return
+            try:
+                from mediahub.club_platform.sponsors import record_exposure
+
+                record_exposure(
+                    profile_id,
+                    run_id=run_id,
+                    card_id=card_id,
+                    sponsor_id=rotated_sponsor["sponsor_id"],
+                    sponsor_name=rotated_sponsor["name"],
+                    surface=surface,
+                )
+            except Exception:
+                pass  # exposure accounting must never break a render
+
         # Pull media library assets for this profile
         media_assets = []
         try:
@@ -24149,6 +24238,16 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             media_assets = [a.to_dict() if hasattr(a, "to_dict") else a for a in assets]
         except Exception:
             pass
+
+        # PC.8: the rotated sponsor's logo (a media-library asset) rides the
+        # sponsor strip when the registry entry references one.
+        rotated_sponsor_logo_path = None
+        if rotated_sponsor and rotated_sponsor.get("logo_asset_id"):
+            for _a in media_assets:
+                _ad = _a if isinstance(_a, dict) else {}
+                if str(_ad.get("id")) == str(rotated_sponsor["logo_asset_id"]):
+                    rotated_sponsor_logo_path = _ad.get("path") or _ad.get("file_path")
+                    break
 
         # Accept optional format from JSON body or query string
         req_fmt = None
@@ -24273,6 +24372,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                         recent_signatures=_pool_recent,
                         forced_hero_asset_id=forced_hero_asset_id,
                         formats=formats_kw,
+                        sponsor_name=rotated_sponsor_name,
+                        sponsor_logo_path=rotated_sponsor_logo_path,
                     )
             except _RenderBusy:
                 return _render_busy_response("graphic")
@@ -24290,6 +24391,8 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 _v9_save_variation_history(
                     run_id, card_id, new_sig, top_brief.get("primary_hook") or ""
                 )
+            if top.get("visuals"):
+                _record_sponsor_exposure()
             return jsonify(
                 {
                     "ok": True,
@@ -24373,11 +24476,15 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     recent_hooks=recent_hooks,
                     allowed_families=choice_allowed_families,
                     forced_hero_asset_id=forced_hero_asset_id,
+                    sponsor_name=rotated_sponsor_name,
+                    sponsor_logo_path=rotated_sponsor_logo_path,
                 )
         except _RenderBusy:
             return _render_busy_response("graphic")
         except Exception as e:
             return jsonify({"error": f"render_failed: {e}"}), 500
+        if res.get("visuals"):
+            _record_sponsor_exposure()
         # V9: Attach the "Why this card?" explanation so JSON consumers can
         # render the same plain-English reasoning the UI shows.
         explanation = _build_card_explanation(target)
@@ -24475,7 +24582,18 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         profile = load_profile(profile_id) if profile_id else None
         if profile is None:
             profile = _active_profile()
-        sponsor_name = (getattr(profile, "sponsor_name", "") if profile else "").strip()
+        # PC.8: the registry's deterministic rotation decides which sponsor
+        # this card carries; the legacy single sponsor_name field remains
+        # the fallback when no registry is configured.
+        _rotated = None
+        if profile is not None:
+            try:
+                from mediahub.club_platform.sponsors import sponsor_for_card as _sponsor_for_card
+
+                _rotated = _sponsor_for_card(profile, run_id, card_id)
+            except Exception:
+                _rotated = None
+        sponsor_name = (_rotated or {}).get("name", "").strip()
         if not sponsor_name:
             body = (
                 f'<p class="dim"><a href="{url_for("content_pack_grouped", run_id=run_id)}">'
@@ -24543,6 +24661,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                             f'<img src="{_h(img_url)}" alt="Sponsor-branded variant" '
                             f'style="max-width:100%;border-radius:10px;border:1px solid var(--border)"/>'
                         )
+                        if _rotated and _rotated.get("sponsor_id"):
+                            try:
+                                from mediahub.club_platform.sponsors import (
+                                    record_exposure as _rec_exposure,
+                                )
+
+                                _rec_exposure(
+                                    resolved_pid,
+                                    run_id=run_id,
+                                    card_id=card_id,
+                                    sponsor_id=_rotated["sponsor_id"],
+                                    sponsor_name=sponsor_name,
+                                    surface="sponsor_variant",
+                                )
+                            except Exception:
+                                pass
                     else:
                         visual_error = "Visual rendered but no asset id returned."
                 else:
@@ -24628,6 +24762,970 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </div>
 """
         return _layout(f"Sponsor variant — {swimmer}", body, active="home")
+
+    # ------------------------------------------------------------------
+    # PC.8 — Sponsor manager + per-sponsor exposure reports.
+    # A club that can show its sponsor "you appeared on 14 posts this
+    # month" funds the subscription from sponsor money. Registry lives on
+    # ClubProfile.sponsors; rotation is deterministic per card (stills and
+    # motion agree); the report joins the exposure ledger with workflow
+    # approval states + the posting log.
+    # ------------------------------------------------------------------
+
+    @app.route("/sponsors")
+    def sponsors_page():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.club_platform.sponsors import active_sponsors, registry_for
+
+        registry = registry_for(prof)
+        active_ids = {s["sponsor_id"] for s in active_sponsors(prof)}
+
+        rows = ""
+        for s in registry:
+            window = ""
+            if s["active_from"] or s["active_until"]:
+                window = f"{_h(s['active_from'] or '…')} &rarr; {_h(s['active_until'] or '…')}"
+            else:
+                window = "Always"
+            state = (
+                '<span style="color:var(--good)">active</span>'
+                if s["sponsor_id"] in active_ids
+                else '<span class="dim">inactive</span>'
+            )
+            rows += (
+                "<tr>"
+                f"<td><b>{_h(s['name'])}</b></td>"
+                f"<td>{_h(s['tier'])}</td>"
+                f"<td>{window}</td>"
+                f"<td>{state}</td>"
+                f'<td><form method="post" action="{url_for("sponsors_delete")}" style="margin:0">'
+                f'<input type="hidden" name="sponsor_id" value="{_h(s["sponsor_id"])}">'
+                '<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Remove</button>'
+                "</form></td></tr>"
+            )
+        if not rows:
+            rows = (
+                '<tr><td colspan="5" class="dim" style="padding:16px">No sponsors yet. '
+                "Add one below &mdash; its slot then rotates across your cards automatically.</td></tr>"
+            )
+
+        tier_opts = "".join(
+            f'<option value="{t}">{t.title()}</option>'
+            for t in ("headline", "gold", "silver", "bronze", "partner")
+        )
+        # Logo picker: any media-library asset can be the sponsor's logo.
+        logo_opts = '<option value="">No logo (name only)</option>'
+        try:
+            if _v8_ok:
+                _mstore = _v8_get_media_store()
+                for _a in _mstore.list(profile_id=prof.profile_id):
+                    _ad = _a.to_dict() if hasattr(_a, "to_dict") else (_a or {})
+                    if _ad.get("id"):
+                        _lbl = _ad.get("original_filename") or _ad.get("type") or _ad["id"]
+                        logo_opts += (
+                            f'<option value="{_h(_ad["id"])}">{_h(str(_lbl)[:60])}</option>'
+                        )
+        except Exception:
+            pass
+        month_now = time.strftime("%Y-%m", time.gmtime())
+        body = f"""
+<h1 style="margin-bottom:4px">Sponsors</h1>
+<p class="dim" style="margin-bottom:20px;max-width:640px">Each active sponsor's slot rotates
+across your generated cards deterministically &mdash; the same card always carries the same
+sponsor, on stills and motion alike. The monthly exposure report shows each sponsor exactly
+where they appeared, ready to forward.</p>
+
+<div class="card" style="margin-bottom:20px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Sponsor registry</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:14px">
+    <thead><tr style="text-align:left;color:var(--ink-dim);font-size:12px;text-transform:uppercase">
+      <th style="padding:6px 8px">Sponsor</th><th>Tier</th><th>Active window</th><th>State</th><th></th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+  <div class="card">
+    <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Add a sponsor</h3>
+    <form method="post" action="{url_for("sponsors_add")}" style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:13px">Name<br>
+        <input name="name" required maxlength="120" style="width:100%"></label>
+      <label style="font-size:13px">Tier<br>
+        <select name="tier" style="width:100%">{tier_opts}</select></label>
+      <div style="display:flex;gap:10px">
+        <label style="font-size:13px;flex:1">Active from<br>
+          <input name="active_from" type="date" style="width:100%"></label>
+        <label style="font-size:13px;flex:1">Active until<br>
+          <input name="active_until" type="date" style="width:100%"></label>
+      </div>
+      <label style="font-size:13px">Logo (from your media library)<br>
+        <select name="logo_asset_id" style="width:100%">{logo_opts}</select></label>
+      <label style="font-size:13px">Website (optional)<br>
+        <input name="website" maxlength="300" style="width:100%" placeholder="https://"></label>
+      <button type="submit" class="btn" style="align-self:flex-start">Add sponsor</button>
+    </form>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Exposure report</h3>
+    <p class="dim" style="font-size:13px">Per-sponsor counts of cards carrying their slot,
+    how many were approved and posted, and the runs they came from.</p>
+    <form method="get" action="{url_for("sponsors_report")}" style="display:flex;gap:10px;align-items:flex-end">
+      <label style="font-size:13px">Month<br>
+        <input name="month" type="month" value="{month_now}" style="width:100%"></label>
+      <button type="submit" class="btn">View report</button>
+    </form>
+  </div>
+</div>
+"""
+        return _layout("Sponsors", body, active="home")
+
+    @app.route("/sponsors/add", methods=["POST"])
+    def sponsors_add():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.club_platform.sponsors import normalise_sponsor
+
+        entry = normalise_sponsor(
+            {
+                "name": request.form.get("name", ""),
+                "tier": request.form.get("tier", ""),
+                "active_from": request.form.get("active_from", ""),
+                "active_until": request.form.get("active_until", ""),
+                "website": request.form.get("website", ""),
+                "logo_asset_id": request.form.get("logo_asset_id", ""),
+            }
+        )
+        if entry is not None:
+            registry = [s for s in (prof.sponsors or [])]
+            # Replace an entry with the same id (same name) instead of duplicating.
+            registry = [
+                s
+                for s in registry
+                if not (isinstance(s, dict) and s.get("sponsor_id") == entry["sponsor_id"])
+            ]
+            registry.append(entry)
+            prof.sponsors = registry
+            save_profile(prof)
+        return redirect(url_for("sponsors_page"))
+
+    @app.route("/sponsors/delete", methods=["POST"])
+    def sponsors_delete():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        sid = (request.form.get("sponsor_id") or "").strip()
+        if sid:
+            prof.sponsors = [
+                s
+                for s in (prof.sponsors or [])
+                if not (isinstance(s, dict) and s.get("sponsor_id") == sid)
+            ]
+            save_profile(prof)
+        return redirect(url_for("sponsors_page"))
+
+    @app.route("/sponsors/report")
+    def sponsors_report():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.club_platform.sponsors import exposure_report
+
+        month = (request.args.get("month") or "").strip()[:7]
+        if not re.match(r"^\d{4}-\d{2}$", month):
+            month = time.strftime("%Y-%m", time.gmtime())
+        report = exposure_report(prof.profile_id, month)
+
+        sections = ""
+        for s in report["sponsors"]:
+            runs_list = ", ".join(_h(r) for r in s["runs"]) or "&mdash;"
+            sections += f"""
+<div class="card" style="margin-bottom:16px">
+  <h3 style="margin-top:0">{_h(s["sponsor_name"])}</h3>
+  <div style="display:flex;gap:28px;flex-wrap:wrap;font-size:14px">
+    <div><div style="font-size:26px;font-weight:800">{s["cards"]}</div><div class="dim">cards carried the slot</div></div>
+    <div><div style="font-size:26px;font-weight:800">{s["approved"]}</div><div class="dim">approved</div></div>
+    <div><div style="font-size:26px;font-weight:800">{s["posted"]}</div><div class="dim">posted</div></div>
+    <div><div style="font-size:26px;font-weight:800">{s["publish_attempts_ok"]}</div><div class="dim">publish attempts OK</div></div>
+  </div>
+  <p class="dim" style="font-size:12px;margin-bottom:0">Runs: {runs_list}</p>
+</div>"""
+        if not sections:
+            sections = (
+                '<div class="card empty"><p>No sponsor exposure recorded for this month. '
+                "Exposure is counted when a card carrying a sponsor slot is generated.</p></div>"
+            )
+
+        body = f"""
+<p class="dim"><a href="{url_for("sponsors_page")}">&larr; Back to sponsors</a></p>
+<h1 style="margin-bottom:4px">Sponsor exposure &mdash; {_h(month)}</h1>
+<p class="dim" style="margin-bottom:20px">{_h(prof.display_name)} &middot; generated by MediaHub.
+Counts come from the exposure ledger (which cards carried which sponsor's slot), the approval
+workflow, and the publish log &mdash; deterministic and auditable.</p>
+{sections}
+"""
+        resp = make_response(_layout(f"Sponsor exposure — {month}", body, active="home"))
+        if (request.args.get("download") or "").lower() in ("1", "true", "yes"):
+            resp.headers["Content-Disposition"] = (
+                f'attachment; filename="sponsor-exposure-{prof.profile_id}-{month}.html"'
+            )
+        return resp
+
+    # ------------------------------------------------------------------
+    # PC.10 — public club achievements wall + website embed + RSS/JSON.
+    # Opt-in, token-keyed, approved-cards-only, conservative by default
+    # (initials-only until W.2 consent exists). Switching the wall off
+    # clears the token so old URLs 404. The token scopes ONE org —
+    # nothing cross-tenant is reachable through it (ADR-0003).
+    # ------------------------------------------------------------------
+
+    @app.route("/public-wall")
+    def public_wall_settings():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.web import public_wall as _pw
+
+        enabled = bool(prof.public_wall_enabled and prof.public_wall_token)
+        cards = _pw.wall_cards(prof) if enabled else []
+        excluded = set(prof.public_wall_excluded_cards or [])
+
+        if enabled:
+            wall_url = url_for("public_wall_page", token=prof.public_wall_token, _external=True)
+            embed_url = url_for("public_wall_embed", token=prof.public_wall_token, _external=True)
+            rss_url = url_for("public_wall_rss", token=prof.public_wall_token, _external=True)
+            json_url = url_for("public_wall_json", token=prof.public_wall_token, _external=True)
+            snippet = _h(
+                f'<iframe src="{embed_url}" style="width:100%;height:640px;border:0" '
+                f'title="{prof.display_name} — latest achievements"></iframe>'
+            )
+            card_rows = ""
+            for c in cards[:30]:
+                key = _pw.card_key(c["run_id"], c["card_id"])
+                card_rows += (
+                    "<tr>"
+                    f"<td>{_h(c['title'])}</td><td class='dim'>{_h(c['meet_name'])}</td>"
+                    f'<td><form method="post" action="{url_for("public_wall_update")}" style="margin:0">'
+                    f'<input type="hidden" name="action" value="exclude">'
+                    f'<input type="hidden" name="card_key" value="{_h(key)}">'
+                    '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Hide</button>'
+                    "</form></td></tr>"
+                )
+            excluded_rows = ""
+            for key in sorted(excluded):
+                excluded_rows += (
+                    f"<tr><td><code>{_h(key)}</code></td>"
+                    f'<td><form method="post" action="{url_for("public_wall_update")}" style="margin:0">'
+                    f'<input type="hidden" name="action" value="include">'
+                    f'<input type="hidden" name="card_key" value="{_h(key)}">'
+                    '<button type="submit" class="btn secondary" style="font-size:12px;padding:3px 10px">Show again</button>'
+                    "</form></td></tr>"
+                )
+            initials_checked = "checked" if prof.public_wall_initials_only else ""
+            status_block = f"""
+<div class="card" style="margin-bottom:20px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Your public wall is live</h3>
+  <p style="font-size:14px">Public page: <a href="{_h(wall_url)}" target="_blank" rel="noopener">{_h(wall_url)}</a></p>
+  <p style="font-size:13px" class="dim">RSS: <code>{_h(rss_url)}</code> &middot; JSON: <code>{_h(json_url)}</code></p>
+  <p style="font-size:13px;margin-bottom:6px">Embed on your club website:</p>
+  <pre style="white-space:pre-wrap;font-size:12px;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--border)">{snippet}</pre>
+  <form method="post" action="{url_for("public_wall_update")}" style="display:flex;gap:14px;align-items:center;margin-top:10px">
+    <input type="hidden" name="action" value="settings">
+    <label style="font-size:13px"><input type="checkbox" name="initials_only" {initials_checked}>
+      Initials-only names (recommended until per-athlete consent tracking exists)</label>
+    <button type="submit" class="btn secondary" style="font-size:12px">Save</button>
+  </form>
+  <form method="post" action="{url_for("public_wall_update")}" style="margin-top:14px">
+    <input type="hidden" name="action" value="disable">
+    <button type="submit" class="btn secondary">Switch off &amp; revoke the link</button>
+  </form>
+</div>
+<div class="card" style="margin-bottom:20px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Cards on the wall ({len(cards)})</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>
+  {card_rows or '<tr><td class="dim" style="padding:12px">No approved, rendered cards yet — approve cards in the review queue and generate their graphics.</td></tr>'}
+  </tbody></table>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Hidden cards</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>
+  {excluded_rows or '<tr><td class="dim" style="padding:12px">None hidden.</td></tr>'}
+  </tbody></table>
+</div>"""
+        else:
+            status_block = f"""
+<div class="card empty">
+  <p><b>Your public wall is off.</b> Switching it on creates an unguessable public link
+  showing only your <i>approved</i> cards — a celebration page you can share or embed in
+  the club website. Names display as initials by default. Switching it off later revokes
+  the link immediately.</p>
+  <form method="post" action="{url_for("public_wall_update")}">
+    <input type="hidden" name="action" value="enable">
+    <button type="submit" class="btn">Switch on the public wall</button>
+  </form>
+</div>"""
+
+        body = f"""
+<h1 style="margin-bottom:4px">Public achievements wall</h1>
+<p class="dim" style="margin-bottom:20px;max-width:640px">A free public celebration page
+of your approved cards, plus a website embed and RSS/JSON feed. Only cards you approved
+ever appear; queued, edited and rejected cards never do.</p>
+{status_block}
+"""
+        return _layout("Public wall", body, active="home")
+
+    @app.route("/public-wall/update", methods=["POST"])
+    def public_wall_update():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+        from mediahub.web import public_wall as _pw
+
+        action = (request.form.get("action") or "").strip()
+        if action == "enable":
+            prof.public_wall_enabled = True
+            if not prof.public_wall_token:
+                prof.public_wall_token = _pw.generate_token()
+        elif action == "disable":
+            # Revocation is structural: the token is cleared, so the old
+            # URL resolves to nothing (404), not to an "off" page.
+            prof.public_wall_enabled = False
+            prof.public_wall_token = ""
+        elif action == "settings":
+            prof.public_wall_initials_only = bool(request.form.get("initials_only"))
+        elif action in ("exclude", "include"):
+            key = (request.form.get("card_key") or "").strip()
+            current = set(prof.public_wall_excluded_cards or [])
+            if action == "exclude" and key:
+                current.add(key)
+            elif action == "include":
+                current.discard(key)
+            prof.public_wall_excluded_cards = sorted(current)
+        else:
+            return redirect(url_for("public_wall_settings"))
+        save_profile(prof)
+        return redirect(url_for("public_wall_settings"))
+
+    def _wall_page_html(prof, cards, token: str, *, embed: bool) -> str:
+        kit = prof.get_brand_kit()
+        primary = getattr(kit, "primary_colour", None) or "#0A2540"
+        items = ""
+        for c in cards:
+            img = url_for(
+                "public_wall_card_png", token=token, run_id=c["run_id"], card_id=c["card_id"]
+            )
+            meet = f'<div class="meet">{_h(c["meet_name"])}</div>' if c["meet_name"] else ""
+            items += (
+                '<figure class="wall-card">'
+                f'<img src="{_h(img)}" alt="{_h(c["alt_text"])}" loading="lazy"/>'
+                f'<figcaption><div class="title">{_h(c["title"])}</div>{meet}</figcaption>'
+                "</figure>"
+            )
+        if not items:
+            items = '<p class="empty">No achievements published yet — check back soon.</p>'
+        header = (
+            ""
+            if embed
+            else f"<header><h1>{_h(prof.display_name)}</h1><p>Latest achievements</p></header>"
+        )
+        badge_href = url_for("signup_page", _external=True)
+        return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_h(prof.display_name)} — achievements</title>
+<style>
+  body{{margin:0;background:#0c1118;color:#e8edf4;font:15px/1.5 system-ui,sans-serif}}
+  header{{padding:28px 24px 8px;border-bottom:3px solid {_h(primary)}}}
+  header h1{{margin:0;font-size:24px}}
+  header p{{margin:4px 0 16px;color:#93a1b3}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;padding:24px}}
+  .wall-card{{margin:0;background:#131a24;border:1px solid #233042;border-radius:12px;overflow:hidden}}
+  .wall-card img{{width:100%;height:auto;display:block}}
+  .wall-card figcaption{{padding:10px 12px}}
+  .wall-card .title{{font-weight:600;font-size:14px}}
+  .wall-card .meet{{color:#93a1b3;font-size:12px;margin-top:2px}}
+  .empty{{padding:48px 24px;color:#93a1b3;text-align:center}}
+  .powered{{display:block;text-align:center;padding:18px;color:#93a1b3;font-size:12px}}
+  .powered a{{color:#e8edf4;text-decoration:none;font-weight:600}}
+</style></head><body>
+{header}
+<div class="grid">{items}</div>
+<span class="powered">Powered by <a href="{_h(badge_href)}" rel="noopener">MediaHub</a></span>
+</body></html>"""
+
+    def _resolve_wall_or_404(token: str):
+        from mediahub.web import public_wall as _pw
+
+        prof = _pw.profile_for_token(token)
+        if prof is None:
+            abort(404)
+        return prof
+
+    @app.route("/wall/<token>")
+    def public_wall_page(token: str):
+        from mediahub.web import public_wall as _pw
+
+        prof = _resolve_wall_or_404(token)
+        resp = make_response(_wall_page_html(prof, _pw.wall_cards(prof), token, embed=False))
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/wall/<token>/embed")
+    def public_wall_embed(token: str):
+        from mediahub.web import public_wall as _pw
+
+        prof = _resolve_wall_or_404(token)
+        resp = make_response(_wall_page_html(prof, _pw.wall_cards(prof), token, embed=True))
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/wall/<token>/feed.json")
+    def public_wall_json(token: str):
+        from mediahub.web import public_wall as _pw
+
+        prof = _resolve_wall_or_404(token)
+        cards = _pw.wall_cards(prof)
+        items = [
+            {
+                "title": c["title"],
+                "meet": c["meet_name"],
+                "image": url_for(
+                    "public_wall_card_png",
+                    token=token,
+                    run_id=c["run_id"],
+                    card_id=c["card_id"],
+                    _external=True,
+                ),
+                "alt": c["alt_text"],
+            }
+            for c in cards
+        ]
+        resp = jsonify({"club": prof.display_name, "items": items, "powered_by": "MediaHub"})
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/wall/<token>/feed.rss")
+    def public_wall_rss(token: str):
+        from xml.sax.saxutils import escape as _xml_escape
+
+        from mediahub.web import public_wall as _pw
+
+        prof = _resolve_wall_or_404(token)
+        cards = _pw.wall_cards(prof)
+        wall_url = url_for("public_wall_page", token=token, _external=True)
+        items_xml = ""
+        for c in cards:
+            img = url_for(
+                "public_wall_card_png",
+                token=token,
+                run_id=c["run_id"],
+                card_id=c["card_id"],
+                _external=True,
+            )
+            title = _xml_escape(c["title"] + (f" — {c['meet_name']}" if c["meet_name"] else ""))
+            items_xml += (
+                "<item>"
+                f"<title>{title}</title>"
+                f"<link>{_xml_escape(wall_url)}</link>"
+                f"<guid isPermaLink=\"false\">{_xml_escape(img)}</guid>"
+                f"<enclosure url=\"{_xml_escape(img)}\" type=\"image/png\"/>"
+                f"<description>{_xml_escape(c['alt_text'])}</description>"
+                "</item>"
+            )
+        rss = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<rss version="2.0"><channel>'
+            f"<title>{_xml_escape(prof.display_name)} — achievements</title>"
+            f"<link>{_xml_escape(wall_url)}</link>"
+            "<description>Approved achievement cards, powered by MediaHub</description>"
+            f"{items_xml}"
+            "</channel></rss>"
+        )
+        resp = make_response(rss)
+        resp.headers["Content-Type"] = "application/rss+xml; charset=utf-8"
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
+    @app.route("/wall/<token>/card/<run_id>/<card_id>.png")
+    def public_wall_card_png(token: str, run_id: str, card_id: str):
+        from flask import send_file
+
+        from mediahub.web import public_wall as _pw
+
+        prof = _resolve_wall_or_404(token)
+        path = _pw.wall_image_path(prof, run_id, card_id)
+        if not path:
+            abort(404)
+        resp = make_response(send_file(path, mimetype="image/png"))
+        resp.headers["Cache-Control"] = "public, max-age=3600"
+        return resp
+
+    # ------------------------------------------------------------------
+    # PC.7 — instant try-before-signup demo.
+    # A stranger drops a results file (or one click on the bundled sample
+    # meet) and gets a watermarked ≤3-card preview with captions and the
+    # "why this card" explainer — no account. Per-IP + global daily caps,
+    # demo runs live only under the sandboxed unbound demo org, PB
+    # web-verification is skipped for anonymous runs, and a daily sweep
+    # deletes old demo runs. The signup CTA carries the run so a
+    # converting club keeps its preview.
+    # ------------------------------------------------------------------
+
+    _DEMO_SAMPLE_PATH = Path(__file__).resolve().parents[3] / "samples" / "MISM-2024-Results.pdf"
+
+    def _demo_client_ip() -> str:
+        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return fwd or (request.remote_addr or "unknown")
+
+    def _demo_session_runs() -> list[str]:
+        v = session.get("demo_runs")
+        return list(v) if isinstance(v, list) else []
+
+    def _try_page(inner: str, *, title: str = "Try MediaHub") -> str:
+        return _layout(title, inner, active="")
+
+    def _try_form_page(error: str = "") -> str:
+        err_html = (
+            f'<div class="card" style="border-color:var(--warn);margin-bottom:16px">'
+            f'<p style="margin:0;color:var(--warn)">{_h(error)}</p></div>'
+            if error
+            else ""
+        )
+        sample_btn = ""
+        if _DEMO_SAMPLE_PATH.exists():
+            sample_btn = f"""
+  <form method="post" action="{url_for("try_demo")}" style="margin:0">
+    <input type="hidden" name="sample" value="1">
+    <button type="submit" class="btn secondary">No file handy? Use a sample meet</button>
+  </form>"""
+        inner = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Try it on your own meet</span>
+  <h1>Results file in. <em class="editorial">Branded cards</em> out.</h1>
+  <p class="lede">Drop a meet results file (Hy-Tek PDF, HY3, or a ZIP of one) and get a
+  watermarked preview of your top three achievement cards — with the reasoning behind each
+  one. No account needed.</p>
+</section>
+{err_html}
+<div class="card" style="max-width:560px">
+  <form method="post" action="{url_for("try_demo")}" enctype="multipart/form-data"
+        style="display:flex;flex-direction:column;gap:14px">
+    <label style="font-size:14px">Meet results file<br>
+      <input type="file" name="file" accept=".hy3,.zip,.pdf,.csv,.xls,.xlsx" required></label>
+    <button type="submit" class="btn">See my cards &rarr;</button>
+  </form>
+  <div style="margin-top:12px">{sample_btn}</div>
+  <p class="dim" style="font-size:12px;margin-bottom:0;margin-top:14px">Previews are
+  watermarked, capped per day, and deleted within 24 hours. Nothing is published anywhere.</p>
+</div>
+"""
+        return _try_page(inner)
+
+    @app.route("/try", methods=["GET", "POST"])
+    def try_demo():
+        from mediahub.web import demo_try as _demo
+
+        if not _demo.demo_enabled():
+            abort(404)
+        if request.method == "GET":
+            return _try_form_page()
+
+        # ---- POST: take the file (or the bundled sample) ----
+        if (request.form.get("sample") or "") == "1":
+            if not _DEMO_SAMPLE_PATH.exists():
+                return _try_form_page("The sample meet isn't available on this deployment.")
+            file_bytes = _DEMO_SAMPLE_PATH.read_bytes()
+            file_name = _DEMO_SAMPLE_PATH.name
+        else:
+            f = request.files.get("file")
+            if f is None or not (f.filename or "").strip():
+                return _try_form_page("Choose a results file first.")
+            file_name = os.path.basename(f.filename or "results.bin")
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext not in _demo.ALLOWED_EXTENSIONS:
+                return _try_form_page(
+                    "That file type isn't supported. Use a Hy-Tek PDF, HY3, ZIP, or spreadsheet."
+                )
+            file_bytes = f.read(_demo.MAX_UPLOAD_BYTES + 1)
+            if len(file_bytes) > _demo.MAX_UPLOAD_BYTES:
+                return _try_form_page("That file is too large for the demo (15 MB max).")
+            if not file_bytes:
+                return _try_form_page("That file is empty.")
+
+        # ---- caps: one claim per uploaded file ----
+        allowed, reason = _demo.claim_demo_slot(_demo_client_ip())
+        if not allowed:
+            return _try_form_page(reason)
+
+        # ---- light parse for the club picker (same as the real upload) ----
+        clubs: list[str] = []
+        meet_name = ""
+        parse_error = ""
+        try:
+            from mediahub.interpreter import interpret_document
+
+            interpreted = interpret_document(file_bytes, hint=None)
+            seen: set[str] = set()
+            for ev in interpreted.events:
+                for sw in ev.swims:
+                    c = (sw.club or "").strip()
+                    if c and c.lower() not in seen:
+                        seen.add(c.lower())
+                        clubs.append(c)
+            clubs.sort(key=str.lower)
+            meet_name = interpreted.meet_name or ""
+        except Exception as exc:
+            parse_error = str(exc)
+        if not clubs:
+            detail = (
+                f'<p class="dim" style="font-size:13px">Parser said: <code>{_h(parse_error)}</code></p>'
+                if parse_error
+                else ""
+            )
+            inner = f"""
+<h1>We couldn't read that file</h1>
+<div class="card" style="max-width:560px">
+  <p>It doesn't look like a meet results file we can parse (Hy-Tek PDF, HY3, or a ZIP of
+  one). Entry lists and heat sheets won't work — it needs finished results.</p>
+  {detail}
+  <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
+</div>"""
+            return _try_page(inner)
+
+        # ---- stage the file + show the one-question club picker ----
+        temp_id = uuid.uuid4().hex[:12]
+        tmp_dir = RUNS_DIR / temp_id
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_dir / "input.bin").write_bytes(file_bytes)
+        (tmp_dir / "demo_meta.json").write_text(
+            json.dumps({"filename": file_name, "clubs": clubs, "meet_name": meet_name}),
+            encoding="utf-8",
+        )
+        pending = session.get("demo_pending")
+        pending = list(pending) if isinstance(pending, list) else []
+        session["demo_pending"] = (pending + [temp_id])[-5:]
+
+        opts = "".join(f'<option value="{_h(c)}">{_h(c)}</option>' for c in clubs[:400])
+        meet_line = f'<p class="dim">Meet: <b>{_h(meet_name)}</b></p>' if meet_name else ""
+        inner = f"""
+<h1>One question: which club is yours?</h1>
+{meet_line}
+<div class="card" style="max-width:560px">
+  <form method="post" action="{url_for("try_demo_start")}" style="display:flex;flex-direction:column;gap:14px">
+    <input type="hidden" name="temp_id" value="{_h(temp_id)}">
+    <label style="font-size:14px">Your club in this meet<br>
+      <select name="club" required style="width:100%">{opts}</select></label>
+    <button type="submit" class="btn">Generate my preview &rarr;</button>
+  </form>
+</div>"""
+        return _try_page(inner)
+
+    @app.route("/try/start", methods=["POST"])
+    def try_demo_start():
+        from mediahub.web import demo_try as _demo
+
+        if not _demo.demo_enabled():
+            abort(404)
+        temp_id = (request.form.get("temp_id") or "").strip()
+        pending = session.get("demo_pending")
+        pending = list(pending) if isinstance(pending, list) else []
+        if not re.fullmatch(r"[a-f0-9]{12}", temp_id) or temp_id not in pending:
+            abort(404)
+        tmp_dir = RUNS_DIR / temp_id
+        try:
+            meta = json.loads((tmp_dir / "demo_meta.json").read_text(encoding="utf-8"))
+            file_bytes = (tmp_dir / "input.bin").read_bytes()
+        except Exception:
+            abort(404)
+        club = (request.form.get("club") or "").strip()
+        if club not in (meta.get("clubs") or []):
+            abort(400)
+
+        _demo.ensure_demo_profile()
+        # Demo restriction: PB web-verification is OFF for anonymous runs
+        # (fetch_pbs=False) — no third-party calls on unauthenticated traffic.
+        run_id = _start_run(
+            file_bytes,
+            meta.get("filename") or "demo-results.bin",
+            _demo.DEMO_PROFILE_ID,
+            True,  # use_pb_cache
+            False,  # fetch_pbs — never web-verify for anonymous demo runs
+            club_filter=club,
+        )
+        session["demo_pending"] = [t for t in pending if t != temp_id]
+        session["demo_runs"] = (_demo_session_runs() + [run_id])[-5:]
+        try:
+            import shutil
+
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return redirect(url_for("try_demo_run", run_id=run_id))
+
+    def _demo_run_or_404(run_id: str) -> dict:
+        """Demo-run access: the run must be in THIS browser session's demo
+        list and stamped to the demo org. Real-org routes can't see demo
+        runs; demo routes can't see real runs."""
+        from mediahub.web import demo_try as _demo
+
+        if not _demo.demo_enabled():
+            abort(404)
+        if run_id not in _demo_session_runs():
+            abort(404)
+        row = None
+        try:
+            conn = _db()
+            try:
+                row = conn.execute(
+                    "SELECT id, status, profile_id, error FROM runs WHERE id = ?", (run_id,)
+                ).fetchone()
+            finally:
+                conn.close()
+        except Exception:
+            row = None
+        if row is None or (row["profile_id"] or "") != _demo.DEMO_PROFILE_ID:
+            abort(404)
+        return {"status": row["status"], "error": row["error"] or ""}
+
+    def _demo_top_cards(run_id: str) -> list[dict]:
+        """The preview's ≤3 ranked cards: [{card_id, achievement, ra}]."""
+        from mediahub.web import demo_try as _demo
+
+        run_data = _load_run(run_id) or {}
+        rr = run_data.get("recognition_report") or {}
+        out = []
+        for ra in rr.get("ranked_achievements") or []:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if not cid:
+                continue
+            out.append({"card_id": str(cid), "achievement": ach, "ra": ra})
+            if len(out) >= _demo.DEMO_CARD_LIMIT:
+                break
+        return out
+
+    @app.route("/try/<run_id>")
+    def try_demo_run(run_id: str):
+        state = _demo_run_or_404(run_id)
+        if state["status"] in ("queued", "running"):
+            inner = """
+<h1>Reading your results&hellip;</h1>
+<div class="card" style="max-width:560px">
+  <p>MediaHub is parsing the file, detecting achievements, and ranking what's worth
+  posting. This usually takes under a minute.</p>
+  <p class="dim" style="font-size:13px">This page refreshes itself.</p>
+</div>
+<script>setTimeout(function () { location.reload(); }, 3000);</script>"""
+            return _try_page(inner, title="Working…")
+        if state["status"] != "done":
+            inner = f"""
+<h1>That run didn't finish</h1>
+<div class="card" style="max-width:560px">
+  <p>Something went wrong processing the file.</p>
+  <p class="dim" style="font-size:13px"><code>{_h(state["error"][:300])}</code></p>
+  <a class="btn" href="{url_for("try_demo")}">&larr; Try another file</a>
+</div>"""
+            return _try_page(inner, title="Demo run failed")
+
+        cards = _demo_top_cards(run_id)
+        if not cards:
+            inner = f"""
+<h1>No achievements detected for that club</h1>
+<div class="card" style="max-width:560px">
+  <p>The file parsed, but the recognition engine found nothing card-worthy for the club
+  you picked — that can happen with small entries or DNF-heavy meets.</p>
+  <a class="btn" href="{url_for("try_demo")}">&larr; Try another file or club</a>
+</div>"""
+            return _try_page(inner, title="Nothing to show")
+
+        # Captions via the existing brand-template path (deterministic), and
+        # the same "why this card" explainer the product shows. Both honest:
+        # the explainer says so when no AI provider is configured.
+        from mediahub.web import demo_try as _demo
+
+        demo_prof = _demo.ensure_demo_profile()
+        kit = demo_prof.get_brand_kit()
+        tone = demo_prof.get_tone()
+        sections = ""
+        for c in cards:
+            ach = c["achievement"]
+            caption = ""
+            try:
+                from mediahub.brand.apply import apply_brand
+
+                branded = apply_brand(dict(c["ra"]), kit, tone, "meet_recap", {})
+                active = branded.get("active_caption") or {}
+                caption = " ".join(
+                    str(v).strip() for v in active.values() if isinstance(v, str) and v.strip()
+                )
+            except Exception:
+                caption = ""
+            explanation = {}
+            try:
+                explanation = _build_card_explanation(c["ra"]) or {}
+            except Exception:
+                explanation = {}
+            why_bits = ""
+            if explanation.get("headline"):
+                why_bits += f"<p style='margin:6px 0'><b>{_h(explanation['headline'])}</b></p>"
+            for b in (explanation.get("bullets") or [])[:3]:
+                why_bits += f'<p class="dim" style="font-size:13px;margin:2px 0">&bull; {_h(b)}</p>'
+            if explanation.get("ai_error"):
+                why_bits += (
+                    f'<p class="dim" style="font-size:12px">AI explainer unavailable: '
+                    f"{_h(explanation['ai_error'])}</p>"
+                )
+            img_url = url_for("try_demo_card_png", run_id=run_id, card_id=c["card_id"])
+            caption_html = (
+                f'<p style="font-size:14px;white-space:pre-wrap">{_h(caption)}</p>'
+                if caption
+                else ""
+            )
+            title = " — ".join(
+                b
+                for b in (
+                    str(ach.get("swimmer_name") or "").strip(),
+                    str(ach.get("event") or "").strip(),
+                    str(ach.get("time") or "").strip(),
+                )
+                if b
+            )
+            sections += f"""
+<div class="card" style="margin-bottom:20px">
+  <h3 style="margin-top:0">{_h(title) or "Achievement"}</h3>
+  <div style="display:grid;grid-template-columns:minmax(220px,360px) 1fr;gap:20px;align-items:start">
+    <img src="{_h(img_url)}" alt="Watermarked preview card" loading="lazy"
+         style="width:100%;border-radius:10px;border:1px solid var(--border)"/>
+    <div>
+      <h4 style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Why this card</h4>
+      {why_bits or '<p class="dim" style="font-size:13px">Ranked by the deterministic recognition engine.</p>'}
+      {caption_html}
+    </div>
+  </div>
+</div>"""
+
+        claim_html = ""
+        if _active_profile() is not None:
+            claim_html = f"""
+  <form method="post" action="{url_for("try_demo_claim", run_id=run_id)}" style="margin:0">
+    <button type="submit" class="btn secondary">Keep this preview in my workspace</button>
+  </form>"""
+        inner = f"""
+<h1 style="margin-bottom:4px">Your top {len(cards)} card{"s" if len(cards) != 1 else ""}</h1>
+<p class="dim" style="margin-bottom:20px;max-width:640px">Watermarked preview — the real
+product renders these in your club's colours with your logo, generates captions in your
+voice, and queues them for one-click approval.</p>
+{sections}
+<div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+  <a class="btn" href="{url_for("signup_page")}">Sign up — keep your preview &rarr;</a>
+  {claim_html}
+  <span class="dim" style="font-size:12px">Demo runs are deleted within 24 hours.</span>
+</div>"""
+        return _try_page(inner, title="Your preview")
+
+    @app.route("/try/<run_id>/card/<card_id>.png")
+    def try_demo_card_png(run_id: str, card_id: str):
+        from flask import send_file
+
+        from mediahub.web import demo_try as _demo
+
+        state = _demo_run_or_404(run_id)
+        if state["status"] != "done":
+            abort(404)
+        cards = {c["card_id"]: c for c in _demo_top_cards(run_id)}
+        card = cards.get(str(card_id))
+        if card is None:
+            abort(404)
+
+        # Cached?
+        manifest_path = RUNS_DIR / run_id / "demo_cards.json"
+        manifest: dict = {}
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+        cached = manifest.get(str(card_id))
+        if cached and Path(cached).exists():
+            return send_file(cached, mimetype="image/png")
+
+        if not _v8_ok or _v8_create_visual_for_item is None:
+            abort(503)
+        run_data = _load_run(run_id) or {}
+        ach = card["achievement"]
+        item = {
+            "id": card["card_id"],
+            "swim_id": card["card_id"],
+            "achievement": ach,
+            "post_angle": ach.get("post_angle"),
+            "meet_name": (run_data.get("meet") or {}).get("name") or run_data.get("meet_name", ""),
+            "safe_to_post": card["ra"].get("safe_to_post") or {"level": "safe"},
+        }
+        demo_prof = _demo.ensure_demo_profile()
+        brand_kit = demo_prof.get_brand_kit()
+        try:
+            with _render_slot("graphic", card["card_id"], timeout=_RENDER_TRY_TIMEOUT):
+                res = _v8_create_visual_for_item(
+                    item,
+                    brand_kit,
+                    profile_id=_demo.DEMO_PROFILE_ID,
+                    run_id=run_id,
+                    formats=["feed_portrait"],
+                    watermark_text=_demo.WATERMARK_TEXT,
+                )
+        except _RenderBusy:
+            return _render_busy_response("graphic")
+        except Exception:
+            abort(503)
+        visuals = res.get("visuals") or []
+        path = visuals[0].get("file_path") if visuals else None
+        if not path or not Path(path).exists():
+            abort(503)
+        manifest[str(card_id)] = str(path)
+        try:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        except OSError:
+            pass
+        return send_file(path, mimetype="image/png")
+
+    @app.route("/try/<run_id>/claim", methods=["POST"])
+    def try_demo_claim(run_id: str):
+        """A converting club keeps its preview: re-stamp the demo run to the
+        signed-in session's own org. The run leaves the demo sandbox (and
+        the sweep's reach) and shows up in the org's Activity."""
+        _demo_run_or_404(run_id)
+        prof = _active_profile()
+        if prof is None:
+            # Not signed in yet — send them to signup; the demo run stays in
+            # their session so they can claim after creating the org.
+            return redirect(url_for("signup_page"))
+        run_data = _load_run(run_id)
+        if not isinstance(run_data, dict):
+            abort(404)
+        run_data["profile_id"] = prof.profile_id
+        try:
+            (RUNS_DIR / f"{run_id}.json").write_text(
+                json.dumps(run_data, indent=2, default=str), encoding="utf-8"
+            )
+        except OSError:
+            abort(500)
+        try:
+            conn = _db()
+            try:
+                conn.execute(
+                    "UPDATE runs SET profile_id = ? WHERE id = ?", (prof.profile_id, run_id)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        session["demo_runs"] = [r for r in _demo_session_runs() if r != run_id]
+        return redirect(url_for("review", run_id=run_id))
 
     @app.route("/api/runs/<run_id>/cards/<card_id>/regenerate", methods=["POST"])
     def api_regenerate_graphic(run_id: str, card_id: str):
@@ -25936,6 +27034,28 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         # card just reports awaiting_human); a fully_autonomous type's cards
         # ride the publish gate on a cadence.
         register_approval_signal_task()
+        # PC.7: the demo-run sweep — demo previews are self-cleaning. The
+        # task type is registered unconditionally (cheap no-op when there
+        # are no demo runs); the daily schedule row is ensured once.
+        from mediahub.scheduler import register_task_type as _register_task_type
+        from mediahub.web.demo_try import demo_enabled as _demo_enabled
+        from mediahub.web.demo_try import sweep_demo_runs as _sweep_demo_runs
+
+        def _demo_sweep_handler(params: dict) -> None:
+            _sweep_demo_runs(_delete_run)
+
+        _register_task_type("demo_sweep", _demo_sweep_handler)
+        if _demo_enabled():
+            from mediahub.workflow.schedule import create_task as _sched_create_task
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks
+
+            if not any(t.task_type == "demo_sweep" for t in _sched_list_tasks()):
+                _sched_create_task(
+                    name="Demo run sweep (PC.7)",
+                    task_type="demo_sweep",
+                    schedule_kind="daily",
+                    schedule_expr="03:30",
+                )
         start_scheduler()
     except Exception:
         log.warning("scheduler did not start", exc_info=True)
