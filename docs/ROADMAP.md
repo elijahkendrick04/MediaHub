@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `75aaa9218` · fix: a11y: <html> element must have a lang attribute (html-has-la (#380)
+**Last updated:** 2026-06-12 · `b86abbb18` · Merge pull request #367: SearXNG outage root-cause fix + log sentinel watchdog
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,16 +370,18 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
+| 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
+| 2026-06-12 | `1801a577e` | Regenerate inventories with main's full dep set (fixes inventory-freshness test) |
+| 2026-06-12 | `35eafa87d` | Sentinel files findings as GitHub issues listed on the roadmap |
 | 2026-06-12 | `75aaa9218` | fix: a11y: <html> element must have a lang attribute (html-has-la (#380) |
 | 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
 | 2026-06-12 | `f015dddd5` | Final check green: 4,465 passed, 1 skip, 0 failures on the merged tree |
+| 2026-06-12 | `be391a5d7` | Wrap long breaker-skip raise for ruff-format (CI hygiene hook) |
+| 2026-06-12 | `18543124a` | Fix silent SearXNG outage and add log sentinel watchdog |
 | 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
 | 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
 | 2026-06-12 | `8e03f502d` | Fix full-suite cross-test pollution: lockout re-keyed to per-account |
-| 2026-06-12 | `414b4a0a7` | Post-merge fixes: erasure ordering, test adaptations, runtime-ledger hygiene |
-| 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
-| 2026-06-12 | `ae5f4f794` | Phase 4 final: definitive suite green — 4,153 passed, 1 skip, 0 failures |
-| 2026-06-12 | `13b778673` | OPEN_LEGAL_QUESTIONS: Q13 — real children's data in repo test fixtures |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
