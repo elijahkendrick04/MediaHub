@@ -7881,6 +7881,108 @@ def create_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
     app.url_map.strict_slashes = False
 
+    # ---- Web hardening (security/web-hardening, THREAT_MODEL §6) --------
+    # Security headers on every response + CSRF protection on state-changing
+    # form posts. JSON POSTs are exempt by content-type (a cross-site form
+    # cannot send application/json without a CORS preflight), webhooks are
+    # exempt by signature verification, and the public wall embed keeps its
+    # frame permissions. Enforcement follows the ENFORCE_LOGIN_IDLE pattern:
+    # on in production, opt-in under TESTING via ENFORCE_CSRF so the large
+    # form-posting test corpus doesn't need a token each.
+    import hmac as _hmac
+    import secrets as _secrets_mod
+
+    _CSRF_EXEMPT_PATHS = {"/webhooks/stripe"}
+    _FORM_TAG_RX = re.compile(r"(<form\b[^>]*\bmethod=[\"']?post[\"']?[^>]*>)", re.IGNORECASE)
+
+    def _csrf_token() -> str:
+        tok = session.get("_csrf")
+        if not tok:
+            tok = _secrets_mod.token_hex(16)
+            session["_csrf"] = tok
+        return tok
+
+    def _csrf_enforced() -> bool:
+        return (not app.config.get("TESTING")) or bool(app.config.get("ENFORCE_CSRF"))
+
+    @app.before_request
+    def _csrf_protect():
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if not _csrf_enforced() or request.path in _CSRF_EXEMPT_PATHS:
+            return None
+        ctype = (request.content_type or "").lower()
+        if ctype.startswith("application/json"):
+            return None
+        supplied = (
+            request.form.get("csrf_token")
+            or request.headers.get("X-CSRF-Token")
+            or ""
+        )
+        expected = session.get("_csrf") or ""
+        if not expected or not _hmac.compare_digest(str(supplied), str(expected)):
+            try:
+                from mediahub.compliance.security_log import record_event as _sec_event
+
+                _sec_event("csrf_rejected", detail=request.path[:200], outcome="blocked")
+            except Exception:
+                pass
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "csrf", "message": "Missing or invalid CSRF token."}), 403
+            return (
+                "<h1>Request blocked</h1><p>This form was submitted without a valid "
+                "security token. Go back, reload the page, and try again.</p>"
+            ), 403
+        return None
+
+    @app.after_request
+    def _security_headers(resp):
+        # CSRF auto-injection: every rendered POST form gets the session
+        # token as a hidden input — works across the whole f-string
+        # monolith without touching each form.
+        try:
+            if (
+                resp.content_type
+                and resp.content_type.startswith("text/html")
+                and not resp.direct_passthrough
+            ):
+                html_text = resp.get_data(as_text=True)
+                if "<form" in html_text.lower():
+                    tok = _csrf_token()
+                    injected = _FORM_TAG_RX.sub(
+                        lambda m: m.group(1)
+                        + f'<input type="hidden" name="csrf_token" value="{tok}">',
+                        html_text,
+                    )
+                    if injected != html_text:
+                        resp.set_data(injected)
+        except Exception:
+            pass
+        h = resp.headers
+        # 'unsafe-inline' is required by the f-string templates' inline
+        # style/script idiom; the CSP still blocks every remote script,
+        # object embedding, and base/form hijack. Tightening to nonces is
+        # tracked in the residual register.
+        h.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+            "font-src 'self'; connect-src 'self'; media-src 'self' blob:; "
+            "object-src 'none'; base-uri 'self'; form-action 'self'",
+        )
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        # The public wall embed is DESIGNED to be iframed; everything else
+        # refuses framing (clickjacking).
+        if not (request.path.startswith("/wall/") and request.path.endswith("/embed")):
+            h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if app.config.get("SESSION_COOKIE_SECURE"):
+            h.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return resp
+
     # Persistent SECRET_KEY &mdash; survives restarts and redeploys.
     # Priority: env var > persisted file > generated + saved.
     _secret = os.environ.get("SECRET_KEY", "")
@@ -12788,6 +12890,21 @@ Relay team broke club record"></textarea>
             + ("".join(rows) or '<tr><td colspan="6" class="muted">No complaints.</td></tr>')
             + "</tbody></table>"
         )
+        from mediahub.compliance.security_log import read_events as _read_sec_events
+
+        _events = list(reversed(_read_sec_events(limit=100)))
+        _event_rows = "".join(
+            f"<tr><td>{_h(e.get('ts', '')[:19])}</td><td>{_h(e.get('event', ''))}</td>"
+            f"<td>{_h(e.get('actor', ''))}</td><td><code>{_h(e.get('subject_pseudonym', ''))}</code></td>"
+            f"<td>{_h(e.get('profile_id', ''))}</td><td>{_h(e.get('outcome', ''))}</td>"
+            f"<td class='muted'>{_h(e.get('detail', '')[:120])}</td></tr>"
+            for e in _events
+        ) or '<tr><td colspan="7" class="muted">No events.</td></tr>'
+        events_table = (
+            "<table><thead><tr><th>When</th><th>Event</th><th>Actor</th><th>Subject</th>"
+            "<th>Org</th><th>Outcome</th><th>Detail</th></tr></thead>"
+            f"<tbody>{_event_rows}</tbody></table>"
+        )
         incidents = IncidentRegister().all()
         inc_rows = "".join(
             f"<tr><td><code>{_h(i.id)}</code></td><td>{_h(i.opened_at[:10])}</td>"
@@ -12802,6 +12919,9 @@ Relay team broke club record"></textarea>
   <h1>Compliance <em class="editorial">desk.</em></h1>
   <p class="lede">Data-protection complaints (acknowledge within 30 days — s.164A DPA 2018) and the incident register (Art 33(5)). Breach process: docs/compliance/BREACH_PLAYBOOK.md.</p>
 </section>
+<div class="card"><h2>Security events (last 100)</h2>
+<p class="muted">Logins, failures, lockouts, exports, erasures, publishes, CSRF rejections. Data subjects appear as pseudonyms only; full stream: <code>DATA_DIR/security_log/events.jsonl</code>.</p>
+{events_table}</div>
 <div class="card"><h2>Complaints</h2>{table}</div>
 <div class="card"><h2>Incident register</h2>
 <table><thead><tr><th>Ref</th><th>Opened</th><th>Title</th><th>Severity</th><th>Personal data</th><th>Status</th></tr></thead>
