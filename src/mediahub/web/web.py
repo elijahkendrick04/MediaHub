@@ -8035,6 +8035,7 @@ def create_app() -> Flask:
             "account_delete",
             "pricing_page",
             "billing_page",
+            "billing_confirm",
             "billing_checkout",
             "billing_portal",
             "stripe_webhook",
@@ -19822,11 +19823,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
+                    # CCR 2013: route through the pre-contract information
+                    # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<form method="post" action="{url_for("billing_checkout")}" style="margin:0">'
-                        f'<input type="hidden" name="plan" value="{_h(tier.plan)}">'
-                        f'<button type="submit" class="btn" style="width:100%">'
-                        f"Upgrade to {_h(tier.name)}</button></form>"
+                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'href="{url_for("billing_confirm", plan=tier.plan)}">'
+                        f"Upgrade to {_h(tier.name)}</a>"
                     )
 
             highlight = (
@@ -19942,6 +19944,87 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         return _layout("Billing", body, active="signin")
 
+    @app.route("/billing/confirm", methods=["GET"])
+    def billing_confirm():
+        """Pre-contract information page (CCR 2013 / DMCCA) shown BEFORE the
+        Stripe checkout: what you're buying, renewal terms, how to cancel,
+        and the 14-day cooling-off acknowledgement."""
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("pricing_page")))
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        plan = (request.args.get("plan") or "").strip().lower()
+        tier = next((t for t in _billing.TIERS if t.plan == plan), None)
+        if tier is None or plan not in (_auth.PLAN_CLUB, _auth.PLAN_FEDERATION):
+            return redirect(url_for("pricing_page"))
+        # Price line: evidence-gated list price when it exists (PC.4), else
+        # the honest statement that the exact total shows at checkout before
+        # any commitment to pay.
+        price_line = (
+            "The exact total price and billing interval are shown on the secure "
+            "Stripe checkout page before you confirm payment."
+        )
+        try:
+            from mediahub.commercial.wtp import QuoteStore, public_list_price
+
+            lp = public_list_price(QuoteStore().list_all())
+            if plan == _auth.PLAN_CLUB and lp is not None:
+                symbol = {"gbp": "£", "usd": "$", "eur": "€"}.get(lp["currency"], "")
+                amount = lp["amount_pence"]
+                figure = (
+                    f"{symbol}{amount // 100}"
+                    if amount % 100 == 0
+                    else f"{symbol}{amount / 100:.2f}"
+                )
+                price_line = (
+                    f"{figure} per year (billed annually). The total is also shown "
+                    "on the secure Stripe checkout page before you confirm payment."
+                )
+        except Exception:
+            pass
+        features = "".join(f"<li>{_h(f)}</li>" for f in tier.features)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Subscribe</span>'
+            f'<h1>Before you <em class="editorial">subscribe</em>.</h1>'
+            f'<p class="lede">The {_h(tier.name)} plan, in plain terms.</p></section>'
+            '<div class="card">'
+            f"<h2>What you get</h2><p>{_h(tier.blurb)}</p><ul>{features}</ul>"
+            f"<p><strong>Price:</strong> {price_line}</p>"
+            "<p><strong>Renewal:</strong> your subscription renews automatically at "
+            "the interval shown at checkout until you cancel. For annual plans we "
+            "send a reminder before renewal.</p>"
+            "<p><strong>Cancelling:</strong> as easy as subscribing — open "
+            "<em>Billing &rarr; Manage billing</em> any time; cancelling stops future "
+            "renewals and you keep access for the period already paid.</p>"
+            "<p><strong>Your 14-day cancellation right:</strong> you can cancel within "
+            "14 days of purchase for a refund. Because the service starts immediately, "
+            "if you use it and then cancel within the 14 days we may deduct a "
+            "proportionate amount for the service already supplied. Email "
+            f"<a href='mailto:{_legal.CONTACT_EMAIL}'>{_legal.CONTACT_EMAIL}</a> to "
+            "cancel within the cooling-off period.</p>"
+            f'<form method="post" action="{url_for("billing_checkout")}">'
+            f'<input type="hidden" name="plan" value="{_h(plan)}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin:14px 0">'
+            '<input type="checkbox" name="immediate_supply" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I expressly request that the service starts immediately, and I "
+            "acknowledge that if I cancel within 14 days I may be charged a "
+            "proportionate amount for what has already been supplied &mdash; and that "
+            "for digital content already downloaded, the cancellation right is "
+            "lost once supply has begun with my consent.</span></label>"
+            f'<button type="submit" class="btn">Continue to secure checkout &rarr;</button> '
+            f'<a class="btn secondary" href="{url_for("pricing_page")}">Cancel</a>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Full terms: '
+            f'<a href="{url_for("terms_page")}">Terms of Service</a>.</p>'
+            "</div>"
+        )
+        return _layout("Before you subscribe", body, active="signin")
+
     @app.route("/billing/checkout", methods=["POST"])
     def billing_checkout():
         user = _auth.current_user(_user_store())
@@ -19956,6 +20039,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _billing_error_body("That plan can&rsquo;t be purchased."),
                 active="signin",
             ), 400
+        # CCR 2013: no checkout without the recorded immediate-supply /
+        # cooling-off acknowledgement from the pre-contract page.
+        if (request.form.get("immediate_supply") or "") != "1":
+            return redirect(url_for("billing_confirm", plan=plan))
+        _legal.AcceptanceStore().record(
+            user.email, _legal.DOC_COOLING_OFF, _legal.TERMS_VERSION, org_id=plan
+        )
         try:
             checkout_url = _billing.create_checkout_session(
                 plan=plan,

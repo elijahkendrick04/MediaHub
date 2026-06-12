@@ -91,6 +91,10 @@ def identity_block() -> str:
 DOC_TERMS = "terms"
 DOC_DPA = "dpa"
 DOC_DATA_ATTESTATION = "data_attestation"
+# CCR 2013 regs 36/37: the buyer's express request for immediate supply +
+# acknowledgement about the 14-day cancellation right, recorded per purchase
+# (org_id field carries the plan).
+DOC_COOLING_OFF = "cooling_off"
 
 _LEDGER_LOCK = threading.Lock()
 
@@ -100,6 +104,7 @@ def current_version(doc: str) -> str:
         DOC_TERMS: TERMS_VERSION,
         DOC_DPA: DPA_VERSION,
         DOC_DATA_ATTESTATION: DPA_VERSION,
+        DOC_COOLING_OFF: TERMS_VERSION,
     }.get(doc, TERMS_VERSION)
 
 
@@ -782,6 +787,7 @@ __all__ = [
     "COMPANY_NUMBER",
     "CONTACT_EMAIL",
     "COOKIES_VERSION",
+    "DOC_COOLING_OFF",
     "DOC_DATA_ATTESTATION",
     "DOC_DPA",
     "DOC_TERMS",

@@ -176,7 +176,9 @@ def test_checkout_creates_session_with_env_price(monkeypatch, tmp_path):
     fake_session = mock.MagicMock()
     fake_session.url = "https://checkout.stripe.test/sess_123"
     with mock.patch("stripe.checkout.Session.create", return_value=fake_session) as m:
-        r = c.post("/billing/checkout", data={"plan": "club"})
+        r = c.post(
+            "/billing/checkout", data={"plan": "club", "immediate_supply": "1"}
+        )
 
     assert r.status_code == 303
     assert r.headers["Location"] == "https://checkout.stripe.test/sess_123"
