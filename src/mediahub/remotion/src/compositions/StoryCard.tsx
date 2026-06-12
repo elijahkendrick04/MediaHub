@@ -224,11 +224,14 @@ type AnimChannels = {
   chipOpacity: number; // chips, logo, bottom strip, decorations
   bgDrift: number; // background pattern translateY (parallax)
   photoScale: number; // slow photo push (parallax)
+  // Numeric count-up progress for the result value (count_up intent).
+  // 1 everywhere else, so every other programme renders the verbatim text.
+  resultProgress: number;
   // Per-word staggered reveal (kinetic_type); identity elsewhere.
   wordAt: (index: number) => { y: number; opacity: number };
 };
 
-// The eight executable intents. Kept in lock-step with
+// The nine executable intents. Kept in lock-step with
 // creative_brief/design_spec.MOTION_INTENTS (tested from Python).
 export const MOTION_INTENTS = [
   "fade_in",
@@ -238,6 +241,7 @@ export const MOTION_INTENTS = [
   "crossfade",
   "kinetic_type",
   "parallax",
+  "count_up",
   "static",
 ] as const;
 
@@ -266,6 +270,7 @@ function animProgram(
     chipOpacity: interpolate(frame, [fps * 1.0, fps * 1.5], [0, 1], clampRight),
     bgDrift: 0,
     photoScale: 1,
+    resultProgress: 1,
     wordAt: identityWord,
   };
 
@@ -374,6 +379,30 @@ function animProgram(
         photoScale: interpolate(frame, [0, durationInFrames], [1.0, 1.07]),
       };
     }
+    case "count_up": {
+      // The number IS the animation: the result ticks up from zero and
+      // settles — with a small confirmation pulse — on the exact verified
+      // value, which then holds for the rest of the clip. A calm fade
+      // programme carries the layers around it.
+      return {
+        ...base,
+        heroY: 0,
+        heroOpacity: interpolate(frame, [0, fps * 0.5], [0, 1], clampRight),
+        secondaryOpacity: interpolate(frame, [fps * 0.25, fps * 0.8], [0, 1], clampRight),
+        resultOpacity: interpolate(frame, [fps * 0.15, fps * 0.45], [0, 1], clampRight),
+        resultScale: interpolate(
+          frame,
+          [fps * 1.55, fps * 1.75, fps * 1.95],
+          [1.0, 1.05, 1.0],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        ),
+        chipOpacity: interpolate(frame, [fps * 0.9, fps * 1.4], [0, 1], clampRight),
+        resultProgress: interpolate(frame, [fps * 0.3, fps * 1.6], [0, 1], {
+          ...clampRight,
+          easing: Easing.out(Easing.cubic),
+        }),
+      };
+    }
     case "static": {
       // Everything present from frame 0 — the card IS the statement.
       return {
@@ -386,6 +415,7 @@ function animProgram(
         chipOpacity: 1,
         bgDrift: 0,
         photoScale: 1,
+        resultProgress: 1,
         wordAt: identityWord,
       };
     }
@@ -611,6 +641,45 @@ function fitLinePx(text: string, basePx: number, maxWidth: number, glyphRatio = 
   return Math.max(40, Math.min(basePx, fitted));
 }
 
+// Formatting-preserving numeric count-up for the result value: "1:02.45"
+// at 40% renders as "0:24.98" — same shape, same decimal places — and
+// settles on the EXACT verified string at progress 1 (the original text is
+// returned verbatim, never a reformat). Non-numeric results ("DQ", "—")
+// pass through untouched at every progress value. Pure function — the
+// count is driven by the frame-derived progress channel.
+function countUpDisplay(text: string, progress: number): string {
+  const t = (text || "").trim();
+  if (progress >= 1 || !t) {
+    return text;
+  }
+  const p = Math.max(0, progress);
+  const mTime = t.match(/^(\d{1,2}):(\d{2})(?:\.(\d{1,2}))?$/);
+  if (mTime) {
+    // Integer maths in fractional-second units so float drift can never
+    // produce an impossible reading like "1:60.00" mid-count.
+    const minDigits = mTime[1].length;
+    const frac = mTime[3] || "";
+    const unit = Math.pow(10, frac.length); // ticks per second
+    const totalTicks =
+      (parseInt(mTime[1], 10) * 60 + parseInt(mTime[2], 10)) * unit +
+      (frac ? parseInt(frac, 10) : 0);
+    const scaledTicks = Math.floor(totalTicks * p);
+    const m = Math.floor(scaledTicks / (60 * unit));
+    const restTicks = scaledTicks - m * 60 * unit;
+    const secWhole = Math.floor(restTicks / unit);
+    const secStr = frac
+      ? `${String(secWhole).padStart(2, "0")}.${String(restTicks % unit).padStart(frac.length, "0")}`
+      : String(secWhole).padStart(2, "0");
+    return `${String(m).padStart(minDigits, "0")}:${secStr}`;
+  }
+  const mNum = t.match(/^(\d+)(?:\.(\d+))?$/);
+  if (mNum) {
+    const decimals = (mNum[2] || "").length;
+    return (parseFloat(t) * p).toFixed(decimals);
+  }
+  return text;
+}
+
 // Display ordinal for a numeric placing ("1" → "1ST"); non-numeric values
 // pass through untouched — never invent a placing that wasn't detected.
 function placeDisplay(place: string): string {
@@ -683,7 +752,8 @@ type SceneCtx = {
   firstName: string;
   label: string;
   event: string;
-  result: string;
+  result: string; // display text — mid-count during the count_up intent
+  resultFinal: string; // the verbatim verified value — use for fitting/crawls
   meet: string;
   club: string;
 };
@@ -981,10 +1051,11 @@ const HeroScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 const PosterScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, width, ts } = ctx;
   const isQuote = card.archetype === "quote_led_recap";
-  const megaIsResult = Boolean(ctx.result);
+  const megaIsResult = Boolean(ctx.resultFinal);
   const mega = megaIsResult ? ctx.result : ctx.surnameText;
+  // Fit against the FINAL value so the size never wobbles mid-count.
   const megaSize = fitLinePx(
-    mega,
+    megaIsResult ? ctx.resultFinal : ctx.surnameText,
     Math.round((megaIsResult ? 232 : 196) * ts),
     width - 180 * ts,
   );
@@ -1479,8 +1550,10 @@ const GridScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
 // Ticker strip — a sliding wire-service band carries the facts.
 const TickerScene: React.FC<{ ctx: SceneCtx }> = ({ ctx }) => {
   const { card, roles, anim, height, ts, frame, fps } = ctx;
-  // Honest ticker copy: only the card's real facts, repeated.
-  const bits = [ctx.label, ctx.surnameText, ctx.event, ctx.result, card.heroStat]
+  // Honest ticker copy: only the card's real facts, repeated. The crawl
+  // always carries the final verified value (a mid-count number scrolling
+  // by would read as a different result).
+  const bits = [ctx.label, ctx.surnameText, ctx.event, ctx.resultFinal, card.heroStat]
     .filter(Boolean)
     .join("  •  ");
   const tickerText = `${bits}  •  ${bits}  •  ${bits}`;
@@ -1890,7 +1963,8 @@ export const StoryCard: React.FC<Props> = ({ card, brand }) => {
     firstName: (card.athleteFirstName || "").toUpperCase(),
     label: (card.achievementLabel || "").toUpperCase(),
     event: card.eventName || "",
-    result: card.resultValue || "",
+    result: countUpDisplay(card.resultValue || "", anim.resultProgress),
+    resultFinal: card.resultValue || "",
     meet: card.meetName || "",
     club: (brand.displayName || brand.shortName || "").toUpperCase(),
   };

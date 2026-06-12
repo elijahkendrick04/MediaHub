@@ -18,9 +18,11 @@ reels. There are two ways it can do that, picked by `MEDIAHUB_REEL_ENGINE`:
 the same colour roles the still painted (medal tints included), reuses the
 still's saliency maths so a photo's subject stays in frame, and forwards the
 AI director's layout archetype and `motion_intent` to the composition. It can
-render three sizes — story (default), square, landscape — and writes a small
-`.json` manifest next to every cached Remotion MP4 saying *why* the video looks
-the way it does (which archetype, which motion, where the colours came from).
+render four sizes — story (default), portrait, square, landscape — and writes a
+small `.json` manifest next to every cached Remotion MP4 saying *why* the video
+looks the way it does (which archetype, which motion, where the colours came
+from, what audio was mixed). Every finished MP4 also gets a `.poster.png`
+sidecar — a single picked frame to use as the thumbnail.
 
 `reel_engine.py` is the little switchboard that reads the env var and says which
 engine is active (the health page shows its answer). Asking for an engine that
@@ -46,6 +48,26 @@ slot, so no cloud service is ever *required* by this interface. Piper's actual
 implementation arrives with roadmap P5.2; until then choosing it returns an
 honest error.
 
-Not done yet (on purpose): burning the subtitles into the video and stitching a whole
-narrated meet recap. The `.srt` is produced now; the rest waits until it can be tested
-on the real server.
+## narration.py + audio_mux.py — sound on the videos (off by default)
+
+Videos used to be silent. Now, when the operator opts in, they can carry sound:
+
+- `narration.py` writes the spoken script with **zero invention**: a fixed
+  template over the *same verified facts the video already shows* (name, event,
+  time, label, the honest cover stats). Times get a deterministic spoken form
+  ("1:02.45" → "1 minute 2.45 seconds"). There is no AI here. If the script
+  would run longer than the video, whole lines are dropped from the bottom of
+  the ranking — never sped up, never summarised.
+- `audio_mux.py` attaches the sound to the finished MP4 with FFmpeg: the
+  narration (spoken by the same `voiceover.py` engine, `MEDIAHUB_VOICEOVER=1`),
+  and/or a music bed from `MEDIAHUB_REEL_MUSIC_DIR` — a folder of music files
+  the **operator** has licensed (MediaHub ships no music and claims no rights).
+  The track is picked deterministically, ducked under the voice, trimmed and
+  faded to the video's exact length. The video pixels are never re-encoded.
+  If anything fails, the video ships **silent** and the manifest says why —
+  never a fake voice or placeholder track. It also pulls the `.poster.png`
+  thumbnail frame out of every finished video. Works for both engines
+  (Remotion and the free FFmpeg one).
+
+Not done yet (on purpose): burning the `.srt` subtitles into the video frames.
+The subtitle file is produced now; the burn-in rides the same mux seam later.
