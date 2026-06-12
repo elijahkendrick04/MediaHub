@@ -53,7 +53,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `9fedc9200` · Merge pull request #399: Docker image — Node 22 LTS + loud NodeSource failure
+**Last updated:** 2026-06-12 · `1fa8328e4` · Merge pull request #375: bump python from 3.12-slim to 3.14-slim
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
