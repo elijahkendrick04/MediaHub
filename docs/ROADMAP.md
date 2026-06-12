@@ -29,7 +29,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `40daecdf6` · Merge pull request #342: Format the whole back-catalogue; make repo hygiene blocking (whole-repo)
+**Last updated:** 2026-06-12 · `69c703ea0` · Merge pull request #344: Phase C build-out — PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall;
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -37,6 +37,8 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `950a19f7e` | Full-suite verification fixes: env inventory, wall-token route swept by isolation invariants |
+| 2026-06-11 | `943dff64a` | Phase C build-out: PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall; close PC.4's /pricing gat |
 | 2026-06-11 | `23b91e2ed` | chore: format the whole back-catalogue and make repo hygiene blocking |
 | 2026-06-11 | `db4953273` | style: ruff-format (pinned 0.8.4) on touched files |
 | 2026-06-11 | `64ca81ee6` | Motion ↔ still parity: archetype scenes, motion intents, role parity, formats, reel narrative |
@@ -45,8 +47,6 @@ in any commit message to move an item:
 | 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
 | 2026-06-11 | `42ae68f42` | fix: a11y: Documents must have <title> element to aid in navigati (#332) |
 | 2026-06-11 | `001d28a7d` | autotest: close the loop — state-branch memory, fixed lifecycle, deploy grace, judge grounding |
-| 2026-06-11 | `d990843fe` | docs(roadmap): add manual Changelog section + 2026-06-11 daily scan entry |
-| 2026-06-11 | `9b5e37a89` | docs(research): product ideas backlog — June 2026 research pass |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -59,10 +59,7 @@ Standing context).
 <!-- ROADMAP:TODO -->
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
-- **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account · ❌ **NOT STARTED**
-- **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) · ❌ **NOT STARTED**
 - **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
-- **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") · ❌ **NOT STARTED**
 - **W.1** · Phase W (selectable) — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) · ❌ **NOT STARTED**
 - **W.2** · Phase W (selectable) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
 - **W.3** · Phase W (selectable) — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs · ❌ **NOT STARTED**
@@ -139,6 +136,9 @@ Standing context).
 - ✅ **P2.2** · Phase 2 — Human-approval signal = the autonomy toggle (gated types pause on `workflow.CardStatus` QUEUE → APPROVED → POSTED) *(completed 2026-06-11)*
 - ✅ **P2.3** · Phase 2 — Single per-type publish gate: provenance/trust + brand-safety + rate limit + global kill switch on `SafeToPost`; reconcile the two `AutonomyLevel` enums *(completed 2026-06-11)*
 - ✅ **PC.3** · Phase C 🥇 — True multi-tenancy: org → workspace in one shared instance (the #1 scaling fix; single-instance-per-club collapses at ~15–40 clubs). Schema needs operator/Council sign-off — it touches the locked ADR-0003 isolation invariant *(completed 2026-06-11)*
+- ✅ **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account *(completed 2026-06-12)*
+- ✅ **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) *(completed 2026-06-12)*
+- ✅ **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") *(completed 2026-06-12)*
 <!-- /ROADMAP:DONE -->
 
 ## Standing context
