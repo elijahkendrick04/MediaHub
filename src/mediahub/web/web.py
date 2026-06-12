@@ -19759,7 +19759,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     # Unconfigured deployments get an honest "not available here" page —
     # never a fake "we sent you an email".
 
-    def _email_unavailable_page(title: str):
+    def _email_unavailable_page(title: str, *, status: int = 503):
+        """The honest "email isn't configured here" page.
+
+        Actions (POSTs) return it as a 503; informational GET surfaces
+        return it as a 200 — the B5 API contract pins that no GET route
+        answers 5xx, and the unconfigured /billing page set the precedent.
+        """
         from mediahub.web.legal import CONTACT_EMAIL
 
         return (
@@ -19772,7 +19778,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 "and we'll sort it manually.</p></div>",
                 active="signin",
             ),
-            503,
+            status,
         )
 
     def _account_email_card(inner: str, *, title: str, heading: str, lede: str) -> str:
@@ -19791,7 +19797,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         from mediahub.web import account_tokens as _tokens
 
         if not email_configured():
-            return _email_unavailable_page("Password reset unavailable")
+            # Honest unavailable state: the GET page renders at 200 (no GET
+            # surface may 5xx — B5 API contract); the POST action is a 503.
+            return _email_unavailable_page(
+                "Password reset unavailable",
+                status=503 if request.method == "POST" else 200,
+            )
         if request.method == "POST":
             if _auth_rate_limited("pwreset"):
                 return _auth_rate_limit_response()

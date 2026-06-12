@@ -67,11 +67,17 @@ def _reset_link_from(text: str) -> str:
 # ---- honest-unavailable state ----------------------------------------------
 
 
-def test_forgot_password_unconfigured_is_honest_503(app_world):
+def test_forgot_password_unconfigured_is_honest(app_world):
+    """Unconfigured email: the GET page explains honestly at 200 (the B5
+    API contract pins that no GET surface answers 5xx); the POST action —
+    the thing that genuinely can't be performed — answers 503."""
     c = app_world["app"].test_client()
     r = c.get("/password/forgot")
-    assert r.status_code == 503
+    assert r.status_code == 200
     assert "not" in r.get_data(as_text=True).lower()
+    assert "configured" in r.get_data(as_text=True).lower()
+    r = c.post("/password/forgot", data={"email": "coach@club.org"})
+    assert r.status_code == 503
 
 
 # ---- the reset flow ---------------------------------------------------------
