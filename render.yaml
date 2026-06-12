@@ -72,15 +72,6 @@ services:
         generateValue: true
       - key: FLASK_ENV
         value: production
-      # Operator developer sign-in (OPTIONAL). Set a long random secret in
-      # the dashboard to make the home-page "Developer access" link and the
-      # /developer route exist; unset it to instantly revoke every operator
-      # session. Without it the affordance is absent by design — never an
-      # accidental public backdoor. (MEDIAHUB_DEV_OPEN=1 is the passwordless
-      # development-only variant; do not enable it on a deployment holding
-      # real customer data.) See .env.example for the full notes.
-      - key: MEDIAHUB_DEV_KEY
-        sync: false
       # --- In-container SearXNG metasearch (Capability 3, OPTIONAL) ---
       # Runs stock SearXNG as a localhost-only process INSIDE this container —
       # no new service, no extra cost. It uses ~150-250 MB RAM; Playwright /
