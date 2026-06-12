@@ -171,14 +171,14 @@ def test_pricing_commits_evidence_derived_price_once_gate_met(monkeypatch, tmp_p
 def test_checkout_creates_session_with_env_price(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, with_stripe=True)
     c = app.test_client()
-    c.post("/signup", data={"email": "buyer@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "buyer@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
 
     fake_session = mock.MagicMock()
     fake_session.url = "https://checkout.stripe.test/sess_123"
     with mock.patch("stripe.checkout.Session.create", return_value=fake_session) as m:
-        r = c.post(
-            "/billing/checkout", data={"plan": "club", "immediate_supply": "1"}
-        )
+        r = c.post("/billing/checkout", data={"plan": "club", "immediate_supply": "1"})
 
     assert r.status_code == 303
     assert r.headers["Location"] == "https://checkout.stripe.test/sess_123"
@@ -192,7 +192,9 @@ def test_checkout_creates_session_with_env_price(monkeypatch, tmp_path):
 def test_checkout_rejects_unknown_plan(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, with_stripe=True)
     c = app.test_client()
-    c.post("/signup", data={"email": "buyer@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "buyer@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     r = c.post("/billing/checkout", data={"plan": "free"})
     assert r.status_code == 400
 
@@ -210,7 +212,10 @@ def test_portal_creates_session(monkeypatch, tmp_path):
     from mediahub.web import auth
 
     c = app.test_client()
-    c.post("/signup", data={"email": "member@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup",
+        data={"email": "member@club.org", "password": "twelvechars1", "accept_terms": "1"},
+    )
     # Give them a customer id so the portal has something to open.
     auth.UserStore().set_plan("member@club.org", "club", stripe_customer_id="cus_test9")
 
@@ -227,7 +232,10 @@ def test_portal_creates_session(monkeypatch, tmp_path):
 def test_portal_without_customer_id_is_clean_error(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, with_stripe=True)
     c = app.test_client()
-    c.post("/signup", data={"email": "nocust@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup",
+        data={"email": "nocust@club.org", "password": "twelvechars1", "accept_terms": "1"},
+    )
     r = c.post("/billing/portal")
     assert r.status_code == 400  # clean, not a 500
 
@@ -251,7 +259,9 @@ def test_webhook_rejects_forged_signature(monkeypatch, tmp_path):
 def test_webhook_completed_sets_plan_club(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, with_stripe=True)
     c = app.test_client()
-    c.post("/signup", data={"email": "w1@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "w1@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
 
     payload = _event(
         "checkout.session.completed",
@@ -278,7 +288,9 @@ def test_webhook_subscription_deleted_reverts_to_free(monkeypatch, tmp_path):
     from mediahub.web import auth
 
     c = app.test_client()
-    c.post("/signup", data={"email": "w2@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "w2@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     auth.UserStore().set_plan("w2@club.org", "club", stripe_customer_id="cus_w2")
 
     payload = _event(
@@ -297,7 +309,9 @@ def test_webhook_subscription_deleted_reverts_to_free(monkeypatch, tmp_path):
 def test_webhook_updated_to_federation(monkeypatch, tmp_path):
     app = _make_app(monkeypatch, tmp_path, with_stripe=True)
     c = app.test_client()
-    c.post("/signup", data={"email": "w3@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "w3@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
 
     payload = _event(
         "customer.subscription.updated",
@@ -319,7 +333,9 @@ def test_webhook_matches_user_by_customer_id(monkeypatch, tmp_path):
     from mediahub.web import auth
 
     c = app.test_client()
-    c.post("/signup", data={"email": "w4@club.org", "password": "twelvechars1", "accept_terms": "1"})
+    c.post(
+        "/signup", data={"email": "w4@club.org", "password": "twelvechars1", "accept_terms": "1"}
+    )
     auth.UserStore().set_plan("w4@club.org", "club", stripe_customer_id="cus_w4")
 
     payload = _event(

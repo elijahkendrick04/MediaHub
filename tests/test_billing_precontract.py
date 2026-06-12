@@ -83,13 +83,9 @@ def test_checkout_records_cooling_off_acknowledgement(app, tmp_path):
     fake_session = mock.MagicMock()
     fake_session.url = "https://checkout.stripe.test/sess_1"
     with mock.patch("stripe.checkout.Session.create", return_value=fake_session):
-        r = c.post(
-            "/billing/checkout", data={"plan": "club", "immediate_supply": "1"}
-        )
+        r = c.post("/billing/checkout", data={"plan": "club", "immediate_supply": "1"})
     assert r.status_code == 303
     from mediahub.web import legal
 
-    acc = legal.AcceptanceStore().latest(
-        "buyer@club.org", legal.DOC_COOLING_OFF, org_id="club"
-    )
+    acc = legal.AcceptanceStore().latest("buyer@club.org", legal.DOC_COOLING_OFF, org_id="club")
     assert acc is not None and acc.accepted_at

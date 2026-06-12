@@ -93,9 +93,7 @@ def test_prompt_carries_name_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("MEDIAHUB_LLM_PSEUDONYMISE", raising=False)
     from mediahub.web import ai_caption
 
-    with mock.patch.object(
-        ai_caption, "call_claude", return_value="Jane Smith flew to a PB!"
-    ) as m:
+    with mock.patch.object(ai_caption, "call_claude", return_value="Jane Smith flew to a PB!") as m:
         out = ai_caption.generate_caption_for_tone(_achievement())
     assert "Jane Smith" in m.call_args.kwargs["user"]
     assert out == "Jane Smith flew to a PB!"

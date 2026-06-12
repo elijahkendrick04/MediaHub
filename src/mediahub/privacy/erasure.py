@@ -149,9 +149,7 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         try:
             from mediahub.memory import store as memory_store
 
-            report["memory_rows"] = memory_store.delete_run(
-                tenant_id=profile_id, run_id=run_id
-            )
+            report["memory_rows"] = memory_store.delete_run(tenant_id=profile_id, run_id=run_id)
         except Exception as exc:
             log.warning("erasure: memory sweep failed for %s: %s", run_id, exc)
     try:
@@ -321,14 +319,10 @@ def erase_athlete(profile_id: str, name: str, club: str = "") -> AthleteErasureR
             if frag not in json.dumps(payload, default=str).lower():
                 continue
             run_id = str(payload.get("run_id") or run_file.stem)
-            stripped, n_cards, n_other, removed_ids = _strip_athlete_from_payload(
-                payload, frag
-            )
+            stripped, n_cards, n_other, removed_ids = _strip_athlete_from_payload(payload, frag)
             stripped = _redact_strings(stripped, name)
             try:
-                run_file.write_text(
-                    json.dumps(stripped, indent=2, default=str), encoding="utf-8"
-                )
+                run_file.write_text(json.dumps(stripped, indent=2, default=str), encoding="utf-8")
             except OSError as exc:
                 log.warning("erasure: could not rewrite %s: %s", run_file, exc)
                 continue

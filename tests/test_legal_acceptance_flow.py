@@ -78,9 +78,7 @@ def test_login_routes_stale_acceptance_through_reaccept(client, monkeypatch):
     client.get("/logout")
     # Simulate a Terms revision after this account accepted.
     monkeypatch.setattr(legal, "TERMS_VERSION", "2099-01-01")
-    r = client.post(
-        "/login", data={"email": "officer@club.org", "password": "twelvechars1"}
-    )
+    r = client.post("/login", data={"email": "officer@club.org", "password": "twelvechars1"})
     assert r.status_code == 302
     assert "/legal/accept" in r.headers["Location"]
 
@@ -97,9 +95,7 @@ def test_reaccept_page_and_post_record_new_version(client, monkeypatch):
     assert "2099-01-01" in page.get_data(as_text=True)
     r = client.post("/legal/accept", data={"accept_terms": "1"})
     assert r.status_code == 302
-    assert legal.AcceptanceStore().has_accepted(
-        "officer@club.org", legal.DOC_TERMS, "2099-01-01"
-    )
+    assert legal.AcceptanceStore().has_accepted("officer@club.org", legal.DOC_TERMS, "2099-01-01")
 
 
 def test_terms_gate_blocks_navigation_until_reaccepted(app, monkeypatch):
@@ -152,9 +148,7 @@ def test_org_setup_requires_attestation_when_enforced(app, tmp_path):
     )
     assert r.status_code in (200, 302)
     assert store.org_has_acceptance("sharks-sc", legal.DOC_DPA, legal.DPA_VERSION)
-    assert store.org_has_acceptance(
-        "sharks-sc", legal.DOC_DATA_ATTESTATION, legal.DPA_VERSION
-    )
+    assert store.org_has_acceptance("sharks-sc", legal.DOC_DATA_ATTESTATION, legal.DPA_VERSION)
 
 
 def test_org_setup_attestation_not_required_twice(app):
@@ -170,9 +164,7 @@ def test_org_setup_attestation_not_required_twice(app):
             "confirm_lawful_basis": "1",
         },
     )
-    assert legal.AcceptanceStore().org_has_acceptance(
-        "orcas-sc", legal.DOC_DPA, legal.DPA_VERSION
-    )
+    assert legal.AcceptanceStore().org_has_acceptance("orcas-sc", legal.DOC_DPA, legal.DPA_VERSION)
     # Re-running setup for the same workspace doesn't demand the boxes again:
     # the update (org_type change) goes through without the checkboxes.
     r = client.post(

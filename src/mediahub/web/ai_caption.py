@@ -130,7 +130,7 @@ _NO_COURSE_ABBREV_INSTRUCTION: str = (
 )
 
 _SHARED_TONE_BANS: str = (
-    'Do not open with "Another …" or "What a …"; never use the phrase ' '"testament to".'
+    'Do not open with "Another …" or "What a …"; never use the phrase "testament to".'
 )
 
 
@@ -189,7 +189,7 @@ def _locale_instruction(club_profile) -> str:
         "northern ireland",
     }
     if country.lower() in uk_names:
-        return "Write in British English (programme, recognise, centre, " "organise; metres)."
+        return "Write in British English (programme, recognise, centre, organise; metres)."
     return f"Write in the natural English variant for {country}."
 
 
@@ -237,14 +237,14 @@ _PLATFORM_SPECS: dict[str, dict] = {
         "label": "Instagram/Facebook feed",
         "max_chars": 280,
         "guidance": (
-            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally " "in a feed scroll"
+            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally in a feed scroll"
         ),
     },
     "story": {
         "label": "Instagram/TikTok story",
         "max_chars": 100,
         "guidance": (
-            "punchy single sentence, no hashtags, fits on a visual card, " "immediate impact"
+            "punchy single sentence, no hashtags, fits on a visual card, immediate impact"
         ),
     },
     "x": {
@@ -387,16 +387,12 @@ def _pseudonymise_prose(prose: str, swimmer_name: str) -> tuple[str, bool]:
     out = re.sub(re.escape(name), _PSEUDONYM_TOKEN, prose, flags=re.IGNORECASE)
     first = name.split()[0]
     if len(first) >= 3 and first.lower() != _PSEUDONYM_TOKEN.lower():
-        out = re.sub(
-            rf"\b{re.escape(first)}\b", _PSEUDONYM_TOKEN, out, flags=re.IGNORECASE
-        )
+        out = re.sub(rf"\b{re.escape(first)}\b", _PSEUDONYM_TOKEN, out, flags=re.IGNORECASE)
     return out, out != prose
 
 
 def _restore_pseudonym(text: str, swimmer_name: str) -> str:
-    return re.sub(
-        re.escape(_PSEUDONYM_TOKEN), swimmer_name.strip(), text, flags=re.IGNORECASE
-    )
+    return re.sub(re.escape(_PSEUDONYM_TOKEN), swimmer_name.strip(), text, flags=re.IGNORECASE)
 
 
 def generate_caption_for_tone(
@@ -747,8 +743,7 @@ def generate_platform_variants(
     for platform in target_platforms:
         spec = _PLATFORM_SPECS[platform]
         system_parts = [
-            f"You are a sports social-media writer. Adapt the given caption "
-            f"for {spec['label']}.",
+            f"You are a sports social-media writer. Adapt the given caption for {spec['label']}.",
             f"Rules: {spec['guidance']}. Maximum {spec['max_chars']} characters.",
             "Keep all factual details exactly as in the original caption. "
             "Output ONLY the adapted caption — no preamble, no quotes, "

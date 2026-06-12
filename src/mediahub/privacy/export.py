@@ -46,9 +46,7 @@ def account_export(email: str) -> dict:
         from mediahub.web.legal import AcceptanceStore
 
         store = AcceptanceStore()
-        out["legal_acceptances"] = [
-            row for row in store._rows() if row.get("email") == norm
-        ]
+        out["legal_acceptances"] = [row for row in store._rows() if row.get("email") == norm]
     except Exception:
         pass
 

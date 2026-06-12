@@ -25,13 +25,24 @@ def _seed_run(data_dir, run_id="run1", profile_id="sharks", athlete="Jane Smith"
     payload = {
         "run_id": run_id,
         "profile_id": profile_id,
-        "meet": {"name": "Spring Open", "swims": [
-            {"first_name": "Jane", "last_name": "Smith", "event": "100 Free", "time": "58.21"},
-            {"first_name": "Tom", "last_name": "Jones", "event": "100 Free", "time": "55.10"},
-        ]},
+        "meet": {
+            "name": "Spring Open",
+            "swims": [
+                {"first_name": "Jane", "last_name": "Smith", "event": "100 Free", "time": "58.21"},
+                {"first_name": "Tom", "last_name": "Jones", "event": "100 Free", "time": "55.10"},
+            ],
+        },
         "cards": [
-            {"card_id": "c-jane", "title": f"PB for {athlete}!", "caption": f"{athlete} smashed it"},
-            {"card_id": "c-tom", "title": "PB for Tom Jones!", "caption": "Tom Jones flying — and Jane Smith cheered"},
+            {
+                "card_id": "c-jane",
+                "title": f"PB for {athlete}!",
+                "caption": f"{athlete} smashed it",
+            },
+            {
+                "card_id": "c-tom",
+                "title": "PB for Tom Jones!",
+                "caption": "Tom Jones flying — and Jane Smith cheered",
+            },
         ],
     }
     (runs / f"{run_id}.json").write_text(json.dumps(payload))
