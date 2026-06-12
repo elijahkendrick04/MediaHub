@@ -152,6 +152,7 @@ class Sentinel:
                 },
                 self._data_dir,
             )
+            self._file_issue(finding, state)
 
         allowed, reason = playbook.action_decision(
             finding.issue_id,
@@ -177,6 +178,68 @@ class Sentinel:
         st.remember_issue(state, finding.issue_id, last_seen=now, last_acted=now)
         st.record_action(state)
         return remediation.action if remediation else None
+
+    # -- GitHub escalation -------------------------------------------------------
+
+    def _file_issue(self, finding: Finding, state: dict) -> None:
+        """One open GitHub issue per issue id (the roadmap escalation path).
+
+        Runs inside the notify window, so a noisy finding costs one API check
+        per window. Files only when there's no remembered issue or the
+        remembered one is CLOSED; on any API doubt it files nothing and
+        retries next window (a duplicate storm is worse than a late issue)."""
+        try:
+            from mediahub.log_sentinel import github_issues as gh  # noqa: PLC0415
+        except Exception:
+            return
+        if not gh.is_configured():
+            return
+        mem = st.issue_memory(state, finding.issue_id)
+        number = int(mem.get("issue_number") or 0)
+        if number:
+            issue_state = gh.issue_state(number)
+            if issue_state == "open":
+                detail = f"already open as #{number}"
+            elif issue_state is None:
+                detail = f"state check for #{number} failed; retry next window"
+            else:
+                detail = ""
+            if detail:
+                st.append_audit(
+                    {
+                        "kind": "issue",
+                        "issue_id": finding.issue_id,
+                        "created": False,
+                        "detail": detail,
+                    },
+                    self._data_dir,
+                )
+                return
+        try:
+            created = gh.create_issue(finding, _public_base_url())
+        except Exception as e:
+            st.append_audit(
+                {
+                    "kind": "issue",
+                    "issue_id": finding.issue_id,
+                    "created": False,
+                    "detail": str(e)[:300],
+                },
+                self._data_dir,
+            )
+            return
+        st.remember_issue(state, finding.issue_id, issue_number=created["number"])
+        st.append_audit(
+            {
+                "kind": "issue",
+                "issue_id": finding.issue_id,
+                "created": True,
+                "number": created["number"],
+                "url": created["url"],
+            },
+            self._data_dir,
+        )
+        log.info("sentinel filed issue #%s for %s", created["number"], finding.issue_id)
 
     # -- actions ----------------------------------------------------------------
 

@@ -41,6 +41,21 @@ Render Logs API with a strict autonomy posture:
   total outage any better; the in-app leader-elected thread is £0 and the
   total-outage case is Render's own `/healthz` health check's job.
 
+## Addendum (2026-06-12): GitHub-issue escalation chosen by the operator
+
+Offered three escalation levels for code-level findings — notify-only,
+auto-file GitHub issues, auto-spawn fix sessions — the operator chose
+**auto-filed issues, surfaced on the roadmap**. Implemented as
+`log_sentinel/github_issues.py` (one open `sentinel`-labelled issue per issue
+id, re-filed only after close + recurrence, inert without
+`MEDIAHUB_SENTINEL_GITHUB_TOKEN`/`_REPO`) plus a `ROADMAP:SENTINEL` marker
+block in `docs/ROADMAP.md` that the roadmap-autoupdate workflow fills from
+open `sentinel` issues (fail-soft: an API error leaves the block untouched).
+Auto-spawning coding sessions stays rejected-for-now: the SearXNG incident
+itself was green in CI, so an unattended log→code→auto-merge loop can deploy
+a plausible-but-wrong fix; issues keep a human (or a human-started session)
+at the wheel.
+
 ## Consequences
 
 - A degraded-but-up deployment now pings the operator within ~1 minute with a

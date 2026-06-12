@@ -101,6 +101,13 @@ services:
       # per docs/LOG_SENTINEL.md (double opt-in + kill switch + caps).
       - key: MEDIAHUB_SENTINEL_AUTOFIX
         value: "0"
+      # GitHub escalation: findings filed as `sentinel` issues that appear in
+      # docs/ROADMAP.md -> "Production findings". Fine-grained PAT (Issues RW
+      # on this repo only), operator-set in the dashboard.
+      - key: MEDIAHUB_SENTINEL_GITHUB_TOKEN
+        sync: false
+      - key: MEDIAHUB_SENTINEL_GITHUB_REPO
+        value: elijahkendrick04/MediaHub
       - key: MEDIAHUB_PUBLIC_BASE_URL
         value: https://mediahub-gzwc.onrender.com
     disk:

@@ -6,4 +6,6 @@ memory, full disk, failing requests), and sends the operator a push message
 saying what happened and what to do. For a small, explicitly approved list of
 problems it can also apply the fix itself (restart the service) — but only when
 you turn that on, never more than a few times a day, and it writes everything it
-sees and does into an audit log. Full guide: `docs/LOG_SENTINEL.md`.
+sees and does into an audit log. It can also file each problem as a GitHub
+issue that shows up on the roadmap until someone fixes and closes it. Full
+guide: `docs/LOG_SENTINEL.md`.

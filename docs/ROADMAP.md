@@ -149,6 +149,19 @@ Standing context).
 - ✅ **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") *(completed 2026-06-12)*
 <!-- /ROADMAP:DONE -->
 
+**Production findings (auto-filed by the log sentinel)**
+
+Open problems the in-app log sentinel spotted in production logs and filed as
+GitHub issues (label `sentinel`) — each is a real, evidenced fault waiting for
+a code fix, so treat this list as roadmap to-do items sourced from production
+rather than from planning. The block refreshes with the rest of this Status
+section; **closing the issue clears it from here**. How the bot works:
+[`LOG_SENTINEL.md`](LOG_SENTINEL.md).
+
+<!-- ROADMAP:SENTINEL -->
+_No open production findings — the log sentinel has nothing filed._
+<!-- /ROADMAP:SENTINEL -->
+
 ## Standing context
 
 The short list of decided, load-bearing principles — full reasoning in the

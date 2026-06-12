@@ -236,6 +236,55 @@ def render_activity(commits) -> str:
     return "\n".join(rows)
 
 
+def render_sentinel_block(issues) -> str:
+    """Render the "Production findings" list from open ``sentinel`` issues.
+
+    ``issues`` is a list of dicts with ``number``, ``html_url``, ``title`` and
+    ``created_at`` (the GitHub issues API shape). Closing an issue removes it
+    here on the next refresh — the issue tracker is the source of truth."""
+    if not issues:
+        return "_No open production findings — the log sentinel has nothing filed._"
+    rows = []
+    for it in issues:
+        title = _md_escape(str(it.get("title") or "").removeprefix("[sentinel]").strip())
+        opened = str(it.get("created_at") or "")[:10]
+        number = it.get("number")
+        url = str(it.get("html_url") or "")
+        rows.append(f"- [#{number}]({url}) · {title} *(opened {opened or 'unknown'})*")
+    return "\n".join(rows)
+
+
+def _fetch_sentinel_issues():
+    """Open issues labelled ``sentinel`` via the GitHub API, or None on ANY
+    failure — the caller then leaves the block untouched rather than blanking
+    real findings over a transient API error. Stdlib-only (the workflow's
+    runner installs nothing)."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+    if not repo or not token:
+        return None
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/issues?labels=sentinel&state=open&per_page=50",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"warning: sentinel issue fetch failed: {e}", file=sys.stderr)
+        return None
+    if not isinstance(data, list):
+        return None
+    # The issues API also returns PRs; a PR carries a "pull_request" key.
+    return [it for it in data if isinstance(it, dict) and "pull_request" not in it]
+
+
 def _md_escape(s: str) -> str:
     return (s or "").replace("|", "\\|").strip()[:100]
 
@@ -303,6 +352,12 @@ def main() -> int:
 
     # 3. recent-activity feed
     text, _ = replace_block(text, "ACTIVITY", render_activity(_recent_commits()))
+
+    # 4. production findings — open `sentinel` issues (docs/LOG_SENTINEL.md).
+    # None => API unavailable; keep the existing block rather than blank it.
+    sentinel_issues = _fetch_sentinel_issues()
+    if sentinel_issues is not None:
+        text, _ = replace_block(text, "SENTINEL", render_sentinel_block(sentinel_issues))
 
     if text != original:
         ROADMAP.write_text(text, encoding="utf-8")

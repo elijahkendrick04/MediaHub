@@ -79,6 +79,28 @@ config changes are notified with a precise diagnosis instead — those belong in
 a human's hands (or a Claude Code session), not a log-watching daemon. The
 decision record is [`adr/0017-log-sentinel-bounded-autoremediation.md`](adr/0017-log-sentinel-bounded-autoremediation.md).
 
+## GitHub issues + the roadmap (the "track the fix" path)
+
+With `MEDIAHUB_SENTINEL_GITHUB_TOKEN` + `MEDIAHUB_SENTINEL_GITHUB_REPO` set,
+every notified finding is **also filed as a GitHub issue** (label `sentinel`)
+carrying the same diagnosis and log evidence. The rules:
+
+- **One open issue per problem.** A finding that keeps firing never spams the
+  tracker — the sentinel checks its remembered issue and skips while it's
+  open. Close the issue when fixed; if the problem comes back later, a fresh
+  issue is filed.
+- **Issues land on the roadmap automatically.** The roadmap workflow lists all
+  open `sentinel` issues in `docs/ROADMAP.md` → *Production findings*, so
+  production-discovered work sits next to planned work. Closing the issue
+  clears it from the list on the next refresh.
+- **Fix workflow:** open the issue, hand it to a Claude Code session (or fix it
+  by hand), merge the PR, close the issue. The notification was the alarm; the
+  issue is the tracked unit of work; the closed issue is the receipt.
+
+Token setup: GitHub → Settings → Developer settings → Fine-grained personal
+access tokens → scope it to this one repository with **Issues: Read and
+write** only. It's a secret — Render env only, never committed.
+
 ## Where its memory lives
 
 Everything is under `DATA_DIR/log_sentinel/` on the persistent disk:

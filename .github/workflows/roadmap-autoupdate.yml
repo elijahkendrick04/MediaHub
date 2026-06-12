@@ -43,6 +43,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: read  # the "Production findings" block lists open `sentinel` issues
 
 concurrency:
   group: roadmap-autoupdate
@@ -69,6 +70,9 @@ jobs:
 
       - name: Refresh ROADMAP.md
         env:
+          # For the sentinel-issues fetch (read-only; fail-soft to "leave the
+          # block as it was" when the API is unreachable).
+          GITHUB_TOKEN: ${{ github.token }}
           ROADMAP_BEFORE: ${{ github.event.before }}
           ROADMAP_AFTER: ${{ github.sha }}
         run: python scripts/roadmap_autoupdate.py

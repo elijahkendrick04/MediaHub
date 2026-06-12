@@ -13,7 +13,7 @@ import time
 import pytest
 import requests
 
-from mediahub.log_sentinel import detectors, playbook, render_api, sentinel
+from mediahub.log_sentinel import detectors, github_issues, playbook, render_api, sentinel
 from mediahub.log_sentinel import state as st
 from mediahub.log_sentinel.render_api import LogLine
 
@@ -33,12 +33,16 @@ def clean_env(monkeypatch):
         "MEDIAHUB_SENTINEL_ACTION_COOLDOWN",
         "MEDIAHUB_SENTINEL_NOTIFY_COOLDOWN",
         "MEDIAHUB_SENTINEL_RESTART_GRACE",
+        "MEDIAHUB_SENTINEL_GITHUB_TOKEN",
+        "MEDIAHUB_SENTINEL_GITHUB_REPO",
+        "MEDIAHUB_SENTINEL_GITHUB_API",
         "MEDIAHUB_NTFY_TOPIC",
         "MEDIAHUB_NOTIFY_WEBHOOK",
     ):
         monkeypatch.delenv(k, raising=False)
     render_api._owner_cache = None
     render_api._time_style["style"] = "rfc3339"
+    github_issues._label_ready = False
     yield
 
 
@@ -401,6 +405,117 @@ def test_run_once_survives_api_outage(tmp_path, monkeypatch):
     summary = sentinel.Sentinel(str(tmp_path)).run_once()
     assert summary["last_poll_ok"] is False
     assert "503" in summary["detail"]
+
+
+# --- GitHub issue escalation ----------------------------------------------------
+
+def _gh_configure(monkeypatch):
+    monkeypatch.setenv("MEDIAHUB_SENTINEL_GITHUB_TOKEN", "ghp_test")
+    monkeypatch.setenv("MEDIAHUB_SENTINEL_GITHUB_REPO", "owner/repo")
+
+
+def _finding(issue_id="worker_timeout", title="Gunicorn worker timeout (wedged request)"):
+    return detectors.Finding(
+        issue_id=issue_id,
+        severity="critical",
+        title=title,
+        suggestion="Do the thing.",
+        count=2,
+        evidence=("2026-06-12T08:00:00Z [CRITICAL] WORKER TIMEOUT (pid:90)",),
+    )
+
+
+def test_github_issues_inert_unconfigured():
+    assert github_issues.is_configured() is False
+    with pytest.raises(github_issues.GithubIssuesUnavailable):
+        github_issues.create_issue(_finding())
+
+
+def test_github_issues_create_ensures_label_and_posts(monkeypatch):
+    _gh_configure(monkeypatch)
+    calls = []
+
+    def fake_request(method, url, params=None, json=None, headers=None, timeout=None):
+        calls.append({"method": method, "url": url, "json": json})
+        assert headers["Authorization"] == "Bearer ghp_test"
+        if method == "GET" and url.endswith("/labels/sentinel"):
+            return _FakeResp(404, {})
+        if method == "POST" and url.endswith("/labels"):
+            return _FakeResp(201, {"name": "sentinel"})
+        if method == "POST" and url.endswith("/issues"):
+            assert json["labels"] == ["sentinel"]
+            assert json["title"].startswith("[sentinel] ")
+            assert "WORKER TIMEOUT" in json["body"]
+            return _FakeResp(201, {"number": 42, "html_url": "https://gh/i/42"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    out = github_issues.create_issue(_finding(), "https://app.example")
+    assert out == {"number": 42, "url": "https://gh/i/42"}
+    # Label ensured exactly once per process even across creates.
+    github_issues.create_issue(_finding())
+    label_checks = [c for c in calls if c["url"].endswith("/labels/sentinel")]
+    assert len(label_checks) == 1
+
+
+def test_github_issue_state(monkeypatch):
+    _gh_configure(monkeypatch)
+    monkeypatch.setattr(
+        requests, "request", lambda *a, **k: _FakeResp(200, {"state": "closed"})
+    )
+    assert github_issues.issue_state(7) == "closed"
+    monkeypatch.setattr(requests, "request", lambda *a, **k: _FakeResp(500, {}))
+    assert github_issues.issue_state(7) is None
+
+
+def test_sentinel_files_issue_once_while_open(tmp_path, monkeypatch):
+    _configure(monkeypatch)
+    _gh_configure(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_SENTINEL_NOTIFY_COOLDOWN", "0")
+    d = str(tmp_path)
+    lines = [_line("[CRITICAL] WORKER TIMEOUT (pid:90)", epoch=2000.0)]
+    monkeypatch.setattr(render_api, "fetch_log_lines", lambda c, **k: (lines, 2000.0))
+    created = {"n": 0}
+
+    def fake_create(finding, base=""):
+        created["n"] += 1
+        return {"number": 10 + created["n"], "url": "https://gh/i"}
+
+    monkeypatch.setattr(github_issues, "create_issue", fake_create)
+    states = {"value": "open"}
+    monkeypatch.setattr(github_issues, "issue_state", lambda n: states["value"])
+    s = sentinel.Sentinel(d)
+    s.run_once()
+    assert created["n"] == 1  # filed
+    s.run_once()
+    assert created["n"] == 1  # still open => deduped
+    states["value"] = "closed"
+    s.run_once()
+    assert created["n"] == 2  # closed + recurred => fresh issue
+    issue_audit = [e for e in st.read_audit_tail(50, d) if e["kind"] == "issue"]
+    assert [e["created"] for e in issue_audit] == [True, False, True]
+    assert st.issue_memory(st.load_state(d), "worker_timeout")["issue_number"] == 12
+
+
+def test_sentinel_skips_issue_on_api_doubt(tmp_path, monkeypatch):
+    _configure(monkeypatch)
+    _gh_configure(monkeypatch)
+    monkeypatch.setenv("MEDIAHUB_SENTINEL_NOTIFY_COOLDOWN", "0")
+    d = str(tmp_path)
+    lines = [_line("[CRITICAL] WORKER TIMEOUT (pid:90)", epoch=2000.0)]
+    monkeypatch.setattr(render_api, "fetch_log_lines", lambda c, **k: (lines, 2000.0))
+    created = {"n": 0}
+
+    def fake_create(finding, base=""):
+        created["n"] += 1
+        return {"number": 11, "url": "https://gh/i"}
+
+    monkeypatch.setattr(github_issues, "create_issue", fake_create)
+    monkeypatch.setattr(github_issues, "issue_state", lambda n: None)  # API erring
+    s = sentinel.Sentinel(d)
+    s.run_once()  # no remembered issue yet => files
+    s.run_once()  # state check fails => must NOT file a duplicate
+    assert created["n"] == 1
 
 
 def test_notification_delivery_via_webhook(tmp_path, monkeypatch):
