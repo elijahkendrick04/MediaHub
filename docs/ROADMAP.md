@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `e3968785c` · Merge pull request #373 from elijahkendrick04/dependabot/github_actions/actions/cache-5
+**Last updated:** 2026-06-12 · `cd5578063` · Merge pull request #379 from elijahkendrick04/dependabot/github_actions/actions/upload-artifact-7
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -385,7 +385,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
 | 2026-06-12 | `636d1df01` | fix: unconfigured GET /password/forgot answers 200, POST stays 503 |
 | 2026-06-12 | `27f27cb63` | docs: package READMEs for backup/, privacy org lifecycle, referrals |
-| 2026-06-12 | `32ff4edba` | docs: mark compliance-handover items 11+12 resolved (PC.11/PC.12) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
