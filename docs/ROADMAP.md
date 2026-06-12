@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `f30170f5b` · Merge pull request #346: UK/EU data-protection compliance + ASVS L2 security hardening (Phases 0–4)
+**Last updated:** 2026-06-12 · `75aaa9218` · fix: a11y: <html> element must have a lang attribute (html-has-la (#380)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,6 +370,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `75aaa9218` | fix: a11y: <html> element must have a lang attribute (html-has-la (#380) |
 | 2026-06-12 | `59f470fea` | fix: a11y: <html> element must have a lang attribute (html-has-la (#368) |
 | 2026-06-12 | `f015dddd5` | Final check green: 4,465 passed, 1 skip, 0 failures on the merged tree |
 | 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
@@ -379,8 +380,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `8171dc2a5` | Multilingual captions: top-10 world languages + Irish, registry-driven (W.13 generalised) |
 | 2026-06-12 | `ae5f4f794` | Phase 4 final: definitive suite green — 4,153 passed, 1 skip, 0 failures |
 | 2026-06-12 | `13b778673` | OPEN_LEGAL_QUESTIONS: Q13 — real children's data in repo test fixtures |
-| 2026-06-12 | `27bc3963f` | Phase 4 verification: ZAP frame-ancestors fix + CSRF adaptation of non-TESTING suites |
-| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
