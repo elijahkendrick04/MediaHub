@@ -4262,12 +4262,6 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   color: var(--ink);
 }
 .mh-footer-brand svg { color: var(--lane); }
-.mh-footer-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-3);
-}
 .mh-footer-tag {
   font-family: var(--font-serif);
   font-style: italic;
@@ -4275,26 +4269,6 @@ main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
   font-size: 15px;
   color: var(--ink-dim);
   text-align: center;
-}
-.mh-footer-devlink {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink);
-  border: 1px solid var(--lane);
-  border-radius: 999px;
-  padding: 6px 14px;
-  text-decoration: none;
-  transition: color var(--transition), background var(--transition);
-}
-.mh-footer-devlink:hover {
-  background: var(--lane);
-  color: var(--bg-deep);
-  text-decoration: none;
 }
 .mh-footer-meta {
   display: inline-flex; align-items: center; gap: var(--sp-3);
@@ -7144,12 +7118,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       </svg>
       <span>MediaHub</span>
     </div>
-    <div class="mh-footer-center">
-      <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
-      {% if dev_login_enabled and active == 'home' %}
-      <a class="mh-footer-devlink" href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access &rarr;</a>
-      {% endif %}
-    </div>
+    <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
       <span class="mh-footer-sep">/</span>
@@ -7166,6 +7135,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
     </div>
+    {% if dev_login_enabled and active == 'home' %}
+    <div class="mh-footer-meta" style="margin-top:8px;opacity:0.4;font-size:11px">
+      <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access</a>
+    </div>
+    {% endif %}
   </div>
 </footer>
 <nav class="mh-bottomnav" aria-label="Primary (mobile)">
