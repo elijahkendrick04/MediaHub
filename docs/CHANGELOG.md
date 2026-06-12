@@ -2399,3 +2399,37 @@ PNG saved to `/tmp/v82_verification.png` (968 KB).
 Folded the June 2026 external market-and-scalability research pass into the long-form `docs/ROADMAP.md` (PR #310 structure) as an "External research pass — June 2026 (confirms & sharpens)" subsection in the commercial reality check — the sharpened white-space finding (named swim incumbents; Gipper ships templates but ingests no result files; watch-Gipper), the platform-publishing API-policy and results-data ToS/CMA/GDPR risks, and the INCLUDE/EXCLUDE do-/don't filter — plus a platform-API note on P4.2; logged as Evidence-refresh cycle 5 in `docs/research/SCALING_DILIGENCE_2026.md`. It **confirms and sharpens** the internal diligence — no revenue figure changed, the £150k–£400k swimming-only ceiling and H1–H4 horizons stand, and PC.3 remains the #1 operator/Council-gated scaling fix.
 
 ---
+
+## Feature — 2026-06-12 — Multilingual captions: top-10 world languages + Irish (W.13 generalised)
+
+The W.13 bilingual-Welsh caption feature is now a full multilingual system. A new
+single-source-of-truth registry, `src/mediahub/web/languages.py`, carries the
+top-10 world languages by total speakers (English, Mandarin Chinese, Hindi,
+Spanish, French, Arabic, Bengali, Portuguese, Russian, Urdu) plus Welsh and
+Irish — and every caption surface derives from it:
+
+- **Settings** (`/organisation`): the caption-language picker is registry-driven —
+  each language alone, or bilingual beside English ("English + Gaeilge (Irish)",
+  "English + 中文 (Mandarin Chinese)", …). `ClubProfile.language` stores a registry
+  code ("cy", "ga", "zh", …) or an English-led pair ("en+cy", "en+hi", …); the
+  legacy value "bilingual" still loads and normalises to "en+cy" — no migration.
+- **Generation**: `generate_caption_bundle` returns the generalised
+  `caption_secondary` + `secondary_language` (replacing the Welsh-only
+  `caption_cy`, which was never persisted), and the shared prompt composer now
+  derives the workspace's primary language from the club profile — so plain
+  regenerates, extra variants, platform variants, content-engine, turn-into,
+  sponsor and autonomy captions all honour the language with no per-caller wiring.
+  Future caption surfaces inherit this for free; adding a language is one registry
+  entry. Welsh keeps its curated swim-terminology prompt; names/times/digits are
+  instruction-guarded in every language; translation stays a provider call with
+  honest errors (no canned fallbacks).
+- **Review UI**: the side-by-side translation box is labelled with the language's
+  native name and renders RTL correctly for Arabic/Urdu (`dir` handling on caption
+  spans and textareas).
+
+Tests: new `tests/test_languages.py` (registry invariants, normalisation, prompt
+instructions, picker options) plus extended Phase-W coverage (legacy-value
+back-compat, Irish/top-10/RTL bundles, language threading through caption-only and
+platform-variant paths).
+
+---
