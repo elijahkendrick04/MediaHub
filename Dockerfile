@@ -14,6 +14,8 @@ ENV PYTHONUNBUFFERED=1 \
 #  - libpangocairo / fonts: WeasyPrint (graphic_renderer fallback)
 #  - libnss3 / libxss1 / libgbm1: Chromium/Playwright runtime
 #  - poppler-utils: PDF parsing in interpreter
+#  - tesseract-ocr: W.10 OCR fallback engine for scanned/photographed
+#    result sheets (interpreter/ocr.py, driven via pytesseract below)
 #  - libgl1: image/video preprocessing
 #  - git: required to pip-install SearXNG from its git repo (below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates gnupg \
     poppler-utils \
+    tesseract-ocr \
     libgl1 \
     libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libffi-dev \
     libnss3 libxss1 libgbm1 libasound2 libatk-bridge2.0-0 libatk1.0-0 \
@@ -36,9 +39,14 @@ WORKDIR /app
 
 # Install Python deps first (better layer caching).
 COPY requirements.txt /app/requirements.txt
+# The trailing pair is the W.10 OCR fallback (optional everywhere else — see
+# the `ocr` extra in pyproject.toml): pytesseract drives the apt tesseract-ocr
+# binary above; pypdfium2 rasterises scanned-PDF pages. Installed here so the
+# DEPLOYED image OCRs a phone photo of a results sheet instead of dead-ending.
 RUN pip install --upgrade pip \
  && pip install -r /app/requirements.txt \
- && pip install gunicorn
+ && pip install gunicorn \
+ && pip install "pytesseract>=0.3.10" "pypdfium2>=4"
 
 # Fail the build LOUDLY if the sqlite-vec extension can't load in this image
 # (Capability 2 / semantic memory). It is a young v0.1.x C extension; a load

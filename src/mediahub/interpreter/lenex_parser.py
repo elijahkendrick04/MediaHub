@@ -2,8 +2,8 @@
 lenex_parser.py — Parse LENEX 3.0 (`.lef` / `.lxf`) files into InterpretedMeet.
 
 LENEX 3.0 is the openly licensed XML interchange format for swim results
-and entries ("free of charge and without restriction") used by
-SportSystems and most European meet software. Two file shapes exist:
+and entries ("free of charge and without restriction") used by most
+European meet-management software. Two file shapes exist:
 
 * ``.lef`` — plain LENEX XML
 * ``.lxf`` — a ZIP archive containing one ``.lef``

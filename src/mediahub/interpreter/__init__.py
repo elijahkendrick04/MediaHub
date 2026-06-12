@@ -39,6 +39,12 @@ _store: PatternStore | None = None
 _LOW_CONF_THRESHOLD = 0.6
 _MIN_OVERALL_CONF = 0.5
 
+# W.10 OCR fallback: OCR'd text is never high-confidence — cap the overall
+# score and flag every uncertain recognised line for human review.
+_OCR_CONFIDENCE_CAP = 0.55
+_OCR_LINE_LOW_CONF = 0.6
+_OCR_MAX_LOW_CONF_FLAGS = 20
+
 # Regex for meet-level metadata — structural only, no domain vocab
 _DATE_RE = re.compile(r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}[\-/]\d{2}[\-/]\d{2})\b")
 
@@ -405,6 +411,38 @@ def interpret_document(
 
     # ---- Stage 6: Overall confidence + hypothesis -----------------------
     overall_conf = _overall_confidence(events)
+
+    # ---- W.10: OCR provenance + per-row uncertainty ----------------------
+    # When ingestion recovered the text via OCR (phone photo / scanned PDF),
+    # record which engine ran, flag every low-confidence recognised line, and
+    # cap the overall confidence — uncertain rows are flagged for human
+    # review, never silently guessed.
+    if stream.format_detected == "image-ocr":
+        ocr_engine = getattr(stream, "ocr_engine", "unknown")
+        ocr_lines = list(getattr(stream, "ocr_lines", []))
+        low_conf_lines = [(t, c) for t, c in ocr_lines if c < _OCR_LINE_LOW_CONF]
+        sources_used.append(f"ocr:{ocr_engine}")
+        needs_review.append(
+            {
+                "reason": "ocr-used",
+                "detail": f"{ocr_engine}; {len(low_conf_lines)} low-confidence lines",
+            }
+        )
+        for line_text, line_conf in low_conf_lines[:_OCR_MAX_LOW_CONF_FLAGS]:
+            needs_review.append(
+                {
+                    "reason": "ocr-low-confidence-row",
+                    "detail": line_text,
+                    "confidence": line_conf,
+                }
+            )
+        overall_conf = min(overall_conf, _OCR_CONFIDENCE_CAP)
+    elif getattr(stream, "ocr_unavailable_detail", None):
+        # Scanned PDF with no OCR engine installed: honest review flag,
+        # everything else about the (empty) pipeline result stays as-is.
+        needs_review.append(
+            {"reason": "image-needs-ocr", "detail": stream.ocr_unavailable_detail}
+        )
 
     if overall_conf < _LOW_CONF_THRESHOLD and stream.text:
         # Low confidence overall — run hypothesis on whole-doc sample

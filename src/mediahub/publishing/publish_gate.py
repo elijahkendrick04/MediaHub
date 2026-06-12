@@ -322,6 +322,46 @@ def _check_safeguarding(card: Optional[dict]) -> GateCheck:
     return GateCheck("safeguarding", True, detail)
 
 
+def _check_consent(org_id: str, card: Optional[dict]) -> GateCheck:
+    """W.2: the consent registry's word is final at the gate.
+
+    Reads the policy resolved onto the card by the pack builder when
+    present, else resolves live from the registry by swimmer name. With no
+    consent regime for the org, the check passes (legacy behaviour).
+    """
+    consent = (card or {}).get("consent")
+    if isinstance(consent, dict) and consent.get("level"):
+        if consent.get("blocked"):
+            return GateCheck(
+                "consent",
+                False,
+                consent.get("reason") or "athlete consent does not allow featuring",
+            )
+        return GateCheck("consent", True, f"consent level {consent['level']!r} allows this card")
+
+    name = ""
+    for source in (card or {}), ((card or {}).get("achievement") or {}):
+        name = (source.get("swimmer_name") or "").strip()
+        if name:
+            break
+    if not name:
+        return GateCheck("consent", True, "no athlete name on the card — nothing to enforce")
+    try:
+        from mediahub.safeguarding import effective_policy, regime_active  # noqa: PLC0415
+
+        if not regime_active(org_id):
+            return GateCheck("consent", True, "no consent regime for this workspace")
+        policy = effective_policy(org_id, name)
+    except Exception:
+        # The registry being unreadable must fail CLOSED at the publish
+        # gate — autonomous publishing without consent visibility is the
+        # exact failure W.2 exists to prevent.
+        return GateCheck("consent", False, "consent registry unavailable — blocked pending review")
+    if policy.blocked:
+        return GateCheck("consent", False, policy.reason)
+    return GateCheck("consent", True, f"consent level {policy.level!r} allows this card")
+
+
 def _parse_cap(raw: object, default: int) -> int:
     try:
         value = int(raw if raw not in (None, "") else default)  # type: ignore[arg-type]
@@ -439,6 +479,7 @@ def evaluate_publish_gate(
     checks.append(_check_confidence(card, threshold_for(org_id, slug, data_dir=data_dir)))
     checks.append(_check_brand_safety(caption, avoid_phrases=_avoid_phrases_for(org_id)))
     checks.append(_check_safeguarding(card))
+    checks.append(_check_consent(org_id, card))
     checks.append(_check_rate_limit(org_id, now=now))
 
     verdict = GateVerdict(
