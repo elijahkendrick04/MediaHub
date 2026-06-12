@@ -12891,6 +12891,17 @@ Relay team broke club record"></textarea>
 </div>
 
 <div class="card">
+  <h2>Under-18 content controls</h2>
+  <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
+  <form method="post" action="{url_for('org_child_policy_settings')}">
+    <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
+    <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
+    <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
+    <button class="btn" type="submit">Save content controls</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>Retention</h2>
   <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
   <form method="post" action="{url_for('org_retention_settings')}">
@@ -12948,6 +12959,18 @@ Relay team broke club record"></textarea>
         profile.consent_require_parental_for_minors = bool(request.form.get("parental_minors"))
         profile.pb_enrichment_enabled = bool(request.form.get("pb_enrichment_enabled"))
         profile.lawful_basis_notes = (request.form.get("lawful_basis_notes") or "").strip()[:500]
+        save_profile(profile)
+        return redirect(url_for("org_consent_page"))
+
+    @app.route("/organisation/consent/child-policy", methods=["POST"])
+    def org_child_policy_settings():
+        pid = _active_profile_id() or ""
+        profile = load_profile(pid) if pid else None
+        if profile is None:
+            return jsonify({"error": "no active organisation"}), 404
+        profile.child_surname_initial = bool(request.form.get("child_surname_initial"))
+        profile.child_suppress_age = bool(request.form.get("child_suppress_age"))
+        profile.child_exclude_photos = bool(request.form.get("child_exclude_photos"))
         save_profile(profile)
         return redirect(url_for("org_consent_page"))
 
@@ -18230,6 +18253,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             existing = _prior_profile or ClubProfile(
                 profile_id=profile_id,
                 display_name=request.form.get("display_name") or profile_id,
+                # Children's Code standard 7 (high privacy by default): NEW
+                # organisations start with the child content controls ON;
+                # the club can relax them deliberately on /organisation/consent.
+                child_surname_initial=True,
+                child_suppress_age=True,
+                child_exclude_photos=False,
             )
 
             if action == "capture":

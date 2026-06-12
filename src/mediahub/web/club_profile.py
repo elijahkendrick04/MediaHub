@@ -243,6 +243,14 @@ class ClubProfile:
     # Per-tenant retention overrides {artifact_class: days}; a club can
     # TIGHTEN the deployment window, never extend it (compliance.retention).
     retention_overrides: dict = field(default_factory=dict)
+    # Children's Code content controls (compliance.child_policy): how
+    # identifiable under-18 athletes are in generated content. Dataclass
+    # defaults stay False so legacy profiles keep their behaviour; NEW
+    # profiles created through organisation setup default them ON
+    # (privacy-high by default — Code standard 7).
+    child_surname_initial: bool = False
+    child_suppress_age: bool = False
+    child_exclude_photos: bool = False
 
     # ---- Step 2: Voice Imitation (all optional, backward-compatible) ----
     # Raw example captions pasted by the user (5-20 past social posts).

@@ -83,7 +83,12 @@ def card_athlete(card: Optional[dict]) -> tuple[str, Optional[int]]:
     if not isinstance(card, dict):
         return "", None
     ach = card.get("achievement") if isinstance(card.get("achievement"), dict) else card
-    name = str(ach.get("swimmer_name") or ach.get("name") or "").strip()
+    # Prefer the internal full name: child-policy display transforms keep it
+    # in raw_facts so consent decisions match the registry record exactly.
+    raw_facts = ach.get("raw_facts") if isinstance(ach.get("raw_facts"), dict) else {}
+    name = str(
+        raw_facts.get("full_name") or ach.get("swimmer_name") or ach.get("name") or ""
+    ).strip()
     age: Optional[int] = None
     for source in (ach, ach.get("raw_facts") or {}):
         if not isinstance(source, dict):

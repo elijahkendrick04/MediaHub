@@ -537,8 +537,16 @@ def generate_caption_for_tone(
         # MR-5: strip "(SC)"/"(LC)" jargon from the event name (and spell
         # out the course field) before the facts are narrated into the
         # prompt. The caller's dict is never mutated.
+        # Children's Code backstop at the LLM boundary: legacy runs persisted
+        # before the tenant enabled child controls still get the transformed
+        # identity (pipeline-time transform covers new runs).
+        from mediahub.compliance.child_policy import apply_to_achievement
+
+        _payload = apply_to_achievement(
+            club_profile, _sanitise_achievement_for_prompt(achievement_dict)
+        )
         user_prose = narrate_achievement(
-            _sanitise_achievement_for_prompt(achievement_dict),
+            _payload,
             profile=club_profile,
         )
     if not user_prose.strip():

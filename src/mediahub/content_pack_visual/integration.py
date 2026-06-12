@@ -241,10 +241,21 @@ def create_visual_for_item(
                     library.append(MediaAsset.from_dict(a))
                 except Exception:
                     pass
+        _exclude_photos = False
+        try:
+            from mediahub.compliance.child_policy import exclude_athlete_photos_for_item
+            from mediahub.web.club_profile import load_profile as _cp_load_profile
+
+            _exclude_photos = exclude_athlete_photos_for_item(
+                _cp_load_profile(profile_id) if profile_id else None, item
+            )
+        except Exception:
+            pass
         evaluation = evaluate(
             item,
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
+            exclude_athlete_photos=_exclude_photos,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)
@@ -491,10 +502,21 @@ def create_candidate_pool_for_item(
                     library.append(MediaAsset.from_dict(a))
                 except Exception:
                     pass
+        _exclude_photos = False
+        try:
+            from mediahub.compliance.child_policy import exclude_athlete_photos_for_item
+            from mediahub.web.club_profile import load_profile as _cp_load_profile
+
+            _exclude_photos = exclude_athlete_photos_for_item(
+                _cp_load_profile(profile_id) if profile_id else None, item
+            )
+        except Exception:
+            pass
         evaluation = evaluate(
             item,
             library_assets=library,
             profile_logo_present=bool(getattr(brand_kit, "logo_svg", None)),
+            exclude_athlete_photos=_exclude_photos,
         )
         out["evaluation"] = (
             evaluation.to_dict() if hasattr(evaluation, "to_dict") else dict(evaluation.__dict__)

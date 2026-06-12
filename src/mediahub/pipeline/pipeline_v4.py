@@ -503,6 +503,19 @@ def run_pipeline_v4(
         run.recognition_error = f"{type(exc).__name__}: {exc}"
         step(f"v5 recognition failed: {exc}")
 
+    # 12b. Children's Code content controls: transform under-18 athletes'
+    # display identity (surname initialisation / age suppression) per the
+    # tenant's policy BEFORE cards are synthesised and persisted, so every
+    # downstream surface (stills, captions, reels, packs) inherits it.
+    # Full name + age stay in raw_facts (internal) for consent/safeguarding.
+    if run.recognition_report and profile is not None:
+        try:
+            from mediahub.compliance.child_policy import apply_to_ranked
+
+            apply_to_ranked(profile, run.recognition_report.get("ranked_achievements") or [])
+        except Exception as exc:
+            step(f"child-policy transform failed (content left untransformed): {exc}")
+
     # 13. Bridge V5 → V3 stubs when V3 produced no cards.
     # The V3 detector path is intentionally skipped for interpreter-parsed
     # runs (swimmers have no ASA IDs), so run.cards is empty. V5 recognition

@@ -136,6 +136,7 @@ def evaluate(
     *,
     profile_logo_present: bool = False,
     content_type_override: Optional[str] = None,
+    exclude_athlete_photos: bool = False,
 ) -> EvaluationResult:
     """Compute readiness + best-fit assets per role."""
     item_id = (
@@ -192,6 +193,16 @@ def evaluate(
                     missing_required.append("logo")
                 else:
                     missing_optional.append("logo")
+            continue
+
+        # Children's Code photo control: when the tenant excludes photos on
+        # under-18 content, athlete-photo roles are never matched — the
+        # artefact renders text-led instead.
+        if exclude_athlete_photos and (req.role.startswith("hero") or req.role == "headshot"):
+            if req.required:
+                missing_required.append(req.role)
+            else:
+                missing_optional.append(req.role)
             continue
 
         scored = select_assets(
