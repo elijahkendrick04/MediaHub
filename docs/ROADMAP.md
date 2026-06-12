@@ -60,20 +60,6 @@ Standing context).
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
 - **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
-- **W.1** · Phase W (selectable) — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) · ❌ **NOT STARTED**
-- **W.2** · Phase W (selectable) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
-- **W.3** · Phase W (selectable) — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs · ❌ **NOT STARTED**
-- **W.4** · Phase W (selectable) — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets · ❌ **NOT STARTED**
-- **W.5** · Phase W (selectable) — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format · ❌ **NOT STARTED**
-- **W.6** · Phase W (selectable) — Data-driven meet previews from entry/psych-sheet files (replaces the form-based stub) · ❌ **NOT STARTED**
-- **W.7** · Phase W (selectable) — Live meet mode: watch a club-controlled live-results URL, queue cards mid-gala for approval · ❌ **NOT STARTED**
-- **W.8** · Phase W (selectable) — Season wraps / monthly recap packs from accumulated run history · ❌ **NOT STARTED**
-- **W.9** · Phase W (selectable) — Magic-link mobile approvals (signed expiring review links; no login) · ❌ **NOT STARTED**
-- **W.10** · Phase W (selectable) — OCR fallback for scanned/photographed result PDFs with per-row uncertainty flags · ❌ **NOT STARTED**
-- **W.11** · Phase W (selectable) — Result-grounded alt-text on every exported/published card · ❌ **NOT STARTED**
-- **W.12** · Phase W (selectable) — Print exports: per-swimmer PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
-- **W.13** · Phase W (selectable) — Bilingual captions (Welsh first) per-workspace language setting · ❌ **NOT STARTED**
-- **W.14** · Phase W (selectable) — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -117,6 +103,20 @@ Standing context).
 ## Completed
 
 <!-- ROADMAP:DONE -->
+- ✅ **W.1** · Phase W — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.2** · Phase W — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.3** · Phase W — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.4** · Phase W — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.5** · Phase W — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.6** · Phase W — Data-driven meet previews from entry/psych-sheet files (replaces the form-based stub) *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.7** · Phase W — Live meet mode: watch a club-controlled live-results URL, queue cards mid-gala for approval *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.8** · Phase W — Season wraps / monthly recap packs from accumulated run history *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.9** · Phase W — Magic-link mobile approvals (signed expiring review links; no login) *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.10** · Phase W — OCR fallback for scanned/photographed result PDFs with per-row uncertainty flags *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.11** · Phase W — Result-grounded alt-text on every exported/published card *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.12** · Phase W — Print exports: per-swimmer PB certificates + A4 noticeboard posters *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.13** · Phase W — Bilingual captions (Welsh first) per-workspace language setting *(completed 2026-06-12 — Phase W integration pass, ADR-0015)*
+- ✅ **W.14** · Phase W — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 *(phase 1 completed 2026-06-12 — Phase W integration pass, ADR-0015; phase 2 waits for P4.2)*
 - ✅ **P0.2** · Phase 0 — Cutout free-by-default: in-process rembg is the default (`MEDIAHUB_CUTOUT_PROVIDER=server`); Replicate/PhotoRoom opt-in *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P5.5** · Phase 5 — rembg cutout shipped as the default (MODNet noted as optional upgrade) *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P1.1** · Phase 1 — Sport-profile schema + loader + `AutonomyLevel` + swimming/football YAML profiles (inert scaffolding) *(completed pre-2026-06 — detail in the phase sections below)*
@@ -228,9 +228,12 @@ The plan now has **seven stages, Phase 0 to Phase 6**:
 > **Beside the stages sits a pick-list (added 2026-06-11): Phase W — make the
 > swimming product deeper.** Fourteen researched extras — things like club
 > records, photo-consent tracking, live updates during a gala, printable
-> certificates, Welsh captions. It has no fixed order and no gate; we pull an
-> item from it whenever it helps win or keep a club. The research behind all of
-> it (22 ideas; the other eight became Phase C and Phase 4 items) lives in
+> certificates, Welsh captions. **All fourteen were built in one integration
+> pass on 2026-06-12** (council-pressure-tested placement in
+> [`adr/0015-phase-w-integration-plan.md`](adr/0015-phase-w-integration-plan.md));
+> only W.14's platform-metrics half still waits for the P4.2 connectors. The
+> research behind all of it (22 ideas; the other eight became Phase C and
+> Phase 4 items) lives in
 > [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).
 
 Each task carries a little badge so you can see how it's going:
@@ -1086,7 +1089,7 @@ US-schools repositioning (Route B) for *revenue*.
 
 ---
 
-## Phase W — Deepen the swimming wedge · W · ❌ **NOT STARTED (selectable backlog, added 2026-06-11)**
+## Phase W — Deepen the swimming wedge · W · ✅ **BUILT (all 14 items landed 2026-06-12 — single integration pass, ADR-0015; W.14 phase 2 still waits for P4.2)**
 
 **Goal.** Make the swim wedge easier to sell, safer to run, and richer in content
 moments — without waiting for, or blocking, the P3/P4/P5 gates. Every item is
@@ -1111,7 +1114,7 @@ fixed phase exit; every item carries its own. Recommended first picks: **W.1 →
 (the consent story committees ask about), **W.4** (cheap, parent-delighting), and
 **W.10** (demo-day ingestion robustness).
 
-### W.1 — Athlete registry + milestone detectors · ❌ **NOT STARTED**
+### W.1 — Athlete registry + milestone detectors · ✅ **DONE (2026-06-12)**
 **The data spine for W.2/W.3/W.8 — and per-athlete celebration at scale, which the
 competitive pass verified nobody automates.** Today there is no athlete identity
 across runs: names are per-run strings (`media_library` linking included), so
@@ -1128,7 +1131,7 @@ org-scoped under the ADR-0003/ADR-0014 invariants. **Exit:** the same swimmer is
 one entity across ≥2 runs; a 50th-race card generates with a provenance trail;
 merge decisions persist and are auditable.
 
-### W.2 — Consent & safeguarding manager · ❌ **NOT STARTED** *(depends on W.1)*
+### W.2 — Consent & safeguarding manager · ✅ **DONE (2026-06-12)**
 **The committee objection-killer and the strongest §4 evidence for the Swim England
 application.** Swim England's own Social Media Good Club Guide expects photo-consent
 handling; the competitive pass found **no content tool encodes minors' rules**; the
@@ -1144,7 +1147,7 @@ welfare-officer export lists consent state; every consent change is audited.
 pass the gate; the review page explains why; pinned by tests alongside the
 ADR-0003 invariant suites.
 
-### W.3 — Club records engine + "NEW CLUB RECORD" cards · ❌ **NOT STARTED**
+### W.3 — Club records engine + "NEW CLUB RECORD" cards · ✅ **DONE (2026-06-12)**
 **The highest-emotion moment a club posts, and no detector exists for it**
 ([`DETECTOR_INVENTORY.md`](DETECTOR_INVENTORY.md)); admin incumbents *display*
 records but never generate content from them. *(Idea #10.)* **Build:** a
@@ -1157,7 +1160,7 @@ the record" as a planner signal; a records-wall block on the PC.10 public page.
 ranked NEW CLUB RECORD card carrying old mark, new mark and provenance; the table
 updates only when the card is approved.
 
-### W.4 — Season-current qualifying-time packs · ❌ **NOT STARTED**
+### W.4 — Season-current qualifying-time packs · ✅ **DONE (2026-06-12)** *(operator curates each season's tables per the runbook in `data/standards/README.md`)*
 **"Qualified for Counties!" is a parent-shareable trigger plain PB detection
 misses — and the detector already exists** (V5 `QualifyingTimeDetector`;
 `ClubProfile.important_standards` is already a field). What's missing is **data**:
@@ -1171,7 +1174,7 @@ motivational times (official free PDFs, fixed 4-year cycle) for US expansion.
 **Exit:** a club selects its standards and a qualifying swim yields a "qualified"
 card naming the standard and its source.
 
-### W.5 — LENEX (.lef/.lxf) ingestion · ❌ **NOT STARTED**
+### W.5 — LENEX (.lef/.lxf) ingestion · ✅ **DONE (2026-06-12)**
 **The highest-value UK ingestion add** (June 2026 data-ecosystem pass): LENEX 3.0
 is the openly licensed XML interchange format ("free of charge and without
 restriction"), it is what SportSystems exports, and Swim England's results
@@ -1185,7 +1188,7 @@ official spec example files. Deterministic throughout. **Exit:** a SportSystems
 `.lxf` export runs the full pipeline with output parity to the HY3 path on the
 same meet.
 
-### W.6 — Data-driven meet previews from entry files · ❌ **NOT STARTED**
+### W.6 — Data-driven meet previews from entry files · ✅ **DONE (2026-06-12)**
 **Doubles content per meet (before + after) from files clubs already hold.** The
 `event_preview` type exists but is form-based — a human types everything; the
 P1.3 planner already wants upcoming-event signals. *(Idea #12.)* **Build:**
@@ -1197,7 +1200,7 @@ signal for the meet date. Ambiguous rows flagged, never guessed. **Exit:**
 uploading an entry file yields an approvable "good luck this weekend" pack with
 zero typing.
 
-### W.7 — Live meet mode (watch a results URL mid-gala) · ❌ **NOT STARTED**
+### W.7 — Live meet mode (watch a results URL mid-gala) · ✅ **DONE (2026-06-12)**
 **Clubs are told to post PBs on event day; nobody can without a volunteer glued to
 a laptop — and it is the most theatrical hand-sell demo available.** Ingestion
 today is single-shot. The ToS-clean path is verified: Hy-Tek "Real-Time Results"
@@ -1214,7 +1217,7 @@ click-URL straight into review (pairs with W.9); watches auto-expire at meet end
 interval, with zero duplicates and zero auto-publishing, and the watch stops
 itself.
 
-### W.8 — Season wraps / monthly recap packs · ❌ **NOT STARTED**
+### W.8 — Season wraps / monthly recap packs · ✅ **DONE (2026-06-12)**
 **Retention work that lands exactly when annual renewal (PC.4's model) comes due**
 — accumulated history becomes switching cost, Wrapped-style. The v7.3
 weekend-in-numbers pattern exists per-run; this generalises it across the season.
@@ -1226,7 +1229,7 @@ through the autonomy queue for approval; a configurable season-end wrap. **Exit:
 one click (or the monthly draft) yields an approvable "month in numbers" pack
 consistent with stored history.
 
-### W.9 — Magic-link mobile approvals · ❌ **NOT STARTED**
+### W.9 — Magic-link mobile approvals · ✅ **DONE (2026-06-12)**
 **The approval bottleneck is the head coach's Sunday evening, not the software** —
 and a volunteer-shaped approval loop is unclaimed by competitors (enterprise tools
 or generic design suites only). Also closes the KNOWN_ISSUES unsigned-run-id
@@ -1240,7 +1243,7 @@ run; org-bound, no account needed. **Exit:** an approver on a phone clears a pac
 end-to-end from the link; expiry/revocation enforced; audit parity with logged-in
 approval.
 
-### W.10 — OCR fallback for scanned PDFs · ❌ **NOT STARTED**
+### W.10 — OCR fallback for scanned PDFs · ✅ **DONE (2026-06-12)** *(engine ships in the Docker image; sandbox runs the honest no-engine path)*
 **A failed first upload during a hand-sell demo is a lost club.** KNOWN_ISSUES:
 low-DPI scans parse to gibberish; the interpreter already marks image uploads
 "needs OCR" but no OCR exists — and committee secretaries *will* upload phone
@@ -1252,7 +1255,7 @@ guessed; `interpreting`-phase logs record OCR engagement. Deterministic.
 **Exit:** a phone photo of a printed results sheet produces parsed rows with
 uncertainty flags instead of gibberish or a dead end.
 
-### W.11 — Result-grounded alt-text on every export · ❌ **NOT STARTED**
+### W.11 — Result-grounded alt-text on every export · ✅ **DONE (2026-06-12)**
 **KNOWN_ISSUES: exports carry no alt text.** Cards are data-dense graphics, so the
 alt text must restate the result ("Maya Patel, 50m freestyle, 31.24 — a 0.8s PB at
 the Swansea Spring Open"), under ~125 chars, human-reviewable — which the approval
@@ -1264,7 +1267,7 @@ attributes) and every publish payload; editable in review beside the caption.
 **Exit:** every exported or published card carries result-grounded alt text the
 approver saw.
 
-### W.12 — PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
+### W.12 — PB certificates + A4 noticeboard posters · ✅ **DONE (2026-06-12)**
 **Parents currently DIY this with generic certificate templates — the competitive
 pass surfaced printable certificates as the existing "solution" to per-child
 celebration.** A branded certificate carrying the verified time is the artifact
@@ -1276,7 +1279,7 @@ BrandKit tokens reused so print matches cards; W.2 consent honoured in batch
 exports. **Exit:** one click exports print-ready branded certificates for every
 approved achievement in a run.
 
-### W.13 — Bilingual captions (Welsh first) · ❌ **NOT STARTED**
+### W.13 — Bilingual captions (Welsh first) · ✅ **DONE (2026-06-12)**
 **The first ten clubs are being hand-sold in Swansea / South-East Wales (PC.6) —
 bilingual posting is locally resonant and no US competitor will ever bother.**
 Marginal cost ≈ 0 on the existing Gemini call (tone-preserving in-pipeline
@@ -1288,7 +1291,7 @@ text; the same seam serves any future locale. Honest-error when no provider — 
 machine-translation heuristics. **Exit:** a bilingual club approves Cymraeg +
 English captions in one pass and the gate's length checks hold.
 
-### W.14 — Engagement feedback loop · ❌ **NOT STARTED** *(phase 2 needs P4.2)*
+### W.14 — Engagement feedback loop · ✅ **DONE — phase 1 (2026-06-12)** *(phase 2 needs P4.2)*
 **The compounding intelligence-layer moat: every approval teaches the next plan —
 template tools cannot replicate it.** *(Idea #22.)* **Build, phase 1 (no external
 APIs):** record per-club which tone variant / archetype is approved, edited or
@@ -1733,17 +1736,14 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    instrumented on `/operator/commercial`. What's left of Phase C is the founder's
    selling motion: set `STRIPE_*`, pre-bind pilots, quote real prices, submit the Swim
    England application, win the first 10 annual clubs.)
-2. **Phase W — the wedge-depth backlog (selectable, ungated; added 2026-06-11).**
-   Fourteen researched items (athlete registry, consent manager, club records,
-   qualifying times, LENEX, meet previews, live meet mode, season wraps,
-   magic-link approvals, OCR, alt-text, certificates, Welsh captions, engagement
-   telemetry) absorbed from
-   [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md); the
-   sell-side four became **PC.7–PC.10** and the distribution slice **P4.5/P4.6**.
-   Pick an item **only when it unblocks a sale, a pilot, the NGB application, or
-   a churn risk** — never ahead of the selling motion. Recommended first picks:
-   W.1→W.2 (consent), W.4 (qualifying times), W.10 (demo-day OCR robustness),
-   PC.7 (the instant demo). *Exit:* per item.
+2. **Phase W — the wedge-depth backlog — ✅ built (2026-06-12).** All fourteen
+   items (athlete registry, consent manager, club records, qualifying times,
+   LENEX, meet previews, live meet mode, season wraps, magic-link approvals,
+   OCR, alt-text, certificates, Welsh captions, engagement telemetry) landed in
+   one council-pressure-tested integration pass —
+   [`adr/0015-phase-w-integration-plan.md`](adr/0015-phase-w-integration-plan.md).
+   Remaining tails: W.14 phase 2 (platform metrics) waits for P4.2, and W.4's
+   seasonal tables are operator-curated per `data/standards/README.md`.
 3. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
    director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
    the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar

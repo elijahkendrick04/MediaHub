@@ -66,6 +66,10 @@ src/mediahub/club_profiles/
 src/mediahub/motion_cache/
 src/mediahub/runs_v4/
 src/mediahub/turn_into_packs/
+# Phase W runtime writes (same no-DATA_DIR fallback)
+src/mediahub/print_exports/
+src/mediahub/season_wraps/
+src/mediahub/autonomy_audit/
 # Phase 1.6 Stage G/J — theme_store falls back to writing here when
 # DATA_DIR isn't set. Real deployments + tests always set DATA_DIR.
 src/themes/

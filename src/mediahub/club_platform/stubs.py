@@ -209,8 +209,8 @@ class WeekendPreviewStub(_StubContentType):
   <form method="POST" enctype="multipart/form-data" data-loader-text="Reading the event"
         data-loader-sub="Fetching links, reading the pack, picking the ones to watch…" style="margin-top:16px">
     <div style="margin-bottom:14px">
-      <label>Event name</label>
-      <input type="text" name="meet_name" placeholder="e.g. County Championships" required/>
+      <label>Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file — it names the meet)</span></label>
+      <input type="text" name="meet_name" placeholder="e.g. County Championships"/>
     </div>
     <div style="margin-bottom:14px">
       <label>Event website link <span class="muted" style="font-size:11px">(optional)</span></label>

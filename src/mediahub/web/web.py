@@ -11829,9 +11829,12 @@ function copyWhyCard(btn, taId) {{
                             few_shot_examples=_few_shot_examples,
                             language=_pw_language,
                         )
-                    except _ClaudeUE:
-                        raise
                     except Exception:
+                        # Strictly best-effort: ANY bundle failure (malformed
+                        # JSON, provider blip, no key) falls through to the
+                        # caption-only path below, whose error classification
+                        # (terminal vs transient) is the canonical one. The
+                        # caption is never lost just because alt text was.
                         return None
 
                 _bundle = _gen_primary()
@@ -15232,6 +15235,21 @@ function mhPlanGenerate(btn) {{
                 }
             ), 503
 
+        # W.11: alt text rides the publish payload — the request's value
+        # wins, else the alt the approver saved in review.
+        _sched_alt = (payload.get("alt_text") or "").strip()
+        if not _sched_alt:
+            try:
+                _ws_sched = _get_wf_store()
+                _st_sched = (
+                    _ws_sched.load(run_id).get(card_id) if _ws_sched is not None else None
+                )
+                _sched_alt = ((_st_sched.edited_captions or {}) if _st_sched else {}).get(
+                    "alt_text", ""
+                )
+            except Exception:
+                _sched_alt = ""
+
         for cid in channel_ids:
             try:
                 res = _buf_schedule(
@@ -15240,6 +15258,7 @@ function mhPlanGenerate(btn) {{
                     text=caption,
                     media_urls=media_urls,
                     scheduled_at=scheduled_at_dt,
+                    alt_text=_sched_alt,
                 )
                 results.append(
                     {
@@ -16531,6 +16550,20 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                                     )
 
                                     _rows = parse_lenex_entries(_up_bytes)
+                                    # Zero-typing goal (W.6): the entry file
+                                    # already names the meet — use it when
+                                    # the form field was left blank.
+                                    if not (form_data.get("meet_name") or "").strip():
+                                        try:
+                                            from mediahub.interpreter.lenex_parser import (
+                                                parse_lenex as _parse_lenex_meet,
+                                            )
+
+                                            _ln_meet = _parse_lenex_meet(_up_bytes)
+                                            if _ln_meet.meet_name:
+                                                form_data["meet_name"] = _ln_meet.meet_name
+                                        except Exception:
+                                            pass
                                     _lines = []
                                     for _r in _rows:
                                         _bits = [
@@ -28198,12 +28231,12 @@ and can be revoked by the club.</p>
         ctx, err = _magic_ctx_or_error(token)
         if ctx is None:
             return (
-                f"<!DOCTYPE html><html><head><meta charset='utf-8'/>"
-                f"<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-                f"<title>Link unavailable</title></head>"
-                f"<body style='font-family:system-ui;background:#0A0B11;color:#F5F2E8;"
-                f"padding:32px 18px;text-align:center'><h1>&#128274;</h1>"
-                f"<p>{_h(err)}</p></body></html>",
+                "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+                "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
+                "<title>Link unavailable</title>"
+                "<style>body{font-family:system-ui;background:var(--bg,black);"
+                "color:white;padding:32px 18px;text-align:center}</style></head>"
+                f"<body><h1>\U0001f512</h1><p>{_h(err)}</p></body></html>",
                 410,
             )
         flash = (request.args.get("ok") or "").strip()

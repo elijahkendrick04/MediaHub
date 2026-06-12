@@ -13,7 +13,6 @@ No LLM anywhere in identity or milestone logic (CLAUDE.md rule).
 
 from __future__ import annotations
 
-from typing import Optional
 
 from swim_content_v5.achievements.base import AchievementDetector
 from swim_content_v5.schema import Achievement, AchievementEvidence
