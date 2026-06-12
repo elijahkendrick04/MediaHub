@@ -691,10 +691,13 @@ def privacy_html(
   <ul>
     <li><strong>Erasure:</strong> delete any run (with its uploads, generated content
         and caption memory) from the run page or Privacy page; delete your whole
-        account from the Privacy page. Clubs can request erasure of a single athlete
-        across all stored data.</li>
+        account from the Privacy page. Clubs can erase a single athlete across all
+        stored data, and a workspace owner can delete the entire organisation —
+        runs, media, registries, ledgers and the public wall — from the
+        Organisation page.</li>
     <li><strong>Access / portability:</strong> export any run as JSON; export your
-        account data from the Privacy page.</li>
+        account data from the Privacy page; workspace owners can download the
+        whole organisation as one takeout ZIP from the Organisation page.</li>
     <li><strong>Rectification:</strong> edit captions before approval; request
         correction of a published item via the correction workflow on this
         Privacy page (it records the request, pulls the card from the public

@@ -19307,6 +19307,36 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<a class="btn secondary" href="{url_for("organisation_members_page")}">'
                 "Manage members &rarr;</a></div>"
             )
+            # PC.13 — org takeout + whole-org deletion (owner/operator only).
+            if _org_admin_allowed(profile.profile_id):
+                body += f"""
+<div class="card" style="margin-top:20px;padding:20px 24px">
+  <h2 style="margin-top:0;font-size:16px">Your organisation's data</h2>
+  <p class="dim" style="font-size:13px;margin:0 0 12px">Download everything this
+  workspace holds — runs, cards and captions, media, the consent registry, sponsor
+  ledger, posting log and audit log — as one ZIP (serves subject-access and
+  portability requests).</p>
+  <a class="btn secondary" href="{url_for("organisation_export")}">Download takeout ZIP</a>
+</div>
+<div class="card" style="margin-top:20px;padding:20px 24px;border-left:3px solid rgba(255,107,107,0.55)">
+  <h2 style="margin-top:0;font-size:16px">Delete this organisation</h2>
+  <p class="dim" style="font-size:13px;margin:0 0 12px">Removes the workspace and
+  everything in it from this deployment: all runs and rendered content, media
+  library, consent registry, athletes, sponsor and audit ledgers, memberships,
+  and the public wall (its link stops working immediately). Member accounts
+  themselves are not deleted. Billing records stay with Stripe per the DPA.
+  <strong>This cannot be undone</strong> — download the takeout ZIP first.</p>
+  <form method="post" action="{url_for("organisation_delete")}"
+        onsubmit="return confirm('Delete this organisation and ALL of its data? This cannot be undone.')"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">
+      Type the organisation id (<code>{_h(profile.profile_id)}</code>) to confirm
+      <input type="text" name="confirm_profile_id" required autocomplete="off" /></label>
+    {_org_delete_password_field_html()}
+    <button class="btn secondary" type="submit"
+            style="border-color:rgba(255,107,107,0.4)">Delete organisation</button>
+  </form>
+</div>"""
         return _layout("Organisation", body, active="organisation")
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
@@ -21122,6 +21152,146 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
         return _layout("Workspace members", body, active="organisation")
+
+    # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
+
+    def _org_delete_password_field_html() -> str:
+        """The password re-verify input on the org-delete form — only for
+        signed-in regular users (operator and anonymous-pilot sessions have
+        no password to verify)."""
+        if not _auth.current_user_email() or _auth.is_dev_operator():
+            return ""
+        return (
+            '<label style="display:flex;flex-direction:column;gap:4px;'
+            'font-size:12px;color:var(--ink-muted)">Confirm your password'
+            '<input type="password" name="password" required '
+            'autocomplete="current-password" /></label>'
+        )
+
+    def _org_admin_allowed(profile_id: str) -> bool:
+        """May the current actor take out / delete this whole org?
+
+        Operator always; a bound org's ACTIVE owners; and for an unbound
+        (open/pilot) workspace any session that can use it — the same
+        open-workspace model that already lets such a session edit it.
+        """
+        pid = (profile_id or "").strip()
+        if not pid:
+            return False
+        if _session_owns_profile(pid):
+            return True
+        return not _tenancy.MembershipStore().is_bound(pid) and _session_can_use_profile(pid)
+
+    @app.route("/organisation/export")
+    def organisation_export():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        if not _org_admin_allowed(pid):
+            abort(404)  # same anti-enumeration posture as the other org gates
+        import tempfile
+
+        from flask import after_this_request, send_file
+
+        from mediahub.privacy import org_export_zip
+
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"mediahub-takeout-{pid}-", suffix=".zip", delete=False
+        )
+        tmp.close()
+        try:
+            org_export_zip(pid, Path(tmp.name))
+        except Exception:
+            log.warning("org export failed for %s", pid, exc_info=True)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return _layout(
+                "Export failed",
+                '<div class="card"><p class="tag bad">The takeout export failed — '
+                "try again, and contact support if it persists.</p></div>",
+                active="organisation",
+            ), 500
+
+        @after_this_request
+        def _cleanup(resp):
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return resp
+
+        return send_file(
+            tmp.name,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"mediahub-org-{pid}-takeout.zip",
+        )
+
+    @app.route("/organisation/delete", methods=["POST"])
+    def organisation_delete():
+        pid = _active_profile_id()
+        if not pid:
+            return redirect(url_for("sign_in_page"))
+        if not _org_admin_allowed(pid):
+            abort(404)
+        # The typed org id is the universal irreversibility check; a signed-in
+        # (non-operator) actor must also re-verify their password so a
+        # hijacked session can't destroy the workspace (mirrors account
+        # deletion).
+        if (request.form.get("confirm_profile_id") or "").strip() != pid:
+            return _layout(
+                "Organisation not deleted",
+                '<div class="card"><p class="tag bad">The confirmation id did not '
+                "match — nothing was deleted.</p>"
+                f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
+                "&larr; Back</a></p></div>",
+                active="organisation",
+            ), 400
+        email = _auth.current_user_email()
+        if email and not _auth.is_dev_operator():
+            try:
+                _user_store().authenticate(email, request.form.get("password") or "")
+            except _auth.AuthError:
+                return _layout(
+                    "Organisation not deleted",
+                    '<div class="card"><p class="tag bad">Password check failed '
+                    "&mdash; organisation NOT deleted.</p>"
+                    f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
+                    "&larr; Back</a></p></div>",
+                    active="organisation",
+                ), 403
+        from mediahub.privacy import delete_org
+
+        report = delete_org(pid, delete_run=_delete_run)
+        session.pop("active_profile_id", None)
+        db_rows = sum(report.get("db_rows_deleted", {}).values())
+        retained = "".join(f"<li>{_h(r)}</li>" for r in report.get("retained", []))
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Organisation <em class="editorial">deleted.</em></h1></section>'
+            '<div class="card"><h2>What was removed</h2><ul>'
+            f"<li>{report['runs_deleted']} run(s) with their rendered content, "
+            "caches and caption memory</li>"
+            f"<li>{report['media_assets_deleted']} media asset(s) and "
+            f"{report['logos_deleted']} uploaded logo file(s)</li>"
+            f"<li>{db_rows} database row(s) across consent registry, athletes, "
+            "club records, corrections, posting and telemetry logs</li>"
+            f"<li>{report['memory_rows_deleted']} caption-memory row(s)</li>"
+            f"<li>{report['memberships_deleted']} workspace membership(s)</li>"
+            "<li>The organisation profile, its brand kit and the public wall "
+            "link (now dead)</li>"
+            "</ul><h2>Retained</h2>"
+            f"<ul>{retained}</ul>"
+            "<p class='muted'>Content already published to social platforms must "
+            "be deleted there too.</p>"
+            f'<p><a class="btn secondary" href="{url_for("home")}">&larr; Home</a></p>'
+            "</div>"
+        )
+        return _layout("Organisation deleted", body, active="")
 
     # ---- DPA + lawful-basis attestation at workspace setup (UK legal) ----
 
