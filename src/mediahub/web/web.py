@@ -1503,7 +1503,9 @@ seed_default_profiles()
 
 def _serialise_pb_audit(pb_audit) -> Optional[dict]:
     """Serialise a V6 RunPBAudit to a JSON-safe dict.
-    Returns None if pb_audit is None or serialisation fails.
+    Returns None if pb_audit is None or serialisation fails — but never
+    silently: a swallowed failure here is what renders the misleading
+    "audit wasn't saved, re-run the meet" card on the review page.
     """
     if pb_audit is None:
         return None
@@ -1512,6 +1514,7 @@ def _serialise_pb_audit(pb_audit) -> Optional[dict]:
 
         return run_audit_to_dict(pb_audit)
     except Exception:
+        log.warning("PB audit serialisation failed — run will persist without it", exc_info=True)
         return None
 
 
@@ -10979,6 +10982,7 @@ def create_app() -> Flask:
             _n_verified = pb_audit_data.get("swimmers_matched_verified", 0)
             _n_needs = pb_audit_data.get("swimmers_needs_verification", 0)
             _n_fetch_fail = pb_audit_data.get("swimmers_fetch_failed", 0)
+            _n_no_history = pb_audit_data.get("swimmers_no_history", 0)
             _n_decisions = pb_audit_data.get("pb_decisions_count", 0)
             _n_confirmed = pb_audit_data.get("pb_confirmed_count", 0)
             _n_official = pb_audit_data.get("pb_confirmed_official_count", 0)
@@ -11030,7 +11034,8 @@ def create_app() -> Flask:
     <div class="stat"><div class="l">Swimmers</div><div class="v">{_n_swimmers}</div></div>
     <div class="stat live"><div class="l">Verified</div><div class="v">{_n_verified}</div></div>
     <div class="stat warn"><div class="l">Needs verification</div><div class="v">{_n_needs}</div></div>
-    <div class="stat"><div class="l">Fetch failed</div><div class="v">{_n_fetch_fail}</div></div>
+    <div class="stat" title="The lookup itself failed (search or page fetch) &mdash; distinct from swimmers who simply have no online history"><div class="l">Lookups failed</div><div class="v">{_n_fetch_fail}</div></div>
+    <div class="stat" title="Lookup completed but found no verifiable online history for these swimmers"><div class="l">No online history</div><div class="v">{_n_no_history}</div></div>
     <div class="stat"><div class="l">PB decisions</div><div class="v">{_n_decisions}</div></div>
     <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{_n_confirmed}</div></div>
     <div class="stat live" title="Time + date match SR all-time PB &mdash; strongest possible confirmation"><div class="l">Official PBs</div><div class="v">{_n_official}</div></div>
@@ -12503,45 +12508,104 @@ function copyWhyCard(btn, taId) {{
         per_swimmer = pb_audit.get("per_swimmer") or []
         _review_url = url_for("review", run_id=run_id)
 
-        rows = ""
-        for sa in per_swimmer:
-            identity = sa.get("identity") or {}
-            method = identity.get("method", "")
-            # Map internal `method` enum to a human label + semantic tag class.
-            method_meta = {
-                "asa_id_verified": ("Verified", "good"),
-                "needs_verification": ("Needs check", "warn"),
-                "asa_id_unverified": ("Unverified", ""),
-                "no_id": ("Not linked", ""),
-                "manual_override": ("Override", "info"),
-            }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
-            method_label, method_cls = method_meta
-            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
-            _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
-            _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
-            n_dec = len(sa.get("pb_decisions") or [])
+        # Discovery-path audits carry no identity matches (identity is None
+        # for every swimmer). The Verify / Ignore controls write ASA-id
+        # corrections that only the legacy SR identity flow reads — on a
+        # discovery run they promised a re-fetch that never happened. Render
+        # the lookup truth instead; keep the legacy table (and its controls)
+        # for old persisted runs that do carry identity data.
+        has_identity = any(sa.get("identity") for sa in per_swimmer)
+
+        def _n_confirmed(sa: dict) -> int:
             # All V7.3 confirmed flavours + the legacy status count as
             # confirmed here, matching aggregate_run_audit's summary set.
-            n_conf = sum(
+            return sum(
                 1
                 for d in (sa.get("pb_decisions") or [])
                 if d.get("status")
                 in ("CONFIRMED_OFFICIAL_PB", "CONFIRMED_PB_IMPROVEMENT", "CONFIRMED_PB")
             )
-            rows += (
-                f"<tr>"
-                f"<td>{_h(sa.get('hy3_name', ''))}</td>"
-                f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
-                f"<td>{_h(sa.get('sr_name') or '—')}</td>"
-                f'<td><span class="tag {method_cls}">{_h(method_label)}</span></td>'
-                f"<td>{n_dec}</td>"
-                f'<td style="color:var(--good)">{n_conf}</td>'
-                f"<td>"
-                f'<a class="btn secondary" style="font-size:11px;padding:3px 8px" href="{_verify_url}">Verify</a>'
-                f' <form style="display:inline" method="post" action="{_ignore_url}">'
-                f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" type="submit">Ignore PBs</button></form>'
-                f"</td>"
-                f"</tr>"
+
+        rows = ""
+        if has_identity:
+            for sa in per_swimmer:
+                identity = sa.get("identity") or {}
+                method = identity.get("method", "")
+                # Map internal `method` enum to a human label + semantic tag class.
+                method_meta = {
+                    "asa_id_verified": ("Verified", "good"),
+                    "needs_verification": ("Needs check", "warn"),
+                    "asa_id_unverified": ("Unverified", ""),
+                    "no_id": ("Not linked", ""),
+                    "manual_override": ("Override", "info"),
+                }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
+                method_label, method_cls = method_meta
+                _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
+                _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
+                _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
+                rows += (
+                    f"<tr>"
+                    f"<td>{_h(sa.get('hy3_name', ''))}</td>"
+                    f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
+                    f"<td>{_h(sa.get('sr_name') or '—')}</td>"
+                    f'<td><span class="tag {method_cls}">{_h(method_label)}</span></td>'
+                    f"<td>{len(sa.get('pb_decisions') or [])}</td>"
+                    f'<td style="color:var(--good)">{_n_confirmed(sa)}</td>'
+                    f"<td>"
+                    f'<a class="btn secondary" style="font-size:11px;padding:3px 8px" href="{_verify_url}">Verify</a>'
+                    f' <form style="display:inline" method="post" action="{_ignore_url}">'
+                    f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" type="submit">Ignore PBs</button></form>'
+                    f"</td>"
+                    f"</tr>"
+                )
+            table_head = (
+                "<th>HY3 Name</th><th>ASA ID</th><th>SR Name</th><th>Identity</th>"
+                "<th>Decisions</th><th>Confirmed</th><th>Actions</th>"
+            )
+        else:
+            for sa in per_swimmer:
+                n_events = len(sa.get("events_fetched") or [])
+                if sa.get("fetch_ok"):
+                    if sa.get("no_history") or n_events == 0:
+                        outcome = '<span class="tag">No online history</span>'
+                    else:
+                        outcome = (
+                            f'<span class="tag good">Found {n_events} '
+                            f"event{'s' if n_events != 1 else ''}</span>"
+                        )
+                else:
+                    _err = _h(sa.get("fetch_error") or "lookup failed")
+                    outcome = f'<span class="tag warn" title="{_err}">Failed</span>'
+                src_urls = [u for u in (sa.get("source_urls") or []) if str(u).startswith("http")]
+                if src_urls:
+                    src_cell = (
+                        f'<a href="{_h(src_urls[0])}" target="_blank" rel="noopener noreferrer" '
+                        f'class="muted" style="font-size:11px">source &#x2197;</a>'
+                    )
+                else:
+                    src_cell = '<span class="muted">—</span>'
+                rows += (
+                    f"<tr>"
+                    f"<td>{_h(sa.get('hy3_name', ''))}</td>"
+                    f"<td>{outcome}</td>"
+                    f"<td>{len(sa.get('pb_decisions') or [])}</td>"
+                    f'<td style="color:var(--good)">{_n_confirmed(sa)}</td>'
+                    f"<td>{src_cell}</td>"
+                    f"</tr>"
+                )
+            table_head = (
+                "<th>Swimmer</th><th>Lookup</th><th>Decisions</th><th>Confirmed</th><th>Source</th>"
+            )
+
+        if has_identity:
+            ident_stats = (
+                f'<div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get("swimmers_matched_verified", 0)}</div></div>'
+                f'<div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get("swimmers_needs_verification", 0)}</div></div>'
+            )
+        else:
+            ident_stats = (
+                f'<div class="stat warn"><div class="l">Lookups failed</div><div class="v">{pb_audit.get("swimmers_fetch_failed", 0)}</div></div>'
+                f'<div class="stat"><div class="l">No online history</div><div class="v">{pb_audit.get("swimmers_no_history", 0)}</div></div>'
             )
 
         body = f"""
@@ -12556,8 +12620,7 @@ function copyWhyCard(btn, taId) {{
 <div class="card">
   <div class="stat-block">
     <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get("swimmers_total", 0)}</div></div>
-    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get("swimmers_matched_verified", 0)}</div></div>
-    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get("swimmers_needs_verification", 0)}</div></div>
+    {ident_stats}
     <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get("pb_confirmed_count", 0)}</div></div>
     <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get("pb_decisions_count", 0)}</div></div>
     <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get("fetch_total_seconds", 0):.1f}s</div></div>
@@ -12567,7 +12630,7 @@ function copyWhyCard(btn, taId) {{
   <h2>Per-swimmer</h2>
   <table>
     <thead><tr>
-      <th>HY3 Name</th><th>ASA ID</th><th>SR Name</th><th>Identity</th><th>Decisions</th><th>Confirmed</th><th>Actions</th>
+      {table_head}
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>

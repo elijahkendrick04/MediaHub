@@ -19,9 +19,13 @@ import hashlib
 import html
 import json
 import logging
+import os
+import random
 import re
 import subprocess
+import threading
 import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from dataclasses import dataclass, asdict
@@ -31,7 +35,8 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-# Cache lives in a .cache dir next to the package root
+# Cache lives under the writable data root (DATA_DIR on a deployment —
+# the persistent disk; the src/mediahub dev default otherwise).
 _CACHE_DIR: Optional[Path] = None
 _CACHE_TTL_SECONDS = 30 * 24 * 3600  # 30 days
 
@@ -39,10 +44,9 @@ _CACHE_TTL_SECONDS = 30 * 24 * 3600  # 30 days
 def _get_cache_dir() -> Path:
     global _CACHE_DIR
     if _CACHE_DIR is None:
-        # Try to place it at the repo root
-        here = Path(__file__).resolve().parent
-        repo_root = here.parent
-        candidate = repo_root / ".cache" / "research"
+        env = os.environ.get("DATA_DIR")
+        base = Path(env) if env else Path(__file__).resolve().parent.parent
+        candidate = base / ".cache" / "research"
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             _CACHE_DIR = candidate
@@ -53,6 +57,43 @@ def _get_cache_dir() -> Path:
             _CACHE_DIR = Path(tempfile.gettempdir()) / "swim_research_cache"
             _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     return _CACHE_DIR
+
+
+# ---------------------------------------------------------------------------
+# DuckDuckGo politeness.
+#
+# PB discovery fans swimmer lookups across a thread pool; without a cap that
+# meant 6 concurrent DDG searches from one IP — exactly the burst pattern DDG
+# rate-limits (403/CAPTCHA), which silently emptied every lookup of a run.
+# A small semaphore keeps the burst polite, a single jittered retry absorbs a
+# transient throttle, and a short global cooldown makes the rest of the run
+# fail fast (and honestly) instead of hammering a server that already said no.
+# ---------------------------------------------------------------------------
+
+
+def _ddg_max_concurrency() -> int:
+    raw = os.environ.get("MEDIAHUB_SEARCH_DDG_CONCURRENCY", "").strip()
+    try:
+        return max(1, min(6, int(raw))) if raw else 2
+    except ValueError:
+        return 2
+
+
+_DDG_SEMAPHORE = threading.BoundedSemaphore(_ddg_max_concurrency())
+_DDG_STATE_LOCK = threading.Lock()
+_DDG_COOLDOWN_S = 60.0
+_ddg_cooldown_until = 0.0
+
+
+def _ddg_in_cooldown() -> bool:
+    with _DDG_STATE_LOCK:
+        return time.time() < _ddg_cooldown_until
+
+
+def _ddg_start_cooldown() -> None:
+    global _ddg_cooldown_until
+    with _DDG_STATE_LOCK:
+        _ddg_cooldown_until = time.time() + _DDG_COOLDOWN_S
 
 
 def _cache_key(query: str) -> str:
@@ -254,7 +295,38 @@ class WebResearcher:
 
     def _search_duckduckgo(self, query: str, num: int) -> list[SearchResult]:
         """
-        Search DuckDuckGo HTML endpoint.
+        Search DuckDuckGo HTML endpoint, politely.
+
+        Concurrency is capped by a module-wide semaphore; an HTTP 403/429 gets
+        one jittered retry, and a second throttle starts a global cooldown so
+        the rest of the run skips DDG instead of hammering it. During cooldown
+        this returns [] (an honest "search unavailable right now").
+        """
+        if _ddg_in_cooldown():
+            return []
+        with _DDG_SEMAPHORE:
+            try:
+                return self._ddg_request(query, num)
+            except urllib.error.HTTPError as e:
+                if e.code not in (403, 429):
+                    raise
+            # Throttled — back off briefly with jitter and retry once.
+            time.sleep(1.5 + random.random() * 2.0)
+            try:
+                return self._ddg_request(query, num)
+            except urllib.error.HTTPError as e:
+                if e.code in (403, 429):
+                    _ddg_start_cooldown()
+                    log.warning(
+                        "DuckDuckGo throttled search (HTTP %s) — cooling down for %.0fs",
+                        e.code,
+                        _DDG_COOLDOWN_S,
+                    )
+                    return []
+                raise
+
+    def _ddg_request(self, query: str, num: int) -> list[SearchResult]:
+        """One raw DuckDuckGo HTML request + parse.
         DDG uses redirect URLs: //duckduckgo.com/l/?uddg=<encoded-real-url>
         """
         encoded = urllib.parse.quote_plus(query)

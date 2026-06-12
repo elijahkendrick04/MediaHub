@@ -63,6 +63,7 @@ data/content_plans/
 # Local-dev runtime writes (created when DATA_DIR env var is not set and the
 # app or tests run from inside the package tree)
 src/mediahub/data/
+src/mediahub/discovered/
 src/mediahub/club_profiles/
 src/mediahub/motion_cache/
 src/mediahub/runs_v4/

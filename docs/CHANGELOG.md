@@ -2442,3 +2442,53 @@ back-compat, Irish/top-10/RTL bundles, language threading through caption-only a
 platform-variant paths).
 
 ---
+
+## Fix — 2026-06-12 — PB auditor: real decisions, honest lookups, run guards
+
+A meet-recap run's PB phase could "take a while and then not work": the audit
+page showed zero decisions on every interpreter-parsed run, a throttled
+DuckDuckGo burst silently emptied every lookup and poisoned the warm cache for
+7 days, and a slow discovery phase could trip the 180s stale-run watchdog.
+Five linked fixes:
+
+- **The audit now contains the engine's real PB decisions.** `_build_pb_audit`
+  runs after V5 recognition and maps `pb_confirmed` / `pb_likely` /
+  `official_pb_confirmed` achievements (keyed by the same canonical
+  `swimmer_key` as the snapshots) into `PBDecision`s, deduping any asa-keyed
+  V3 claims. Before, only V3 claims were mapped — structurally empty on
+  interpreter runs (no ASA ids), so the audit always showed 0 decisions while
+  the cards showed PBs.
+- **Failure is no longer cached for a week, and the cache toggle works.**
+  Empty discoveries expire from the warm cache after 1 hour
+  (`WarmCache.EMPTY_TTL`) instead of 7 days, cache writes are atomic
+  (tmp + `os.replace`), and the configure form's previously-ignored
+  `use_pb_cache` now reaches discovery as `force_refresh` — "re-run the meet"
+  genuinely re-researches.
+- **Search politeness + a real fetch budget.** DuckDuckGo searches are capped
+  process-wide (`MEDIAHUB_SEARCH_DDG_CONCURRENCY`, default 2) with one
+  jittered retry on 403/429 then a 60s global cooldown; the discovery phase
+  has a wall-clock budget (`MEDIAHUB_PB_FETCH_BUDGET_S`, default 600s, 0 =
+  unlimited) that skips remaining swimmers honestly and finally wires the
+  audit's `fetch_budget_exceeded` flag to reality.
+- **Watchdog-safe heartbeats.** When no lookup completes within
+  `MEDIAHUB_PB_PROGRESS_TICK_S` (default 45s) the phase emits a "Still
+  researching…" progress line, and the V5 step logs before its meet-identity
+  research — no more silent >180s gaps read as a dead run.
+- **Honesty fixes.** Snapshots distinguish "no online history" (a completed
+  lookup) from a failed fetch — new `no_history` per-swimmer field and
+  `swimmers_no_history` run counter, shown on the review panel and audit page;
+  `cache_hits`/`cache_misses` count real lookups via the propagated
+  `from_cache` flag; the audit page drops the dead Verify/Ignore controls on
+  discovery runs (they wrote corrections only the legacy SR identity flow
+  reads) and shows lookup outcome + source link instead — legacy identity
+  audits keep the old table; `_serialise_pb_audit` logs failures instead of
+  silently dropping the audit; the discovered-cache root migrates once from
+  the doubled `data/data/discovered` path to `<DATA_DIR>/discovered`.
+
+Tests: `tests/test_pb_discovery_resilience.py` (empty-TTL, root migration, DDG
+cooldown, budget, heartbeat, force_refresh), `tests/test_pb_audit_page.py`
+(discovery vs legacy rendering), extended `tests/test_pb_audit_pipeline.py`
+(V5-fed decisions, dedupe, budget/cache/no-history counters) and updated
+`tests/test_pb_bridge.py` (new snapshot classification contract).
+
+---
