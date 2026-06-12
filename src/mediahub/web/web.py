@@ -9033,6 +9033,22 @@ def create_app() -> Flask:
                     '<div class="card"><p class="tag bad">No file selected.</p></div>',
                     active="create",
                 )
+            # Extension allowlist (THREAT_MODEL §1): results files only. The
+            # file is stored as opaque bytes under a random run id and parsed
+            # by deterministic parsers — but rejecting junk up front shrinks
+            # the parser attack surface and gives an honest error.
+            _ALLOWED_UPLOAD_EXTS = {
+                ".hy3", ".hyv", ".sd3", ".sdif", ".cl2", ".zip", ".pdf",
+                ".htm", ".html", ".csv", ".txt",
+            }
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in _ALLOWED_UPLOAD_EXTS:
+                return _layout(
+                    "Upload",
+                    '<div class="card"><p class="tag bad">That file type isn\'t supported. '
+                    "Upload meet results as HY3, SDIF/SD3/CL2, ZIP, PDF, HTML or CSV.</p></div>",
+                    active="create",
+                ), 400
             data = f.read()
             if not data:
                 return _layout(
@@ -9672,16 +9688,19 @@ def create_app() -> Flask:
                 400,
             )
         # Early SSRF reject (every fetch inside the crawl is re-validated too).
+        # FAIL-CLOSED: if the guard itself can't run, the URL doesn't either.
         try:
             from mediahub.web_research.safe_fetch import is_url_safe
 
-            if not is_url_safe(url):
-                return (
-                    jsonify({"error": "That address can't be reached (private/invalid host)."}),
-                    400,
-                )
+            url_ok = is_url_safe(url)
         except Exception:
-            pass
+            log.warning("SSRF guard unavailable — refusing user-supplied URL", exc_info=True)
+            url_ok = False
+        if not url_ok:
+            return (
+                jsonify({"error": "That address can't be reached (private/invalid host)."}),
+                400,
+            )
         # Per-session rate limit (a real headless-browser crawl is a real cost).
         sid = session.get("mh_sid")
         if not sid:

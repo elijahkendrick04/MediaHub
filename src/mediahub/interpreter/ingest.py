@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import json
 import logging
 import pathlib
@@ -113,6 +114,34 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _max_pdf_pages() -> int:
+    """Resource cap for PDF parsing (THREAT_MODEL §1): a hostile PDF with
+    thousands of pages must not pin the worker. Real meet result PDFs run
+    tens of pages; the default cap is generous. 0 disables the cap."""
+    raw = os.environ.get("MEDIAHUB_MAX_PDF_PAGES", "").strip()
+    try:
+        return max(0, int(raw)) if raw else 500
+    except ValueError:
+        return 500
+
+
+def _assert_pdf_page_cap(data: bytes) -> None:
+    cap = _max_pdf_pages()
+    if cap <= 0:
+        return
+    try:
+        import pypdf  # noqa: PLC0415
+
+        n_pages = len(pypdf.PdfReader(io.BytesIO(data)).pages)
+    except Exception:
+        return  # unreadable header — let the extractors produce the real error
+    if n_pages > cap:
+        raise ValueError(
+            f"PDF has {n_pages} pages — more than this deployment accepts ({cap}). "
+            "Split the results document and upload the relevant sessions."
+        )
+
+
 def _extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
     """Extract a PDF.
 
@@ -120,6 +149,7 @@ def _extract_pdf(data: bytes) -> tuple[str, list[Line], list[TableCandidate]]:
     row aware) — see :mod:`interpreter.pdf_extractor`.
     Fallbacks: pypdf layout extraction, then pdfminer.six.
     """
+    _assert_pdf_page_cap(data)
     # Primary: pdfplumber spatial extractor
     try:
         from .pdf_extractor import extract_pdf as _spatial_extract  # noqa: PLC0415
