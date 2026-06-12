@@ -433,3 +433,56 @@ def test_healthz_ping_sec_fetch_dest_document_returns_html(client):
     body = r.data.decode()
     assert "<title>" in body
     assert "MediaHub Health" in body
+
+
+# ---------------------------------------------------------------------------
+# /static/theme/fonts.css — document-title (axe-core WCAG 2.4.2)
+# ---------------------------------------------------------------------------
+
+
+def test_fonts_css_browser_nav_has_title(client):
+    """Direct browser navigation to /static/theme/fonts.css must return an
+    HTML document with a <title> element — regression for axe-core
+    document-title (WCAG 2.4.2).  A real browser navigation ranks text/html
+    strictly above */*;q=0.8."""
+    r = client.get(
+        "/static/theme/fonts.css",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub" in body
+
+
+def test_fonts_css_sec_fetch_dest_document_has_title(client):
+    """Sec-Fetch-Dest: document (Chromium/Firefox page.goto) must trigger the
+    HTML path for /static/theme/fonts.css even when Accept is absent."""
+    r = client.get("/static/theme/fonts.css", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
+
+
+def test_fonts_css_stylesheet_load_returns_css(client):
+    """Stylesheet loads (Sec-Fetch-Dest: style, Accept: text/css) must receive
+    the real CSS — the HTML intercept must not break font loading."""
+    r = client.get(
+        "/static/theme/fonts.css",
+        headers={"Accept": "text/css,*/*;q=0.1", "Sec-Fetch-Dest": "style"},
+    )
+    assert r.status_code == 200
+    assert "css" in r.content_type
+    assert "@font-face" in r.data.decode()
+
+
+def test_fonts_css_wildcard_accept_returns_css(client):
+    """Accept: */* (curl / fetch default) must return the CSS file, not HTML,
+    so programmatic consumers are not broken."""
+    r = client.get("/static/theme/fonts.css", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    # Should be CSS or at minimum not HTML
+    assert not r.content_type.startswith("text/html")
