@@ -14317,7 +14317,25 @@ Relay team broke club record"></textarea>
 
     @app.route("/healthz/ping")
     def healthz_ping():
-        return jsonify({"pong": True})
+        payload = {"pong": True}
+        if _wants_html_health():
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — Ping</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     @app.route("/healthz/memory")
     def healthz_memory():

@@ -363,3 +363,73 @@ def test_healthz_memory_sec_fetch_dest_document_returns_html(client):
     body = r.data.decode()
     assert 'lang="en"' in body
     assert "<title>" in body
+
+
+# ---------------------------------------------------------------------------
+# /healthz/ping — content-negotiation contract (axe document-title)
+# ---------------------------------------------------------------------------
+
+
+def test_healthz_ping_html_has_title(client):
+    """Browser requests to /healthz/ping must receive an HTML page with a
+    <title> element — regression for axe-core document-title (WCAG 2.4.2)."""
+    r = client.get("/healthz/ping", headers={"Accept": "text/html"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_ping_json_by_default(client):
+    """Clients that send no Accept header must receive JSON from /healthz/ping
+    — the HTML path must not break the existing monitoring contract."""
+    r = client.get("/healthz/ping")
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert payload.get("pong") is True
+
+
+def test_healthz_ping_json_explicit_accept(client):
+    """Explicit Accept: application/json must return JSON from /healthz/ping."""
+    r = client.get("/healthz/ping", headers={"Accept": "application/json"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    assert r.get_json() is not None
+
+
+def test_healthz_ping_wildcard_accept_returns_json(client):
+    """Accept: */* (curl/fetch default) must return JSON from /healthz/ping."""
+    r = client.get("/healthz/ping", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert payload.get("pong") is True
+
+
+def test_healthz_ping_browser_accept_returns_html(client):
+    """A real browser navigation Accept header must get the HTML page from
+    /healthz/ping (axe-core document-title, WCAG 2.4.2)."""
+    r = client.get(
+        "/healthz/ping",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
+
+
+def test_healthz_ping_sec_fetch_dest_document_returns_html(client):
+    """Sec-Fetch-Dest: document must trigger HTML from /healthz/ping even when
+    Accept is absent — guards against reverse-proxy stripping of Accept."""
+    r = client.get("/healthz/ping", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
