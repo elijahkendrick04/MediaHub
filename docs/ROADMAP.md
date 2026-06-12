@@ -19,11 +19,14 @@ approves everything before it goes anywhere.
 Signup, billing code, multi-tenancy, the generative design engine, fourteen
 swimming-depth features and a UK legal-compliance baseline have all shipped.
 What we do **not** have is a single paying club. The bottleneck is no longer
-engineering — it is (1) a short list of real-world tasks only you can do
-(choose the real company name and register the company at Companies House,
-register with the ICO, set the Stripe keys, get the legal drafts signed off,
-buy the domain, sell to the first clubs) and (2) a handful of remaining code
-tasks Fable 5 can build. Both lists are right below, in that order.
+engineering — the last compliance code tasks (PC.11–PC.14) and the referral
+engine (PC.9) shipped on 2026-06-12 and now live under **Completed**. What
+remains is (1) a short list of real-world tasks only you can do (choose the
+real company name and register the company at Companies House, register with
+the ICO, set the Stripe keys, get the legal drafts signed off, buy the
+domain, sell to the first clubs), each with its own step-by-step guide, and
+(2) two code tasks (PC.15/PC.16) that each wait on one of those founder
+decisions. Both lists are right below, in that order.
 
 The plan is organised into phases:
 
@@ -39,13 +42,17 @@ The plan is organised into phases:
 Every task carries a badge: ✅ done · 🔵 in progress · ⚠️ stuck · ❌ not
 started.
 
-**What updates itself, and what doesn't.** Exactly five marked blocks in this
+**What updates itself, and what doesn't.** Exactly six marked blocks in this
 file are rewritten by a robot on every push to `main`: the **Last updated**
-line, the **Recent code activity** table, and the items inside the **two
-to-do lists and the Completed list** (moved by `roadmap: <ID> <status>` lines
-in commit messages — see *Status* below). Every other word is written by
-hand, usually by Fable 5 in a session — so if a paragraph looks stale, it
-will not fix itself; say so and it gets rewritten.
+line, the **Recent code activity** table, the **Production findings** list,
+and the items inside the **two to-do lists and the Completed list**. List
+items move two ways: a `roadmap: <ID> <status>` line in a commit message
+(see *Status* below) — or the robot's **sweep**: any to-do item already
+marked done with a ✅ badge is moved off its to-do list into the Completed
+list automatically, and any human work its line still names is kept on (or
+filed into) the founder list. Every other word is written by hand, usually
+by Fable 5 in a session — so if a paragraph looks stale, it will not fix
+itself; say so and it gets rewritten.
 
 > New here? Read **[START_HERE.md](../START_HERE.md)** first, then come back.
 > Odd word? See the **[GLOSSARY](../GLOSSARY.md)**.
@@ -63,10 +70,21 @@ refresh on every push to `main` via
 the lists, put a directive line in any commit message:
 
 > `roadmap: <ID> <status>` — `<ID>` is an item ID from the lists below
-> (`F.2`, `PC.9`, `P4.1` …); `<status>` is `done` · `wip` · `blocked` ·
+> (`F.2`, `P4.1`, `P6.3` …); `<status>` is `done` · `wip` · `blocked` ·
 > `todo`. `done` **moves the item to Completed** (date-stamped); any other
 > status moves it back to its to-do list with the matching badge (`F.*` ids
 > return to the founder list, everything else to the Fable 5 list).
+
+No directive is needed for an item that is already *marked* done: on every
+push the robot also runs a **completed-item sweep** — any to-do item whose
+badge is ✅ (however it got marked) is moved to the Completed list, dated
+from its badge. If the item's line names the human work still open
+(`Founder half open = F.1/F.6`), those `F.*` items stay on the founder list
+and the Completed entry points at them; a free-text remainder
+(`founder remainder: <task>`) is filed as a **new** `F.*` founder item,
+flagged until its step-by-step guide is written. So a finished item can
+never squat on a to-do list — and the human half of a half-human task can
+never silently vanish.
 
 ## To do — things only you can do
 
@@ -97,7 +115,7 @@ and it must never displace a selling week.
 - **F.5** · Adapt and submit the drafted Swim England API application · ❌ **NOT STARTED**
 - **PC.4** · Phase C 🥇 — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling) · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling) · 🔵 **IN PROGRESS**
-- **F.6** · Production ops decisions: retention period, breach contact, insurance, Remotion licence (or the free ffmpeg engine), demo-sample check · ❌ **NOT STARTED**
+- **F.6** · Production ops decisions: retention period, breach owner named in the runbook, insurance, Remotion licence (or the free ffmpeg engine), Render snapshots + off-site backup target · ❌ **NOT STARTED**
 - **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
 - **F.8** · When direct Instagram/Facebook posting nears (P4.2): start the Meta Business Verification + App Review paperwork early · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO_FOUNDER -->
@@ -464,8 +482,9 @@ The boring decisions a paying customer silently assumes someone has made.
    and tell Fable 5 if you change it later, so the Privacy Notice's retention
    table keeps matching what the code does.
 2. Name the breach owner (you): the person who notifies affected clubs
-   without undue delay and the ICO within 72 hours. The incident runbook
-   (PC.14's code half) records this once it lands.
+   without undue delay and the ICO within 72 hours. Write the name into the
+   owner line of [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md)
+   (shipped with PC.14 — it has the slot ready).
 3. Get professional-indemnity + cyber insurance quotes (small-SaaS brokers
    cover this cheaply).
 4. Decide reels: buy the Remotion company licence, **or** set
@@ -477,9 +496,21 @@ The boring decisions a paying customer silently assumes someone has made.
    by `scripts/make_demo_sample.py`); the real meet PDF survives only as a
    parser-regression fixture in `sample_data/`, which no route serves. See
    [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md).
-6. Confirm Render disk snapshots are on (the off-site backup + rehearsed
-   restore is PC.14's code half) — and re-confirm the equivalent on the new
-   host if/when F.12 moves hosting.
+6. Switch the daily backup on and point it off the Render disk. The backup
+   code + rehearsed restore shipped with PC.14, but the scheduled job
+   deliberately stays off until you give it a target. In the Render
+   dashboard confirm disk snapshots are on, then set two environment
+   variables on the service: `MEDIAHUB_BACKUP_UPLOAD_URL` — any HTTPS
+   endpoint that accepts an HTTP `PUT` of a ZIP (an S3/R2 presigned URL, a
+   WebDAV folder, or any small storage service that gives you one) — and,
+   if that endpoint wants auth, `MEDIAHUB_BACKUP_UPLOAD_TOKEN` (sent as a
+   `Bearer` token). (Setting only `MEDIAHUB_BACKUP_DIR` also switches the
+   job on, but those archives sit on the same disk they protect — off-site
+   is the point.) If/when F.12 moves hosting, re-confirm the equivalent
+   snapshots + off-site target on the new host.
+7. **Verify:** the operator console's backup line shows a recent archive
+   with **off-site upload: yes**, and your name is in the runbook's owner
+   line.
 
 #### F.7 — Seasonal qualifying-times refresh (recurring)
 
@@ -511,24 +542,21 @@ no review at all.
 
 ## To do — things Fable 5 can build
 
-Ask in any session ("build PC.15"). Order = recommended priority: the four
-**sell-gate code remainders** (PC.11–PC.14) made the founder list's first
-sale lawful and trustworthy and have shipped, as has the referral engine
-(PC.9); **PC.15/PC.16 are next up** — Phase C work, *not* behind the exit
-gates, each waiting only on its founder input (PC.15 on F.9's chosen name,
-PC.16 on F.12's go decision); then the gated expansion phases. **Phases 3–6 are gated** — they wait
-until a club can sign up, pay and publish with zero founder involvement,
-**and** ≥10 clubs pay annually, **and** the lawful-to-sell gate holds (see
-Phase C). Two flagged exceptions: P4.5 (email digests) and P4.6 (Telegram)
-are review-free, sell-supporting **pull-forward candidates** at your
-discretion.
+Ask in any session ("build PC.15"). The four **sell-gate code remainders**
+(PC.11–PC.14) made the founder list's first sale lawful and trustworthy, and
+the referral engine (PC.9) runs the intro loop — all five are fully shipped
+and now live in the **Completed** list, their open halves founder-only
+(F.1–F.4 and F.6 above, each with its step-by-step guide). **PC.15/PC.16
+are next up** — Phase C work, *not* behind the exit gates, each waiting only
+on its founder input (PC.15 on F.9's chosen name, PC.16 on F.12's go
+decision); then the gated expansion phases. **Phases 3–6 are gated** — they
+wait until a club can sign up, pay and publish with zero founder
+involvement, **and** ≥10 clubs pay annually, **and** the lawful-to-sell gate
+holds (see Phase C). Two flagged exceptions: P4.5 (email digests) and P4.6
+(Telegram) are review-free, sell-supporting **pull-forward candidates** at
+your discretion.
 
 <!-- ROADMAP:TODO -->
-- **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: subprocessor register pinned to the env-flag surface by a guard test (`legal.SUBPROCESSORS` + `tests/test_subprocessor_register_guard.py` — caught two undisclosed flows on day one), the two unlicensed `vendor/` dirs removed (`tests/test_vendor_licences.py` keeps it that way). Founder half open = F.2/F.3/F.4
-- **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: W.2 consent enforced on every public-wall exit (page, embed, feeds, card PNGs — blocked athletes unreachable, settings page explains why) + the Children's-Code pass recorded ([CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md)); the `/try` demo sample is now synthetic (finding F1)
-- **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: whole-org deletion cascade (`privacy/org_lifecycle.py`, POST `/organisation/delete`) + org takeout ZIP (GET `/organisation/export` — runs, media, captions, consent state, ledgers, audit log) under the ADR-0003/0014 isolation invariants
-- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder · ✅ **CODE HALF SHIPPED (2026-06-12)**: transactional-email seam (`notify/email.py`, honest-503) driving password reset, verification, invite delivery and `/operator/notify-users` breach channel; daily `backup_sweep` + restore rehearsed on every test run (`tests/test_backup_restore.py`) + [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md); invoice/receipt surfacing on `/billing`. Founder half open = F.1/F.6
-- **PC.9** · Phase C 🥇 — In-product referral engine · ✅ **BUILT (2026-06-12)**: per-org shareable codes (`/signup?ref=`), code-tracked leads in the PC.6 funnel, amount-verified payment auto-grants the referrer a free month (Stripe coupon at the referrer's own annual/12; honest `pending_manual` fallbacks), live readout on `/operator/commercial`
 - **PC.15** · Phase C — Rebrand sweep, waits on F.9's name: one product-name source of truth threaded through every customer-facing surface (UI chrome, legal pages, wall badge + embeds, email from-name, `/try`, README) plus the F.11 canonical-host redirect; `mediahub` package/env names stay internal · ❌ **NOT STARTED**
 - **PC.16** · Phase C — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
@@ -581,6 +609,7 @@ list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-12 | **Sell-gate items closed out + the roadmap now keeps itself honest:** PC.9 and PC.11–PC.14 verified fully shipped on the code side (all 55 pinning tests green) and moved to Completed; their remaining halves are founder-only and live on the founder list with updated step-by-step guides (F.6 gains the breach-owner + off-site-backup steps). The auto-update bot gained a **completed-item sweep**: any to-do item marked ✅ moves itself to Completed on the next push to `main`, and a declared human remainder is kept on — or filed into — the founder list, so finished items can no longer squat on a to-do list. | *Status* section · [`scripts/roadmap_autoupdate.py`](../scripts/roadmap_autoupdate.py) |
 | 2026-06-12 | **Business identity, own domain & cheaper hosting prioritised (F.9–F.12 + PC.15/PC.16):** the real company name comes before any further filings (MediaHub is an indefensible filler), then Companies House registration (£100 digital; director ID-verification mandatory since Nov 2025), then the .co.uk domain wired to the live app — so Stripe/ICO/solicitor/Swim England paperwork files **once**, under the real name, and every printed/shared link survives any future host. The Render→VPS move (≈£20/mo → ≈£4–8/mo, prices verified June 2026) is sequenced last, as a DNS flip, and must never displace selling. | Founder guides F.9–F.12 · Phase C section |
 | 2026-06-12 | **Sell-gate code remainders + referral engine shipped (PC.9, PC.11–PC.14 code halves):** subprocessor-register guard test (caught 3 undisclosed flows) + unlicensed vendor dirs removed; W.2 consent enforced on the public wall + Children's-Code pass recorded (synthetic `/try` sample replaces real minors' data); whole-org deletion + takeout ZIP; transactional-email seam (password reset / verification / invites / breach channel), daily backups + rehearsed restore, incident runbook; in-product referral engine with auto-granted Stripe rewards. Remaining on the sell gate is founder-only (F.1–F.8). | Phase C section · [CHILDRENS_CODE_PASS](compliance/CHILDRENS_CODE_PASS.md) · [SUPPORT_INCIDENT_RUNBOOK](SUPPORT_INCIDENT_RUNBOOK.md) |
 | 2026-06-12 | **UK legal compliance baseline shipped (PR #352):** in-product Terms / accurate Privacy Notice / Cookie Policy / Art. 28 DPA with versioned, recorded acceptance; erasure cascades, account deletion + export; correction/takedown workflow; retention sweep; CCR/DMCCA pre-contract checkout; auth rate-limiting + security headers; DPIA draft. PC.11/PC.13 mostly delivered, PC.12/PC.14 started; the founder half became the F.* list above. | [COMPLIANCE_AUDIT](COMPLIANCE_AUDIT.md) · [COMPLIANCE_HANDOVER](COMPLIANCE_HANDOVER.md) |
@@ -835,7 +864,7 @@ met:** a signed club has a shareable code; a paid referral auto-grants the
 reward and updates the funnel ledger with zero operator typing
 (`tests/test_referrals.py` pins the whole flow end to end).
 
-#### PC.11 — Legal & privacy pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
+#### PC.11 — Legal & privacy pack · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — ADR-0015; founder remainder F.2/F.3/F.4)*
 
 The contractual minimum to take a club's money: MediaHub is a **processor**
 for clubs (the controllers) over personal data that is largely **children's**.
@@ -909,7 +938,7 @@ without founder involvement; deletion verifiably removes the data from
 (`tests/test_org_lifecycle.py` — a second org stays byte-intact); the
 published schedule matches what the code does.
 
-#### PC.14 — Operational trust pack · 🟡 **CODE HALF SHIPPED (2026-06-12)** *(sell gate — ADR-0015; founder half open)*
+#### PC.14 — Operational trust pack · ✅ **CODE COMPLETE (2026-06-12)** *(sell gate — ADR-0015; founder remainder F.1/F.6)*
 
 The boring things a paying customer silently assumes. **Shipped (PR #352):**
 the CCR/DMCCA pre-contract checkout (`/billing/confirm`: price honesty,
@@ -940,13 +969,13 @@ until F.2). **Shipped (2026-06-12, code remainder):**
 - **Billing hygiene:** `/billing` and `/billing/confirm` state where every
   payment's invoice/receipt lives (Stripe customer portal).
 
-**Remaining — founder:** renewal reminders + VAT decision (F.1), breach owner
-+ insurance (F.6), confirm Render disk snapshots + point the backup target
-off-site. **Exit:** a user can reset their password unaided ✅; an invite
-email actually arrives ✅; a restore from backup has been performed and
-documented ✅ (automated drill); the support contact and runbook exist ✅;
-a test payment produces an expensable invoice (Stripe portal — verify with
-the first test payment, F.1).
+**Remaining — founder:** renewal reminders + VAT decision (F.1); breach
+owner, insurance, Render disk snapshots and the off-site backup target —
+all itemised with steps in F.6's guide. **Exit:** a user can reset their
+password unaided ✅; an invite email actually arrives ✅; a restore from
+backup has been performed and documented ✅ (automated drill); the support
+contact and runbook exist ✅; a test payment produces an expensable invoice
+(Stripe portal — verify with the first test payment, F.1).
 
 #### Strategy notes — the three credible £1M+ routes (context, *not* build items)
 
@@ -1189,7 +1218,7 @@ cloud provider on the same seam). Feeds back into **PC.4** packaging
 | No-hidden-fees discipline | ✅ enforced | The [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md) register is pinned by the Phase-0 guard suites: every paid path optional with a free default; every AI surface admits a local provider; no AGPL in-process. |
 | Multi-tenancy: org → workspace | ✅ shipped | PC.3 (ADR-0014) on top of the ADR-0003 invariant; pinned by `tests/test_workspace_membership_invariant.py`. |
 | Go-to-market / distribution | 🔵 selling open | The #1 risk. Tooling + drafted NGB application live on `/operator/commercial`; the founder's motion (PC.6) and the ≥10-club gate remain open. |
-| Safeguarding / minors' data | ✅ locked, extending | ADR-0003 isolation invariant + W.2 consent registry; PC.12 finishes the public-surface half. |
+| Safeguarding / minors' data | ✅ locked | ADR-0003 isolation invariant + W.2 consent registry; PC.12 finished the public-surface half (2026-06-12, Children's-Code pass recorded). |
 | Explainability & audit trail | ✅ | Every step explainable; autonomous-publish decisions land in the immutable per-org ledger. |
 | Product design / UI polish | ❌ open | Targets: Home, Add Input, Content Pack, the autonomy controls. Flask + Jinja stay. |
 | Test-suite stability | ✅ | Full suite green (~3,576 passed / 1 skipped, 2026-06-09 — see CLAUDE.md "Running Tests"). Keep green. |
@@ -1243,6 +1272,11 @@ ADRs, build reports and tests.
 - ✅ **PC.7** · Phase C 🥇 — Instant try-before-signup demo: paste a results file, get a watermarked 3-card preview, no account *(completed 2026-06-12)*
 - ✅ **PC.8** · Phase C 🥇 — Sponsor manager + per-sponsor exposure reports (clubs fund the subscription from sponsor money) *(completed 2026-06-12)*
 - ✅ **PC.10** · Phase C 🥇 — Public club achievements page + website embed/RSS of approved cards ("powered by MediaHub") *(completed 2026-06-12)*
+- ✅ **PC.11** · Phase C 🥇 (sell gate) — Legal-pack code remainder *(completed 2026-06-12 — founder remainder: F.2/F.3/F.4)*
+- ✅ **PC.12** · Phase C 🥇 (sell gate) — Minors'-consent remainder *(completed 2026-06-12)*
+- ✅ **PC.13** · Phase C 🥇 (sell gate) — Data-rights remainder *(completed 2026-06-12)*
+- ✅ **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder *(completed 2026-06-12 — founder remainder: F.1/F.6)*
+- ✅ **PC.9** · Phase C 🥇 — In-product referral engine *(completed 2026-06-12)*
 <!-- /ROADMAP:DONE -->
 
 **Production findings (auto-filed by the log sentinel)**

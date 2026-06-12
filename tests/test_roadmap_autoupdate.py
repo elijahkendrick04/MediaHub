@@ -244,6 +244,140 @@ def test_live_roadmap_file_satisfies_the_list_contract():
         assert changed and f"- ✅ **{ids[0]}**" in moved
 
 
+# --- sweep_completed (hand-marked ✅ items move to Completed) -----------------
+
+SWEEP_DOC = (
+    "<!-- ROADMAP:TODO_FOUNDER -->\n"
+    "- **F.1** · Turn payments on · ❌ **NOT STARTED**\n"
+    "- **F.6** · Production ops decisions · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO_FOUNDER -->\n\n"
+    "<!-- ROADMAP:TODO -->\n"
+    "- **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder · ✅ "
+    "**CODE HALF SHIPPED (2026-06-12)**: email seam + backups + runbook. "
+    "Founder half open = F.1/F.6\n"
+    "- **PC.9** · Phase C 🥇 — In-product referral engine · ✅ **BUILT (2026-06-12)**: "
+    "codes, auto-granted rewards\n"
+    "- **P3.1** · Phase 3 (gated) — Second-sport engine adapter · ❌ **NOT STARTED**\n"
+    "<!-- /ROADMAP:TODO -->\n\n"
+    "<!-- ROADMAP:DONE -->\n"
+    "- ✅ **PC.1** · Phase C — Self-serve signup + auth *(completed 2026-06-09)*\n"
+    "<!-- /ROADMAP:DONE -->\n"
+)
+
+
+def test_sweep_moves_badge_marked_items_dated_from_the_badge():
+    out, moved = ru.sweep_completed(SWEEP_DOC, today="2027-01-01")
+    assert moved == ["PC.14", "PC.9"]
+    todo = _todo_block(out)
+    assert "PC.14" not in todo and "PC.9" not in todo
+    assert "- **P3.1**" in todo  # open items untouched
+    done = _done_block(out)
+    # badge dates win over `today`; the ship-detail tail is dropped (it lives
+    # in the item's phase section), the description core is kept
+    assert (
+        "- ✅ **PC.9** · Phase C 🥇 — In-product referral engine "
+        "*(completed 2026-06-12)*" in done
+    )
+    assert "2027-01-01" not in out
+
+
+def test_sweep_keeps_named_founder_remainders_on_the_founder_list():
+    out, _ = ru.sweep_completed(SWEEP_DOC)
+    assert (
+        "- ✅ **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder "
+        "*(completed 2026-06-12 — founder remainder: F.1/F.6)*" in _done_block(out)
+    )
+    founder = _founder_block(out)
+    assert "- **F.1**" in founder and "- **F.6**" in founder
+    # no new founder items invented for ids that already exist
+    assert "F.7" not in founder
+
+
+def test_sweep_files_free_text_remainder_as_a_new_founder_item():
+    doc = SWEEP_DOC.replace(
+        "Founder half open = F.1/F.6",
+        "founder remainder: chase the printer for the gala banner",
+    )
+    out, _ = ru.sweep_completed(doc)
+    founder = _founder_block(out)
+    line = next(l for l in founder.splitlines() if "chase the printer" in l)
+    # next free F-number after F.1/F.6 is F.7; flagged as needing its guide
+    assert line.startswith("- **F.7** · chase the printer for the gala banner")
+    assert "human half of PC.14" in line and "step-by-step guide" in line
+    assert line.endswith("· ❌ **NOT STARTED**")
+    assert "*(completed 2026-06-12 — founder remainder filed as F.7)*" in _done_block(out)
+
+
+def test_sweep_warns_on_a_named_remainder_id_that_exists_nowhere(capsys):
+    doc = SWEEP_DOC.replace("F.1/F.6", "F.1/F.99")
+    out, moved = ru.sweep_completed(doc)
+    assert "PC.14" in moved  # still swept — the warning is advisory
+    assert "F.99" in capsys.readouterr().err
+    assert "founder remainder: F.1/F.99" in _done_block(out)
+
+
+def test_sweep_undated_badge_falls_back_to_today():
+    doc = SWEEP_DOC.replace("**BUILT (2026-06-12)**", "**BUILT**")
+    out, _ = ru.sweep_completed(doc, today="2026-06-13")
+    assert "- ✅ **PC.9**" in _done_block(out)
+    assert "*(completed 2026-06-13)*" in _done_block(out)
+
+
+def test_sweep_moves_a_founder_list_item_too():
+    doc = SWEEP_DOC.replace(
+        "- **F.6** · Production ops decisions · ❌ **NOT STARTED**",
+        "- **F.6** · Production ops decisions · ✅ **DONE (2026-06-14)**: all decided",
+    )
+    out, moved = ru.sweep_completed(doc)
+    assert "F.6" in moved
+    assert "F.6" not in _founder_block(out)
+    assert (
+        "- ✅ **F.6** · Production ops decisions *(completed 2026-06-14)*"
+        in _done_block(out)
+    )
+
+
+def test_sweep_is_idempotent_and_noop_without_marked_items():
+    once, moved = ru.sweep_completed(SWEEP_DOC)
+    assert moved
+    twice, moved_again = ru.sweep_completed(once)
+    assert twice == once and moved_again == []
+    bare = SWEEP_DOC.replace("✅", "🔵")
+    out, moved = ru.sweep_completed(bare)
+    assert out == bare and moved == []
+
+
+def test_sweep_preserves_markers_and_bullet_shape():
+    out, _ = ru.sweep_completed(SWEEP_DOC)
+    for marker in (
+        "<!-- ROADMAP:TODO -->",
+        "<!-- /ROADMAP:TODO -->",
+        "<!-- ROADMAP:TODO_FOUNDER -->",
+        "<!-- /ROADMAP:TODO_FOUNDER -->",
+        "<!-- ROADMAP:DONE -->",
+        "<!-- /ROADMAP:DONE -->",
+    ):
+        assert out.count(marker) == 1
+    for block in (_todo_block(out), _founder_block(out), _done_block(out)):
+        for line in filter(None, (l.strip() for l in block.splitlines())):
+            assert line.startswith("- ")
+
+
+def test_live_roadmap_sweep_is_safe():
+    """The sweep must run cleanly over the real docs/ROADMAP.md: structure
+    intact, and anything it moves lands in Completed. (It does NOT assert a
+    no-op — hand-marking an item ✅ in a PR and letting the bot sweep it on
+    the next push to main is the supported flow.)"""
+    text = ru.ROADMAP.read_text(encoding="utf-8")
+    out, moved = ru.sweep_completed(text, today="2026-01-01")
+    for name in ("TODO", "TODO_FOUNDER", "DONE"):
+        assert out.count(f"<!-- ROADMAP:{name} -->") == 1
+        assert out.count(f"<!-- /ROADMAP:{name} -->") == 1
+    done = _done_block(out)
+    for ident in moved:
+        assert f"- ✅ **{ident}**" in done
+
+
 # --- replace_block ----------------------------------------------------------
 
 def test_replace_block_replaces_between_markers():
