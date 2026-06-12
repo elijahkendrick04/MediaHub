@@ -153,13 +153,9 @@ def run_coder(prompt: str, *, cwd: Path | None = None, timeout: float | None = N
         return False, f"{be} coder error: {exc}"
 
 
-# --- quality discipline (from the vendored ruflo coding skills) --------------
-SKILLS_DIR = REPO_ROOT / "autotest" / "skills" / "coding"
-
+# --- quality discipline -------------------------------------------------------
 CODING_STANDARDS = """\
-Write code to a professional standard, following the discipline in the skills under
-autotest/skills/coding/ (agent-coder, sparc-methodology, agent-reviewer, agent-tester) —
-read them if useful. Core rules:
+Write code to a professional standard. Core rules:
 - Clarity: clear names, single responsibility, small functions; match the surrounding
   code's conventions and style EXACTLY.
 - Robustness: handle edge cases and errors; validate inputs; never crash on bad data.
@@ -178,8 +174,9 @@ specification, the approach, and the files/interfaces you'll touch, THEN impleme
 """
 
 REVIEW_PROMPT = """\
-Now switch roles to a senior code REVIEWER (see autotest/skills/coding/agent-reviewer.md
-and agent-analyze-code-quality.md). Inspect the current uncommitted changes — you may run
+Now switch roles to a senior code REVIEWER (see
+autotest/skills/coding/agent-analyze-code-quality.md). Inspect the current uncommitted
+changes — you may run
 `git diff` to see them (read-only; do NOT commit, push, or revert) — and FIX any problems
 you find, directly in the files. Check: requirement fully met; edge cases + error handling;
 security (XSS/injection/IDOR, no leaked secrets); the protected deterministic engine is
@@ -190,7 +187,7 @@ If it's already solid, make no changes.
 
 def write_code(task: str, *, complex: bool = False, review: bool = True,
                cwd: Path | None = None, timeout: float | None = None) -> tuple[bool, str]:
-    """Run the coder with the ruflo coding discipline: a standards-guided
+    """Run the coder with the coding discipline: a standards-guided
     implement pass, then (default) a reviewer/refine pass on the same working
     tree. ``complex=True`` adds a SPARC plan-first instruction (for roadmap
     builds). Returns (ok, combined_log)."""
