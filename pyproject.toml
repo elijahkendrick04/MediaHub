@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,25 +23,25 @@ classifiers = [
   "Framework :: Flask",
 ]
 dependencies = [
-  "flask>=3.0",
-  "markupsafe>=2.1",
-  "requests>=2.31",
-  "pdfplumber>=0.10",
-  "pypdf>=4.0",
-  "beautifulsoup4>=4.12",
-  "lxml>=5.0",
+  "flask>=3.1.3",
+  "markupsafe>=3.0.3",
+  "requests>=2.34.2",
+  "pdfplumber>=0.11.9",
+  "pypdf>=6.13.2",
+  "beautifulsoup4>=4.15.0",
+  "lxml>=6.1.1",
   # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx): read .xlsx
   # results deterministically, read-only. MIT-licensed.
-  "openpyxl>=3.1",
-  "Pillow>=10.0",
+  "openpyxl>=3.1.5",
+  "Pillow>=12.2.0",
   # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
   # See requirements.txt and docs/THEMING.md.
-  "materialyoucolor>=3.0",
-  "coloraide>=4.0",
-  "numpy>=1.24",
+  "materialyoucolor>=3.0.2",
+  "coloraide>=8.8.1",
+  "numpy>=2.4.6",
   # Sport-profile config loader (mediahub.sport_profiles) parses the
   # human-authored data/sport_profiles/*.yaml files. MIT-licensed, free.
-  "PyYAML>=6.0",
+  "PyYAML>=6.0.3",
   # Capability 2 (semantic memory): sqlite-vec stores vectors in a vec0 virtual
   # table for exact brute-force KNN recall (mediahub.memory.store). Pure-C,
   # dependency-free SQLite extension; MIT/Apache-2.0 dual.
@@ -50,15 +50,15 @@ dependencies = [
   # account passwords; stripe is the official SDK for Checkout / Customer
   # Portal / webhook verification. Both optional at runtime — no STRIPE_* env
   # means billing 503s and the rest of the app is unaffected.
-  "bcrypt>=4.0",
-  "argon2-cffi>=23.1",
-  "stripe>=7.0",
+  "bcrypt>=5.0.0",
+  "argon2-cffi>=25.1.0",
+  "stripe>=15.2.0",
 ]
 
 [project.optional-dependencies]
 ai = [
-  "anthropic>=0.30",
-  "replicate>=0.25",
+  "anthropic>=0.109.1",
+  "replicate>=1.0.7",
 ]
 # W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
 # Optional everywhere — with no engine the interpreter keeps the honest
@@ -67,8 +67,8 @@ ai = [
 # image-only PDF pages for OCR. Pure-pip alternative engine:
 # rapidocr-onnxruntime (heavier wheel; onnxruntime already ships for rembg).
 ocr = [
-  "pytesseract>=0.3.10",
-  "pypdfium2>=4",
+  "pytesseract>=0.3.13",
+  "pypdfium2>=5.9.0",
 ]
 render = [
   # Playwright pin: the bundled Chromium revision must match what the
@@ -78,34 +78,34 @@ render = [
   # the matching chromium when it installs this version, so the runtime
   # discovery succeeds (PLAYWRIGHT_BROWSERS_PATH=/ms-playwright pinned
   # in the Dockerfile keeps the path stable).
-  "playwright>=1.56,<1.58",
-  "weasyprint>=60",
+  "playwright>=1.60.0,<1.61",
+  "weasyprint>=69.0",
   # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): a static FFmpeg
   # binary with no system install. The wheel is BSD-2; the bundled binary is
   # a stock FFmpeg build invoked strictly as a subprocess.
-  "imageio-ffmpeg>=0.4.9",
+  "imageio-ffmpeg>=0.6.0",
 ]
 dev = [
-  "pytest>=7.4",
-  "pytest-xdist>=3.5",
+  "pytest>=9.0.3",
+  "pytest-xdist>=3.8.0",
   # reportlab is used by test_interpreter_corpus to synthesise PDF
   # fixtures so the corpus tests can run without external sample files.
-  "reportlab>=4.0",
+  "reportlab>=4.5.1",
   # B5: property-based API contract testing (Schemathesis). tests/test_api_contract.py
   # honest-skips when it's absent, so this only enables the deeper fuzz; the plain
   # no-5xx smoke needs no extra dep. Pinned to the 3.x line whose API the test targets
   # (from_dict / get_all_operations / call_wsgi); the test also skips cleanly on any
   # API drift, so a future bump can't redden CI — only a real 5xx fails it.
-  "schemathesis>=3.19,<4",
+  "schemathesis>=4.21.5,<5",
   # D1: re-run a failing test on demand (opt-in via --reruns) to tell a flake from a
   # real failure. Inert unless --reruns is passed, so the gating suite is unaffected.
-  "pytest-rerunfailures>=12.0",
+  "pytest-rerunfailures>=16.3",
 ]
 # D1 flake-hunting only — kept OUT of `dev` on purpose: pytest-randomly auto-shuffles
 # test order when installed, and the GATING suite must stay deterministic. The separate
 # flake-detection CI job installs `.[dev,flake]` and opts into randomisation.
 flake = [
-  "pytest-randomly>=3.15",
+  "pytest-randomly>=4.1.0",
 ]
 
 [project.scripts]
