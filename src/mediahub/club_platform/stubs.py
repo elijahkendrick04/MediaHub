@@ -235,8 +235,8 @@ class WeekendPreviewStub(_StubContentType):
       <div id="pv-watch-ai">
         <label>Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
         <input type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
-        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — PDF, Word, CSV, text)</span></label>
-        <input type="file" name="entries_file" accept=".pdf,.docx,.txt,.csv,.md,.html,.htm"/>
+        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
+        <input type="file" name="entries_file" accept=".lef,.lxf,.pdf,.docx,.txt,.csv,.md,.html,.htm"/>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0">The AI reads the entries and picks your club&rsquo;s
         ones to watch — name, events, and a factual one-line reason each. It only ever names athletes
         who actually appear in the entries.</p>

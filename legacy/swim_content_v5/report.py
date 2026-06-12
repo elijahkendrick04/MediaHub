@@ -348,14 +348,20 @@ def build_recognition_report_for_run(run: "PipelineRunV4") -> dict:
     # Build history map from pb_snapshots
     history_map = _build_history_map_from_snapshots(our_results, pb_snapshots, swimmer_names)
 
-    # Load standards and club code
+    # Load standards and club code. W.4: season packs merge with quals.json
+    # and the club's Organisation picks narrow which standards fire.
     standards: list = []
     club_code = ""
     try:
-        from swim_content.quals_registry import load_registry
-        standards = load_registry()
+        from mediahub.standards import standards_for_profile
+
+        standards = standards_for_profile(profile)
     except Exception:
-        pass
+        try:
+            from swim_content.quals_registry import load_registry
+            standards = load_registry()
+        except Exception:
+            pass
     if profile and profile.club_codes:
         club_code = profile.club_codes[0]
 

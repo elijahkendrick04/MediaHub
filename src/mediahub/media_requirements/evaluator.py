@@ -172,6 +172,14 @@ def evaluate(
     # Cache for asset list (used multiple times)
     library_list = list(library_assets)
 
+    # W.2: the consent policy resolved onto the card by the pack builder.
+    # When photo consent is withheld, athlete-linked photo roles must never
+    # match an asset — the photo simply doesn't exist for this card.
+    _consent = content_item.get("consent") or ach.get("consent") or {}
+    _photo_ok = True
+    if isinstance(_consent, dict) and _consent.get("level"):
+        _photo_ok = bool(_consent.get("photo_ok", True))
+
     matched: dict[str, list[dict]] = {}
     missing_required: list[str] = []
     missing_optional: list[str] = []
@@ -192,6 +200,16 @@ def evaluate(
                     missing_required.append("logo")
                 else:
                     missing_optional.append("logo")
+            continue
+
+        _athlete_role = req.role.startswith("hero") or req.role == "headshot"
+        if _athlete_role and not _photo_ok:
+            # Photo consent withheld (or unknown under an active regime) —
+            # never select an athlete photo for this card.
+            if req.required:
+                missing_required.append(req.role)
+            else:
+                missing_optional.append(req.role)
             continue
 
         scored = select_assets(

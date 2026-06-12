@@ -439,6 +439,42 @@ class TestConsent:
         pol = effective_policy("otherclub", "Maya Patel", db_path=db)
         assert not pol.blocked  # other org has no regime
 
+    def test_photo_suppressed_when_consent_withheld(self):
+        """W.2 generation-time enforcement: with photo consent withheld, an
+        athlete photo must never match — even when a perfect asset exists."""
+        from mediahub.media_library.models import MediaAsset
+        from mediahub.media_requirements.evaluator import evaluate
+
+        asset = MediaAsset(
+            id="ma_maya",
+            filename="m.jpg",
+            path="/tmp/m.jpg",
+            type="athlete_action",
+            profile_id="p",
+            linked_athlete_names=["Maya Patel"],
+            permission_status="approved_by_club",
+            approval_status="approved",
+            orientation="portrait",
+            width=1500,
+            height=2000,
+        )
+        item = {
+            "id": "ci_1",
+            "post_angle": "confirmed_official_pb",
+            "confidence": 0.9,
+            "swimmer_name": "Maya Patel",
+            "achievement": {"swimmer_name": "Maya Patel", "post_angle": "confirmed_official_pb"},
+            "safe_to_post": {"level": "safe"},
+            "consent": {"level": "no_photo", "photo_ok": False, "name_ok": True, "blocked": False},
+        }
+        res = evaluate(item, library_assets=[asset])
+        assert not any(r.startswith("hero") or r == "headshot" for r in res.matched)
+
+        # Same card with full consent does match the photo.
+        item_ok = dict(item, consent={"level": "full", "photo_ok": True, "name_ok": True, "blocked": False})
+        res_ok = evaluate(item_ok, library_assets=[asset])
+        assert any(r.startswith("hero") or r == "headshot" for r in res_ok.matched)
+
     def test_csv_import_and_welfare_export(self, db):
         text = (
             "name,level,note\n"
