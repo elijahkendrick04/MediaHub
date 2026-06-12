@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `b86abbb18` · Merge pull request #367: SearXNG outage root-cause fix + log sentinel watchdog
+**Last updated:** 2026-06-12 · `d27866350` · Merge pull request #377: Fix the PB auditor in the meet-recap pipeline
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -370,6 +370,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `aae3242f3` | Align the DSR erasure test with the canonical discovered-cache root |
+| 2026-06-12 | `ef5e3112c` | Fix the PB auditor in the meet-recap pipeline: real decisions, honest lookups, run guards |
 | 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
 | 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
 | 2026-06-12 | `1801a577e` | Regenerate inventories with main's full dep set (fixes inventory-freshness test) |
@@ -380,8 +382,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `be391a5d7` | Wrap long breaker-skip raise for ruff-format (CI hygiene hook) |
 | 2026-06-12 | `18543124a` | Fix silent SearXNG outage and add log sentinel watchdog |
 | 2026-06-12 | `6d31c3aee` | Update per-IP limiter test for the layered auth design |
-| 2026-06-12 | `8045a1405` | docs(roadmap): restructure to-do-first with founder/Fable 5 lists; teach the bot the founder block |
-| 2026-06-12 | `8e03f502d` | Fix full-suite cross-test pollution: lockout re-keyed to per-account |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
