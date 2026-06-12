@@ -74,6 +74,9 @@ class User:
     plan: str = PLAN_FREE
     stripe_customer_id: str = ""
     created_at: str = ""
+    # When the address proved it can receive our mail (PC.14). Empty = not
+    # verified; purely informational — no feature gates on it.
+    email_verified_at: str = ""
 
     def to_record(self) -> dict:
         return asdict(self)
@@ -86,6 +89,7 @@ class User:
             plan=_coerce_plan(d.get("plan")),
             stripe_customer_id=str(d.get("stripe_customer_id", "") or ""),
             created_at=str(d.get("created_at", "") or ""),
+            email_verified_at=str(d.get("email_verified_at", "") or ""),
         )
 
 
@@ -241,6 +245,34 @@ class UserStore:
                 user.stripe_customer_id = str(stripe_customer_id or "")
             self._append(user)
             return user
+
+    def set_password(self, email: str, new_plaintext: str) -> Optional[User]:
+        """Replace an account's password (PC.14 reset flow). Returns the
+        user, or None for an unknown email. Raises AuthError on a weak
+        password — same rule as signup."""
+        if len(new_plaintext or "") < 8:
+            raise AuthError("Password must be at least 8 characters.")
+        with _LEDGER_LOCK:
+            user = self._read_all().get(normalize_email(email))
+            if user is None:
+                return None
+            user.hashed_password = hash_password(new_plaintext)
+            self._append(user)
+            return user
+
+    def mark_email_verified(self, email: str) -> Optional[User]:
+        """Stamp the account as having received our verification mail."""
+        with _LEDGER_LOCK:
+            user = self._read_all().get(normalize_email(email))
+            if user is None:
+                return None
+            user.email_verified_at = _utc_now_iso()
+            self._append(user)
+            return user
+
+    def all_emails(self) -> list[str]:
+        """Every account email (the operator breach-notice audience)."""
+        return sorted(self._read_all().keys())
 
     def delete(self, email: str) -> bool:
         """Erase an account from the ledger entirely (UK GDPR Art. 17).

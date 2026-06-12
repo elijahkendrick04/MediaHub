@@ -96,9 +96,13 @@ class Subprocessor:
 
 SUBPROCESSORS: tuple[Subprocessor, ...] = (
     Subprocessor(
-        name="Hosting provider ([HOSTING_PROVIDER_AND_REGION])",
-        processing="Runs the service and stores all Club Data",
+        name="Hosting & backup storage ([HOSTING_PROVIDER_AND_REGION])",
+        processing=(
+            "Runs the service and stores all Club Data, including the "
+            "operator-configured off-site backup archives"
+        ),
         location="[HOSTING_REGION]",
+        env_keys=("MEDIAHUB_BACKUP_UPLOAD_URL", "MEDIAHUB_BACKUP_UPLOAD_TOKEN"),
     ),
     Subprocessor(
         name="Google (Gemini API)",
@@ -149,6 +153,16 @@ SUBPROCESSORS: tuple[Subprocessor, ...] = (
         processing="Social scheduling of approved content",
         location="US",
         env_keys=("BUFFER_ACCESS_TOKEN",),
+    ),
+    Subprocessor(
+        name="Resend (only if transactional email is configured)",
+        processing=(
+            "Transactional email delivery: password resets, email "
+            "verification, workspace invites and service/breach notices "
+            "(account email addresses and the message content)"
+        ),
+        location="US",
+        env_keys=("RESEND_API_KEY", "MEDIAHUB_EMAIL_ENDPOINT"),
     ),
     Subprocessor(
         name="Stripe",
@@ -607,6 +621,10 @@ def privacy_html(
             connects Buffer</td></tr>
     <tr><td>Payments</td><td>Email, plan, payment details (collected by Stripe
         directly)</td><td>Stripe</td></tr>
+    <tr><td>Transactional email (password resets, verification, workspace
+        invites, service/breach notices)</td>
+        <td>Your account email address and the message content</td>
+        <td>Resend &mdash; only if configured</td></tr>
     <tr><td>Notifications</td><td>Human-readable status messages (no athlete data by
         design)</td><td>ntfy / your webhook &mdash; only if configured</td></tr>
   </table>
@@ -659,9 +677,10 @@ def privacy_html(
 <div class="card">
   <h2>7. International transfers</h2>
   <p>Google (Gemini), Anthropic, Replicate, Microsoft (voiceover, where enabled),
-  Stripe and Buffer process data in the United States; Photoroom processes data in
-  [PHOTOROOM_REGION]; an operator-configured OpenAI-compatible endpoint (where one is
-  configured) processes data wherever that chosen provider runs. Where a provider is
+  Resend (email, where configured), Stripe and Buffer process data in the United
+  States; Photoroom processes data in [PHOTOROOM_REGION]; an operator-configured
+  OpenAI-compatible endpoint (where one is configured) processes data wherever that
+  chosen provider runs. Where a provider is
   certified under the UK&ndash;US Data Bridge we rely on that; otherwise we use the UK
   International Data Transfer Agreement/Addendum with that provider. The status for
   each provider is recorded in our processing records ([CONTACT_EMAIL] for a copy).</p>

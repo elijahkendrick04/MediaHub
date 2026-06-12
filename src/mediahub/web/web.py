@@ -19617,6 +19617,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             _tenancy.MembershipStore().activate_invites(user.email)
         except Exception:
             log.warning("invite activation failed for a new account", exc_info=True)
+        # PC.14: verification mail (best-effort; only when the email seam
+        # is configured — signup never blocks on it).
+        _send_verification_email(user.email)
         # Land new users on the create surface (Step 7: redirect to /add-input).
         return redirect(url_for("make_page"))
 
@@ -19629,6 +19632,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         alt = (
             f'No account yet? <a href="{url_for("signup_page")}" '
             'style="color:var(--accent);font-weight:600">Create one</a>.'
+            f'<br><a href="{url_for("password_forgot")}" '
+            'style="color:var(--ink-muted);font-weight:600">Forgot your password?</a>'
         )
         if _auth.dev_login_enabled():
             alt += (
@@ -19688,6 +19693,211 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _auth.logout_user()
         session.pop("terms_ok_version", None)
         return redirect(url_for("home"))
+
+    # ---- PC.14 — password reset + email verification --------------------
+    #
+    # Both ride the transactional-email seam (mediahub.notify.email).
+    # Unconfigured deployments get an honest "not available here" page —
+    # never a fake "we sent you an email".
+
+    def _email_unavailable_page(title: str):
+        from mediahub.web.legal import CONTACT_EMAIL
+
+        return (
+            _layout(
+                title,
+                '<div class="card"><p class="tag bad">Email delivery is not '
+                "configured on this deployment, so this can't be done "
+                "self-serve yet.</p>"
+                f"<p>Contact support at <strong>{_h(CONTACT_EMAIL)}</strong> "
+                "and we'll sort it manually.</p></div>",
+                active="signin",
+            ),
+            503,
+        )
+
+    def _account_email_card(inner: str, *, title: str, heading: str, lede: str) -> str:
+        return (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Account</span>'
+            f"<h1>{heading}</h1>"
+            f'<p class="lede">{lede}</p></section>'
+            f'<div class="card" style="padding:24px 28px;max-width:440px">{inner}</div>'
+        )
+
+    @app.route("/password/forgot", methods=["GET", "POST"])
+    def password_forgot():
+        from mediahub.notify.email import EmailSendError, email_configured, send_email
+        from mediahub.web import account_tokens as _tokens
+
+        if not email_configured():
+            return _email_unavailable_page("Password reset unavailable")
+        if request.method == "POST":
+            if _auth_rate_limited("pwreset"):
+                return _auth_rate_limit_response()
+            email = _auth.normalize_email(request.form.get("email") or "")
+            user = _user_store().get(email) if email else None
+            if user is not None:
+                token = _tokens.mint_reset_token(
+                    app.secret_key, user.email, user.hashed_password
+                )
+                reset_url = url_for("password_reset", token=token, _external=True)
+                try:
+                    send_email(
+                        user.email,
+                        "Reset your MediaHub password",
+                        "Someone (hopefully you) asked to reset the password for "
+                        f"this MediaHub account.\n\nReset it here (link valid for "
+                        f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours, single use):\n"
+                        f"{reset_url}\n\nIf this wasn't you, ignore this email — "
+                        "your password is unchanged.",
+                    )
+                except EmailSendError:
+                    log.warning("password reset email failed", exc_info=True)
+            # Identical response whether or not the account exists — the
+            # form must not be an email-enumeration oracle.
+            body = _account_email_card(
+                "<p>If an account exists for that address, a reset link is on "
+                "its way. The link works once and expires in "
+                f"{int(_tokens.RESET_MAX_AGE_HOURS)} hours.</p>"
+                f'<p><a class="btn secondary" href="{url_for("login_page")}">'
+                "&larr; Back to log in</a></p>",
+                title="Check your email",
+                heading='Check your <em class="editorial">email</em>.',
+                lede="We've sent a reset link if the account exists.",
+            )
+            return _layout("Check your email", body, active="signin")
+        body = _account_email_card(
+            f'<form method="post" action="{url_for("password_forgot")}">'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Email</label>'
+            '<input type="email" name="email" autocomplete="email" required '
+            'style="width:100%" placeholder="you@club.org" />'
+            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            "Send reset link</button></form>",
+            title="Forgot password",
+            heading='Forgot your <em class="editorial">password</em>?',
+            lede="Enter your account email and we'll send a single-use reset link.",
+        )
+        return _layout("Forgot password", body, active="signin")
+
+    @app.route("/password/reset/<token>", methods=["GET", "POST"])
+    def password_reset(token: str):
+        from mediahub.web import account_tokens as _tokens
+
+        def _hash_for(email: str):
+            u = _user_store().get(email)
+            return u.hashed_password if u else None
+
+        try:
+            email = _tokens.verify_reset_token(
+                app.secret_key, token, current_hash_for_email=_hash_for
+            )
+        except _tokens.AccountTokenExpired:
+            return _layout(
+                "Link expired",
+                '<div class="card"><p class="tag bad">This reset link has '
+                "expired.</p>"
+                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
+                "Request a new one</a></p></div>",
+                active="signin",
+            ), 410
+        except _tokens.AccountTokenError:
+            return _layout(
+                "Invalid link",
+                '<div class="card"><p class="tag bad">This reset link is invalid '
+                "or has already been used.</p>"
+                f'<p><a class="btn secondary" href="{url_for("password_forgot")}">'
+                "Request a new one</a></p></div>",
+                active="signin",
+            ), 404
+        if request.method == "POST":
+            if _auth_rate_limited("pwreset"):
+                return _auth_rate_limit_response()
+            try:
+                user = _user_store().set_password(email, request.form.get("password") or "")
+            except _auth.AuthError as exc:
+                body = _account_email_card(
+                    f'<p class="tag bad">{_h(str(exc))}</p>'
+                    f'<form method="post" action="{url_for("password_reset", token=token)}">'
+                    '<label style="display:block;font-size:12px;text-transform:uppercase;'
+                    'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+                    "New password</label>"
+                    '<input type="password" name="password" required minlength="8" '
+                    'autocomplete="new-password" style="width:100%" />'
+                    '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+                    "Set new password</button></form>",
+                    title="Choose a new password",
+                    heading='Choose a new <em class="editorial">password</em>.',
+                    lede="At least 8 characters.",
+                )
+                return _layout("Choose a new password", body, active="signin"), 400
+            if user is None:
+                abort(404)
+            _auth.login_user(user)
+            if not _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
+                session["terms_ok_version"] = _legal.TERMS_VERSION
+            return redirect(url_for("make_page"))
+        body = _account_email_card(
+            f'<form method="post" action="{url_for("password_reset", token=token)}">'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+            f"New password for {_h(email)}</label>"
+            '<input type="password" name="password" required minlength="8" '
+            'autocomplete="new-password" style="width:100%" />'
+            '<div class="dim" style="font-size:12px;margin-top:6px">At least 8 characters.</div>'
+            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            "Set new password</button></form>",
+            title="Choose a new password",
+            heading='Choose a new <em class="editorial">password</em>.',
+            lede="This link works once.",
+        )
+        return _layout("Choose a new password", body, active="signin")
+
+    @app.route("/verify-email/<token>")
+    def verify_email(token: str):
+        from mediahub.web import account_tokens as _tokens
+
+        try:
+            email = _tokens.verify_verify_token(app.secret_key, token)
+        except _tokens.AccountTokenError:
+            return _layout(
+                "Invalid link",
+                '<div class="card"><p class="tag bad">This verification link is '
+                "invalid or has expired.</p></div>",
+                active="signin",
+            ), 404
+        user = _user_store().mark_email_verified(email)
+        if user is None:
+            abort(404)
+        return _layout(
+            "Email verified",
+            '<div class="card"><p class="tag good">Email address verified — '
+            "thanks!</p>"
+            f'<p><a class="btn secondary" href="{url_for("make_page")}">'
+            "Continue &rarr;</a></p></div>",
+            active="signin",
+        )
+
+    def _send_verification_email(email: str) -> None:
+        """Best-effort post-signup verification mail (configured-only)."""
+        from mediahub.notify.email import email_configured, send_email
+        from mediahub.web import account_tokens as _tokens
+
+        if not email_configured():
+            return
+        try:
+            token = _tokens.mint_verify_token(app.secret_key, email)
+            send_email(
+                email,
+                "Verify your MediaHub email",
+                "Welcome to MediaHub. Confirm this address so password resets "
+                "and service notices reach you:\n\n"
+                f"{url_for('verify_email', token=token, _external=True)}\n",
+            )
+        except Exception:
+            log.warning("verification email failed", exc_info=True)
 
     # ---- /legal/accept (versioned ToS re-acceptance) -------------------
 
@@ -19838,6 +20048,140 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             session["op_notice"] = notice
         if error:
             session["op_error"] = error
+
+    # ---- PC.14 — operator "notify all users" (the breach channel) -------
+    #
+    # The ICO's 72-hour clock needs a working channel, not a plan to build
+    # one. Every send is recorded to DATA_DIR/operator_notices.jsonl with
+    # honest per-recipient counts.
+
+    def _operator_notices_path() -> Path:
+        return DATA_DIR / "operator_notices.jsonl"
+
+    def _record_operator_notice(subject: str, result: dict) -> None:
+        try:
+            path = _operator_notices_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "sent_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "subject": subject,
+                            "recipients_sent": result.get("sent", 0),
+                            "recipients_failed": result.get("failed", []),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            os.chmod(path, 0o600)
+        except OSError:
+            log.warning("operator notice ledger write failed", exc_info=True)
+
+    @app.route("/operator/notify-users", methods=["GET", "POST"])
+    def operator_notify_users():
+        guard = _require_operator()
+        if guard is not None:
+            return guard
+        from mediahub.backup import last_backup_state
+        from mediahub.notify.email import EmailNotConfigured, email_configured, send_to_many
+
+        emails = _user_store().all_emails()
+        sent_html = ""
+        if request.method == "POST":
+            subject = (request.form.get("subject") or "").strip()
+            message = (request.form.get("message") or "").strip()
+            if not subject or not message:
+                sent_html = (
+                    '<p class="tag bad" style="margin-bottom:16px">Subject and '
+                    "message are both required.</p>"
+                )
+            else:
+                try:
+                    result = send_to_many(emails, subject, message)
+                except EmailNotConfigured:
+                    return _email_unavailable_page("Notify users unavailable")
+                _record_operator_notice(subject, result)
+                failed = result["failed"]
+                sent_html = (
+                    f'<p class="tag good" style="margin-bottom:16px">Sent to '
+                    f"{result['sent']} of {len(emails)} account(s)."
+                    + (
+                        f" Failed: {_h(', '.join(failed))}."
+                        if failed
+                        else ""
+                    )
+                    + " Recorded in the notice ledger.</p>"
+                )
+        seam_line = (
+            '<p class="tag good">Email delivery is configured.</p>'
+            if email_configured()
+            else '<p class="tag bad">Email delivery is NOT configured '
+            "(set RESEND_API_KEY + MEDIAHUB_EMAIL_FROM) — sending will fail "
+            "honestly until it is.</p>"
+        )
+        backup_state = last_backup_state()
+        backup_line = (
+            f"Last backup: <strong>{_h(str(backup_state.get('last_backup_at')))}</strong> "
+            f"({int(backup_state.get('bytes') or 0):,} bytes; "
+            f"off-site upload: {'yes' if backup_state.get('uploaded') else 'no'})"
+            if backup_state
+            else "No backup has run yet on this deployment."
+        )
+        # Ledger tail (newest 5) so the operator sees the evidence trail.
+        rows = ""
+        try:
+            if _operator_notices_path().exists():
+                lines = _operator_notices_path().read_text(encoding="utf-8").splitlines()
+                for ln in lines[-5:][::-1]:
+                    try:
+                        rec = json.loads(ln)
+                    except json.JSONDecodeError:
+                        continue
+                    rows += (
+                        f"<tr><td>{_h(str(rec.get('sent_at')))}</td>"
+                        f"<td>{_h(str(rec.get('subject')))}</td>"
+                        f"<td>{int(rec.get('recipients_sent') or 0)}</td></tr>"
+                    )
+        except OSError:
+            pass
+        ledger_html = (
+            '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+            "<thead><tr style='text-align:left'><th>Sent</th><th>Subject</th>"
+            "<th>Recipients</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            if rows
+            else '<p class="dim" style="font-size:13px">No notices sent yet.</p>'
+        )
+        body = f"""
+<h1 style="margin-bottom:4px">Notify all users</h1>
+<p class="dim" style="margin-bottom:20px;max-width:640px">The breach-notification
+channel (incident runbook step 4): one message to every account email on this
+deployment. Every send is recorded. Use plain language — what happened, what data,
+what you're doing, what they should do.</p>
+{seam_line}
+{sent_html}
+<div class="card" style="max-width:640px;margin-bottom:20px">
+  <form method="post" action="{url_for("operator_notify_users")}"
+        onsubmit="return confirm('Send this to ALL {len(emails)} account(s)?')">
+    <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Subject</label>
+    <input type="text" name="subject" required style="width:100%;margin-bottom:14px" />
+    <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">Message (plain text)</label>
+    <textarea name="message" required rows="10" style="width:100%"></textarea>
+    <button type="submit" class="btn" style="margin-top:16px">Send to {len(emails)} account(s)</button>
+  </form>
+</div>
+<div class="card" style="max-width:640px;margin-bottom:20px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Recovery state</h3>
+  <p style="font-size:13px">{backup_line}</p>
+</div>
+<div class="card" style="max-width:640px">
+  <h3 style="margin-top:0;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Notice ledger (latest 5)</h3>
+  {ledger_html}
+</div>
+"""
+        return _layout("Notify all users", body, active="")
 
     def _pounds_to_pence(raw: str) -> int:
         from decimal import Decimal, InvalidOperation
@@ -20503,6 +20847,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
                 "Opens the Stripe Customer Portal to change card, switch plan, "
                 "or cancel.</div>"
+                '<div class="dim" style="font-size:12px;margin-top:6px">'
+                "<strong>Invoices &amp; receipts:</strong> every payment's invoice "
+                "is in the portal too — download the PDF for the club's expense "
+                "records.</div>"
             )
         elif _auth.is_premium(user.plan):
             manage_html = (
@@ -20592,6 +20940,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             "<p><strong>Cancelling:</strong> as easy as subscribing — open "
             "<em>Billing &rarr; Manage billing</em> any time; cancelling stops future "
             "renewals and you keep access for the period already paid.</p>"
+            "<p><strong>Invoices &amp; receipts:</strong> every payment generates an "
+            "invoice you can download from <em>Billing &rarr; Manage billing</em> — "
+            "made for a volunteer treasurer's expense file.</p>"
             "<p><strong>Your 14-day cancellation right:</strong> you can cancel within "
             "14 days of purchase for a refund. Because the service starts immediately, "
             "if you use it and then cancel within the 14 days we may deduct a "
@@ -20989,6 +21340,30 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         return redirect(url_for("sign_in_page"))
 
     # ---- /organisation/members — PC.3 workspace membership (ADR-0014) ----
+    def _send_invite_email(email: str, profile_id: str) -> bool:
+        """Deliver a workspace invite (PC.14). Returns True when a mail was
+        accepted by the provider; False when the seam is unconfigured or
+        delivery failed (the caller words the notice honestly)."""
+        from mediahub.notify.email import email_configured, send_email
+
+        if not email_configured():
+            return False
+        prof = load_profile(profile_id)
+        org_name = prof.display_name if prof else profile_id
+        try:
+            return send_email(
+                email,
+                f"You've been invited to {org_name} on MediaHub",
+                f"You've been invited to join the {org_name} workspace on "
+                "MediaHub — the club's content engine.\n\n"
+                "Create your account with this email address and the "
+                "membership activates automatically:\n\n"
+                f"{url_for('signup_page', _external=True)}\n",
+            )
+        except Exception:
+            log.warning("invite email failed", exc_info=True)
+            return False
+
     @app.route("/organisation/members", methods=["GET", "POST"])
     def organisation_members_page():
         """Who can sign in to the active workspace.
@@ -21026,14 +21401,23 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         invited_by=inviter,
                         invited_via_profile_id=pid,
                     )
-                    notice = (
-                        f"{m.email} added as {m.role}."
-                        if m.status == _tenancy.STATUS_ACTIVE
-                        else (
+                    if m.status == _tenancy.STATUS_ACTIVE:
+                        notice = f"{m.email} added as {m.role}."
+                    else:
+                        # PC.14: deliver the invite when the email seam is
+                        # configured; otherwise say honestly that the link
+                        # must be shared out-of-band.
+                        notice = (
                             f"{m.email} invited as {m.role} — the membership "
                             "activates when they sign up with that email."
                         )
-                    )
+                        delivered = _send_invite_email(m.email, pid)
+                        notice += (
+                            " An invite email is on its way."
+                            if delivered
+                            else " Email delivery isn't configured here, so share "
+                            "the signup link with them yourself."
+                        )
                 elif action == "remove":
                     store.remove(target, pid)
                     notice = f"{_tenancy.normalize_email(target)} removed."
@@ -29789,6 +30173,27 @@ and can be revoked by the club.</p>
                     task_type="retention_sweep",
                     schedule_kind="daily",
                     schedule_expr="03:50",
+                )
+        # PC.14: daily DATA_DIR backup. Handler always registered (honest
+        # no-op when no backup target is configured); the schedule row is
+        # ensured once when the operator opts in.
+        from mediahub.backup import backup_enabled as _backup_enabled
+        from mediahub.backup import sweep as _backup_sweep
+
+        def _backup_handler(params: dict) -> None:
+            _backup_sweep(params)
+
+        _register_task_type("backup_sweep", _backup_handler)
+        if _backup_enabled():
+            from mediahub.workflow.schedule import create_task as _sched_create_task3
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks3
+
+            if not any(t.task_type == "backup_sweep" for t in _sched_list_tasks3()):
+                _sched_create_task3(
+                    name="DATA_DIR backup (PC.14)",
+                    task_type="backup_sweep",
+                    schedule_kind="daily",
+                    schedule_expr="04:10",
                 )
         start_scheduler()
     except Exception:
