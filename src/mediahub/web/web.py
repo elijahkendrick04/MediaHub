@@ -13602,7 +13602,25 @@ Relay team broke club record"></textarea>
         if _re_status.get("active") == "ffmpeg":
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
-        return jsonify({"ok": bool(ok), "deps": deps})
+        payload = {"ok": bool(ok), "deps": deps}
+        if _wants_html_health():
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — Deps</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(
+                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
+            )
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     # ---- /status -------------------------------------------------------
     #
