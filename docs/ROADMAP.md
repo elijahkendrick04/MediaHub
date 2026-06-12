@@ -12,6 +12,7 @@ the ADRs and companion docs linked under [Standing context](#standing-context).
 
 Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
 
+- **2026-06-12** — **Compliance-readiness audit: Phase C was pushing "go sell" with zero legal/compliance surface in place** (maintainer instruction "assess how the roadmap told me to sell with no compliance"). Root cause: Phase C was composed entirely from the 2026 *scaling* diligence, whose question was "what blocks revenue?" — so every PC item is a revenue mechanic, and "lawful to operate" was never an exit criterion. Compliance only ever entered the plan through side doors: as a data-*acquisition* risk (PC.6(a)'s "prefer the official API over scraping") and as a sellable *feature* (W.2 consent manager, filed in the optional pick-list). Engineering-shaped safety shipped (ADR-0003 isolation, publish-gate safeguarding rule, initials-first wall) because code review owns it; the document/contract/registration half (terms, privacy notice, DPA, ICO registration, deletion/export rights, breach process) had no owning channel and fell through. Fix: a third **compliance-readiness ("lawful-to-sell") exit gate** on Phase C — no paid contract before it holds — implemented as four new sell-gate items **PC.11–PC.14** (legal & privacy pack; minors' consent gate, promoting W.2 to load-bearing; data lifecycle & rights; operational trust pack: transactional email/password reset, backups + restore drill, support + incident runbook, billing hygiene). Decision recorded in [`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md). [compliance audit]
 - **2026-06-11** — **Phase C build-out: PC.7 + PC.8 + PC.10 shipped; PC.4's `/pricing` gate enforced** (maintainer instruction "complete PC.4/6/7/8/10"): the public try-before-signup demo (`/try`, watermarked ≤3-card preview, capped, sandboxed, self-cleaning, claimable on conversion), the sponsor manager + per-sponsor exposure reports (`/sponsors`, deterministic rotation, exposure ledger, monthly report), and the public achievements wall + embed + RSS/JSON (`/wall/<token>`, opt-in, approved-only, initials-first, structurally revocable). PC.4's remaining engineering gap closed — `/pricing` now reads `pc4_pricing_gate` and commits a list price only from ≥5 revealed annual payments (the highest tested price that cleared). PC.6 was audited build-complete (lead ledger, cold-share + referral-debt readouts, NGB application drafted + tracked); what remains on PC.4/PC.6 is the founder's selling motion, which code cannot close. [completion pass]
 - **2026-06-11** — **Phase 6 — Creative-suite breadth added** (maintainer instruction): every content-creation feature in the two checked-in competitor inventories ([Canva](research/CANVA_FEATURE_INVENTORY_2026.md), [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)) now has a MediaHub-shaped build plan — **our own first-party versions, not integrations of theirs** — organised into 24 gated work packages (P6.1–P6.24) with a feature-by-feature coverage index proving nothing was missed. Long-form mapping: [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). Phase 6 sits behind the Phase C gates like P3/P4/P5; standing rules (hosted-only, approval-first, deterministic engine, Gemini-first honest-error AI, GWS exclusion) all hold. [roadmap engine]
 - **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
@@ -59,9 +60,13 @@ Standing context).
 <!-- ROADMAP:TODO -->
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
+- **PC.11** · Phase C 🥇 (sell gate) — Legal & privacy pack: public Terms + Privacy Notice with versioned signup acceptance, club DPA (Art. 28 processor terms), published subprocessor register + transfer disclosures, ICO registration (founder action) · ❌ **NOT STARTED**
+- **PC.12** · Phase C 🥇 (sell gate) — Minors' consent & safeguarding gate: W.2's consent ledger enforced at generation + public wall + publish gate, plus a Children's-Code pass on the public surfaces · ❌ **NOT STARTED**
+- **PC.13** · Phase C 🥇 (sell gate) — Data lifecycle & rights: self-serve account/org deletion, org-level data export (SAR/portability), documented retention schedule · ❌ **NOT STARTED**
+- **PC.14** · Phase C 🥇 (sell gate) — Operational trust pack: transactional-email seam (password reset, verification, breach notice, member invites), DATA_DIR backup + restore drill, support contact + incident runbook, VAT/invoice hygiene · ❌ **NOT STARTED**
 - **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
 - **W.1** · Phase W (selectable) — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) · ❌ **NOT STARTED**
-- **W.2** · Phase W (selectable) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
+- **W.2** · Phase W → PC.12 sell gate (promoted 2026-06-12) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
 - **W.3** · Phase W (selectable) — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs · ❌ **NOT STARTED**
 - **W.4** · Phase W (selectable) — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets · ❌ **NOT STARTED**
 - **W.5** · Phase W (selectable) — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format · ❌ **NOT STARTED**
@@ -155,6 +160,12 @@ linked ADRs and research docs:
   ([SCALING_DILIGENCE_2026](research/SCALING_DILIGENCE_2026.md)).
 - **Stop polishing and sell.** P1.4 cleared the "sellable wedge" bar; further
   graphics work sits strictly behind Phase C sell-side progress.
+- **Lawful-to-sell before sold.** No paid contract before the
+  compliance-readiness gate holds: versioned Terms + Privacy Notice accepted at
+  signup, a club DPA, ICO registration, the minors' consent gate (PC.12),
+  deletion/export rights (PC.13), and password-reset / breach-notice / backup
+  basics (PC.14)
+  ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
 - **The deterministic engine is the moat.** Parsers, detectors, the ranker,
   and colour-science stay AI-free; AI judgement goes through
   `media_ai.llm`/`ai_core.llm` with honest errors, never heuristic fakes
@@ -216,7 +227,10 @@ The plan now has **seven stages, Phase 0 to Phase 6**:
 
 > **Ahead of all six in priority (added 2026-06)** sits a new
 > **Phase C — Commercialise & Distribute**: self-serve signup, billing, true
-> multi-tenancy, sane pricing, and a real way to reach clubs. The numbered phases
+> multi-tenancy, sane pricing, a real way to reach clubs — and, added
+> 2026-06-12, the **legal/compliance pack** (terms, privacy, a club data
+> agreement, minors' consent, data rights, backups) that makes the first sale
+> lawful and trustworthy. The numbered phases
 > describe *capability*; **Phase C is about getting paid for it** — and a hard-nosed
 > scaling diligence
 > ([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md))
@@ -780,7 +794,7 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 ---
 
-## Phase C — Commercialise & Distribute · PC · 🔵 **BUILD SIDE COMPLETE (2026-06-11) — sell side open** · 🥇 TOP PRIORITY
+## Phase C — Commercialise & Distribute · PC · 🔵 **sell side open — compliance build-out reopened 2026-06-12 (PC.11–PC.14)** · 🥇 TOP PRIORITY
 
 > **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
 > *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
@@ -815,12 +829,33 @@ drafted Swim England application) landed with it on the operator console
 referral motion, submit the NGB application. The exit gates are unchanged and unmet —
 **zero paying clubs** today; code can no longer be the excuse.
 
-**Exit criteria (both are hard gates on later phases).**
+**Update 2026-06-12 — the build side is reopened: the compliance surface was never
+built.** A compliance-readiness audit (maintainer-instructed) found that "sell now"
+was being pushed with **no Terms of Service, no Privacy Notice (the existing
+`/privacy` route is a data-inventory/delete tool, not a policy), no club DPA, no
+ICO registration, no terms acceptance at signup, no account deletion, no data
+export, no password reset (no transactional email at all), and no backup/restore
+story** — while the product processes **minors'** names, ages, performance data and
+photos for UK clubs and publishes them on a public wall. Root cause and decision in
+[`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md):
+Phase C was composed from a *revenue* diligence, so "lawful to operate" was never an
+exit criterion. **PC.11–PC.14** close the gap and a third exit gate below makes it
+structural. The selling motion can be *prepared* in parallel (warm conversations,
+the NGB application, the demo), but **no club pays before gate 3 holds.**
+
+**Exit criteria (all three are hard gates; 1–2 gate later phases, 3 gates the first paid contract).**
 1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
    involvement.* No scaling work (P3/P4/P5) starts until this holds.
 2. **Traction gate:** *≥10 clubs paying annually* before any new sport (P3). If the wedge
    stalls below ~50 clubs over time, that is a retention/PMF problem to fix — **not** a
    signal to add sports.
+3. **Compliance-readiness ("lawful-to-sell") gate — added 2026-06-12:** *no paid
+   contract before* versioned Terms + Privacy Notice are live and accepted at signup,
+   the club DPA exists, ICO registration is done, the minors' consent gate (PC.12)
+   enforces at generation/wall/publish, deletion + export (PC.13) work end-to-end,
+   and password reset / breach notice / verified backups (PC.14) are in place.
+   PC.4's pricing ledger and PC.6's funnel keep moving, but a quote may not convert
+   to payment until this gate holds ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
 
 ### PC.1 — Self-serve signup + auth · ✅ **DONE**
 The signup/login/session half of Appendix B **Step 7** (email+password, hashed; signed
@@ -1051,6 +1086,100 @@ What shipped:
 Pinned by `tests/test_public_wall.py` (token resolution, approved-only, initials,
 exclusions, revocation, feeds, and cross-tenant isolation).
 
+### PC.11 — Legal & privacy pack · ❌ **NOT STARTED** · *(sell gate — ADR-0015)*
+**The contractual minimum to take a club's money.** MediaHub is a **processor**
+for clubs (the controllers) over personal data that is largely **children's** —
+names, ages, race performance, photos — and today there is no Terms of Service,
+no Privacy Notice, no DPA, and signup records no acceptance of anything.
+**Build:**
+- Public **Terms of Service** + **Privacy Notice** routes (e.g. `/legal/terms`,
+  `/legal/privacy` — the existing `/privacy` data-inventory tool keeps its URL),
+  versioned documents stored in-repo; signup requires an explicit acceptance
+  checkbox and records `{terms_version, accepted_at}` in the `users.jsonl`
+  ledger; material changes force re-acceptance at next login.
+- A club-facing **Data Processing Agreement** (UK GDPR Art. 28 processor terms,
+  minors' data explicitly in scope) presented to the org owner at org creation /
+  first paid quote, acceptance recorded per org.
+- A published **subprocessor register** with transfer mechanisms, kept truthful
+  against the dependency register: Render (hosting + disk), Stripe (payments),
+  Google Gemini + Anthropic (LLM — athlete names/results ride in prompts),
+  Buffer (when scheduled), Replicate/PhotoRoom (opt-in cutouts), the TTS
+  provider when voiceover is on. A guard test pins the register against the
+  env-flag surface so a new provider can't ship undisclosed.
+- **Founder (non-code) checklist, tracked on `/operator/commercial`:** ICO
+  registration (data-protection fee), and a professional review of the three
+  documents before the first paid contract — drafts can be assembled in-repo,
+  but sign-off is a human act.
+**Exit:** an account cannot be created without recorded acceptance of a
+versioned ToS + Privacy Notice; an org owner has a recorded DPA acceptance;
+the subprocessor page renders and its guard test is green; ICO registration is
+logged on the operator console.
+
+### PC.12 — Minors' consent & safeguarding gate · ❌ **NOT STARTED** · *(sell gate — W.2 promoted 2026-06-12)*
+**W.2 stops being optional the day money changes hands.** The product's core
+output is *publishing children's achievements*; Swim England's Social Media
+Good Club Guide expects photo-consent handling, the drafted NGB application
+already cites safeguarding evidence, and the public wall (PC.10) currently
+leans on an initials-only default rather than recorded consent. **Build:** ship
+**W.2** (per-athlete consent registry — photo OK / full name OK / initials-only /
+do-not-feature; most-restrictive default; CSV import; enforced deterministically
+at generation, in `media_library/selector.py` photo scoring, on the public wall,
+and as a publish-gate check; welfare-officer export; audited changes). A
+name-keyed minimal ledger is acceptable for this gate if W.1's full athlete
+registry hasn't landed; it migrates onto the W.1 spine when that ships. Plus a
+documented **Children's-Code (Age Appropriate Design) pass** over the public
+surfaces (`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a
+no-consent athlete cannot render a name/photo and cannot pass the gate or
+appear on the wall; the review UI explains why; the Children's-Code pass is
+recorded; the NGB application's safeguarding claims are all true in code.
+
+### PC.13 — Data lifecycle & rights · ❌ **NOT STARTED** · *(sell gate — ADR-0015)*
+**Deletion, export, retention — the data-subject-rights plumbing a controller
+club will ask its processor for.** Today `/privacy` deletes individual runs,
+demo runs sweep at 24h — and that's the whole story: no account deletion, no
+org deletion, no export, no retention schedule. **Build:**
+- **Self-serve account deletion** (user row + memberships) and **org deletion**
+  cascading runs, media assets, content packs, wall token, sponsor/exposure
+  ledgers, consent registry — with the Stripe customer handled per the DPA
+  (financial records have their own statutory retention).
+- **Org-level data export** (takeout ZIP: runs JSON, media, captions, consent
+  state, audit log) — serves SARs and portability in one mechanism.
+- A documented **retention schedule** (runs, uploads, media, logs, audit
+  trails, demo runs, deleted-org grace window) published in the Privacy Notice
+  and enforced by scheduler jobs where automatic.
+**Exit:** a club owner can delete their org or export everything it holds
+without founder involvement; deletion verifiably removes the data from
+`DATA_DIR` (pinned by tests under the ADR-0003/0014 isolation invariants);
+the retention schedule in the Privacy Notice matches what the code does.
+
+### PC.14 — Operational trust pack · ❌ **NOT STARTED** · *(sell gate — ADR-0015)*
+**The boring things a paying customer silently assumes.** Found missing in the
+2026-06-12 audit: there is **no transactional email at all** (so no password
+reset — a locked-out volunteer is locked out forever; PC.3's member invites
+never send; a breach could not be notified), **no backup story** beyond the
+single 1 GB Render disk that holds `users.jsonl`, the payment/WTP ledgers and
+every run, and no support or incident path. **Build:**
+- **Transactional-email seam** (Resend-style HTTP API behind an env key,
+  honest-503 unconfigured — pulls P4.5's seam forward without the digest
+  product): password reset (signed expiring token), email verification,
+  member-invite delivery, and an operator "notify all users" path for breach
+  notification (the ICO's 72-hour clock needs a working channel, not a plan to
+  build one).
+- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
+  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs) with the
+  key material handled per the DPA, and a *documented, rehearsed* restore —
+  an unrestored backup is a hypothesis.
+- **Support + incident runbook:** a real support contact surfaced in-product
+  and in the ToS; a short incident/breach runbook (detect → contain → assess →
+  notify ICO/clubs) checked into `docs/`; `/healthz` uptime already exists —
+  surface it honestly to customers.
+- **Billing hygiene:** decide VAT handling (Stripe Tax vs below-threshold
+  statement), and ensure Checkout emits an invoice/receipt a volunteer
+  treasurer can put through club accounts.
+**Exit:** a user can reset their password unaided; an invite email actually
+arrives; a restore from backup has been performed and documented; the support
+contact and runbook exist; a test payment produces an expensable invoice.
+
 **Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
 `DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the
 shipped cross-tenant isolation invariant (ADR-0003) as the multi-tenancy seed; Postiz /
@@ -1108,8 +1237,9 @@ sellable*, but **not ahead of billing**"). The discipline: pick an item **only w
 it unblocks a sale, a pilot, the NGB application, or a known churn risk** — never
 as polish for its own sake, and never as a reason to defer the selling motion. No
 fixed phase exit; every item carries its own. Recommended first picks: **W.1 → W.2**
-(the consent story committees ask about), **W.4** (cheap, parent-delighting), and
-**W.10** (demo-day ingestion robustness).
+(the consent story committees ask about — and W.2 is no longer merely recommended:
+it was **promoted into the PC.12 sell gate on 2026-06-12**), **W.4** (cheap,
+parent-delighting), and **W.10** (demo-day ingestion robustness).
 
 ### W.1 — Athlete registry + milestone detectors · ❌ **NOT STARTED**
 **The data spine for W.2/W.3/W.8 — and per-athlete celebration at scale, which the
@@ -1128,7 +1258,7 @@ org-scoped under the ADR-0003/ADR-0014 invariants. **Exit:** the same swimmer is
 one entity across ≥2 runs; a 50th-race card generates with a provenance trail;
 merge decisions persist and are auditable.
 
-### W.2 — Consent & safeguarding manager · ❌ **NOT STARTED** *(depends on W.1)*
+### W.2 — Consent & safeguarding manager · ❌ **NOT STARTED** *(depends on W.1; **promoted 2026-06-12 — load-bearing for the PC.12 sell gate**, no longer optional: see Phase C / ADR-0015. PC.12 permits a name-keyed minimal ledger ahead of W.1, migrating onto the registry when it lands)*
 **The committee objection-killer and the strongest §4 evidence for the Swim England
 application.** Swim England's own Social Media Good Club Guide expects photo-consent
 handling; the competitive pass found **no content tool encodes minors' rules**; the
