@@ -1,29 +1,29 @@
-Flask>=3.0
-gunicorn>=21.2
-requests>=2.31
-beautifulsoup4>=4.12
-lxml>=5.0
-pypdf>=4.0
-pdfminer.six>=20231228
-pdfplumber>=0.11
+Flask>=3.1.3
+gunicorn>=26.0.0
+requests>=2.34.2
+beautifulsoup4>=4.15.0
+lxml>=6.1.1
+pypdf>=6.13.2
+pdfminer.six>=20260107
+pdfplumber>=0.11.9
 # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx). Leagues and meets
 # publish results as .xlsx; openpyxl reads them deterministically (read-only).
-openpyxl>=3.1
+openpyxl>=3.1.5
 
 # V8: media generation engine. Playwright pinned to the version whose
 # bundled Chromium revision matches what's reliably installable on
 # Render at build time. See pyproject.toml comment for the full reason.
-playwright>=1.56,<1.58
-pillow>=10.0
-rembg>=2.0
-onnxruntime>=1.16
-anthropic>=0.30
-replicate>=0.25
+playwright>=1.60.0,<1.61
+pillow>=12.2.0
+rembg>=2.0.76
+onnxruntime>=1.26.0
+anthropic>=0.109.1
+replicate>=1.0.7
 
 # P0.1 free reel fallback (MEDIAHUB_REEL_ENGINE=ffmpeg): ships a static FFmpeg
 # binary so the fallback needs no system ffmpeg and no Remotion license. The
 # wheel is BSD-2; the bundled FFmpeg is invoked strictly as a subprocess.
-imageio-ffmpeg>=0.4.9
+imageio-ffmpeg>=0.6.0
 
 # Capability 2 (semantic memory): sqlite-vec is a pure-C, dependency-free
 # SQLite extension (MIT/Apache-2.0 dual) that stores vectors in a vec0 virtual
@@ -35,7 +35,7 @@ sqlite-vec>=0.1.9,<0.2
 # Voiceover (optional, operator-gated via MEDIAHUB_VOICEOVER=1): pure-Python,
 # CPU-only text-to-speech of the already-approved caption. When absent the
 # voiceover route honest-errors (503) rather than degrading to a fake voice.
-edge-tts>=6.1
+edge-tts>=7.2.8
 
 # Phase 1.6 Stage B — Adaptive Theming Engine colour-science package.
 # materialyoucolor is the maintained Python port of Google's
@@ -47,19 +47,19 @@ edge-tts>=6.1
 # numpy is used by the theming CVD simulator (3×3 Machado matrices),
 # the saliency cropper (energy maps), and variant_metrics (perceptual hashing).
 # See docs/THEMING.md for the architecture.
-materialyoucolor>=3.0
-coloraide>=4.0
-numpy>=1.24
+materialyoucolor>=3.0.2
+coloraide>=8.8.1
+numpy>=2.4.6
 
 # Sport-profile config loader (mediahub.sport_profiles) reads the human-authored
 # data/sport_profiles/*.yaml files. PyYAML is MIT-licensed and free; the loader is
 # inert scaffolding (not yet wired into the runtime pipeline).
-PyYAML>=6.0
+PyYAML>=6.0.3
 
 # Scheduler (mediahub.scheduler / mediahub.workflow.schedule) uses croniter to
 # compute cron / daily / weekly / monthly fire-times. croniter is MIT-licensed,
 # maintained under the Pallets-Eco (Flask) org; deps python-dateutil + pytz.
-croniter>=2.0
+croniter>=6.2.2
 
 # Phase C commercial layer (web/auth.py + web/billing.py). bcrypt (Apache-2.0)
 # hashes account passwords — used directly because passlib 1.7.x cannot load a
@@ -67,11 +67,11 @@ croniter>=2.0
 # Customer Portal, and webhook signature verification. Both are optional at
 # runtime: with no STRIPE_* env configured, billing honest-errors (503) and the
 # rest of the app is unaffected.
-bcrypt>=4.0
+bcrypt>=5.0.0
 # argon2-cffi (MIT): argon2id password hashing (ASVS L2 V2.4); bcrypt stays
 # for verifying legacy hashes, upgraded on next login.
-argon2-cffi>=23.1
-stripe>=7.0
+argon2-cffi>=25.1.0
+stripe>=15.2.0
 
 # W.10 OPTIONAL OCR fallback (interpreter/ocr.py) — deliberately NOT installed
 # here. Scanned/photographed result sheets need a real OCR engine; without one
