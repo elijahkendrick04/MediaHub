@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `cd5578063` · Merge pull request #379 from elijahkendrick04/dependabot/github_actions/actions/upload-artifact-7
+**Last updated:** 2026-06-12 · `c3e4446ff` · Merge pull request #389: Auto-merge Dependabot GitHub-Actions bumps on all-green checks
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -374,6 +374,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `c3d4f2763` | Auto-merge Dependabot GitHub-Actions bumps on all-green checks |
 | 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
 | 2026-06-12 | `8129ca971` | Apply CI-pinned ruff format to test_dev_login.py |
 | 2026-06-12 | `d11cf8c38` | Add opt-in passwordless developer sign-in + home-page footer link |
@@ -383,8 +384,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `9bacf51fe` | docs: regenerate inventories on the merged tree |
 | 2026-06-12 | `0a9a81146` | Remove two unused imports flagged by CI's ruff --fix hook |
 | 2026-06-12 | `164d52231` | Format tree with CI-pinned ruff 0.8.4 (hygiene hook parity) |
-| 2026-06-12 | `636d1df01` | fix: unconfigured GET /password/forgot answers 200, POST stays 503 |
-| 2026-06-12 | `27f27cb63` | docs: package READMEs for backup/, privacy org lifecycle, referrals |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
