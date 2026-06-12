@@ -557,20 +557,8 @@ def _dispatch_engine() -> str:
     resolves to 'remotion' (the default) the existing _run_remotion path
     continues completely unchanged.  'ffmpeg' routes to the free fallback
     in :mod:`mediahub.visual.reel_ffmpeg` (roadmap P0.1).
-
-    The 'satori' engine is registered as a future placeholder (P5.4) but
-    is not yet implemented; callers receive an honest ReelEngineUnavailable
-    rather than a fake/placeholder asset (CLAUDE.md AI-surfaces rule).
     """
-    engine = select_reel_engine()
-    if engine == "satori":
-        raise ReelEngineUnavailable(
-            "The 'satori' render engine is not yet implemented. "
-            "Set MEDIAHUB_REEL_ENGINE=remotion (or leave it unset) for the "
-            "production Remotion renderer, or MEDIAHUB_REEL_ENGINE=ffmpeg "
-            "for the free still-graphic + FFmpeg fallback."
-        )
-    return engine
+    return select_reel_engine()
 
 
 # ---------------------------------------------------------------------------
