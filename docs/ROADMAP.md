@@ -31,7 +31,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `8b0a3ea37` · Merge pull request #359 from elijahkendrick04/claude/eager-ride-uwc5v9
+**Last updated:** 2026-06-12 · `030bc35eb` · Merge pull request #352: UK legal compliance — audit + remediation baseline
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -42,14 +42,15 @@ in any commit message to move an item:
 | 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
 | 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
 | 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
+| 2026-06-12 | `56d01c8fa` | docs(roadmap): record the UK legal compliance baseline against the PC.11-PC.14 sell gate |
+| 2026-06-12 | `cd34d6807` | style: apply pre-commit ruff-format (fixes Repo hygiene CI) |
 | 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
 | 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
 | 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
 | 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
 | 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
 | 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
-| 2026-06-12 | `7394cb396` | Phase W web integration: Club data hub, athletes/consent/records pages, live meet + wraps UI, magic- |
-| 2026-06-12 | `4ca993ccd` | Apply pre-commit formatting (ruff-format line collapses) |
+| 2026-06-12 | `81d6ee69e` | docs(compliance): handover — commit map, placeholder list, operational checklist, closing verdict |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
