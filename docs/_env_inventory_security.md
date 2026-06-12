@@ -12,11 +12,14 @@ each key to the minimum the deployment uses:
 | `PHOTOROOM_API_KEY` | Only when `MEDIAHUB_CUTOUT_PROVIDER=photoroom` | As Replicate | `.env` only |
 | `BUFFER_ACCESS_TOKEN` | Per-club token scoped to that club's channels (stored per-profile); never a master token in env on multi-tenant deployments | Posting to the connected channels | Revoke in Buffer, re-connect |
 | `STRIPE_SECRET_KEY` | Restricted key: Checkout + Customer Portal + webhooks only | Billing actions (card data never touches MediaHub) | Stripe dashboard |
-| `MEDIAHUB_DEV_KEY` | High-entropy (≥ 32 random chars); set only while the operator needs the override; **unsetting it instantly revokes all operator sessions** | Full operator access | Unset/replace in `.env` |
 | `MEDIAHUB_NTFY_TOKEN` / webhook URLs | Notification payloads carry no athlete personal data by policy (tested) | Noise/spoofed ops alerts | `.env` only |
 | `app.secret_key` (`DATA_DIR/.secret_key`, 0600) | Auto-generated per deployment; signs sessions | Session forgery → full account takeover: protect the data volume, rotate after any suspected exposure (logs everyone out) | Delete the file, restart |
 
 Boot-time validation (`mediahub.web.env_check`, fail-fast in production):
-unset `DATA_DIR` on a production host, malformed provider keys, and a weak
-`MEDIAHUB_DEV_KEY` are refused at startup rather than discovered in an
-incident.
+unset `DATA_DIR` on a production host and malformed provider keys are refused
+at startup rather than discovered in an incident.
+
+The operator developer sign-in (`/developer`) is public and passwordless — one
+click grants an unrestricted operator session, with no key or env gate. This is
+a deliberate owner decision; see
+`docs/adr/0018-public-passwordless-operator-signin.md` for the accepted risk.

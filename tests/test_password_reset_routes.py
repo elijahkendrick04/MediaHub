@@ -219,7 +219,10 @@ def test_member_invite_without_seam_is_honest(app_world):
 
 def test_notify_users_requires_operator(app_world):
     c = app_world["app"].test_client()
-    assert c.get("/operator/notify-users").status_code == 404  # no dev key set
+    # Non-operator → bounced to the public developer sign-in (not a 404).
+    r = c.get("/operator/notify-users")
+    assert r.status_code in (302, 303)
+    assert "/developer" in r.headers["Location"]
 
 
 def test_notify_users_sends_to_all_and_records(app_world, outbox, monkeypatch):

@@ -6929,14 +6929,12 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_pid = (_sess.get("active_profile_id") or "").strip()
         # Account-level identity (PC.1) — separate from the org pin above.
         account_email = (_sess.get("user_email") or "").strip().lower()
-        # Operator developer session (env-gated) + whether the affordance exists.
+        # Operator developer session (public, passwordless sign-in).
         dev_operator = _auth.is_dev_operator()
-        dev_login_enabled = _auth.dev_login_enabled()
     except Exception:
         signed_in_pid = ""
         account_email = ""
         dev_operator = False
-        dev_login_enabled = False
     signed_in_name = ""
     signed_in_primary = ""
     signed_in_secondary = ""
@@ -7087,7 +7085,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
       <a href="{{ url_for('logout') }}">Log out</a>
     {% else %}
       <a href="{{ url_for('login_page') }}">Log in</a>
-      {% if dev_login_enabled %}<a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>{% endif %}
+      <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
     {% endif %}
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
@@ -7146,7 +7144,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     </div>
     <div class="mh-footer-center">
       <div class="mh-footer-tag">Structured input. Meaningful moments. Ready-to-post content.</div>
-      {% if dev_login_enabled and active == 'home' %}
+      {% if active == 'home' %}
       <a class="mh-footer-devlink" href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer access &rarr;</a>
       {% endif %}
     </div>
@@ -7922,7 +7920,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in=bool(signed_in_pid),
         account_email=account_email,
         dev_operator=dev_operator,
-        dev_login_enabled=dev_login_enabled,
         signed_in_name=signed_in_name,
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
@@ -8318,14 +8315,14 @@ def create_app() -> Flask:
             "billing_portal",
             "stripe_webhook",
             # Operator developer sign-in — must be reachable without an active
-            # org (the whole point is unrestricted operator access). Env-gated:
-            # the handlers themselves 404 unless MEDIAHUB_DEV_KEY is set.
+            # org (the whole point is unrestricted operator access). Public and
+            # passwordless: one click on /developer grants the operator session.
             "developer_login",
             "developer_login_post",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
-            # (404s unless MEDIAHUB_DEV_KEY is set, redirects non-operator
-            # sessions) and org-independent, so it bypasses the org gate
-            # exactly like the developer sign-in above.
+            # (redirects non-operator sessions to the developer sign-in) and
+            # org-independent, so it bypasses the org gate exactly like the
+            # developer sign-in above.
             "operator_commercial",
             "operator_commercial_quote_add",
             "operator_commercial_quote_update",
@@ -20735,12 +20732,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<br><a href="{url_for("password_forgot")}" '
             'style="color:var(--ink-muted);font-weight:600">Forgot your password?</a>'
         )
-        if _auth.dev_login_enabled():
-            alt += (
-                f'<br><a href="{url_for("developer_login")}" '
-                'style="color:var(--ink-muted);font-weight:600">'
-                "Developer sign-in &rarr;</a>"
-            )
+        alt += (
+            f'<br><a href="{url_for("developer_login")}" '
+            'style="color:var(--ink-muted);font-weight:600">'
+            "Developer sign-in &rarr;</a>"
+        )
         return _auth_form_page(
             title="Log in",
             heading='Welcome <em class="editorial">back</em>.',
@@ -21221,89 +21217,40 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         return t
 
     # ---- /developer (operator unrestricted sign-in) -------------------
-    # Env-gated by MEDIAHUB_DEV_KEY: the route 404s and the buttons vanish on
-    # any deployment without a key, so it is never a public backdoor. On a
-    # correct key the operator gets an unrestricted (Owner-plan) session that
-    # bypasses every paywall gate. The key is verified constant-time, never
-    # logged, and never rendered back to the page.
-    def _developer_login_page(*, error: str = "", open_mode: bool = False) -> str:
-        err_html = ""
-        if error:
-            err_html = (
-                '<div class="mh-flash error" role="alert" style="'
-                "margin:0 0 var(--sp-5);padding:14px 18px;"
-                "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
-                "background:var(--bad-bg,rgba(255,107,107,0.06));color:var(--ink);"
-                "border-radius:var(--radius-sm);font-family:var(--font-mono);"
-                'font-size:12px;letter-spacing:0.06em;text-transform:uppercase">'
-                f"[ ERROR ] {_h(error)}</div>"
-            )
-        if open_mode:
-            # Passwordless temporary backdoor (MEDIAHUB_DEV_OPEN): no key field,
-            # a single button takes the unrestricted session. A standing banner
-            # reminds the operator the door is open and to remove it before real
-            # customers — matching the env var's documented intent.
-            warn_html = (
-                '<div class="mh-flash" role="alert" style="'
-                "margin:0 0 var(--sp-5);padding:14px 18px;"
-                "border:1px solid rgba(245,193,91,0.35);"
-                "border-left:3px solid var(--warn);"
-                "background:rgba(245,193,91,0.06);color:var(--ink);"
-                "border-radius:var(--radius-sm);font-family:var(--font-mono);"
-                'font-size:12px;letter-spacing:0.05em;line-height:1.5">'
-                "[ OPEN ] Passwordless operator access is ON. Anyone who reaches "
-                "this page can enter unrestricted &mdash; unset "
-                "<strong>MEDIAHUB_DEV_OPEN</strong> to close it before onboarding "
-                "real customers.</div>"
-            )
-            body = (
-                '<section class="mh-hero" style="padding-top:var(--sp-7);'
-                'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
-                '<span class="mh-hero-eyebrow">Operator</span>'
-                '<h1>Developer <em class="editorial">sign-in</em>.</h1>'
-                '<p class="lede">Unrestricted, paywall-free access for the '
-                "operator running this deployment. Passwordless mode is on "
-                "&mdash; no key required.</p>"
-                "</section>"
-                f"{warn_html}"
-                f"{err_html}"
-                '<div class="card" style="padding:24px 28px;max-width:440px">'
-                f'<form method="post" action="{url_for("developer_login_post")}" '
-                'data-loader-text="Signing in&hellip;">'
-                '<button type="submit" class="btn" style="width:100%">'
-                "Enter unrestricted</button>"
-                "</form>"
-                '<div class="dim" style="font-size:13px;margin-top:18px;'
-                'text-align:center">'
-                f'Back to <a href="{url_for("login_page")}" '
-                'style="color:var(--accent);font-weight:600">normal log in</a>.'
-                "</div>"
-                "</div>"
-            )
-            return _layout("Developer sign-in", body, active="signin")
+    # Public and passwordless: the route always exists and one click grants an
+    # unrestricted (Owner-plan) session that bypasses every paywall gate. There
+    # is no key — anyone who reaches this page can enter (owner decision, see
+    # docs/adr/0018-public-passwordless-operator-signin.md).
+    def _developer_login_page() -> str:
+        note_html = (
+            '<div class="mh-flash" role="alert" style="'
+            "margin:0 0 var(--sp-5);padding:14px 18px;"
+            "border:1px solid rgba(245,193,91,0.35);"
+            "border-left:3px solid var(--warn);"
+            "background:rgba(245,193,91,0.06);color:var(--ink);"
+            "border-radius:var(--radius-sm);font-family:var(--font-mono);"
+            'font-size:12px;letter-spacing:0.05em;line-height:1.5">'
+            "[ OPEN ] Unrestricted operator access &mdash; this sign-in needs no "
+            "password, so anyone who reaches this page can enter.</div>"
+        )
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Operator</span>'
             '<h1>Developer <em class="editorial">sign-in</em>.</h1>'
             '<p class="lede">Unrestricted, paywall-free access for the operator '
-            "running this deployment. Enter the developer key from your "
-            "environment.</p>"
+            "running this deployment. No key required &mdash; one click to "
+            "enter.</p>"
             "</section>"
-            f"{err_html}"
+            f"{note_html}"
             '<div class="card" style="padding:24px 28px;max-width:440px">'
             f'<form method="post" action="{url_for("developer_login_post")}" '
             'data-loader-text="Signing in&hellip;">'
-            '<label style="display:block;font-size:12px;text-transform:uppercase;'
-            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
-            "Developer key</label>"
-            '<input type="password" name="dev_key" autocomplete="off" required '
-            'autofocus style="width:100%" '
-            'placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
-            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            '<button type="submit" class="btn" style="width:100%">'
             "Enter unrestricted</button>"
             "</form>"
-            '<div class="dim" style="font-size:13px;margin-top:18px;text-align:center">'
+            '<div class="dim" style="font-size:13px;margin-top:18px;'
+            'text-align:center">'
             f'Back to <a href="{url_for("login_page")}" '
             'style="color:var(--accent);font-weight:600">normal log in</a>.'
             "</div>"
@@ -21313,35 +21260,25 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
     @app.route("/developer", methods=["GET"])
     def developer_login():
-        if not _auth.dev_login_enabled():
-            abort(404)
         if _auth.is_dev_operator():
             return redirect(url_for("make_page"))
-        return _developer_login_page(open_mode=_auth.dev_login_open())
+        return _developer_login_page()
 
     @app.route("/developer", methods=["POST"])
     def developer_login_post():
-        if not _auth.dev_login_enabled():
-            abort(404)
         if _auth_rate_limited("developer"):
             return _auth_rate_limit_response()
-        # Passwordless temporary mode (MEDIAHUB_DEV_OPEN) signs in with no key;
-        # otherwise a correct MEDIAHUB_DEV_KEY is required.
-        if _auth.dev_login_open() or _auth.verify_dev_key(request.form.get("dev_key")):
-            _auth.login_dev_operator()
-            nxt = _safe_next(request.args.get("next") or request.form.get("next"))
-            return redirect(nxt or url_for("make_page"))
-        return _developer_login_page(error="Invalid developer key."), 401
+        # Public, passwordless operator sign-in — one click grants the session.
+        _auth.login_dev_operator()
+        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        return redirect(nxt or url_for("make_page"))
 
     # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
-    # Operator-only, exactly like /developer: the surface does not exist
-    # (404) unless MEDIAHUB_DEV_KEY is configured, and non-operator sessions
-    # are sent to the developer sign-in. It holds commercially sensitive
-    # data (quotes, pipeline) so it must never render for org users.
+    # Operator-only, exactly like /developer: non-operator sessions are sent to
+    # the (public, passwordless) developer sign-in. It holds commercially
+    # sensitive data (quotes, pipeline) so it must never render for org users.
 
     def _require_operator():
-        if not _auth.dev_login_enabled():
-            abort(404)
         if not _auth.is_dev_operator():
             return redirect(url_for("developer_login", next=url_for("operator_commercial")))
         return None

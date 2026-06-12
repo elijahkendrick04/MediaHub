@@ -40,10 +40,12 @@ errors, a provider breach notice, anomalous ledger entries
 **Contain.**
 1. Publishing: flip the autonomy kill switch (publish gate honours it) and,
    if needed, suspend Buffer channel connections.
-2. Access: rotate `MEDIAHUB_DEV_KEY` (instantly revokes operator sessions);
-   rotate `SECRET_KEY` (invalidates every session cookie + outstanding
-   magic links and reset tokens); rotate any provider key suspected leaked
-   (`.env` only — never code).
+2. Access: the operator `/developer` sign-in is public and passwordless
+   (ADR-0018), so there is no key to rotate — rotate `SECRET_KEY` to
+   invalidate every session cookie (including any outstanding operator
+   session) plus magic links and reset tokens; rotate any provider key
+   suspected leaked (`.env` only — never code). To close the operator door
+   itself, ship a code change re-gating `/developer`.
 3. If the host itself is compromised: scale the Render service to zero;
    the data disk persists.
 
