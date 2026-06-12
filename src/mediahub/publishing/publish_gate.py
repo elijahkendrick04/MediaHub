@@ -323,12 +323,50 @@ def _check_safeguarding(card: Optional[dict]) -> GateCheck:
 
 
 def _check_consent(org_id: str, card: Optional[dict]) -> GateCheck:
-    """Consent/opt-out gate — same decision function as approval + packs.
+    """ONE consent answer at the gate — both registries, fail closed.
 
-    Fail-safe: if the registry cannot be read, the card is BLOCKED, not
-    waved through — a missing answer to "may this athlete appear?" is a
-    block, mirroring the honest-error rule everywhere else.
+    Two consent systems exist by design history: the W.2 safeguarding
+    registry (per-athlete levels: full/no_photo/initials_only/
+    do_not_feature, resolved onto cards at pack build) and the compliance
+    ledger (refusals/revocations, Art 18 restriction, opt-in mode with
+    parental flags, erasure suppression records). A card publishes only
+    when NEITHER blocks; if either registry is unreadable the card is
+    BLOCKED, never waved through.
     """
+    # 1. W.2 safeguarding policy (card-resolved when present, else live).
+    consent = (card or {}).get("consent")
+    if isinstance(consent, dict) and consent.get("level"):
+        if consent.get("blocked"):
+            return GateCheck(
+                "consent",
+                False,
+                consent.get("reason") or "athlete consent does not allow featuring",
+            )
+    else:
+        name = ""
+        for source in (card or {}), ((card or {}).get("achievement") or {}):
+            name = (source.get("swimmer_name") or "").strip()
+            if name:
+                break
+        if name:
+            try:
+                from mediahub.safeguarding import effective_policy, regime_active  # noqa: PLC0415
+
+                if regime_active(org_id):
+                    policy = effective_policy(org_id, name)
+                    if policy.blocked:
+                        return GateCheck("consent", False, policy.reason)
+            except Exception:
+                # Registry unreadable must fail CLOSED at the publish gate —
+                # autonomous publishing without consent visibility is the
+                # exact failure W.2 exists to prevent.
+                return GateCheck(
+                    "consent", False, "consent registry unavailable — blocked pending review"
+                )
+
+    # 2. Compliance ledger (opt-outs, Art 18 restriction, opt-in/parental
+    # mode, erasure suppression) — same decision function as the approval
+    # route and the pack filter.
     try:
         from mediahub.compliance.gate import consent_block_reason_for_card  # noqa: PLC0415
 
@@ -337,7 +375,7 @@ def _check_consent(org_id: str, card: Optional[dict]) -> GateCheck:
         return GateCheck("consent", False, f"consent registry unreadable ({exc}) — blocking")
     if reason:
         return GateCheck("consent", False, reason)
-    return GateCheck("consent", True, "no opt-out or restriction recorded for this athlete")
+    return GateCheck("consent", True, "no consent registry blocks this athlete")
 
 
 def _parse_cap(raw: object, default: int) -> int:

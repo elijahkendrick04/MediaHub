@@ -26,6 +26,7 @@ from .rows import assign_rows_to_events
 from .hypothesis import propose_patterns, save_corpus_section
 from .hytek_parser import detect_hy3, parse_hy3
 from .sdif_parser import detect_sdif, parse_sdif
+from .lenex_parser import detect_lenex, parse_lenex
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,12 @@ _store: PatternStore | None = None
 
 _LOW_CONF_THRESHOLD = 0.6
 _MIN_OVERALL_CONF = 0.5
+
+# W.10 OCR fallback: OCR'd text is never high-confidence — cap the overall
+# score and flag every uncertain recognised line for human review.
+_OCR_CONFIDENCE_CAP = 0.55
+_OCR_LINE_LOW_CONF = 0.6
+_OCR_MAX_LOW_CONF_FLAGS = 20
 
 # Regex for meet-level metadata — structural only, no domain vocab
 _DATE_RE = re.compile(r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}[\-/]\d{2}[\-/]\d{2})\b")
@@ -186,11 +193,11 @@ def _try_native_parse(
     hint: Optional[str] = None,
     source_path: Optional[pathlib.Path] = None,
 ) -> Optional[InterpretedMeet]:
-    """Attempt direct parsing for native Hy-Tek formats.
+    """Attempt direct parsing for native interchange formats.
 
-    Returns an InterpretedMeet if the input is .hy3, .cl2/SDIF, or a ZIP
-    containing such files. Returns None to defer to the schema-induce
-    pipeline.
+    Returns an InterpretedMeet if the input is .hy3, .cl2/SDIF, LENEX
+    (.lef/.lxf), or a ZIP containing such files. Returns None to defer
+    to the schema-induce pipeline.
     """
     if not data:
         return None
@@ -208,7 +215,13 @@ def _try_native_parse(
         except Exception as exc:  # noqa: BLE001
             log.warning("sdif parser failed: %s", exc)
 
-    # ZIP: look for HY3 / CL2 members and parse them directly. We cap
+    if detect_lenex(data) or (hint and any(x in hint.lower() for x in (".lef", ".lxf", "lenex"))):
+        try:
+            return parse_lenex(data)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("lenex parser failed: %s", exc)
+
+    # ZIP: look for HY3 / CL2 / LENEX members and parse them directly. We cap
     # member count and uncompressed size via _zip_safety so a malicious
     # compression bomb can't OOM the worker.
     if data[:4] == _ZIP_MAGIC:
@@ -228,7 +241,8 @@ def _try_native_parse(
                 return None
             hytek_members = [n for n in safe_names if n.lower().endswith(".hy3")]
             sdif_members = [n for n in safe_names if n.lower().endswith((".cl2", ".sd3"))]
-            if not hytek_members and not sdif_members:
+            lenex_members = [n for n in safe_names if n.lower().endswith((".lef", ".lxf"))]
+            if not hytek_members and not sdif_members and not lenex_members:
                 return None
             results: list[InterpretedMeet] = []
             info_by_name = {info.filename: info for info in zf.infolist()}
@@ -246,6 +260,13 @@ def _try_native_parse(
                     log.warning("sdif member %s rejected: %s", n, exc)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("sdif member %s failed: %s", n, exc)
+            for n in lenex_members:
+                try:
+                    results.append(parse_lenex(safe_read_member(zf, info_by_name[n])))
+                except UnsafeZipError as exc:
+                    log.warning("lenex member %s rejected: %s", n, exc)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("lenex member %s failed: %s", n, exc)
             if results:
                 merged = _merge_meets(results)
                 # Tag that the source was a ZIP wrapper
@@ -390,6 +411,36 @@ def interpret_document(
 
     # ---- Stage 6: Overall confidence + hypothesis -----------------------
     overall_conf = _overall_confidence(events)
+
+    # ---- W.10: OCR provenance + per-row uncertainty ----------------------
+    # When ingestion recovered the text via OCR (phone photo / scanned PDF),
+    # record which engine ran, flag every low-confidence recognised line, and
+    # cap the overall confidence — uncertain rows are flagged for human
+    # review, never silently guessed.
+    if stream.format_detected == "image-ocr":
+        ocr_engine = getattr(stream, "ocr_engine", "unknown")
+        ocr_lines = list(getattr(stream, "ocr_lines", []))
+        low_conf_lines = [(t, c) for t, c in ocr_lines if c < _OCR_LINE_LOW_CONF]
+        sources_used.append(f"ocr:{ocr_engine}")
+        needs_review.append(
+            {
+                "reason": "ocr-used",
+                "detail": f"{ocr_engine}; {len(low_conf_lines)} low-confidence lines",
+            }
+        )
+        for line_text, line_conf in low_conf_lines[:_OCR_MAX_LOW_CONF_FLAGS]:
+            needs_review.append(
+                {
+                    "reason": "ocr-low-confidence-row",
+                    "detail": line_text,
+                    "confidence": line_conf,
+                }
+            )
+        overall_conf = min(overall_conf, _OCR_CONFIDENCE_CAP)
+    elif getattr(stream, "ocr_unavailable_detail", None):
+        # Scanned PDF with no OCR engine installed: honest review flag,
+        # everything else about the (empty) pipeline result stays as-is.
+        needs_review.append({"reason": "image-needs-ocr", "detail": stream.ocr_unavailable_detail})
 
     if overall_conf < _LOW_CONF_THRESHOLD and stream.text:
         # Low confidence overall — run hypothesis on whole-doc sample

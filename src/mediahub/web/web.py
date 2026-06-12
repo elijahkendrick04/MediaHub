@@ -75,6 +75,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import legal as _legal
 from . import tenancy as _tenancy
 
 # V7 / brand feature flags. These packages are only ever imported lazily at
@@ -153,10 +154,10 @@ except ImportError:
     _save_voice_profile = None
 
 # V9: "Why this card?" explainer.
-# The legacy rule-based explainer (recognition/explainer.py) is no longer
-# called — _build_card_explanation now requires an AI provider and surfaces
-# an honest "AI unavailable: configure a provider" message when none is
-# configured, instead of falling back to a hardcoded type-phrase template.
+# _build_card_explanation requires an AI provider and surfaces an honest
+# "AI unavailable: configure a provider" message when none is configured —
+# never a hardcoded type-phrase template. (The old rule-based explainer
+# module was deleted once the AI surface replaced it.)
 
 
 # LLM-derived performance-context sentence, keyed by
@@ -609,7 +610,7 @@ def _render_why_inner(
         plain_lines.append("")
         plain_lines.append("Source lines:")
         for sl in source_lines:
-            plain_lines.append(f"  [{sl.get('label','source')}] {sl.get('raw_text','')}")
+            plain_lines.append(f"  [{sl.get('label', 'source')}] {sl.get('raw_text', '')}")
     plain_text = _h("\n".join(p for p in plain_lines if p is not None))
 
     bullets_block = (
@@ -739,9 +740,7 @@ def _render_why_this_card(
         )
     exp = _build_card_explanation(ra)
     return (
-        f"{shell_open}"
-        f"{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}"
-        f"</details>"
+        f"{shell_open}{_render_why_inner(exp, ra=ra, run_id=run_id, card_uuid=card_uuid)}</details>"
     )
 
 
@@ -1433,7 +1432,7 @@ def _reconcile_interrupted_runs():
     try:
         conn = _db()
         rows = conn.execute(
-            "SELECT id, heartbeat_at, created_at FROM runs " "WHERE status IN ('queued','running')"
+            "SELECT id, heartbeat_at, created_at FROM runs WHERE status IN ('queued','running')"
         ).fetchall()
         dead = []
         for r in rows:
@@ -1594,6 +1593,26 @@ def _persist_run(run: PipelineRunV4, file_name: str) -> None:
     )
     conn.commit()
     conn.close()
+
+    # W.1: log this run's swims into the athlete registry so identity,
+    # milestones, consent and wraps accumulate. Best-effort and idempotent —
+    # registry trouble must never fail a run.
+    if run.profile_id and not run.error:
+        try:
+            from mediahub.athletes import sync_run_payload as _ath_sync
+
+            _prof = None
+            try:
+                _prof = load_profile(run.profile_id)
+            except Exception:
+                _prof = None
+
+            def _is_ours(code):
+                return _prof.is_ours(code, None) if _prof else True
+
+            _ath_sync(run.profile_id, payload, is_ours=_is_ours)
+        except Exception:
+            log.warning("athlete registry sync failed for run %s", run.run_id, exc_info=True)
 
 
 def _load_run(run_id: str) -> Optional[dict]:
@@ -1792,14 +1811,14 @@ def _render_wf_actions(run_id: str, card_id: str, wf_status: str) -> str:
     return (
         f'<span class="strap" data-mh-wf-target="{_h(card_id)}" '
         f'data-mh-wf-state="{_h(status_key)}" style="padding:0">'
-        f'<span data-mh-wf-label>{_h(label)}</span></span>'
+        f"<span data-mh-wf-label>{_h(label)}</span></span>"
         f'<button class="{approve_cls}" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="approved" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
         f"{approve_pressed}"
         f' title="Mark this card approved — it moves into the content builder for captioning, graphics and scheduling.">{approve_label}</button>'
         f'<button class="btn secondary" type="button" style="font-size:12px;padding:4px 10px"'
         f' data-mh-wf="queue" data-mh-run-id="{_h(run_id)}" data-mh-card-id="{_h(card_id)}"'
-        f'{_disabled_attrs("queue")}'
+        f"{_disabled_attrs('queue')}"
         f' title="Send back to the queue — undoes the approval.">Re-queue</button>'
     )
 
@@ -1831,6 +1850,16 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
 def _delete_run(run_id: str) -> bool:
     p = RUNS_DIR / f"{run_id}.json"
     existed = p.exists()
+    # Erasure cascade (UK GDPR Art. 17) — the stores OUTSIDE the run files:
+    # per-run PB cache, caption memory, posting-log excerpts, motion cache.
+    # Resolved before the JSON disappears (it carries the owning profile_id),
+    # and never allowed to abort the file/DB deletion below.
+    try:
+        from mediahub.privacy import run_deletion_cascade  # noqa: PLC0415
+
+        run_deletion_cascade(run_id, _run_owner_profile_id(run_id) or "")
+    except Exception:  # noqa: BLE001
+        log.warning("run deletion cascade failed for %s", run_id, exc_info=True)
     if existed:
         p.unlink()
     # Also drop any per-run sidecar directory (visuals, motion, briefs,
@@ -2430,6 +2459,38 @@ function _fetchCaption(captionUrl, tone, panel, cacheKey, isAi, cardId) {
         if (textarea) { textarea.value = active; }
       }
       _renderActive(0);
+      // W.13: Welsh variant for bilingual workspaces — shown beside the
+      // English caption so both are approved in one pass.
+      if (captionDiv && j.caption_cy) {
+        var cyBox = document.createElement('div');
+        cyBox.style.cssText = 'margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:rgba(212,255,58,0.03)';
+        cyBox.innerHTML = '<div style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Cymraeg</div>'
+          + '<span style="white-space:pre-wrap">' + safeText(j.caption_cy) + '</span>';
+        captionDiv.appendChild(cyBox);
+      }
+      // W.11: result-grounded alt text — editable, saved with the card so
+      // every export/publish surface carries what the approver saw.
+      if (captionDiv && typeof j.alt_text === 'string' && j.live) {
+        var altWrap = document.createElement('div');
+        altWrap.style.cssText = 'margin-top:8px;display:flex;gap:6px;align-items:center';
+        altWrap.innerHTML = '<span style="font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap" title="Read aloud by screen readers — describes the result on the image">Alt text</span>'
+          + '<input type="text" class="alt-text-input" maxlength="200" value="' + safeText(j.alt_text).replace(/"/g,'&quot;') + '" style="flex:1;font-size:12px;padding:5px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)"/>'
+          + '<button type="button" class="btn secondary alt-text-save" style="font-size:11px;padding:4px 10px">Save</button>';
+        captionDiv.appendChild(altWrap);
+        var altInput = altWrap.querySelector('.alt-text-input');
+        var altSave = altWrap.querySelector('.alt-text-save');
+        altSave.addEventListener('click', function() {
+          if (typeof WF_API_BASE === 'undefined') { altSave.textContent = 'n/a'; return; }
+          fetch(WF_API_BASE + encodeURIComponent(cardId), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'set_edits', edits: {alt_text: altInput.value}})
+          }).then(function(r){ return r.json(); }).then(function() {
+            altSave.textContent = 'Saved';
+            setTimeout(function(){ altSave.textContent = 'Save'; }, 1500);
+          }).catch(function(){ altSave.textContent = 'Retry'; });
+        });
+      }
       // Update timestamp
       var picker = panel.closest('.tone-picker');
       if (picker) {
@@ -2645,6 +2706,65 @@ function mhCardPhotoUpload(btn, photoUrl, createUrl, cardId, fmt) {
   setTimeout(function(){ try { document.body.removeChild(inp); } catch(e) {} }, 60000);
 }
 
+// Venue backdrops: CC-licensed public photos of the meet's pool/venue,
+// searched server-side (venue_search), imported into the org's library with
+// licence + attribution preserved, then attached to this graphic.
+var _venueResults = {};
+function mhVenueSearchOpen(btn, createUrl, cardId, fmt) {
+  var slot = document.querySelector('.mh-venue-results[data-card="' + cardId + '"]');
+  if (!slot) return;
+  if (slot.dataset.open === '1') { slot.style.display = 'none'; slot.dataset.open = ''; return; }
+  slot.dataset.open = '1'; slot.style.display = '';
+  slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">Searching public venue photos&hellip;</span>';
+  var base = createUrl.replace(/\/cards\/[^/]*\/create-graphic$/, '');
+  fetch(base + '/venue-search')
+    .then(function(r){ return r.json(); })
+    .then(function(j) {
+      var res = (j && j.results) || [];
+      if (!res.length) {
+        slot.innerHTML = '<span style="font-size:11px;color:var(--ink-muted)">No public venue photos found' + (j && j.query ? ' for “' + j.query + '”' : '') + '.</span>';
+        return;
+      }
+      _venueResults[cardId] = res;
+      var html = '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Venue backdrops' + (j.query ? ' · ' + j.query : '') + ' · CC-licensed, attribution saved with the asset</div>';
+      res.forEach(function(ph, i) {
+        html += '<button type="button" title="' + ((ph.title || '') + (ph.licence ? ' · ' + ph.licence : '')).replace(/"/g, '&quot;') + '"' +
+          ' onclick=' + _attrEsc('mhVenueImport(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(fmt) + ', ' + i + ')') +
+          ' style="padding:0;border-radius:6px;cursor:pointer;border:2px solid var(--border);background:var(--bg);line-height:0;margin:0 4px 4px 0">' +
+          '<img src="' + ph.thumb_url + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none"/></button>';
+      });
+      slot.innerHTML = html;
+    })
+    .catch(function() {
+      slot.innerHTML = '<span style="font-size:11px;color:var(--bad)">Venue search failed.</span>';
+    });
+}
+function mhVenueImport(btn, createUrl, cardId, fmt, idx) {
+  var ph = (_venueResults[cardId] || [])[idx];
+  if (!ph) return;
+  var base = createUrl.replace(/\/cards\/[^/]*\/create-graphic$/, '');
+  btn.disabled = true;
+  fetch(base + '/venue-import', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(ph)
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(j) {
+      btn.disabled = false;
+      if (!j.ok || !j.asset) {
+        if (window.MH && MH.toast) MH.toast('Venue photo import failed: ' + (j.error || 'unknown'), 'error', 4000);
+        return;
+      }
+      if (window.MH && MH.toast) MH.toast('Venue photo saved to your library — rendering with it now', 'success', 2500);
+      createGraphic(btn, createUrl, cardId, fmt, j.asset.id, false);
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      if (window.MH && MH.toast) MH.toast('Venue photo import failed: ' + e, 'error', 4000);
+    });
+}
+
 function _renderVisualPanel(panel, data, cardId, createUrl) {
   var visuals = data.visuals || [];
   if (!visuals.length) {
@@ -2691,10 +2811,13 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
   var firstName = athlete ? athlete.split(' ')[0] : '';
   var upOc = 'mhCardPhotoUpload(this, ' + JSON.stringify(photoUrl) + ', ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
   var uploadBtn = '<button type="button" onclick=' + _attrEsc(upOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--lane);background:transparent;color:var(--lane);font-family:inherit;margin:0 4px 4px 0">+ Add photo' + (firstName ? ' of ' + firstName : '') + '</button>';
+  var venueOc = 'mhVenueSearchOpen(this, ' + JSON.stringify(createUrl) + ', ' + JSON.stringify(cardId) + ', ' + JSON.stringify(cur) + ')';
+  var venueBtn = '<button type="button" onclick=' + _attrEsc(venueOc) + ' style="font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;border:1px dashed var(--border);background:transparent;color:var(--ink-dim);font-family:inherit;margin:0 4px 4px 0">Venue backdrop&hellip;</button>';
   var pickerHtml =
     '<div style="margin-bottom:8px">' +
       '<div style="font-size:10px;text-transform:uppercase;color:var(--ink-muted);letter-spacing:0.5px;margin-bottom:4px">Photo &middot; pick which goes on this graphic</div>' +
-      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn +
+      _pchip('Auto', (!chosen && !noP), autoOc) + _pchip('No photo', noP, noneOc) + thumbs + uploadBtn + venueBtn +
+      '<div class="mh-venue-results" data-card="' + cardId.replace(/"/g, '&quot;') + '" style="display:none;margin-top:6px"></div>' +
     '</div>';
   panel.innerHTML =
     '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
@@ -2717,13 +2840,13 @@ function _renderVisualPanel(panel, data, cardId, createUrl) {
 
 // Motion-graphic generation: lazy, cached server-side. Streams the resulting
 // MP4 into an inline <video> on the card panel. fmt picks the output cut
-// (story 9:16 default, square 1:1, landscape 16:9) \u2014 same card facts, same
-// brand, re-laid-out per platform.
+// (story 9:16 default, portrait 4:5, square 1:1, landscape 16:9) \u2014 same
+// card facts, same brand, re-laid-out per platform.
 var _motionCache = {};
-var _MOTION_FMT_DIMS = {story: '1080&times;1920', square: '1080&times;1080', landscape: '1920&times;1080'};
+var _MOTION_FMT_DIMS = {story: '1080&times;1920', portrait: '1080&times;1350', square: '1080&times;1080', landscape: '1920&times;1080'};
 function _motionFmtChips(motionUrl, cardId, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:11px;padding:4px 10px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -2780,8 +2903,10 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
             '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
               '<a class="btn secondary" href="' + url + '" download="motion-' + cardId + '-' + fmt + '.mp4" style="font-size:11px;padding:4px 10px">Download MP4</a>' +
             '</div>' +
+            '<div class="mh-motion-why" style="font-size:11px;color:var(--ink-muted);margin-top:8px"></div>' +
           '</div>' +
         '</div>';
+      _loadMotionWhy(panel, motionUrl, fmt);
     })
     .catch(function(err) {
       btn.disabled = false; btn.textContent = origLabel;
@@ -2789,13 +2914,31 @@ function generateMotion(btn, motionUrl, cardId, fmt) {
     });
 }
 
+// "Why this motion design" \u2014 the render's explainability sidecar, fetched
+// after the MP4 lands. Absence is fine (legacy renders predate manifests).
+function _loadMotionWhy(panel, motionUrl, fmt) {
+  var slot = panel.querySelector('.mh-motion-why');
+  if (!slot) return;
+  var mUrl = motionUrl + '/manifest' + (fmt !== 'story' ? '?format=' + encodeURIComponent(fmt) : '');
+  fetch(mUrl).then(function(r){ return r.ok ? r.json() : null; }).then(function(m) {
+    if (!m || !m.card) return;
+    var bits = [];
+    if (m.card.archetype) bits.push('archetype <b>' + m.card.archetype + '</b>');
+    if (m.card.motion_intent) bits.push('motion <b>' + m.card.motion_intent + '</b>');
+    if (m.card.mood) bits.push('mood <b>' + m.card.mood + '</b>');
+    bits.push(m.card.colour_source === 'still-parity-roles' ? 'colours mirror the approved still' : 'colours from seed ' + (m.card.variation_seed || ''));
+    slot.innerHTML = 'Why this design: ' + bits.join(' &middot; ');
+  }).catch(function(){});
+}
+
 // Meet-reel generation: async job + poll. A cold render takes 30-90s \u2014
 // far past what front-line proxies tolerate on a held connection \u2014 so the
 // button kicks off a background job and polls until the MP4 is ready.
-// fmt picks the output cut (story 9:16 default, square 1:1, landscape 16:9).
+// fmt picks the output cut (story 9:16 default, portrait 4:5, square 1:1,
+// landscape 16:9).
 function _reelFmtChips(reelUrl, active) {
   var out = '';
-  ['story', 'square', 'landscape'].forEach(function(f) {
+  ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {
     var label = f.charAt(0).toUpperCase() + f.slice(1);
     if (f === active) {
       out += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -3117,10 +3260,10 @@ def _render_card_creative_toolbar(run_id: str, card_id_raw: str) -> str:
             f'onclick="switchToneLive(this, {repr(_caption_url)}, {repr(card_uuid)})" '
             f'title="{_h(title)}" '
             f'style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);'
-            f'cursor:pointer;background:{init_bg};color:{init_fg};'
-            f'font-family:inherit;margin-right:4px;font-weight:{"600" if is_active else "400"};'
+            f"cursor:pointer;background:{init_bg};color:{init_fg};"
+            f"font-family:inherit;margin-right:4px;font-weight:{'600' if is_active else '400'};"
             f'display:inline-flex;align-items:center;gap:5px">'
-            f'{status_dot}{_h(t_label)}</button>'
+            f"{status_dot}{_h(t_label)}</button>"
         )
         panels_html += (
             f'<div class="tone-panel" data-tone="{t_key}" data-card="{card_uuid}" style="{display}">'
@@ -3201,9 +3344,9 @@ def _render_turn_into_card(run_id: str) -> str:
         _ti_prior_html = (
             '<div style="margin-top:14px">'
             '<div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">'
-            'Previously generated packs</div>'
+            "Previously generated packs</div>"
             f'<ul style="margin:0;padding-left:20px">{"".join(rows)}</ul>'
-            '</div>'
+            "</div>"
         )
 
     _ti_chips = "".join(
@@ -5702,8 +5845,7 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 # dark --surface card background while RESPONSIVE_GUARDRAILS_CSS remains the
 # cascade's final layer (see test_theme_tokens::test_guardrails_appended_last).
 _MH_AUDIENCE_ICON_CSS = (
-    "\n.mh-audience-icon { color: var(--lane); }"
-    "\n.mh-audience-icon svg { color: var(--lane); }\n"
+    "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
 BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
 
@@ -6014,8 +6156,8 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         colour_var = "--mh-success" if passed else "--mh-error"
         contrast_rows.append(
             f'<tr><td style="padding:4px 8px;font-family:var(--font-mono);'
-            f'font-size:11px">{esc(c.get("scheme",""))}</td>'
-            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("role_pair",""))}</td>'
+            f'font-size:11px">{esc(c.get("scheme", ""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("role_pair", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{c.get("apca_lc", 0):.1f}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
@@ -6032,9 +6174,9 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         colour_var = "--mh-success" if passed else "--mh-error"
         status_rows.append(
             f'<tr><td style="padding:4px 8px;font-size:12px">'
-            f'{esc(s.get("status_name",""))}</td>'
+            f"{esc(s.get('status_name', ''))}</td>"
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
-            f'font-size:11px">{esc(s.get("status_hex",""))}</td>'
+            f'font-size:11px">{esc(s.get("status_hex", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{s.get("delta_e_2000", 0):.1f}</td>'
             f'<td style="padding:4px 8px;text-align:center;'
@@ -6048,8 +6190,8 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
         symbol = "✓" if passed else "✗"
         colour_var = "--mh-success" if passed else "--mh-warning"
         cvd_rows.append(
-            f'<tr><td style="padding:4px 8px;font-size:12px">{esc(c.get("cvd",""))}</td>'
-            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("pair",""))}</td>'
+            f'<tr><td style="padding:4px 8px;font-size:12px">{esc(c.get("cvd", ""))}</td>'
+            f'<td style="padding:4px 8px;font-size:12px">{esc(c.get("pair", ""))}</td>'
             f'<td style="padding:4px 8px;font-family:var(--font-mono);'
             f'font-size:11px;text-align:right">{c.get("delta_e_2000", 0):.1f}</td>'
             f'<td style="padding:4px 8px;text-align:center;'
@@ -6060,12 +6202,12 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
     if harmonic and harmonic.get("template"):
         harmonic_html = (
             f'<p style="margin:0;font-size:12px;color:var(--mh-on-surface)">'
-            f'Best template: <b>{esc(harmonic["template"])}</b> @ '
-            f'<code>{harmonic.get("rotation", 0):.1f}°</code>, '
-            f'energy = <code>{harmonic.get("energy", 0):.1f}</code> '
-            f'across <code>{harmonic.get("hue_count", 0)}</code> hues '
-            f'(Cohen-Or 2006; lower energy = more harmonic).'
-            f'</p>'
+            f"Best template: <b>{esc(harmonic['template'])}</b> @ "
+            f"<code>{harmonic.get('rotation', 0):.1f}°</code>, "
+            f"energy = <code>{harmonic.get('energy', 0):.1f}</code> "
+            f"across <code>{harmonic.get('hue_count', 0)}</code> hues "
+            f"(Cohen-Or 2006; lower energy = more harmonic)."
+            f"</p>"
         )
     else:
         harmonic_html = (
@@ -6085,7 +6227,7 @@ def _theme_audit_panel_html(theme_json: Optional[dict]) -> str:
 
     seed_hct_str = ""
     if isinstance(seed_hct, (list, tuple)) and len(seed_hct) >= 3:
-        seed_hct_str = f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, " f"T={seed_hct[2]:.1f})"
+        seed_hct_str = f"HCT(H={seed_hct[0]:.1f}°, C={seed_hct[1]:.1f}, T={seed_hct[2]:.1f})"
 
     repaired_note = ""
     if was_repaired:
@@ -6369,7 +6511,7 @@ def _theme_seed_style_block() -> str:
     if accent_hex and _re.fullmatch(r"#[0-9A-Fa-f]{6,8}", accent_hex):
         overrides.append(f"--mh-brand-accent: {accent_hex};")
 
-    return f'<style id="mh-theme-seed">' f':root {{ {" ".join(overrides)} }}' f'</style>'
+    return f'<style id="mh-theme-seed">:root {{ {" ".join(overrides)} }}</style>'
 
 
 # Self-contained "Create graphic" panel script for pages OTHER than the meet
@@ -6897,6 +7039,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('club_data_page') }}" class="{{ 'active' if active=='clubdata' else '' }}">Club data</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
@@ -6974,9 +7117,18 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <div class="mh-footer-meta">
       <a href="{{ url_for('status_page') }}">System status</a>
       <span class="mh-footer-sep">/</span>
-      <a href="{{ url_for('privacy_page') }}">Data &amp; privacy</a>
+      <a href="{{ url_for('privacy_page') }}">Privacy</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('terms_page') }}">Terms</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('cookies_page') }}">Cookies</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+    </div>
+    <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
+      {{ provider_identity }}
     </div>
   </div>
 </footer>
@@ -7002,7 +7154,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
   function check(){
-    fetch(HEALTH_URL,{cache:'no-store'}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
+    fetch(HEALTH_URL,{cache:'no-store',headers:{'Accept':'application/json'}}).then(r=>r.json().then(j=>({s:r.status,j:j}))).then(o=>{
       var ok = o.s === 200 && o.j && o.j.ok;
       var dot = document.getElementById('backend-pill-dot');
       var txt = document.getElementById('backend-pill-text');
@@ -7740,6 +7892,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
         theme_seed_style=_theme_seed_style_block(),
+        provider_identity=(
+            f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
+        ),
     )
 
 
@@ -7967,7 +8122,9 @@ def create_app() -> Flask:
         # everything else refuses framing (clickjacking). frame-ancestors
         # has no default-src fallback, so it must be set explicitly (ZAP
         # baseline finding, 2026-06-12).
-        _embeddable = request.path.startswith("/wall/") and request.path.endswith("/embed")
+        _embeddable = (request.endpoint or "") == "public_wall_embed" or (
+            request.path.startswith("/wall/") and request.path.endswith("/embed")
+        )
         h.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -7981,7 +8138,9 @@ def create_app() -> Flask:
             h.setdefault("X-Frame-Options", "DENY")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if app.config.get("SESSION_COOKIE_SECURE"):
+        # HSTS when we know we're behind TLS (secure-cookie config, a TLS
+        # request, or Render's edge) — never teach a plain-HTTP dev setup to pin.
+        if app.config.get("SESSION_COOKIE_SECURE") or request.is_secure or os.environ.get("RENDER"):
             h.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
             )
@@ -8107,8 +8266,24 @@ def create_app() -> Flask:
             "login_page",
             "login_post",
             "logout",
+            # UK legal baseline — the legal documents must be readable by
+            # anyone BEFORE they sign up or set up an organisation (UK GDPR
+            # Art. 13 requires the privacy notice at the point of
+            # collection; CCR 2013 requires pre-contract information).
+            # The privacy ACTIONS (cache clear / run delete) stay gated.
+            "privacy_page",
+            "terms_page",
+            "cookies_page",
+            "dpa_page",
+            "legal_accept_page",
+            "legal_accept_post",
+            # Account-level data rights (Art. 15/17) — must work without an
+            # active organisation; athlete erasure stays org-gated.
+            "account_export_route",
+            "account_delete",
             "pricing_page",
             "billing_page",
+            "billing_confirm",
             "billing_checkout",
             "billing_portal",
             "stripe_webhook",
@@ -8176,6 +8351,11 @@ def create_app() -> Flask:
             "public_wall_json",
             "public_wall_rss",
             "public_wall_card_png",
+            # W.9 — magic-link mobile approvals: the signed, expiring,
+            # revocable token IS the access control; the approver has no
+            # login by design (pool-deck phone).
+            "magic_review_page",
+            "magic_card_action",
         }
     )
     # API endpoints that should return a JSON 409 instead of redirecting.
@@ -8362,6 +8542,70 @@ def create_app() -> Flask:
             return redirect(url_for("sign_in_page"))
         return redirect(url_for("organisation_setup"))
 
+    # ---- Versioned ToS re-acceptance gate (UK legal baseline) -----------
+    #
+    # When TERMS_VERSION moves, every signed-in account must accept the new
+    # version once before continuing. The session marker keeps this to one
+    # ledger read per session; the ledger (legal_acceptances.jsonl) is the
+    # source of truth. Signed-out traffic is untouched — acceptance is
+    # collected at signup.
+    _TERMS_GATE_EXEMPT = frozenset(
+        {
+            "legal_accept_page",
+            "legal_accept_post",
+            "terms_page",
+            "privacy_page",
+            "cookies_page",
+            "dpa_page",
+            "login_page",
+            "login_post",
+            "signup_page",
+            "signup_post",
+            "logout",
+            "static",
+            "favicon",
+            "web_manifest",
+            "service_worker",
+            "healthz",
+            "healthz_ping",
+            "status_page",
+            "stripe_webhook",
+        }
+    )
+
+    @app.before_request
+    def _gate_until_terms_accepted():
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_TERMS_GATE"):
+            return None
+        ep = request.endpoint or ""
+        if ep in _TERMS_GATE_EXEMPT:
+            return None
+        email = _auth.current_user_email()
+        if not email:
+            return None
+        if session.get("terms_ok_version") == _legal.TERMS_VERSION:
+            return None
+        if _legal.AcceptanceStore().needs_terms_reacceptance(email):
+            if (request.path or "").startswith("/api/"):
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "terms_reacceptance_required",
+                            "accept_url": url_for("legal_accept_page"),
+                        }
+                    ),
+                    403,
+                )
+            return redirect(url_for("legal_accept_page", next=request.path))
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        return None
+
+    # Security headers live in the consolidated _security_headers hook in
+    # create_app's web-hardening block (CSP + CSRF injection + nosniff +
+    # embed-aware XFO + Referrer/Permissions-Policy + HSTS) — one hook,
+    # one truth (Art. 32 / audit finding 1.10).
+
     # ---- HOME ----------------------------------------------------------
     @app.route("/")
     def home():
@@ -8393,7 +8637,7 @@ def create_app() -> Flask:
         # is the live dot + the CTA. Editorial italic does the emphasis work.
         if prof and prof.is_ready():
             # Returning user with a pinned org.
-            hero_h1 = f"{_h(prof.display_name)}.<br>" '<em class="editorial">Ready</em> to file.'
+            hero_h1 = f'{_h(prof.display_name)}.<br><em class="editorial">Ready</em> to file.'
             hero_lede = (
                 "Your brand voice, palette, and logo are loaded. Captions, "
                 "graphics, and motion videos will arrive on-brand. Nothing "
@@ -8401,17 +8645,17 @@ def create_app() -> Flask:
             )
             hero_actions = (
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">'
-                'Create new content &rarr;</a>'
+                "Create new content &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                'Switch organisation</a>'
+                "Switch organisation</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("organisation_page")}">'
-                'Edit profile</a>'
+                "Edit profile</a>"
             )
             eyebrow = "Pinned organisation"
             lane_no = "04"
         else:
             # Fresh visit (or signed-out). Display-caps + italic emphasis.
-            hero_h1 = "Results in.<br>" '<em class="editorial">On-brand</em> stories out.'
+            hero_h1 = 'Results in.<br><em class="editorial">On-brand</em> stories out.'
             hero_lede = (
                 "MediaHub reads your club website, social profiles, and brand "
                 "guidelines, then writes captions, builds graphics, and renders "
@@ -8425,9 +8669,9 @@ def create_app() -> Flask:
                 # brand-new tenant.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("sign_in_page")}">'
-                    f'Sign in &rarr;</a>'
+                    f"Sign in &rarr;</a>"
                     f'<a class="mh-cta-secondary" href="{url_for("organisation_setup")}">'
-                    'Set up my organisation</a>'
+                    "Set up my organisation</a>"
                 )
             else:
                 # Fresh deployment with no organisations yet: lead with
@@ -8436,9 +8680,9 @@ def create_app() -> Flask:
                 # "no orgs yet" panel) and never looks broken.
                 hero_actions = (
                     f'<a class="mh-cta-primary" href="{url_for("organisation_setup")}">'
-                    'Set up my organisation &rarr;</a>'
+                    "Set up my organisation &rarr;</a>"
                     f'<a class="mh-cta-secondary" href="{url_for("sign_in_page")}">'
-                    'Sign in</a>'
+                    "Sign in</a>"
                 )
             eyebrow = "Sport content automation"
             lane_no = "01"
@@ -8447,11 +8691,11 @@ def create_app() -> Flask:
         meta_parts = []
         if n_orgs:
             meta_parts.append(
-                f'<span><b>{n_orgs:02d}</b> {"organisation" if n_orgs == 1 else "organisations"}</span>'
+                f"<span><b>{n_orgs:02d}</b> {'organisation' if n_orgs == 1 else 'organisations'}</span>"
             )
         if n_runs:
             meta_parts.append(
-                f'<span><b>{n_runs:03d}</b> total {"run" if n_runs == 1 else "runs"}</span>'
+                f"<span><b>{n_runs:03d}</b> total {'run' if n_runs == 1 else 'runs'}</span>"
             )
         if prof and prof.brand_capture_status in ("ok", "ok_heuristic"):
             meta_parts.append("<span>Brand voice <b>captured</b></span>")
@@ -8629,34 +8873,34 @@ def create_app() -> Flask:
         if prof and prof.is_ready():
             final_cta_html = (
                 '<section class="mh-final-cta">'
-                '<div>'
+                "<div>"
                 f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
-                '<em>ready</em> in a sitting.</h2>'
+                "<em>ready</em> in a sitting.</h2>"
                 '<p class="mh-final-cta-sub">Drop the results file. We\'ll '
-                'rank the moments and write the captions; you spend the '
-                'evening approving instead of opening Photoshop.</p>'
-                '</div>'
+                "rank the moments and write the captions; you spend the "
+                "evening approving instead of opening Photoshop.</p>"
+                "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("make_page")}">Start a content pack &rarr;</a>'
                 f'<a class="btn secondary" href="{url_for("activity_page")}">All recent runs</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
         else:
             final_cta_html = (
                 '<section class="mh-final-cta">'
-                '<div>'
+                "<div>"
                 '<h2 class="mh-final-cta-headline">A minute to set up. '
-                '<em>Then</em> every week is easier.</h2>'
+                "<em>Then</em> every week is easier.</h2>"
                 '<p class="mh-final-cta-sub">Tell us your club\'s name and '
-                'website. We\'ll read your brand, palette and voice, and have '
-                'on-brand drafts ready the next time you upload a results file.</p>'
-                '</div>'
+                "website. We'll read your brand, palette and voice, and have "
+                "on-brand drafts ready the next time you upload a results file.</p>"
+                "</div>"
                 '<div class="mh-final-cta-actions">'
                 f'<a class="btn large" href="{url_for("organisation_setup")}">Create your organisation &rarr;</a>'
                 f'<a class="btn secondary" href="{url_for("sign_in_page")}">Sign in</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
 
         return _layout(
@@ -8817,12 +9061,12 @@ def create_app() -> Flask:
                     "so the run list is empty even if work was done earlier. "
                     "Try refreshing &mdash; if it keeps happening, ask your "
                     "operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("activity_page")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Activity", empty_body, active="activity")
             empty_body = (
@@ -8830,15 +9074,15 @@ def create_app() -> Flask:
                 '<span class="mh-hero-eyebrow">Activity</span>'
                 f'<h1>Quiet weekend, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
                 '<p class="lede">'
-                'No runs yet for this organisation. Upload a results file, paste '
-                'a sponsor brief, or describe a moment in your own words &mdash; '
-                'every run lands here with the meet name, status, queue, and a '
-                'one-click link back into the review.'
-                '</p>'
+                "No runs yet for this organisation. Upload a results file, paste "
+                "a sponsor brief, or describe a moment in your own words &mdash; "
+                "every run lands here with the meet name, status, queue, and a "
+                "one-click link back into the review."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Activity", empty_body, active="activity")
 
@@ -8850,16 +9094,16 @@ def create_app() -> Flask:
             if s.get("scheduled"):
                 parts.append(
                     f'<span class="tag info" style="font-size:11px">'
-                    f'{s["scheduled"]} scheduled</span>'
+                    f"{s['scheduled']} scheduled</span>"
                 )
             if s.get("published"):
                 parts.append(
                     f'<span class="tag good" style="font-size:11px">'
-                    f'{s["published"]} published</span>'
+                    f"{s['published']} published</span>"
                 )
             if s.get("failed"):
                 parts.append(
-                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
                 )
             return " ".join(parts)
 
@@ -8943,7 +9187,7 @@ def create_app() -> Flask:
                     f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                     f'<button class="btn danger" type="submit" '
                     f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                    f'</form></td></tr>'
+                    f"</form></td></tr>"
                 )
                 if r["status"] == "error" and r["error"]:
                     err_text = str(r["error"])
@@ -9112,23 +9356,23 @@ def create_app() -> Flask:
         body = (
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Activity</span>'
-            '<h1>Recent runs</h1>'
+            "<h1>Recent runs</h1>"
             '<div class="strap" style="margin-top:var(--sp-3)">'
             f'<span>{_h(prof.display_name)}</span><span class="sep">·</span>'
-            f'<span>{len(rows):02d} {"run" if len(rows) == 1 else "runs"}</span>'
-            '</div>'
-            '</section>'
-            f'{summary_html}'
-            f'{failure_callout}'
-            f'{toolbar_html}'
+            f"<span>{len(rows):02d} {'run' if len(rows) == 1 else 'runs'}</span>"
+            "</div>"
+            "</section>"
+            f"{summary_html}"
+            f"{failure_callout}"
+            f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
-            '<thead><tr><th>Input</th><th>Status</th>'
-            '<th>Matched</th><th>Achievements</th><th>Schedule</th>'
-            '<th>Started</th><th></th></tr></thead>'
-            f'<tbody>{rows_html}</tbody>'
-            '</table></div>'
-            f'{posting_panel_html}'
-            f'{filter_js}'
+            "<thead><tr><th>Input</th><th>Status</th>"
+            "<th>Matched</th><th>Achievements</th><th>Schedule</th>"
+            "<th>Started</th><th></th></tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            "</table></div>"
+            f"{posting_panel_html}"
+            f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
 
@@ -9235,16 +9479,16 @@ def create_app() -> Flask:
                         configure_href = url_for("upload_configure", run_id=r["id"])
                         n_swims = r["our_swims"] or 0
                         items_html += (
-                            '<li>'
+                            "<li>"
                             '<span class="ico">'
                             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
-                            '</span>'
+                            "</span>"
                             f'<div class="body"><span class="name">{_h(name)}</span>'
                             f'<span class="meta">{n_swims} swim{"" if n_swims == 1 else "s"} · '
                             f'<time class="mh-rel" datetime="{_h(when_iso)}">{_h(when)}</time></span>'
-                            '</div>'
+                            "</div>"
                             f'<a class="go" href="{configure_href}">Re-configure &rarr;</a>'
-                            '</li>'
+                            "</li>"
                         )
                     recent_html = (
                         '<div class="card mh-recent-card">'
@@ -9364,7 +9608,7 @@ def create_app() -> Flask:
     <div id="mh-upload-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
     <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
       <button id="mh-upload-submit" class="btn" type="submit">Continue &rarr;</button>
-      <a class="btn ghost" href="{url_for('home')}">Cancel</a>
+      <a class="btn ghost" href="{url_for("home")}">Cancel</a>
     </div>
   </form>
 </div>
@@ -9461,31 +9705,31 @@ def create_app() -> Flask:
             if byte_size < 2048:
                 headline = "That file doesn't look like a meet results file"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    f'is only {byte_size} bytes &mdash; far too small to be a real '
-                    'meet results file. The most common cause is a broken download '
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"is only {byte_size} bytes &mdash; far too small to be a real "
+                    "meet results file. The most common cause is a broken download "
                     '(an HTML "404 Not Found" page saved as a PDF, or a partial save).</p>'
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
-                    'Try downloading the file again from the source and re-uploading. '
-                    'A real Hytek PDF or HY3 is usually 100 KB or larger.</p>'
+                    "Try downloading the file again from the source and re-uploading. "
+                    "A real Hytek PDF or HY3 is usually 100 KB or larger.</p>"
                 )
             elif n_events == 0:
                 headline = "That file looks like a meet preview, not results"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    'parsed OK but doesn\'t contain any events with results.</p>'
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    "parsed OK but doesn't contain any events with results.</p>"
                     '<p class="dim" style="font-size:13px;margin-top:8px">'
-                    'This usually means you uploaded an entry list, a heat sheet, or '
-                    'meet conditions document. Wait until the meet finishes and the '
-                    'organisers publish the actual results file.</p>'
+                    "This usually means you uploaded an entry list, a heat sheet, or "
+                    "meet conditions document. Wait until the meet finishes and the "
+                    "organisers publish the actual results file.</p>"
                 )
             else:
                 headline = "We couldn't read clubs from that file"
                 explain = (
-                    f'<p>The file <code>{_h(meta.get("filename") or "(unknown)")}</code> '
-                    f'has {n_events} events but no club information we can filter on. '
-                    'This is rare and usually means the file is from a meet management '
-                    'system MediaHub doesn\'t yet support.</p>'
+                    f"<p>The file <code>{_h(meta.get('filename') or '(unknown)')}</code> "
+                    f"has {n_events} events but no club information we can filter on. "
+                    "This is rare and usually means the file is from a meet management "
+                    "system MediaHub doesn't yet support.</p>"
                 )
             err_explain = (
                 f'<p class="dim" style="margin-bottom:12px;font-size:13px">'
@@ -9649,17 +9893,17 @@ def create_app() -> Flask:
             else:
                 prof_logo_html = (
                     '<p class="dim" style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
-                    'No logo on your organisation profile. '
+                    "No logo on your organisation profile. "
                     f'<a href="{url_for("organisation_page")}" '
                     'style="color:var(--warn);text-decoration:underline">Add one</a> '
-                    'so it flows through to every graphic.</p>'
+                    "so it flows through to every graphic.</p>"
                 )
 
         body = f"""
 <section class="mh-hero" data-lane="02" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
   <span class="mh-hero-eyebrow">Configure this run</span>
   <h1>One more look,<br><em class="editorial">then we run it.</em></h1>
-  <p class="lede">{_h(meet_name) or 'Meet uploaded.'} &mdash; {len(clubs)} club{'s' if len(clubs) != 1 else ''} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
+  <p class="lede">{_h(meet_name) or "Meet uploaded."} &mdash; {len(clubs)} club{"s" if len(clubs) != 1 else ""} detected. Pick yours and tune the palette for this one-off. Photos are added later, per graphic, so each one lands on the right athlete&rsquo;s card.</p>
 </section>
 
 <nav class="mh-stepper" aria-label="Upload progress">
@@ -10109,19 +10353,19 @@ def create_app() -> Flask:
                 _err_body = (
                     '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">'
                     '<span class="mh-hero-eyebrow">Pipeline failed</span>'
-                    '<h1>Run didn\'t finish.</h1>'
+                    "<h1>Run didn't finish.</h1>"
                     '<p class="lede">'
-                    'The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn\'t parse &mdash; try a different format or check the file isn\'t corrupted.'
-                    '</p>'
+                    "The pipeline raised an error before producing any cards. The most common cause is a results file the active adapter couldn't parse &mdash; try a different format or check the file isn't corrupted."
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All recent runs</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                     '<div class="card" style="border-left:2px solid var(--bad)">'
                     '<div class="strap" style="color:var(--bad);margin-bottom:var(--sp-3)">Error detail</div>'
                     f'<pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;color:var(--ink)">{_h(_err_msg)}</pre>'
-                    '</div>'
+                    "</div>"
                 )
                 return _layout("Run failed", _err_body, active="create")
             # Round-6 fix: when neither the in-memory cache nor the DB has
@@ -10157,8 +10401,8 @@ def create_app() -> Flask:
 
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
     <a id="review-link" class="btn" style="display:none" href="{_review_url}">Open review queue &rarr;</a>
-    <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for('upload')}">Try another file</a>
-    <a id="home-link"   class="btn secondary" href="{url_for('home')}">View on home</a>
+    <a id="retry-link"  class="btn secondary" style="display:none" href="{url_for("upload")}">Try another file</a>
+    <a id="home-link"   class="btn secondary" href="{url_for("home")}">View on home</a>
   </div>
 </div>
 
@@ -10322,7 +10566,7 @@ def create_app() -> Flask:
         # streamed progress log (not an empty one) and honour staleness.
         conn = _db()
         row = conn.execute(
-            "SELECT status, error, progress_log, heartbeat_at " "FROM runs WHERE id = ?", (run_id,)
+            "SELECT status, error, progress_log, heartbeat_at FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
         conn.close()
         if not row:
@@ -10428,10 +10672,10 @@ def create_app() -> Flask:
                     '<div class="kv" style="margin-top:10px">'
                     '<span class="k">AI-read</span><span>'
                     '<span class="tag warn">AI-read from page</span> '
-                    f'{_n_tables} table{"" if _n_tables == 1 else "s"} on this run '
-                    f'{"was" if _n_tables == 1 else "were"} read from the page by AI vision '
-                    f'(avg confidence {_avg:.0%}) and re-checked by the deterministic '
-                    'interpreter like any other input.</span></div>'
+                    f"{_n_tables} table{'' if _n_tables == 1 else 's'} on this run "
+                    f"{'was' if _n_tables == 1 else 'were'} read from the page by AI vision "
+                    f"(avg confidence {_avg:.0%}) and re-checked by the deterministic "
+                    "interpreter like any other input.</span></div>"
                 )
             _refetch_block = ""
             if _results_url_enabled():
@@ -10541,14 +10785,14 @@ def create_app() -> Flask:
 <div class="card">
   <h2>Meet context</h2>
   <div class="kv">
-    <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get('meet_level','open'))}</span></span>
-    <span class="k">Governing body</span><span>{_h(mctx.get('governing_body') or '—')}</span>
-    <span class="k">Has finals</span><span>{ctx_badge(mctx.get('has_finals'))}</span>
-    <span class="k">Has age groups</span><span>{ctx_badge(mctx.get('has_age_groups'))}</span>
-    <span class="k">Age groups</span><span class="muted">{_h(', '.join(mctx.get('age_groups') or []) or '—')}</span>
-    <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get('research_available') else '<span class="tag warn">unavailable</span>'}</span>
+    <span class="k">Meet level</span><span><span class="tag info">{_h(mctx.get("meet_level", "open"))}</span></span>
+    <span class="k">Governing body</span><span>{_h(mctx.get("governing_body") or "—")}</span>
+    <span class="k">Has finals</span><span>{ctx_badge(mctx.get("has_finals"))}</span>
+    <span class="k">Has age groups</span><span>{ctx_badge(mctx.get("has_age_groups"))}</span>
+    <span class="k">Age groups</span><span class="muted">{_h(", ".join(mctx.get("age_groups") or []) or "—")}</span>
+    <span class="k">Research</span><span>{'<span class="tag good">available</span>' if mctx.get("research_available") else '<span class="tag warn">unavailable</span>'}</span>
   </div>
-  {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + '</div>') if ctx_sources_html else ''}
+  {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + "</div>") if ctx_sources_html else ""}
 </div>"""
 
         # --- Top achievements panel
@@ -10610,7 +10854,7 @@ def create_app() -> Flask:
                 ra, card_uuid=f"top-{_why_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
             ach_rows_html += f"""
-<div class="ach-row" data-type="{a.get('type','')}" data-conf="{conf_label}" data-swimmer="{a.get('swimmer_name','')}" data-event="{a.get('event','')}" data-band="{band}" data-post="{ra.get('suggested_post_type','')}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
@@ -10657,12 +10901,12 @@ def create_app() -> Flask:
         not_gen_rows = ""
         for t in no_ach_traces[:30]:
             not_gen_rows += (
-                f'<tr data-swimmer="{t.get("swimmer_name","")}" data-event="{t.get("event","")}">'
-                f'<td>{_h(t.get("swimmer_name",""))}</td>'
-                f'<td>{_h(t.get("event",""))}</td>'
-                f'<td style="font-family:monospace">{_h(t.get("time_str",""))}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary",""))}</td>'
-                f'</tr>'
+                f'<tr data-swimmer="{t.get("swimmer_name", "")}" data-event="{t.get("event", "")}">'
+                f"<td>{_h(t.get('swimmer_name', ''))}</td>"
+                f"<td>{_h(t.get('event', ''))}</td>"
+                f'<td style="font-family:monospace">{_h(t.get("time_str", ""))}</td>'
+                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary", ""))}</td>'
+                f"</tr>"
             )
 
         # --- Legacy V4 cards (collapsed)
@@ -10680,7 +10924,7 @@ def create_app() -> Flask:
             sources_str = ", ".join(s.get("name", "") for s in (t.get("sources") or [])[:3])
             v4_rows.append(
                 f'<tr><td><span class="tag info">{_h(_humanise(c.get("card_type", "")))}</span><br>'
-                f'<strong>{_h((c.get("headline") or "")[:80])}</strong>'
+                f"<strong>{_h((c.get('headline') or '')[:80])}</strong>"
                 f'<div class="muted" style="font-size:12px">{_h((c.get("subhead") or "")[:120])}</div></td>'
                 f'<td><span class="tag {badge}">{_h(conf)}</span></td>'
                 f'<td><span class="tag {safe_badge}">{_h(safe)}</span></td>'
@@ -10701,7 +10945,7 @@ def create_app() -> Flask:
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Clean</div><div style="font-size:12px">{_h(cap.get("clean") or "—")}</div></div>'
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Team</div><div style="font-size:12px">{_h(cap.get("team") or "—")}</div></div>'
                 f'<div><div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:4px">Hype</div><div style="font-size:12px">{_h(cap.get("hype") or "—")}</div></div>'
-                f'</div></div>'
+                f"</div></div>"
             )
 
         # Warnings
@@ -10711,13 +10955,13 @@ def create_app() -> Flask:
             for w in warnings[:10]:
                 cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
                 items.append(
-                    f'<li><span class="tag {cls}">{_h(w.get("severity",""))}</span> '
-                    f'<strong>{_h(w.get("code",""))}</strong> &mdash; {_h(w.get("message",""))}</li>'
+                    f'<li><span class="tag {cls}">{_h(w.get("severity", ""))}</span> '
+                    f"<strong>{_h(w.get('code', ''))}</strong> &mdash; {_h(w.get('message', ''))}</li>"
                 )
             warn_html = (
                 '<div class="card"><h2>Parse notes</h2>'
                 '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
-                f'<ul>{"".join(items)}</ul></div>'
+                f"<ul>{''.join(items)}</ul></div>"
             )
 
         # --- V6 PB Audit panel
@@ -10752,7 +10996,7 @@ def create_app() -> Flask:
             if _needs_verif_swimmers:
                 rows = ""
                 for sa in _needs_verif_swimmers[:10]:
-                    _sw_key = _h(sa.get("asa_id") or f"name:{sa.get('hy3_name','')}")
+                    _sw_key = _h(sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}")
                     _hy3 = _h(sa.get("hy3_name", ""))
                     _sr = _h(sa.get("sr_name") or "—")
                     _asa = _h(sa.get("asa_id") or "?")
@@ -10767,7 +11011,7 @@ def create_app() -> Flask:
                 _needs_verif_html = (
                     f'<div class="divider"></div>'
                     f'<div><strong style="color:var(--warn)">&#x26A0; {_n_needs} swimmer{"s" if _n_needs != 1 else ""} need verification:</strong>'
-                    f'{rows}</div>'
+                    f"{rows}</div>"
                 )
 
             _budget_note = (
@@ -10889,7 +11133,7 @@ def create_app() -> Flask:
                 _wf_filter_buttons += (
                     f'<a class="{_wf_btn_cls.strip()}" href="{_wf_opt_url}" '
                     f'aria-current="{"page" if _wf_filter == _wf_opt[0] else "false"}">'
-                    f'{_wf_opt[1]}{_wf_count_html}</a>'
+                    f"{_wf_opt[1]}{_wf_count_html}</a>"
                 )
             # Progress maths — how much of the queue has the user actioned?
             _wf_decided = (_wf_n_approved or 0) + (_wf_n_rejected or 0)
@@ -10934,9 +11178,37 @@ def create_app() -> Flask:
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
       {_bulk_approve_btn}
+      <button type="button" class="btn secondary" id="mh-magic-link-btn"
+              data-mint-url="{url_for("api_mint_magic_link", run_id=run_id)}"
+              title="Create a no-login link so a coach can approve this pack from their phone">
+        &#128241; Approve from a phone</button>
       <a class="btn" href="{_pack_url}" style="align-self:flex-end">Open content builder &rarr;</a>
     </div>
   </div>
+  <div id="mh-magic-link-out" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px"></div>
+  <script>
+  (function() {{
+    var btn = document.getElementById('mh-magic-link-btn');
+    var out = document.getElementById('mh-magic-link-out');
+    if (!btn) return;
+    btn.addEventListener('click', function() {{
+      btn.disabled = true; btn.textContent = 'Creating link…';
+      fetch(btn.dataset.mintUrl, {{method: 'POST'}})
+        .then(function(r) {{ return r.json(); }})
+        .then(function(j) {{
+          btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone';
+          if (!j.ok) {{ out.style.display = ''; out.textContent = 'Could not create the link.'; return; }}
+          out.style.display = '';
+          out.innerHTML = '<strong>Review link</strong> (works for 72 hours, no login — anyone with it can approve, so share carefully):'
+            + '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">'
+            + '<input type="text" readonly value="' + j.url.replace(/"/g, '&quot;') + '" style="flex:1;font-size:12px;padding:6px 8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--ink)"/>'
+            + '<button type="button" class="btn secondary" style="font-size:12px" onclick="navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent=\\'Copied\\'">Copy</button></div>'
+            + (j.notified ? '<div class="muted" style="margin-top:4px;font-size:12px">Also pushed to your notification channel.</div>' : '');
+        }})
+        .catch(function() {{ btn.disabled = false; btn.innerHTML = '&#128241; Approve from a phone'; }});
+    }});
+  }})();
+  </script>
   <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span class="muted" style="font-size:12px;font-family:var(--font-mono);letter-spacing:0.14em;text-transform:uppercase">Filter</span>
     <nav class="mh-segmented" role="tablist" aria-label="Filter cards by workflow status">
@@ -11019,7 +11291,7 @@ def create_app() -> Flask:
             )
 
             ach_rows_html_wf += f"""
-<div class="ach-row" data-type="{a.get("type","")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name","")}" data-event="{a.get("event","")}" data-band="{band}" data-post="{ra.get("suggested_post_type","")}" data-status="{wf_status}">
+<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
@@ -11191,13 +11463,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Review queue</span>
-  <h1>{_h(meet.get('name', '(unknown meet)'))}</h1>
+  <h1>{_h(meet.get("name", "(unknown meet)"))}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{_h(data.get('profile_display','—'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('start_date','?'))} – {_h(meet.get('end_date','?'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('course','?'))}</span><span class="sep">·</span>
-    <span>{_h(meet.get('venue') or 'venue unknown')}</span><span class="sep">·</span>
-    <span style="color:var(--ink-faint)">{_h(dispatch_log.get('chosen_filename') or data.get('file_name',''))}</span>
+    <span>{_h(data.get("profile_display", "—"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("start_date", "?"))} – {_h(meet.get("end_date", "?"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course", "?"))}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span><span class="sep">·</span>
+    <span style="color:var(--ink-faint)">{_h(dispatch_log.get("chosen_filename") or data.get("file_name", ""))}</span>
   </div>
 </section>
 
@@ -11235,12 +11507,12 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
     <span class="muted" style="font-size:12px">Approve cards here &mdash; build graphics, video &amp; the reel in the content builder.</span>
   </div>
   <div class="filters-bar">
-    <select id="f-type" onchange="applyFilters()">{opts(types_set, 'types')}</select>
+    <select id="f-type" onchange="applyFilters()">{opts(types_set, "types")}</select>
     <select id="f-conf" onchange="applyFilters()"><option value="">All confidence</option><option>high</option><option>medium</option><option>low</option></select>
-    <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, 'swimmers')}</select>
-    <select id="f-event" onchange="applyFilters()">{opts(events_set, 'events')}</select>
-    <select id="f-band" onchange="applyFilters()">{opts(bands_set, 'bands')}</select>
-    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, 'post types')}</select>
+    <select id="f-swimmer" onchange="applyFilters()">{opts(swimmers_set, "swimmers")}</select>
+    <select id="f-event" onchange="applyFilters()">{opts(events_set, "events")}</select>
+    <select id="f-band" onchange="applyFilters()">{opts(bands_set, "bands")}</select>
+    <select id="f-post" onchange="applyFilters()">{opts(post_types_set, "post types")}</select>
     <button class="btn secondary" style="font-size:13px;padding:6px 12px" onclick="clearFilters()">Clear</button>
     <span id="f-count" class="muted" style="font-size:12px;align-self:center"></span>
     <button type="button" class="btn secondary" id="mh-expand-all-why" aria-pressed="false"
@@ -11849,11 +12121,52 @@ function copyWhyCard(btn, taId) {{
                         # variants — return None and filter.
                         return None
 
-                if n_variants == 1:
-                    variants = [_gen_one()]
+                # W.11/W.13: the PRIMARY variant rides the bundle call so the
+                # result-grounded alt text (and the Welsh variant for cy/
+                # bilingual workspaces) arrive in the SAME provider call —
+                # zero added latency. Extra variants stay caption-only.
+                from mediahub.web.ai_caption import (
+                    generate_caption_bundle as _gen_bundle,
+                )
+
+                _pw_language = (getattr(club_profile_obj, "language", "en") or "en").strip().lower()
+                alt_text = ""
+                caption_cy = None
+
+                def _gen_primary():
+                    try:
+                        return _gen_bundle(
+                            ach_dict,
+                            club_brand,
+                            tone=tone,
+                            voice_profile=_run_voice_profile,
+                            club_profile=club_profile_obj,
+                            recent_captions=_recent_captions,
+                            few_shot_examples=_few_shot_examples,
+                            language=_pw_language,
+                        )
+                    except Exception:
+                        # Strictly best-effort: ANY bundle failure (malformed
+                        # JSON, provider blip, no key) falls through to the
+                        # caption-only path below, whose error classification
+                        # (terminal vs transient) is the canonical one. The
+                        # caption is never lost just because alt text was.
+                        return None
+
+                _bundle = _gen_primary()
+                if _bundle:
+                    alt_text = _bundle.get("alt_text") or ""
+                    caption_cy = _bundle.get("caption_cy")
+                    variants = [_bundle.get("caption") or ""]
+                    extra_needed = max(0, n_variants - 1)
                 else:
-                    with ThreadPoolExecutor(max_workers=n_variants) as pool:
-                        variants = list(pool.map(lambda _: _gen_one(), range(n_variants)))
+                    variants = []
+                    extra_needed = n_variants
+                if extra_needed == 1:
+                    variants.append(_gen_one())
+                elif extra_needed > 1:
+                    with ThreadPoolExecutor(max_workers=extra_needed) as pool:
+                        variants.extend(pool.map(lambda _: _gen_one(), range(extra_needed)))
                 # Drop None placeholders from failed variants.
                 variants = [v for v in variants if v]
                 # Deduplicate identical outputs (Gemini occasionally returns the
@@ -11903,6 +12216,12 @@ function copyWhyCard(btn, taId) {{
                         "fallback": False,
                         "fallback_voice": None,
                         "explanation": explanation,
+                        # W.11: result-grounded alt text from the same call,
+                        # editable in review and threaded into exports.
+                        "alt_text": alt_text,
+                        # W.13: Welsh variant for bilingual workspaces.
+                        "caption_cy": caption_cy,
+                        "language": _pw_language,
                     }
                 )
             except _ClaudeUE as e:
@@ -12147,19 +12466,19 @@ function copyWhyCard(btn, taId) {{
             empty_body = (
                 '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
                 '<span class="mh-hero-eyebrow">PB audit</span>'
-                '<h1>No PB audit on file</h1>'
+                "<h1>No PB audit on file</h1>"
                 '<p class="lede">'
-                'This run was processed without PB fetching, so there\'s nothing to '
-                'reconcile here. Re-run the same input from the upload page with PB '
-                'fetching enabled and the audit detail will appear.'
-                '</p>'
+                "This run was processed without PB fetching, so there's nothing to "
+                "reconcile here. Re-run the same input from the upload page with PB "
+                "fetching enabled and the audit detail will appear."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">'
-                'Re-upload with PB fetching &rarr;</a>'
+                "Re-upload with PB fetching &rarr;</a>"
                 f'<a class="mh-cta-secondary" href="{url_for("review", run_id=run_id)}">'
-                'Back to the review queue</a>'
-                '</div>'
-                '</section>'
+                "Back to the review queue</a>"
+                "</div>"
+                "</section>"
             )
             return _layout("PB Audit", empty_body, active="")
         per_swimmer = pb_audit.get("per_swimmer") or []
@@ -12178,7 +12497,7 @@ function copyWhyCard(btn, taId) {{
                 "manual_override": ("Override", "info"),
             }.get(method, (method.replace("_", " ").capitalize() or "—", ""))
             method_label, method_cls = method_meta
-            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name','')}"
+            _sw_key = sa.get("asa_id") or f"name:{sa.get('hy3_name', '')}"
             _verify_url = url_for("pb_verify_form", run_id=run_id, swimmer_key=_sw_key)
             _ignore_url = url_for("pb_ignore", run_id=run_id, swimmer_key=_sw_key)
             n_dec = len(sa.get("pb_decisions") or [])
@@ -12191,19 +12510,19 @@ function copyWhyCard(btn, taId) {{
                 in ("CONFIRMED_OFFICIAL_PB", "CONFIRMED_PB_IMPROVEMENT", "CONFIRMED_PB")
             )
             rows += (
-                f'<tr>'
-                f'<td>{_h(sa.get("hy3_name",""))}</td>'
+                f"<tr>"
+                f"<td>{_h(sa.get('hy3_name', ''))}</td>"
                 f'<td class="muted">{_h(sa.get("asa_id") or "—")}</td>'
-                f'<td>{_h(sa.get("sr_name") or "—")}</td>'
+                f"<td>{_h(sa.get('sr_name') or '—')}</td>"
                 f'<td><span class="tag {method_cls}">{_h(method_label)}</span></td>'
-                f'<td>{n_dec}</td>'
+                f"<td>{n_dec}</td>"
                 f'<td style="color:var(--good)">{n_conf}</td>'
-                f'<td>'
+                f"<td>"
                 f'<a class="btn secondary" style="font-size:11px;padding:3px 8px" href="{_verify_url}">Verify</a>'
                 f' <form style="display:inline" method="post" action="{_ignore_url}">'
                 f'<button class="btn secondary" style="font-size:11px;padding:3px 8px" type="submit">Ignore PBs</button></form>'
-                f'</td>'
-                f'</tr>'
+                f"</td>"
+                f"</tr>"
             )
 
         body = f"""
@@ -12211,18 +12530,18 @@ function copyWhyCard(btn, taId) {{
   <span class="mh-hero-eyebrow">PB audit</span>
   <h1>Personal-best reconciliation</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>run {_h(pb_audit.get('run_id', run_id)[:12])}</span><span class="sep">/</span>
+    <span>run {_h(pb_audit.get("run_id", run_id)[:12])}</span><span class="sep">/</span>
     <a href="{_review_url}" style="color:var(--ink-muted);text-decoration:none">← Back to review</a>
   </div>
 </section>
 <div class="card">
   <div class="stat-block">
-    <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get('swimmers_total',0)}</div></div>
-    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get('swimmers_matched_verified',0)}</div></div>
-    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get('swimmers_needs_verification',0)}</div></div>
-    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get('pb_confirmed_count',0)}</div></div>
-    <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get('pb_decisions_count',0)}</div></div>
-    <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get('fetch_total_seconds',0):.1f}s</div></div>
+    <div class="stat"><div class="l">Swimmers</div><div class="v">{pb_audit.get("swimmers_total", 0)}</div></div>
+    <div class="stat live"><div class="l">Verified</div><div class="v">{pb_audit.get("swimmers_matched_verified", 0)}</div></div>
+    <div class="stat warn"><div class="l">Needs verification</div><div class="v">{pb_audit.get("swimmers_needs_verification", 0)}</div></div>
+    <div class="stat good"><div class="l">Confirmed PBs</div><div class="v">{pb_audit.get("pb_confirmed_count", 0)}</div></div>
+    <div class="stat"><div class="l">Total decisions</div><div class="v">{pb_audit.get("pb_decisions_count", 0)}</div></div>
+    <div class="stat"><div class="l">Fetch time</div><div class="v">{pb_audit.get("fetch_total_seconds", 0):.1f}s</div></div>
   </div>
 </div>
 <div class="card">
@@ -12405,7 +12724,7 @@ function copyWhyCard(btn, taId) {{
                         f'<div class="stat"><div class="l">Precision</div><div class="v">{report.precision or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">Recall</div><div class="v">{report.recall or "&mdash;"}</div></div>'
                         f'<div class="stat"><div class="l">F1</div><div class="v">{report.f1 or "&mdash;"}</div></div>'
-                        f'</div></div>'
+                        f"</div></div>"
                     )
                 except Exception as e:
                     report_html = (
@@ -12515,19 +12834,19 @@ function copyWhyCard(btn, taId) {{
             for m in rep.matches:
                 badge = "good" if m.get("matched_card") else "bad"
                 rows += (
-                    f'<tr><td>{_h(m.get("moment",""))}</td>'
+                    f"<tr><td>{_h(m.get('moment', ''))}</td>"
                     f'<td><span class="tag {badge}">'
-                    f'{"matched" if m.get("matched_card") else "missed"}</span></td>'
-                    f'<td>{_h(m.get("matched_headline") or "—")}</td>'
-                    f'<td>{_h(m.get("score",""))}</td></tr>'
+                    f"{'matched' if m.get('matched_card') else 'missed'}</span></td>"
+                    f"<td>{_h(m.get('matched_headline') or '—')}</td>"
+                    f"<td>{_h(m.get('score', ''))}</td></tr>"
                 )
             rep_html = f"""
 <div class="card">
   <h2>Result</h2>
   <div class="stat-block">
-    <div class="stat"><div class="l">Precision</div><div class="v">{rep.precision*100:.0f}%</div></div>
-    <div class="stat"><div class="l">Recall</div><div class="v">{rep.recall*100:.0f}%</div></div>
-    <div class="stat"><div class="l">F1</div><div class="v">{rep.f1*100:.0f}%</div></div>
+    <div class="stat"><div class="l">Precision</div><div class="v">{rep.precision * 100:.0f}%</div></div>
+    <div class="stat"><div class="l">Recall</div><div class="v">{rep.recall * 100:.0f}%</div></div>
+    <div class="stat"><div class="l">F1</div><div class="v">{rep.f1 * 100:.0f}%</div></div>
     <div class="stat"><div class="l">Matched</div><div class="v">{rep.n_matched_moments}/{rep.n_total_moments}</div></div>
   </div>
   <div class="divider"></div>
@@ -12628,48 +12947,135 @@ Relay team broke club record"></textarea>
             )
         except Exception:
             n_cache = 0
-        body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Privacy &amp; data</span>
-  <h1>What we <em class="editorial">keep.</em></h1>
-  <p class="lede">Everything MediaHub stores on this deployment, and exactly how to delete it. No data leaves the box except to fetch public PB-lookup pages from the configured source.</p>
-</section>
+        # The deployment inventory (counts + cache-clear action) is only for
+        # signed-in sessions — the notice text itself is public (Art. 13).
+        account_email = _auth.current_user_email() or ""
+        active_org = _active_profile_id() or ""
+        signed_in = bool(account_email or active_org)
+        from mediahub.privacy.retention import retention_days
 
+        _rd = retention_days()
+        _retention_line = (
+            f"runs, uploads and packs older than {_rd} days are deleted daily."
+            if _rd > 0
+            else "disabled on this deployment — runs are kept until you delete them."
+        )
+        _rights_tools_html = ""
+        if active_org:
+            _rights_tools_html += f"""
 <div class="card">
-  <h2>Inventory</h2>
+  <h2>Erase an athlete</h2>
+  <p class="muted">Removes a named athlete from this organisation's runs, rendered
+  files, caches, caption memory and posting-log excerpts. Irreversible.</p>
+  <form method="post" action="{url_for("privacy_athlete_erase")}"
+        onsubmit="return confirm('Erase this athlete from all stored data? This cannot be undone.')"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Full name
+      <input type="text" name="athlete_name" required placeholder="e.g. Jane Smith" /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Club (optional)
+      <input type="text" name="athlete_club" placeholder="for exact cache match" /></label>
+    <button class="btn secondary" type="submit">Erase athlete</button>
+  </form>
+</div>"""
+            from mediahub.privacy import list_corrections
+
+            open_corrections = list_corrections(active_org, status="open")
+            rows_html = "".join(
+                "<li style='margin-bottom:8px'>"
+                f"<strong>#{int(c['id'])}</strong> &mdash; run <code>{_h(str(c['run_id']))}</code>, "
+                f"card <code>{_h(str(c['card_id']))}</code>: {_h(str(c['reason']))} "
+                f"<form method='post' action='{url_for('privacy_correction_resolve', correction_id=int(c['id']))}' style='display:inline'>"
+                "<button class='btn secondary' type='submit' style='padding:2px 10px;font-size:11px'>Mark resolved</button>"
+                "</form></li>"
+                for c in open_corrections
+            )
+            open_list = (
+                f"<ul style='margin-top:10px'>{rows_html}</ul>"
+                if rows_html
+                else "<p class='muted' style='margin-top:10px'>No open corrections.</p>"
+            )
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Correct a published card</h2>
+  <p class="muted">A published card was wrong (wrong result, wrong athlete)? Open a
+  correction: it's recorded, the card is pulled from the public wall, and you get the
+  takedown checklist for the social platforms.</p>
+  <form method="post" action="{url_for("privacy_correction_open")}"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Run id
+      <input type="text" name="run_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted)">Card id
+      <input type="text" name="card_id" required /></label>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);flex:1;min-width:220px">What's wrong?
+      <input type="text" name="reason" required placeholder="e.g. wrong time — was 58.21 not 56.21" /></label>
+    <button class="btn secondary" type="submit">Open correction</button>
+  </form>
+  {open_list}
+</div>"""
+        if account_email:
+            _rights_tools_html += f"""
+<div class="card">
+  <h2>Your account</h2>
+  <p class="muted">Signed in as <strong>{_h(account_email)}</strong>.</p>
+  <a class="btn secondary" href="{url_for("account_export_route")}">Export my account data (JSON)</a>
+  <form method="post" action="{url_for("account_delete")}" style="margin-top:14px"
+        onsubmit="return confirm('Delete your account? This removes your sign-in, acceptances and workspace memberships, and cannot be undone.')">
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-muted);max-width:280px">Confirm your password
+      <input type="password" name="password" required autocomplete="current-password" /></label>
+    <button class="btn secondary" type="submit" style="margin-top:10px;border-color:rgba(255,107,107,0.4)">Delete my account</button>
+  </form>
+  <p class="muted" style="margin-top:8px">Deleting your account does not delete your club's
+  shared workspace data &mdash; other members keep access. Billing records held by Stripe
+  are retained by Stripe under its legal obligations.</p>
+</div>"""
+        inventory_html = f"""
+<div class="card">
+  <h2>Your data on this deployment</h2>
   <div class="stat-block">
     <div class="stat"><div class="l">Runs (DB)</div><div class="v">{n_runs}</div></div>
     <div class="stat"><div class="l">Run JSON files</div><div class="v">{n_files}</div></div>
     <div class="stat"><div class="l">Upload temp files</div><div class="v">{n_uploads}</div></div>
     <div class="stat"><div class="l">PB cache entries</div><div class="v">{n_cache}</div></div>
   </div>
-</div>
-
-<div class="card">
-  <h2>What we store</h2>
-  <ul>
-    <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
-    <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
-    <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
-  </ul>
-  <p class="muted">No data is sent to third parties beyond fetching public PB-lookup pages from the configured PB source.</p>
-</div>
-
-<div class="card">
-  <h2>Actions</h2>
-  <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the home page and use the Delete run button.</p>
+  <p class="muted" style="margin-top:8px">Automatic retention: {_retention_line}</p>
 </div>
+{_rights_tools_html}
 
 <div class="card">
   <h2>Complaints</h2>
   <p>Think we've handled personal data wrongly? <a href="{url_for('complaints_form')}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
 </div>
 """
-        return _layout("Privacy", body, active="privacy")
+        body = _legal.privacy_html(
+            terms_url=url_for("terms_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+            deployment_inventory_html=inventory_html if signed_in else "",
+        )
+        return _layout("Privacy Notice", body, active="privacy")
+
+    @app.route("/terms")
+    def terms_page():
+        body = _legal.terms_html(
+            privacy_url=url_for("privacy_page"),
+            cookies_url=url_for("cookies_page"),
+            dpa_url=url_for("dpa_page"),
+        )
+        return _layout("Terms of Service", body, active="")
+
+    @app.route("/cookies")
+    def cookies_page():
+        body = _legal.cookies_html(privacy_url=url_for("privacy_page"))
+        return _layout("Cookie Policy", body, active="")
+
+    @app.route("/dpa")
+    def dpa_page():
+        body = _legal.dpa_html(privacy_url=url_for("privacy_page"))
+        return _layout("Data Processing Agreement", body, active="")
 
     @app.route("/privacy/run/<run_id>/delete", methods=["POST"])
     def privacy_delete_run(run_id):
@@ -13381,6 +13787,164 @@ Relay team broke club record"></textarea>
                 personal_data_involved=bool(request.form.get("personal_data")),
             )
         return redirect(url_for("admin_compliance"))
+    # ---- Data-subject rights (UK GDPR Arts. 15/17/20) -------------------
+
+    @app.route("/privacy/athlete/erase", methods=["POST"])
+    def privacy_athlete_erase():
+        """Erase one named athlete across everything the active org holds."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        name = (request.form.get("athlete_name") or "").strip()
+        club = (request.form.get("athlete_club") or "").strip()
+        if not name:
+            return redirect(url_for("privacy_page"))
+        # ONE erasure engine: compliance.dsr delegates to the privacy
+        # cascade and adds the media-library / profile-text / suppression
+        # extras, so this quick action and the Art 12A DSR workflow
+        # (/organisation/athlete-rights) do the same work.
+        from mediahub.compliance.dsr import erase_athlete as _dsr_erase
+
+        recorded_by = ""
+        try:
+            recorded_by = _auth.current_user_email() or ""
+        except Exception:
+            pass
+        report = _dsr_erase(active, name, recorded_by=recorded_by)
+        cascade = report.get("cascade") or {}
+        _runs_n = len(set(list(cascade.get("runs_touched", [])) + list(report.get("runs_touched", []))))
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Athlete <em class="editorial">erased.</em></h1></section>'
+            '<div class="card"><h2>What was removed</h2><ul>'
+            f"<li>{cascade.get('cards_removed', 0) + report.get('cards_removed', 0)} card(s) and "
+            f"{cascade.get('swims_removed', 0)} result row(s) across {_runs_n} run(s)</li>"
+            f"<li>{cascade.get('assets_removed', 0) + len(report.get('visual_files_deleted', []))} rendered file(s)</li>"
+            f"<li>{cascade.get('pb_cache_files', 0) + len(report.get('pb_cache_files_deleted', []))} PB-cache and "
+            f"{cascade.get('research_cache_files', 0)} research-cache file(s)</li>"
+            f"<li>{cascade.get('memory_rows', 0) + report.get('memory_rows_deleted', 0)} caption-memory row(s)</li>"
+            f"<li>{cascade.get('posting_excerpts', 0)} posting-log excerpt(s) blanked</li>"
+            f"<li>{len(report.get('media_assets_deleted', []))} media-library photo(s) deleted, "
+            f"{len(report.get('media_assets_unlinked', []))} unlinked</li>"
+            "<li>Suppression recorded in both consent registries &mdash; the athlete cannot reappear in new content</li>"
+            "</ul><p class='muted'>Remaining mentions inside multi-athlete captions "
+            "were redacted. Content already published to social "
+            "platforms must be deleted there too &mdash; use the correction tools "
+            "on the Privacy page.</p>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Athlete erased", body, active="privacy")
+
+    @app.route("/privacy/correction", methods=["POST"])
+    def privacy_correction_open():
+        """Open a correction/takedown for a published-but-wrong card.
+
+        Does everything MediaHub controls: records the request and pulls the
+        card off the public wall. The response is honest about the manual
+        remainder (deleting the post on the platform itself)."""
+        active = _active_profile_id() or ""
+        if not active:
+            return redirect(url_for("privacy_page"))
+        run_id = (request.form.get("run_id") or "").strip()
+        card_id = (request.form.get("card_id") or "").strip()
+        reason = (request.form.get("reason") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id)
+            and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", card_id)
+            and reason
+        ):
+            return redirect(url_for("privacy_page"))
+        from mediahub.privacy import TAKEDOWN_CHECKLIST, open_correction
+
+        cid = open_correction(profile_id=active, run_id=run_id, card_id=card_id, reason=reason)
+        # Pull the card off the public wall immediately.
+        try:
+            from mediahub.web.public_wall import card_key
+
+            prof = load_profile(active)
+            if prof is not None:
+                current = set(prof.public_wall_excluded_cards or [])
+                key = card_key(run_id, card_id)
+                if key not in current:
+                    current.add(key)
+                    prof.public_wall_excluded_cards = sorted(current)
+                    save_profile(prof)
+        except Exception:
+            log.warning("correction: wall exclusion failed", exc_info=True)
+        checklist = "".join(f"<li>{_h(item)}</li>" for item in TAKEDOWN_CHECKLIST)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Privacy &amp; data</span>'
+            '<h1>Correction <em class="editorial">opened.</em></h1></section>'
+            '<div class="card">'
+            f"<p>Correction #{cid} recorded for card <code>{_h(card_id)}</code> "
+            f"in run <code>{_h(run_id)}</code>. The card has been removed from the "
+            "public wall.</p>"
+            "<h2>Still to do (outside MediaHub)</h2>"
+            f"<ul>{checklist}</ul>"
+            f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+            "&larr; Back to privacy</a></p></div>"
+        )
+        return _layout("Correction opened", body, active="privacy")
+
+    @app.route("/privacy/correction/<int:correction_id>/resolve", methods=["POST"])
+    def privacy_correction_resolve(correction_id: int):
+        active = _active_profile_id() or ""
+        if active:
+            from mediahub.privacy import resolve_correction
+
+            resolve_correction(
+                profile_id=active,
+                correction_id=correction_id,
+                resolution=(request.form.get("resolution") or "").strip(),
+            )
+        return redirect(url_for("privacy_page"))
+
+    @app.route("/account/export")
+    def account_export_route():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page", next=url_for("account_export_route")))
+        from mediahub.privacy import account_export
+
+        payload = account_export(email)
+        resp = jsonify(payload)
+        resp.headers["Content-Disposition"] = 'attachment; filename="mediahub-account-export.json"'
+        return resp
+
+    @app.route("/account/delete", methods=["POST"])
+    def account_delete():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        # Deleting an account is irreversible — re-verify the password so a
+        # hijacked session can't silently destroy the account.
+        password = request.form.get("password") or ""
+        try:
+            _user_store().authenticate(email, password)
+        except _auth.AuthError:
+            return (
+                _layout(
+                    "Account not deleted",
+                    '<div class="card"><p class="tag bad">Password check failed '
+                    "&mdash; account NOT deleted.</p>"
+                    f'<p><a class="btn secondary" href="{url_for("privacy_page")}">'
+                    "&larr; Back</a></p></div>",
+                    active="privacy",
+                ),
+                403,
+            )
+        from mediahub.privacy import erase_account
+
+        erase_account(email)
+        _auth.logout_user()
+        session.clear()
+        return redirect(url_for("home"))
+
 
     # ---- HEALTH --------------------------------------------------------
     APP_VERSION = "v4.0.0"
@@ -13462,6 +14026,25 @@ Relay team broke club record"></textarea>
         except Exception:
             pass
 
+    def _wants_html_health() -> bool:
+        """True when the request is a genuine browser navigation that should
+        receive the HTML health page (axe-core document-title, WCAG 2.4.2).
+
+        Compares Accept qualities instead of ``best_match``: fetch()/curl/
+        python-requests send ``Accept: */*``, which matches both candidates
+        at equal quality — ``best_match`` then breaks the tie by list order
+        and misclassifies those API callers as browsers (the nav badge
+        choked on the HTML and painted "offline"). A real navigation ranks
+        text/html (q=1) strictly above ``*/*;q=0.8`` so it still gets HTML;
+        clients with no Accept header score 0 = 0 and stay on JSON.
+        ``Sec-Fetch-Dest: document`` covers proxies that strip Accept.
+        """
+        accept = request.accept_mimetypes
+        return (
+            accept["text/html"] > accept["application/json"]
+            or request.headers.get("Sec-Fetch-Dest", "") == "document"
+        )
+
     @app.route("/health")
     def health():
         import time as _time
@@ -13478,13 +14061,11 @@ Relay team broke club record"></textarea>
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         status_code = 200 if payload["ok"] else 503
-        # Return HTML (with a valid <title>) when a browser requests the page so
-        # that axe-core's document-title rule is satisfied; API/monitoring clients
-        # that send Accept: application/json (or no Accept) get plain JSON.
-        best = request.accept_mimetypes.best_match(
-            ["text/html", "application/json"], default="application/json"
-        )
-        if best == "text/html":
+        # Return HTML (with a valid <title>) when a browser navigates to the
+        # page so that axe-core's document-title rule is satisfied; API and
+        # monitoring clients (Accept: application/json, */*, or no Accept)
+        # get plain JSON — see _wants_html_health.
+        if _wants_html_health():
             status_label = _h("OK" if payload["ok"] else "Degraded")
             body = _h(json.dumps(payload, indent=2))
             html = (
@@ -13497,8 +14078,16 @@ Relay team broke club record"></textarea>
                 f"<body><pre>{body}</pre></body>"
                 "</html>"
             )
-            return Response(html, status=status_code, mimetype="text/html")
-        return jsonify(payload), status_code
+            return Response(
+                html,
+                status=status_code,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
+        resp = jsonify(payload)
+        resp.status_code = status_code
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        return resp
 
     _FAVICON_SVG = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
@@ -13616,22 +14205,10 @@ Relay team broke club record"></textarea>
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
         # Return HTML (with a valid <title>) for browser navigations so that
-        # axe-core's document-title rule (WCAG 2.4.2) is satisfied.  Two
-        # complementary signals cover edge cases where a reverse-proxy strips
-        # one or the other:
-        #   • Accept: text/html — standard content-negotiation
-        #   • Sec-Fetch-Dest: document — fetch-metadata sent by Chromium/Firefox
-        #     on top-level page navigations (page.goto in Playwright)
-        # Monitoring tools (curl, urllib, Render's own liveness probe) send
-        # neither, so they continue to receive JSON — the existing contract.
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        # axe-core's document-title rule (WCAG 2.4.2) is satisfied. API and
+        # monitoring callers — including the nav badge's fetch(), curl, and
+        # Render's liveness probe — stay on JSON; see _wants_html_health.
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -13928,10 +14505,10 @@ Relay team broke club record"></textarea>
             when = _humanize_when(top["to_ts"])
             last_incident_html = (
                 f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
-                f'(silent for {_h(duration)})</p>'
+                f"(silent for {_h(duration)})</p>"
                 f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
-                f'Detected from a gap in heartbeats between '
-                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+                f"Detected from a gap in heartbeats between "
+                f"{_h(top['from_ts'][:19])} and {_h(top['to_ts'][:19])} UTC.</p>"
             )
 
         # Build a compact incident table so operators can see the
@@ -13941,10 +14518,10 @@ Relay team broke club record"></textarea>
             for g in gaps:
                 gap_rows += (
                     f'<tr><td class="muted" style="font-size:12px">'
-                    f'{_h(g["to_ts"][:19])} UTC</td>'
-                    f'<td>{_h(_humanize_duration(g["duration_seconds"]))}</td>'
+                    f"{_h(g['to_ts'][:19])} UTC</td>"
+                    f"<td>{_h(_humanize_duration(g['duration_seconds']))}</td>"
                     f'<td class="muted" style="font-size:12px">'
-                    f'gap started {_h(g["from_ts"][:19])} UTC</td></tr>'
+                    f"gap started {_h(g['from_ts'][:19])} UTC</td></tr>"
                 )
             incidents_html = (
                 '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
@@ -13977,36 +14554,36 @@ Relay team broke club record"></textarea>
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
             f"Version <code>{_h(version_label)}</code>"
             + (
-                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-                f'({_h((latest.get("source") or "").lower())})'
+                f" &middot; last heartbeat {_h(_humanize_when(latest['ts']))} "
+                f"({_h((latest.get('source') or '').lower())})"
                 if latest
                 else ""
             )
-            + '</div></div></div>'
+            + "</div></div></div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:20px">'
             '<table style="width:100%"><thead>'
-            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
-            '<th>Downtime</th></tr></thead><tbody>'
-            f'<tr><td><b>24 hours</b></td>'
-            f'<td>{_format_uptime_pct(s24)}</td>'
-            f'<td>{_h(s24.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>7 days</b></td>'
-            f'<td>{_format_uptime_pct(s7d)}</td>'
-            f'<td>{_h(s7d.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>30 days</b></td>'
-            f'<td>{_format_uptime_pct(s30)}</td>'
-            f'<td>{_h(s30.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
-            '</tbody></table></div>'
+            "<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>"
+            "<th>Downtime</th></tr></thead><tbody>"
+            f"<tr><td><b>24 hours</b></td>"
+            f"<td>{_format_uptime_pct(s24)}</td>"
+            f"<td>{_h(s24.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s24.get('downtime_seconds', 0))) if s24.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>7 days</b></td>"
+            f"<td>{_format_uptime_pct(s7d)}</td>"
+            f"<td>{_h(s7d.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s7d.get('downtime_seconds', 0))) if s7d.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>30 days</b></td>"
+            f"<td>{_format_uptime_pct(s30)}</td>"
+            f"<td>{_h(s30.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
+            "</tbody></table></div>"
             f'<div class="card" style="padding:14px 22px;margin-bottom:20px">'
-            f'{last_incident_html}</div>'
-            f'{incidents_html}'
+            f"{last_incident_html}</div>"
+            f"{incidents_html}"
             '<p class="dim" style="margin-top:30px;font-size:12px">'
-            'Uptime is derived from heartbeat density: each platform ping or '
-            'health check inserts one row, and gaps over 5 minutes are counted '
-            'as downtime. Raw data at '
+            "Uptime is derived from heartbeat density: each platform ping or "
+            "health check inserts one row, and gaps over 5 minutes are counted "
+            "as downtime. Raw data at "
             f'<a href="{url_for("api_status_json")}">/api/status</a>.</p>'
         )
         html = _layout("Status", body, active="status")
@@ -14095,14 +14672,7 @@ Relay team broke club record"></textarea>
                 "'open': false means a few errors but no trip yet."
             ),
         }
-        wants_html = (
-            request.accept_mimetypes.best_match(
-                ["text/html", "application/json"], default="application/json"
-            )
-            == "text/html"
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-        if wants_html:
+        if _wants_html_health():
             body = _h(json.dumps(payload, indent=2))
             html = (
                 "<!DOCTYPE html>"
@@ -14153,13 +14723,13 @@ Relay team broke club record"></textarea>
                 if b["provider"] == "gemini" and b["est_cost_usd"] == 0:
                     cost_disp = "$0.00 (free tier)"
                 prov_rows += (
-                    f'<tr><td><b>{_h(b["provider"])}</b></td>'
-                    f'<td>{_h(b["calls"])}</td>'
-                    f'<td>{_h(b["ok"])}</td>'
-                    f'<td>{_h(b["failed"])}</td>'
-                    f'<td>{_h(b.get("tokens_in", 0))}</td>'
-                    f'<td>{_h(b.get("tokens_out", 0))}</td>'
-                    f'<td>{_h(cost_disp)}</td></tr>'
+                    f"<tr><td><b>{_h(b['provider'])}</b></td>"
+                    f"<td>{_h(b['calls'])}</td>"
+                    f"<td>{_h(b['ok'])}</td>"
+                    f"<td>{_h(b['failed'])}</td>"
+                    f"<td>{_h(b.get('tokens_in', 0))}</td>"
+                    f"<td>{_h(b.get('tokens_out', 0))}</td>"
+                    f"<td>{_h(cost_disp)}</td></tr>"
                 )
             providers_html = (
                 '<div class="card"><table style="width:100%">'
@@ -14193,7 +14763,7 @@ Relay team broke club record"></textarea>
                 "</div>"
                 '<div style="height:10px;background:rgba(255,255,255,0.08);'
                 'border-radius:6px;overflow:hidden">'
-                f'<div style="height:100%;width:{min(pct,100):.1f}%;'
+                f'<div style="height:100%;width:{min(pct, 100):.1f}%;'
                 f'background:{bar_color}"></div></div>'
                 "</div>"
             )
@@ -14206,18 +14776,18 @@ Relay team broke club record"></textarea>
                 '<div class="card" style="padding:16px 22px;margin-bottom:18px;'
                 'border-left:3px solid var(--mh-prim-error-500)">'
                 f'<div style="font-weight:600;margin-bottom:4px">'
-                f'Last LLM error &mdash; {_h(last_err.get("provider", "unknown"))}</div>'
+                f"Last LLM error &mdash; {_h(last_err.get('provider', 'unknown'))}</div>"
                 f'<div class="dim" style="font-size:12px;margin-bottom:6px">'
-                f'{_h(last_err.get("ts", "")[:19])} UTC'
+                f"{_h(last_err.get('ts', '')[:19])} UTC"
                 + (
-                    f' &middot; {_h(last_err.get("error_kind"))}'
+                    f" &middot; {_h(last_err.get('error_kind'))}"
                     if last_err.get("error_kind")
                     else ""
                 )
-                + '</div>'
+                + "</div>"
                 f'<code style="font-size:12px">'
-                f'{_h(last_err.get("error_message", "")[:300])}</code>'
-                '</div>'
+                f"{_h(last_err.get('error_message', '')[:300])}</code>"
+                "</div>"
             )
         else:
             err_html = ""
@@ -14260,10 +14830,10 @@ Relay team broke club record"></textarea>
                 cost = f"${d['est_cost_usd']:.4f}" if d["est_cost_usd"] else "$0.00"
                 day_rows += (
                     f'<tr><td class="muted" style="font-size:12px">{_h(d["date"])}</td>'
-                    f'<td>{_h(d["calls"])}</td>'
-                    f'<td>{_h(d["ok"])}</td>'
-                    f'<td>{_h(d["failed"])}</td>'
-                    f'<td>{_h(cost)}</td></tr>'
+                    f"<td>{_h(d['calls'])}</td>"
+                    f"<td>{_h(d['ok'])}</td>"
+                    f"<td>{_h(d['failed'])}</td>"
+                    f"<td>{_h(cost)}</td></tr>"
                 )
             thirty_html = (
                 '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
@@ -14285,30 +14855,30 @@ Relay team broke club record"></textarea>
         body = (
             '<h1 style="margin-bottom:6px">Usage</h1>'
             '<p class="dim" style="margin-bottom:24px">Operator dashboard. '
-            'LLM call counts, free-tier headroom, recent provider errors, '
-            'and publishing roll-up for this MediaHub deployment.</p>'
-            f'{err_html}'
-            f'{headroom_html}'
-            f'{post_html}'
+            "LLM call counts, free-tier headroom, recent provider errors, "
+            "and publishing roll-up for this MediaHub deployment.</p>"
+            f"{err_html}"
+            f"{headroom_html}"
+            f"{post_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            'Today (last 24h)</h2>'
+            "Today (last 24h)</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f'{_h(today["total_calls"])} calls &middot; '
-            f'<b>${today["est_cost_usd_total"]:.4f}</b> estimated cost &middot; '
-            f'{_h(today["failed_count"])} failed'
-            '</p>'
-            f'{providers_html}'
+            f"{_h(today['total_calls'])} calls &middot; "
+            f"<b>${today['est_cost_usd_total']:.4f}</b> estimated cost &middot; "
+            f"{_h(today['failed_count'])} failed"
+            "</p>"
+            f"{providers_html}"
             '<h2 style="margin-top:28px;margin-bottom:6px;font-size:18px">'
-            'Last 7 days</h2>'
+            "Last 7 days</h2>"
             '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-            f'{_h(seven_total)} calls &middot; '
-            f'<b>${seven_cost:.4f}</b> estimated cost.</p>'
-            f'{thirty_html}'
+            f"{_h(seven_total)} calls &middot; "
+            f"<b>${seven_cost:.4f}</b> estimated cost.</p>"
+            f"{thirty_html}"
             '<p class="dim" style="margin-top:30px;font-size:12px">'
-            'Estimated cost is derived from published list pricing for each '
-            'provider and is not a substitute for a real billing source. '
-            'Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated '
-            'as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>'
+            "Estimated cost is derived from published list pricing for each "
+            "provider and is not a substitute for a real billing source. "
+            "Gemini free tier (1,500 req/day on gemini-2.5-flash) is treated "
+            "as $0; Anthropic input/output tokens use Sonnet midpoint rates.</p>"
         )
         return _layout("Usage", body, active="usage")
 
@@ -14412,11 +14982,11 @@ Relay team broke club record"></textarea>
         )
         if prof is None:
             return (
-                f'{section_header}'
+                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
-                'Sign in to an organisation to see its recent runs here. '
-                'Activity is scoped per-organisation so the data never '
-                'leaks between profiles.</p>'
+                "Sign in to an organisation to see its recent runs here. "
+                "Activity is scoped per-organisation so the data never "
+                "leaks between profiles.</p>"
                 '<div class="card empty">No organisation pinned. '
                 f'<a href="{url_for("sign_in_page")}">Sign in &rarr;</a></div>'
             )
@@ -14472,11 +15042,11 @@ Relay team broke club record"></textarea>
 
         if not rows:
             return (
-                f'{section_header}'
-                f'{section_intro}'
+                f"{section_header}"
+                f"{section_intro}"
                 '<div class="card empty">No runs yet for this organisation. '
                 f'<a href="{url_for("make_page")}">Create your first piece of content &rarr;</a>'
-                '</div>'
+                "</div>"
             )
 
         def _schedule_summary_html(rid: str) -> str:
@@ -14487,16 +15057,16 @@ Relay team broke club record"></textarea>
             if s.get("scheduled"):
                 parts.append(
                     f'<span class="tag info" style="font-size:11px">'
-                    f'{s["scheduled"]} scheduled</span>'
+                    f"{s['scheduled']} scheduled</span>"
                 )
             if s.get("published"):
                 parts.append(
                     f'<span class="tag good" style="font-size:11px">'
-                    f'{s["published"]} published</span>'
+                    f"{s['published']} published</span>"
                 )
             if s.get("failed"):
                 parts.append(
-                    f'<span class="tag bad" style="font-size:11px">' f'{s["failed"]} failed</span>'
+                    f'<span class="tag bad" style="font-size:11px">{s["failed"]} failed</span>'
                 )
             return " ".join(parts)
 
@@ -14521,7 +15091,7 @@ Relay team broke club record"></textarea>
                 f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
                 f'<button class="btn danger" type="submit" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
-                f'</form></td></tr>'
+                f"</form></td></tr>"
             )
             if r["status"] == "error" and r["error"]:
                 n_errored += 1
@@ -14616,7 +15186,7 @@ Relay team broke club record"></textarea>
             latest = _uptime.latest_heartbeat()
             gaps = _uptime.recent_gaps(window_hours=24 * 30, limit=5)
         except Exception:
-            return f"{section_header}" '<div class="card empty">Status data not available.</div>'
+            return f'{section_header}<div class="card empty">Status data not available.</div>'
 
         pill_label = "no data yet"
         pill_color = "#7a7a7a"
@@ -14653,10 +15223,10 @@ Relay team broke club record"></textarea>
             when = _humanize_when(top["to_ts"])
             last_incident_html = (
                 f'<p style="margin:0"><b>Last incident:</b> {_h(when)} '
-                f'(silent for {_h(duration)})</p>'
+                f"(silent for {_h(duration)})</p>"
                 f'<p class="dim" style="margin:4px 0 0;font-size:12px">'
-                f'Detected from a gap in heartbeats between '
-                f'{_h(top["from_ts"][:19])} and {_h(top["to_ts"][:19])} UTC.</p>'
+                f"Detected from a gap in heartbeats between "
+                f"{_h(top['from_ts'][:19])} and {_h(top['to_ts'][:19])} UTC.</p>"
             )
 
         version_label = APP_VERSION
@@ -14673,31 +15243,31 @@ Relay team broke club record"></textarea>
             f'<div class="dim" style="font-size:13px;margin-top:2px">'
             f"Version <code>{_h(version_label)}</code>"
             + (
-                f' &middot; last heartbeat {_h(_humanize_when(latest["ts"]))} '
-                f'({_h((latest.get("source") or "").lower())})'
+                f" &middot; last heartbeat {_h(_humanize_when(latest['ts']))} "
+                f"({_h((latest.get('source') or '').lower())})"
                 if latest
                 else ""
             )
-            + '</div></div></div>'
+            + "</div></div></div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<table style="width:100%"><thead>'
-            '<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>'
-            '<th>Downtime</th></tr></thead><tbody>'
-            f'<tr><td><b>24 hours</b></td>'
-            f'<td>{_format_uptime_pct(s24)}</td>'
-            f'<td>{_h(s24.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s24.get("downtime_seconds", 0))) if s24.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>7 days</b></td>'
-            f'<td>{_format_uptime_pct(s7d)}</td>'
-            f'<td>{_h(s7d.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s7d.get("downtime_seconds", 0))) if s7d.get("has_data") else "&mdash;"}</td></tr>'
-            f'<tr><td><b>30 days</b></td>'
-            f'<td>{_format_uptime_pct(s30)}</td>'
-            f'<td>{_h(s30.get("samples", 0))}</td>'
-            f'<td>{_h(_humanize_duration(s30.get("downtime_seconds", 0))) if s30.get("has_data") else "&mdash;"}</td></tr>'
-            '</tbody></table></div>'
+            "<tr><th>Window</th><th>Uptime</th><th>Heartbeats</th>"
+            "<th>Downtime</th></tr></thead><tbody>"
+            f"<tr><td><b>24 hours</b></td>"
+            f"<td>{_format_uptime_pct(s24)}</td>"
+            f"<td>{_h(s24.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s24.get('downtime_seconds', 0))) if s24.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>7 days</b></td>"
+            f"<td>{_format_uptime_pct(s7d)}</td>"
+            f"<td>{_h(s7d.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s7d.get('downtime_seconds', 0))) if s7d.get('has_data') else '&mdash;'}</td></tr>"
+            f"<tr><td><b>30 days</b></td>"
+            f"<td>{_format_uptime_pct(s30)}</td>"
+            f"<td>{_h(s30.get('samples', 0))}</td>"
+            f"<td>{_h(_humanize_duration(s30.get('downtime_seconds', 0))) if s30.get('has_data') else '&mdash;'}</td></tr>"
+            "</tbody></table></div>"
             f'<div class="card" style="padding:14px 22px">'
-            f'{last_incident_html}</div>'
+            f"{last_incident_html}</div>"
         )
 
     def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
@@ -14856,7 +15426,113 @@ Relay team broke club record"></textarea>
       .catch(function(){});
   });
 })();
+window.mhBufferDisconnect = function(btn) {
+  if (!window.confirm('Disconnect Buffer for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
+  btn.disabled = true;
+  fetch('REPLACE_DISCONNECT_URL', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok) { window.location.reload(); }
+      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect Buffer.', 'error'); }
+    })
+    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect Buffer.', 'error'); });
+};
+window.mhAutonomySweepNow = function(btn) {
+  var out = document.getElementById('mh-sweep-result');
+  btn.disabled = true; out.textContent = 'Checking recent runs against the publish gate…';
+  fetch('REPLACE_SWEEP_URL', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false;
+      if (j && j.ok) {
+        out.textContent = 'Swept ' + (j.swept_runs || 0) + ' recent run(s) · ' + (j.published || 0) + ' card(s) published. Details land in the activity log below after a refresh.';
+      } else { out.textContent = (j && j.error) || 'Sweep failed.'; }
+    })
+    .catch(function(){ btn.disabled = false; out.textContent = 'Sweep failed.'; });
+};
 </script>"""
+        js_html = js_html.replace(
+            "REPLACE_DISCONNECT_URL", url_for("api_disconnect_buffer")
+        ).replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
+
+        # Buffer connection + on-demand sweep + cadence state — the operational
+        # half of autonomy: the policy table above decides *if*, this shows
+        # *whether it can actually run* (token, cadence) and lets a human
+        # trigger one cycle now instead of waiting for the hourly task.
+        cadence_on = False
+        try:
+            from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
+
+            cadence_on = any(
+                t.task_type == "approval_signal"
+                and (t.params or {}).get("org_id") == prof.profile_id
+                and t.enabled
+                for t in _sched_list_tasks2()
+            )
+        except Exception:
+            pass
+        buffer_status = (
+            '<span style="color:var(--mh-prim-success-400)">Buffer connected</span>'
+            '<button type="button" class="btn secondary" onclick="mhBufferDisconnect(this)" '
+            'style="font-size:11px;padding:3px 10px;margin-left:10px">Disconnect</button>'
+            if has_buffer
+            else '<span class="dim">Buffer not connected — connect inside any card’s schedule modal.</span>'
+        )
+        cadence_status = (
+            '<span style="color:var(--mh-prim-success-400)">active</span> — recent runs are '
+            "checked against the publish gate every hour"
+            if cadence_on
+            else '<span class="dim">off</span> — turns on automatically while any type above '
+            "is <em>Fully autonomous</em>"
+        )
+        ops_html = (
+            '<div class="card" style="margin-top:14px;padding:16px 18px">'
+            '<div style="font-weight:600;margin-bottom:6px">Autonomy operations</div>'
+            f'<p style="font-size:13px;margin:0 0 6px 0">{buffer_status}</p>'
+            f'<p style="font-size:13px;margin:0 0 10px 0">Hourly cadence: {cadence_status}.</p>'
+            '<button type="button" class="btn secondary" onclick="mhAutonomySweepNow(this)" '
+            'style="font-size:12px">Run autonomy check now</button>'
+            '<div id="mh-sweep-result" class="dim" style="font-size:12px;margin-top:8px"></div>'
+            "</div>"
+        )
+
+        # The audit ledger, surfaced — every gate verdict, auto-approval and
+        # publish attempt for this org, newest first. Append-only JSONL via
+        # workflow.autonomy.AuditLog; this is its read surface.
+        audit_rows = ""
+        try:
+            from mediahub.workflow.autonomy import AuditLog as _AuditLog
+
+            entries = _AuditLog().read(prof.profile_id, limit=12)
+            for e in reversed(entries):
+                ts = _h(_humanize_when(str(e.get("ts") or "")))
+                kind = _h(str(e.get("kind") or ""))
+                tool = _h(str(e.get("tool") or ""))
+                result = _h(str(e.get("result") or ""))
+                audit_rows += (
+                    f"<tr><td style='white-space:nowrap;font-size:12px'>{ts}</td>"
+                    f"<td style='font-size:12px'><code>{kind}</code></td>"
+                    f"<td style='font-size:12px'>{tool}</td>"
+                    f"<td style='font-size:12px;color:var(--ink-dim)'>{result}</td></tr>"
+                )
+        except Exception:
+            audit_rows = ""
+        audit_html = (
+            '<div class="card" style="margin-top:14px;padding:16px 18px">'
+            '<div style="font-weight:600;margin-bottom:6px">Autonomy activity log</div>'
+            '<p class="dim" style="font-size:12px;margin:0 0 10px 0">The immutable audit trail '
+            "behind every autonomous decision for this organisation: gate verdicts, "
+            "auto-approvals, publish attempts and blocked actions.</p>"
+            + (
+                f'<div style="overflow-x:auto"><table class="mh-table-stack" style="width:100%">'
+                f"<thead><tr><th>When</th><th>Event</th><th>Tool</th><th>Detail</th></tr></thead>"
+                f"<tbody>{audit_rows}</tbody></table></div>"
+                if audit_rows
+                else '<div class="card empty" style="margin:0">No autonomous activity yet — '
+                "entries appear here once the approval signal runs.</div>"
+            )
+            + "</div>"
+        )
 
         return (
             f"{section_header}"
@@ -14865,6 +15541,8 @@ Relay team broke club record"></textarea>
             f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
             f"without your explicit opt-in.</p>"
             f"{form_html}"
+            f"{ops_html}"
+            f"{audit_html}"
             f"{js_html}"
         )
 
@@ -14924,7 +15602,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h3 style="margin-top:0">Actions</h3>
-  <form method="post" action="{url_for('privacy_cache_clear')}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
     <button class="btn secondary" type="submit">Clear PB cache</button>
   </form>
   <p class="muted" style="margin-top:8px">To delete an individual run, open it from the activity section above and use the Delete button on the row.</p>
@@ -14996,29 +15674,29 @@ Relay team broke club record"></textarea>
             'Auto-refresh disabled here. Open the live <a href="'
             + url_for("status_page")
             + '">/status page</a> for the auto-refreshing version.</p>'
-            '</div>'
+            "</div>"
             '<div class="card" style="padding:18px 22px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Health checks</h3>'
             '<table style="width:100%">'
-            '<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>'
-            f'<tbody>{check_rows}</tbody></table></div>'
+            "<thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>"
+            f"<tbody>{check_rows}</tbody></table></div>"
             '<div class="card" style="padding:18px 22px">'
             '<h3 style="margin-top:0;font-size:16px">Operator dashboards</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">'
-            'Deep operations data lives behind these URLs. They are safe to share '
-            'with deployment operators but not user-facing.</p>'
+            "Deep operations data lives behind these URLs. They are safe to share "
+            "with deployment operators but not user-facing.</p>"
             '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.8">'
             f'<li><a href="{url_for("healthz_usage")}">LLM usage dashboard</a>'
-            ' &mdash; today\'s call counts, cost estimate, free-tier headroom.</li>'
+            " &mdash; today's call counts, cost estimate, free-tier headroom.</li>"
             f'<li><a href="{url_for("api_status_json")}">/api/status</a>'
-            ' &mdash; raw uptime JSON for external monitors.</li>'
+            " &mdash; raw uptime JSON for external monitors.</li>"
             f'<li><a href="{url_for("health")}">/health</a>'
-            ' &mdash; deep dependency probe (DB, dirs, profiles).</li>'
+            " &mdash; deep dependency probe (DB, dirs, profiles).</li>"
             f'<li><a href="{url_for("healthz_deps")}">/healthz/deps</a>'
-            ' &mdash; Playwright / Node / Remotion availability.</li>'
+            " &mdash; Playwright / Node / Remotion availability.</li>"
             f'<li><a href="{url_for("healthz_memory")}">/healthz/memory</a>'
-            ' &mdash; process RSS and active-run counters.</li>'
-            '</ul></div>'
+            " &mdash; process RSS and active-run counters.</li>"
+            "</ul></div>"
         )
 
     # ---- /api/settings/llm-status ----
@@ -15119,6 +15797,15 @@ Relay team broke club record"></textarea>
             merged = dict(existing)
             merged.update(levels)
             _save_policy(pid, merged)
+            # Reconcile the org's approval-signal cadence with the new policy:
+            # any fully_autonomous type gets the hourly scheduled sweep that
+            # actually drives auto-approval; reverting to fully gated removes it.
+            try:
+                from mediahub.workflow.approval import ensure_approval_signal_cadence
+
+                ensure_approval_signal_cadence(pid)
+            except Exception:
+                app.logger.exception("approval-signal cadence reconciliation failed")
             if thresholds:
                 from mediahub.publishing.publish_gate import save_thresholds as _save_thresholds
 
@@ -15148,17 +15835,28 @@ Relay team broke club record"></textarea>
             return jsonify({"error": "No organisation active."}), 403
         body = request.get_json(silent=True) or {}
         run_id = str(body.get("run_id") or request.form.get("run_id") or "").strip()
-        if not run_id:
-            return jsonify({"error": "run_id is required."}), 400
         try:
-            from mediahub.workflow.approval import apply_approval_signal
+            from mediahub.workflow.approval import _recent_run_ids, apply_approval_signal
 
-            summary = apply_approval_signal(pid, run_id)
+            if run_id:
+                summary = apply_approval_signal(pid, run_id)
+                status = 200 if summary.get("ok") else 404
+                return jsonify(summary), status
+            # No run_id: sweep the org's recent finished runs — the same
+            # scope the scheduled cadence covers, triggered on demand.
+            run_ids = _recent_run_ids(pid)
+            summaries = [apply_approval_signal(pid, rid) for rid in run_ids]
+            return jsonify(
+                {
+                    "ok": True,
+                    "swept_runs": len(summaries),
+                    "published": sum(int(s.get("published") or 0) for s in summaries),
+                    "runs": summaries,
+                }
+            )
         except Exception as exc:
             app.logger.exception("autonomy sweep failed")
             return jsonify({"error": str(exc)}), 500
-        status = 200 if summary.get("ok") else 404
-        return jsonify(summary), status
 
     # ---- Content plan (P1.3 cross-source planner) ---------------------
     #
@@ -15935,6 +16633,19 @@ function mhPlanGenerate(btn) {{
                 }
             ), 503
 
+        # W.11: alt text rides the publish payload — the request's value
+        # wins, else the alt the approver saved in review.
+        _sched_alt = (payload.get("alt_text") or "").strip()
+        if not _sched_alt:
+            try:
+                _ws_sched = _get_wf_store()
+                _st_sched = _ws_sched.load(run_id).get(card_id) if _ws_sched is not None else None
+                _sched_alt = ((_st_sched.edited_captions or {}) if _st_sched else {}).get(
+                    "alt_text", ""
+                )
+            except Exception:
+                _sched_alt = ""
+
         for cid in channel_ids:
             try:
                 res = _buf_schedule(
@@ -15943,6 +16654,7 @@ function mhPlanGenerate(btn) {{
                     text=caption,
                     media_urls=media_urls,
                     scheduled_at=scheduled_at_dt,
+                    alt_text=_sched_alt,
                 )
                 results.append(
                     {
@@ -16389,7 +17101,7 @@ function mhPlanGenerate(btn) {{
         approved: list[dict] = []
         for ra in pack["ranked_achievements"]:
             a = ra.get("achievement", {})
-            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
             st = wf_states.get(cid)
             if st and getattr(getattr(st, "status", None), "value", "") in ("approved", "posted"):
                 approved.append(ra)
@@ -16436,7 +17148,7 @@ function mhPlanGenerate(btn) {{
                 continue
             bits = " ".join(b for b in [ev, "—" if ev and tm else "", tm] if b)
             if pl in (1, 2, 3, "1", "2", "3"):
-                bits += f" · {['🥇','🥈','🥉'][int(pl) - 1]}"
+                bits += f" · {['🥇', '🥈', '🥉'][int(pl) - 1]}"
             if a.get("pb"):
                 bits += " · PB"
             result_lines.append(bits)
@@ -16713,12 +17425,12 @@ function mhPlanGenerate(btn) {{
                     "The runs database wasn't readable on this deployment, "
                     "so the meet picker is empty. Try refreshing &mdash; if it "
                     "keeps happening, ask your operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("spotlight_landing")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Athlete Spotlight", empty_body, active="create")
             empty_body = (
@@ -16726,14 +17438,14 @@ function mhPlanGenerate(btn) {{
                 '<span class="mh-hero-eyebrow">Athlete spotlight</span>'
                 '<h1>One swimmer.<br><em class="editorial">One story.</em></h1>'
                 '<p class="lede">'
-                'Upload a meet first, and every swimmer in your club becomes '
-                'a single-athlete content pack — every achievement, ranked.'
-                '</p>'
+                "Upload a meet first, and every swimmer in your club becomes "
+                "a single-athlete content pack — every achievement, ranked."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("upload")}">Upload a meet &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("make_page")}">All input types</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Athlete Spotlight", empty_body, active="create")
 
@@ -16791,7 +17503,7 @@ function mhPlanGenerate(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
-  <form method="get" action="{url_for('spotlight_landing')}">
+  <form method="get" action="{url_for("spotlight_landing")}">
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
     </select>
@@ -16888,7 +17600,7 @@ function mhPlanGenerate(btn) {{
             angle = _h(_humanise(a.get("angle_hint", "") or ""))
             event = _h(a.get("event", ""))
             atype = _h(_humanise(a.get("type", "")))
-            card_id_raw = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            card_id_raw = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
             card_id_safe = _h(card_id_raw)
 
             wf = wf_states.get(card_id_raw)
@@ -16942,7 +17654,7 @@ function mhPlanGenerate(btn) {{
 
         def _sp_status(ra: dict) -> str:
             a = ra.get("achievement", {})
-            cid = a.get("swim_id") or f"sp:{a.get('type','')}:{a.get('event','')}"
+            cid = a.get("swim_id") or f"sp:{a.get('type', '')}:{a.get('event', '')}"
             wf = wf_states.get(cid)
             return wf.status.value if wf else "queue"
 
@@ -16988,7 +17700,7 @@ function mhPlanGenerate(btn) {{
     <div class="stat"><div class="l">Total</div><div class="v">{pack["n_achievements"]}</div></div>
   </div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="post" action="{url_for('spotlight_build', run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
+    <form method="post" action="{url_for("spotlight_build", run_id=run_id, swimmer_key=swimmer_key)}" style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"
           data-loader-text="Composing the spotlight post">
       <select name="tone" style="font-size:12px;max-width:220px" title="Caption tone for the spotlight post">{_sp_tone_opts}</select>
       <button type="submit" class="btn" style="font-size:13px">Build spotlight post from approved cards &rarr;</button>
@@ -17234,8 +17946,57 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     ):
                         _up = request.files.get(_field)
                         if _up and getattr(_up, "filename", ""):
+                            _up_bytes = _up.read() or b""
+                            # W.6: LENEX entry files (.lef/.lxf — what meet
+                            # organisers actually send) parse structurally,
+                            # not as raw text, so the AI sees clean
+                            # name/event/entry-time rows.
+                            _fn_lower = (_up.filename or "").lower()
+                            if _field == "entries_file" and (
+                                _fn_lower.endswith((".lef", ".lxf"))
+                                or b"<LENEX" in _up_bytes[:2048].upper()
+                            ):
+                                try:
+                                    from mediahub.interpreter.lenex_parser import (
+                                        parse_lenex_entries,
+                                    )
+
+                                    _rows = parse_lenex_entries(_up_bytes)
+                                    # Zero-typing goal (W.6): the entry file
+                                    # already names the meet — use it when
+                                    # the form field was left blank.
+                                    if not (form_data.get("meet_name") or "").strip():
+                                        try:
+                                            from mediahub.interpreter.lenex_parser import (
+                                                parse_lenex as _parse_lenex_meet,
+                                            )
+
+                                            _ln_meet = _parse_lenex_meet(_up_bytes)
+                                            if _ln_meet.meet_name:
+                                                form_data["meet_name"] = _ln_meet.meet_name
+                                        except Exception:
+                                            pass
+                                    _lines = []
+                                    for _r in _rows:
+                                        _bits = [
+                                            _r.get("swimmer_name") or "",
+                                            (
+                                                f"{_r.get('distance_m') or ''}"
+                                                + (f" {_r['stroke']}" if _r.get("stroke") else "")
+                                            ).strip(),
+                                            _r.get("entry_time") or "",
+                                            _r.get("club") or "",
+                                        ]
+                                        _lines.append(" — ".join(b for b in _bits if b))
+                                    if _lines:
+                                        form_data[_key] = "\n".join(_lines)[:_cap]
+                                        continue
+                                except Exception:
+                                    app.logger.exception(
+                                        "event preview: LENEX entries parse failed"
+                                    )
                             try:
-                                _res = _doc_text(_up.filename, _up.read() or b"")
+                                _res = _doc_text(_up.filename, _up_bytes)
                             except Exception:
                                 app.logger.exception("event preview: %s extraction failed", _field)
                                 continue
@@ -17354,7 +18115,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<p style="margin-top:var(--sp-5);display:flex;gap:var(--sp-4);flex-wrap:wrap">'
                 f'<a href="{_packs_url}">View your saved drafts &rarr;</a>'
                 f'<a href="{url_for("make_page")}">&larr; All input types</a>'
-                f'</p>'
+                f"</p>"
             )
         except Exception:
             body += f'<p style="margin-top:var(--sp-5)"><a href="{url_for("make_page")}">&larr; All input types</a></p>'
@@ -17475,8 +18236,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it.get("title") or "Untitled chat")}</a></td>'
-                f'<td>{badge}</td>'
-                f'<td>{it.get("n_messages", 0)}</td>'
+                f"<td>{badge}</td>"
+                f"<td>{it.get('n_messages', 0)}</td>"
                 f'<td class="muted">{_h(ts)}</td></tr>'
             )
         new_url = url_for("free_text_chat_new")
@@ -17501,19 +18262,26 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
 <div class="card">
   <h2>Past chats</h2>
-  {('<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>'
-    '<th>Updated</th></tr></thead><tbody>' + rows_html + '</tbody></table>')
-   if rows_html else (
-       '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
-       'readable. You can still start a new chat above; if this persists, ask '
-       'your operator to check the data volume.</p>'
-       if store_failed else
-       '<p class="muted">No chats yet.</p>'
-   )}
+  {
+            (
+                "<table><thead><tr><th>Title</th><th>State</th><th>Messages</th>"
+                "<th>Updated</th></tr></thead><tbody>" + rows_html + "</tbody></table>"
+            )
+            if rows_html
+            else (
+                '<p class="muted">Couldn&rsquo;t load past chats &mdash; the chat store wasn&rsquo;t '
+                "readable. You can still start a new chat above; if this persists, ask "
+                "your operator to check the data volume.</p>"
+                if store_failed
+                else '<p class="muted">No chats yet.</p>'
+            )
+        }
 </div>
 
 <p style="margin-top:18px;font-size:12px;color:var(--ink-muted)">
-  Prefer the one-shot form? <a href="{url_for('stub_free_text_quick')}">Use the legacy quick generator →</a>
+  Prefer the one-shot form? <a href="{
+            url_for("stub_free_text_quick")
+        }">Use the legacy quick generator →</a>
 </p>
 """
         return _layout("Free text — chat", body, active="create")
@@ -17564,7 +18332,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             msgs_html += (
                 f'<div class="chat-msg" data-role="{_h(role)}" '
                 f'style="margin-bottom:var(--sp-3);padding:var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5);'
-                f'background:var(--surface);border:1px solid var(--hairline);'
+                f"background:var(--surface);border:1px solid var(--hairline);"
                 f'border-left:2px solid {rail};border-radius:var(--radius)">'
                 f'<div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;'
                 f'color:{"var(--lane)" if is_user else "var(--ink-muted)"};letter-spacing:0.18em;margin-bottom:6px">{who}</div>'
@@ -17624,10 +18392,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div class="strap" style="color:var(--good);margin-bottom:var(--sp-3)">Proposed brief</div>
   {_format_brief_html(s.pending_brief)}
   <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-3)">
-    <form method="post" action="{url_for('free_text_chat_accept', chat_id=chat_id)}" style="display:inline">
+    <form method="post" action="{url_for("free_text_chat_accept", chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn">Accept &amp; generate</button>
     </form>
-    <form method="post" action="{url_for('free_text_chat_decline', chat_id=chat_id)}" style="display:inline">
+    <form method="post" action="{url_for("free_text_chat_decline", chat_id=chat_id)}" style="display:inline">
       <button type="submit" class="btn secondary">Decline — keep refining</button>
     </form>
   </div>
@@ -17660,7 +18428,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <h1>{title}</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{msg_count:02d} {"message" if msg_count == 1 else "messages"}</span><span class="sep">/</span>
-    <a href="{url_for('free_text_chat_page')}" style="color:var(--ink-muted);text-decoration:none">← All chats</a>
+    <a href="{url_for("free_text_chat_page")}" style="color:var(--ink-muted);text-decoration:none">← All chats</a>
   </div>
 </section>
 
@@ -17874,12 +18642,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     "so the list is empty even if you saved drafts earlier. "
                     "Try refreshing &mdash; if it keeps happening, ask your "
                     "operator to check the data volume."
-                    '</p>'
+                    "</p>"
                     '<div class="mh-hero-actions">'
                     f'<a class="mh-cta-primary" href="{url_for("stub_packs_list")}">Refresh &rarr;</a>'
                     f'<a class="mh-cta-secondary" href="{url_for("make_page")}">Start fresh</a>'
-                    '</div>'
-                    '</section>'
+                    "</div>"
+                    "</section>"
                 )
                 return _layout("Saved drafts", body, active="create")
             body = (
@@ -17887,14 +18655,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 '<span class="mh-hero-eyebrow">Saved drafts</span>'
                 '<h1>Nothing <em class="editorial">drafted</em> yet.</h1>'
                 '<p class="lede">'
-                'Content packs you generate from Free Text, Event Preview, '
-                'Sponsor Post and Session Update are kept here so you can '
-                'come back, edit, and approve later.'
-                '</p>'
+                "Content packs you generate from Free Text, Event Preview, "
+                "Sponsor Post and Session Update are kept here so you can "
+                "come back, edit, and approve later."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{url_for("make_page")}">Start creating &rarr;</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Saved drafts", body, active="create")
 
@@ -17907,12 +18675,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             rows_html += (
                 f'<tr><td><a href="{view_url}">{_h(it["title"])}</a></td>'
                 f'<td><span class="tag info">{_h(label)}</span></td>'
-                f'<td>{it["n_cards"]}</td>'
+                f"<td>{it['n_cards']}</td>"
                 f'<td class="muted">{_h(ts)}</td>'
                 f'<td><form method="post" action="{delete_url}" style="display:inline" '
-                f'onsubmit="return confirm(\'Delete this draft?\')">'
+                f"onsubmit=\"return confirm('Delete this draft?')\">"
                 f'<button class="btn secondary" type="submit" style="font-size:11px;padding:4px 10px;color:var(--bad);border-color:rgba(244,63,94,0.3)">Delete</button>'
-                f'</form></td></tr>'
+                f"</form></td></tr>"
             )
 
         body = f"""
@@ -17920,7 +18688,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <span class="mh-hero-eyebrow">Saved drafts</span>
   <h1>Drafts</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
-    <span>{len(items):02d} pack{'s' if len(items) != 1 else ''} saved</span>
+    <span>{len(items):02d} pack{"s" if len(items) != 1 else ""} saved</span>
   </div>
 </section>
 <div class="card">
@@ -18527,7 +19295,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "summary and keywords are empty). Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
+                            f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
                         )
                     else:
                         # Surface the failure clearly but keep the form usable.
@@ -18536,7 +19304,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "fetch_failed": "Could not reach that URL &mdash; check it loads in a browser.",
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
+                            f'<p class="tag bad" style="margin-bottom:20px">{_h(reason)}</p>'
                         )
                 profile = existing
 
@@ -18602,7 +19370,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             "Edit and save."
                         )
                         capture_preview = (
-                            f'<p class="tag info" style="margin-bottom:20px">' f"{_h(note)}</p>"
+                            f'<p class="tag info" style="margin-bottom:20px">{_h(note)}</p>'
                         )
                     else:
                         reason = {
@@ -18614,7 +19382,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                             ),
                         }.get(status, f"Capture failed ({_h(status or 'unknown error')}).")
                         capture_error = (
-                            f'<p class="tag bad" style="margin-bottom:20px">' f"{_h(reason)}</p>"
+                            f'<p class="tag bad" style="margin-bottom:20px">{_h(reason)}</p>'
                         )
                 profile = existing
 
@@ -18665,6 +19433,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 existing.org_type = (request.form.get("org_type") or "other").strip()
                 existing.governing_body = (request.form.get("governing_body") or "").strip()
                 existing.country = (request.form.get("country") or "").strip()
+                # W.13: caption language (en / cy / bilingual)
+                _lang = (request.form.get("language") or "en").strip().lower()
+                existing.language = _lang if _lang in ("en", "cy", "bilingual") else "en"
+                # W.4: which qualifying standards this club cares about
+                existing.important_standards = [
+                    s.strip() for s in request.form.getlist("important_standards") if s.strip()
+                ]
                 codes_raw = request.form.get("club_codes") or ""
                 existing.club_codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
                 existing.brand_primary = (
@@ -18758,7 +19533,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                     )
                 else:
                     saved_msg = (
-                        '<p class="tag good" style="margin-bottom:20px">' "Organisation saved.</p>"
+                        '<p class="tag good" style="margin-bottom:20px">Organisation saved.</p>'
                     )
                 # Persist any social-link edits made on the full form.
                 social_edits: dict[str, str] = {}
@@ -18838,6 +19613,39 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         exemplars_text = "\n---\n".join(profile.exemplar_captions or [])
         voice_examples_text = "\n".join(profile.voice_examples or [])
 
+        # W.13: caption language picker
+        _LANGS = [
+            ("en", "English"),
+            ("cy", "Cymraeg (Welsh)"),
+            ("bilingual", "Bilingual — English + Cymraeg"),
+        ]
+        language_opts = "".join(
+            _opt(v, l, v == (getattr(profile, "language", "en") or "en")) for v, l in _LANGS
+        )
+
+        # W.4: qualifying-standards picker (season packs + quals registry)
+        standards_cbs = ""
+        try:
+            from mediahub.standards import available_standards_summary as _stds_summary
+
+            _picked = set(profile.important_standards or [])
+            _rows = []
+            for _s in _stds_summary():
+                _label = (
+                    f"{_s['competition']} — {_s['body']}"
+                    f" ({_s['level']}, {_s['course']}, {_s['season']})"
+                )
+                _rows.append(_cb("important_standards", _s["id"], _label, _s["id"] in _picked))
+            standards_cbs = "".join(_rows)
+        except Exception:
+            standards_cbs = ""
+        if not standards_cbs:
+            standards_cbs = (
+                '<p class="muted" style="font-size:12px">No qualifying-time tables are '
+                "loaded yet. The operator curates them each season — see "
+                "<code>data/standards/README.md</code>.</p>"
+            )
+
         # Build the voice-profile summary panel so the user can see what
         # the engine learned the last time they ran "Analyse voice".
         vp = profile.voice_profile or {}
@@ -18858,21 +19666,21 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);'
                 f'border-radius:8px;background:var(--panel)">'
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-bottom:6px">'
-                f'Voice profile (from {len(profile.voice_examples or [])} examples)</div>'
+                f"Voice profile (from {len(profile.voice_examples or [])} examples)</div>"
                 f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px">'
-                f'<div>Avg sentence length: <b>{_h(vp.get("sentence_length_avg", "—"))}</b> words</div>'
-                f'<div>P90 sentence length: <b>{_h(vp.get("sentence_length_p90", "—"))}</b> words</div>'
-                f'<div>Emojis / caption: <b>{_h(vp.get("emoji_rate_per_caption", "—"))}</b></div>'
-                f'<div>Hashtags / caption: <b>{_h(vp.get("hashtag_count_avg", "—"))}</b></div>'
-                f'<div>Swimmer address: <b>{_h(vp.get("preferred_swimmer_address", "first_name"))}</b></div>'
-                f'</div>'
+                f"<div>Avg sentence length: <b>{_h(vp.get('sentence_length_avg', '—'))}</b> words</div>"
+                f"<div>P90 sentence length: <b>{_h(vp.get('sentence_length_p90', '—'))}</b> words</div>"
+                f"<div>Emojis / caption: <b>{_h(vp.get('emoji_rate_per_caption', '—'))}</b></div>"
+                f"<div>Hashtags / caption: <b>{_h(vp.get('hashtag_count_avg', '—'))}</b></div>"
+                f"<div>Swimmer address: <b>{_h(vp.get('preferred_swimmer_address', 'first_name'))}</b></div>"
+                f"</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Openers</div>'
-                f'<div>{_list_chips(vp.get("characteristic_openers"))}</div>'
+                f"<div>{_list_chips(vp.get('characteristic_openers'))}</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Closers</div>'
-                f'<div>{_list_chips(vp.get("characteristic_closers"))}</div>'
+                f"<div>{_list_chips(vp.get('characteristic_closers'))}</div>"
                 f'<div style="font-size:12px;color:var(--ink-dim);margin-top:6px">Phrases to avoid</div>'
-                f'<div>{_list_chips(vp.get("forbidden_phrases"))}</div>'
-                f'</div>'
+                f"<div>{_list_chips(vp.get('forbidden_phrases'))}</div>"
+                f"</div>"
             )
         else:
             voice_profile_html = (
@@ -18968,11 +19776,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Voice summary</div>
-      <p style="margin:0;font-size:13px;color:var(--ink);line-height:1.5">{_h(profile.brand_voice_summary or '(no summary yet)')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink);line-height:1.5">{_h(profile.brand_voice_summary or "(no summary yet)")}</p>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Palette</div>
       <div>{swatches or '<span class="dim" style="font-size:12px">(none detected)</span>'}</div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-top:14px;margin-bottom:6px">Typography hint</div>
-      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or '—')}</p>
+      <p style="margin:0;font-size:13px;color:var(--ink)">{_h(profile.brand_typography_hint or "—")}</p>
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Detected logo</div>
@@ -19036,16 +19844,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             n_examples = len(profile.voice_examples or [])
             voice_profile_html = f"""
 <div class="card" style="margin-bottom:20px;border:1px dashed var(--border);background:rgba(167,139,250,0.04)">
-  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview &middot; {n_examples} example{'s' if n_examples != 1 else ''}</h3>
+  <h3 style="margin-top:0;margin-bottom:12px;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--ink-dim)">Voice profile preview &middot; {n_examples} example{"s" if n_examples != 1 else ""}</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:8px">Style metrics</div>
-      {_stat_row('Avg sentence length (words)', vp.get('sentence_length_avg', 0))}
-      {_stat_row('Sentence length p90', vp.get('sentence_length_p90', 0))}
-      {_stat_row('Avg emoji per caption', vp.get('emoji_rate_per_caption', 0))}
-      {_stat_row('Avg hashtags per caption', vp.get('hashtag_count_avg', 0))}
-      {_stat_row('Capitalisation style', cap_style)}
-      {_stat_row('Swimmer address', address)}
+      {_stat_row("Avg sentence length (words)", vp.get("sentence_length_avg", 0))}
+      {_stat_row("Sentence length p90", vp.get("sentence_length_p90", 0))}
+      {_stat_row("Avg emoji per caption", vp.get("emoji_rate_per_caption", 0))}
+      {_stat_row("Avg hashtags per caption", vp.get("hashtag_count_avg", 0))}
+      {_stat_row("Capitalisation style", cap_style)}
+      {_stat_row("Swimmer address", address)}
     </div>
     <div>
       <div style="font-weight:600;font-size:12px;color:var(--ink-dim);margin-bottom:6px">Typical openers</div>
@@ -19074,7 +19882,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {saved_msg}{capture_preview}{capture_error}{voice_preview}{voice_error}
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Organisation profile</span>
-  <h1>{_h(profile.display_name) if profile.display_name else 'Your organisation'}</h1>
+  <h1>{_h(profile.display_name) if profile.display_name else "Your organisation"}</h1>
   <p class="lede">Tell MediaHub about your club, society or team. Every generated caption, graphic, and reel is built from what's set here &mdash; brand voice, palette, sponsor rules, the lot.</p>
 </section>
 
@@ -19087,33 +19895,33 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <input type="hidden" name="display_name" value="{_h(profile.display_name)}"/>
     <div style="margin-bottom:10px">
       <label>Website</label>
-      <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or '')}"
+      <input type="url" name="brand_source_url" value="{_h(profile.brand_source_url or "")}"
              placeholder="https://your-club.example" style="{_input_style};max-width:600px"/>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;max-width:780px">
       <div style="margin-bottom:10px">
         <label>Instagram</label>
-        <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get('instagram',''))}"
+        <input type="url" name="social_instagram" value="{_h((profile.social_links or {}).get("instagram", ""))}"
                placeholder="https://instagram.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>Facebook</label>
-        <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get('facebook',''))}"
+        <input type="url" name="social_facebook" value="{_h((profile.social_links or {}).get("facebook", ""))}"
                placeholder="https://facebook.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>Twitter / X</label>
-        <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get('twitter',''))}"
+        <input type="url" name="social_twitter" value="{_h((profile.social_links or {}).get("twitter", ""))}"
                placeholder="https://x.com/your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>TikTok</label>
-        <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get('tiktok',''))}"
+        <input type="url" name="social_tiktok" value="{_h((profile.social_links or {}).get("tiktok", ""))}"
                placeholder="https://tiktok.com/@your-club" style="{_input_style}"/>
       </div>
       <div style="margin-bottom:10px">
         <label>LinkedIn</label>
-        <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get('linkedin',''))}"
+        <input type="url" name="social_linkedin" value="{_h((profile.social_links or {}).get("linkedin", ""))}"
                placeholder="https://linkedin.com/company/your-club" style="{_input_style}"/>
       </div>
     </div>
@@ -19176,8 +19984,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
              style="{_input_style}"/>
     </div>
     <div>
+      <label>Caption language</label>
+      <select name="language" style="{_input_style}">{language_opts}</select>
+      <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Bilingual writes every caption in English and Cymraeg side by side.</p>
+    </div>
+    <div>
       <label>Result file codes</label>
-      <input type="text" name="club_codes" value="{_h(', '.join(profile.club_codes or []))}"
+      <input type="text" name="club_codes" value="{_h(", ".join(profile.club_codes or []))}"
              placeholder="e.g. CMA, COMA" style="{_input_style}"/>
       <p style="font-size:12px;color:var(--ink-dim);margin-top:4px">Comma-separated codes that identify your members in results files.</p>
     </div>
@@ -19197,6 +20010,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     <span class="mh-brandkit-chip"><span class="sw" id="bk-sw-pri" style="background:{_h(_org_pri)}"></span><span class="hex" id="bk-hex-pri">{_h(_org_pri)}</span></span>
     <span class="mh-brandkit-chip"><span class="sw" id="bk-sw-sec" style="background:{_h(_org_sec)}"></span><span class="hex" id="bk-hex-sec">{_h(_org_sec)}</span></span>
     <span style="font-size:var(--fs-sm);color:var(--ink-dim);margin-left:auto">This palette flows into every caption graphic and motion reel.</span>
+  </div>
+  <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px">
+    <label style="display:block;margin-bottom:6px">Qualifying standards this club cares about</label>
+    <p style="font-size:12px;color:var(--ink-dim);margin:0 0 8px">Tick the competitions whose qualifying times should trigger "Qualified!" cards. Each table names its source document on the card.</p>
+    {standards_cbs}
   </div>
   <script>
   (function(){{
@@ -19269,7 +20087,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:600px">
     <div>
       <label>Primary sponsor name</label>
-      <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or '')}"
+      <input type="text" name="sponsor_name" value="{_h(profile.sponsor_name or "")}"
              placeholder="e.g. Acme Sports" style="{_input_style}"/>
     </div>
     <div>
@@ -19418,6 +20236,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         prefill_email: str = "",
         error: str = "",
         min_password: bool = False,
+        extra_fields_html: str = "",
     ) -> str:
         err_html = ""
         if error:
@@ -19431,7 +20250,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f"[ ERROR ] {_h(error)}</div>"
             )
         pw_hint = (
-            '<div class="dim" style="font-size:12px;margin-top:6px">' "At least 8 characters.</div>"
+            '<div class="dim" style="font-size:12px;margin-top:6px">At least 8 characters.</div>'
             if min_password
             else ""
         )
@@ -19459,12 +20278,70 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
             + 'style="width:100%" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
             f"{pw_hint}"
+            f"{extra_fields_html}"
             f'<button type="submit" class="btn" style="margin-top:20px;width:100%">{_h(submit_label)}</button>'
             "</form>"
             f'<div class="dim" style="font-size:13px;margin-top:18px;text-align:center">{alt_html}</div>'
             "</div>"
         )
         return _layout(title, body, active="signin")
+
+    # ---- auth rate limiting (Art. 32 / audit finding 1.10) ---------------
+    #
+    # Fixed-window, per-IP, per-endpoint, in-process. Two gunicorn workers
+    # means an attacker gets at most 2× the budget — still a hard brake on
+    # online guessing, with zero shared state to corrupt.
+    _AUTH_WINDOW_SECONDS = 600
+    _AUTH_MAX_ATTEMPTS = 10
+    _auth_attempts: dict = {}
+    _auth_attempts_lock = threading.Lock()
+
+    def _client_ip() -> str:
+        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return fwd or (request.remote_addr or "unknown")
+
+    def _auth_rate_limited(bucket: str) -> bool:
+        """Record an attempt; True when this IP exceeded the window budget."""
+        now = time.time()
+        key = (bucket, _client_ip())
+        with _auth_attempts_lock:
+            window = [t for t in _auth_attempts.get(key, []) if now - t < _AUTH_WINDOW_SECONDS]
+            window.append(now)
+            _auth_attempts[key] = window
+            # Opportunistic cleanup so the dict can't grow unbounded.
+            if len(_auth_attempts) > 10_000:
+                for k in [
+                    k
+                    for k, v in _auth_attempts.items()
+                    if not v or now - v[-1] > _AUTH_WINDOW_SECONDS
+                ]:
+                    _auth_attempts.pop(k, None)
+            return len(window) > _AUTH_MAX_ATTEMPTS
+
+    def _auth_rate_limit_response():
+        return (
+            _layout(
+                "Too many attempts",
+                '<div class="card"><p class="tag bad">Too many attempts from your '
+                "network &mdash; wait a few minutes and try again.</p></div>",
+                active="signin",
+            ),
+            429,
+        )
+
+    def _terms_checkbox_html() -> str:
+        """The required Terms/Privacy acceptance control on the signup form."""
+        return (
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'margin-top:16px;font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I agree to the "
+            f'<a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">Terms of Service</a> and have read the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</span></label>'
+        )
 
     @app.route("/signup", methods=["GET"])
     def signup_page():
@@ -19485,16 +20362,17 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'style="color:var(--accent);font-weight:600">Log in</a>.'
             ),
             min_password=True,
+            extra_fields_html=_terms_checkbox_html(),
         )
 
     @app.route("/signup", methods=["POST"])
     def signup_post():
+        if _auth_rate_limited("signup"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
-        store = _user_store()
-        try:
-            user = store.create(email, password)
-        except _auth.AuthError as exc:
+
+        def _signup_error(message: str, status: int):
             return (
                 _auth_form_page(
                     title="Create account",
@@ -19507,12 +20385,32 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'style="color:var(--accent);font-weight:600">Log in</a>.'
                     ),
                     prefill_email=email,
-                    error=str(exc),
+                    error=message,
                     min_password=True,
+                    extra_fields_html=_terms_checkbox_html(),
                 ),
+                status,
+            )
+
+        # Versioned ToS acceptance is a hard requirement at signup — the
+        # browser's `required` attribute is convenience, this is the gate.
+        if (request.form.get("accept_terms") or "") != "1":
+            return _signup_error(
+                "Please accept the Terms of Service and Privacy Notice to create an account.",
                 400,
             )
-        session.clear()  # session rotation on privilege change (signup = login)
+        store = _user_store()
+        try:
+            user = store.create(email, password)
+        except _auth.AuthError as exc:
+            return _signup_error(str(exc), 400)
+        # Session rotation on privilege change (signup = login) — clear the
+        # pre-signup session BEFORE the acceptance marker lands in it.
+        session.clear()
+        # Record the timestamped, versioned acceptance before the session
+        # starts; the session marker spares the ledger a read per request.
+        _legal.AcceptanceStore().record(user.email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         _auth.login_user(user)
         from mediahub.compliance.security_log import record_event as _sec_event
 
@@ -19578,6 +20476,11 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def login_post():
         from mediahub.compliance.security_log import record_event as _sec_event
 
+        # Two layers by design: the W per-IP auth limiter (fast 429 on raw
+        # request volume) + the per-email/per-address lockout below (counts
+        # FAILURES, blocks before password verification).
+        if _auth_rate_limited("login"):
+            return _auth_rate_limit_response()
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
         addr = _client_addr()
@@ -19611,6 +20514,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         _auth.login_user(user)
         _sec_event("login", actor=user.email)
         nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        # Re-acceptance check: accounts whose recorded Terms acceptance
+        # predates TERMS_VERSION (or legacy accounts with no record) are
+        # routed through /legal/accept before they continue.
+        if _legal.AcceptanceStore().needs_terms_reacceptance(user.email):
+            return redirect(
+                url_for("legal_accept_page", next=nxt) if nxt else url_for("legal_accept_page")
+            )
+        session["terms_ok_version"] = _legal.TERMS_VERSION
         return redirect(nxt or url_for("make_page"))
 
     @app.route("/login/2fa", methods=["GET", "POST"])
@@ -19733,7 +20644,64 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
         _auth.logout_user()
+        session.pop("terms_ok_version", None)
         return redirect(url_for("home"))
+
+    # ---- /legal/accept (versioned ToS re-acceptance) -------------------
+
+    @app.route("/legal/accept", methods=["GET"])
+    def legal_accept_page():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        nxt = _safe_next(request.args.get("next"))
+        action = url_for("legal_accept_post", next=nxt) if nxt else url_for("legal_accept_post")
+        prior = _legal.AcceptanceStore().latest(email, _legal.DOC_TERMS)
+        prior_line = (
+            f"You last accepted version {_h(prior.version)} on {_h(prior.accepted_at)}."
+            if prior
+            else "Your account predates recorded acceptance, so we're asking once now."
+        )
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Legal</span>'
+            '<h1>Updated <em class="editorial">terms</em>.</h1>'
+            f'<p class="lede">The Terms of Service changed (version {_legal.TERMS_VERSION}). '
+            "Please review and accept to continue.</p></section>"
+            '<div class="card">'
+            f"<p>{prior_line}</p>"
+            f'<p>Read the <a href="{url_for("terms_page")}" target="_blank" '
+            'style="color:var(--accent)">current Terms of Service</a> and the '
+            f'<a href="{url_for("privacy_page")}" target="_blank" '
+            'style="color:var(--accent)">Privacy Notice</a>.</p>'
+            f'<form method="post" action="{action}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="accept_terms" value="1" required '
+            'style="margin-top:3px" />'
+            f"<span>I accept the Terms of Service (version {_legal.TERMS_VERSION}).</span>"
+            "</label>"
+            '<button type="submit" class="btn" style="margin-top:16px">Accept and continue</button>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Don\'t agree? You can '
+            f'<a href="{url_for("privacy_page")}">export your data</a> and '
+            f'<a href="{url_for("logout")}">sign out</a>.</p>'
+            "</div>"
+        )
+        return _layout("Accept updated terms", body, active="")
+
+    @app.route("/legal/accept", methods=["POST"])
+    def legal_accept_post():
+        email = _auth.current_user_email()
+        if not email:
+            return redirect(url_for("login_page"))
+        if (request.form.get("accept_terms") or "") != "1":
+            return redirect(url_for("legal_accept_page"))
+        _legal.AcceptanceStore().record(email, _legal.DOC_TERMS, _legal.TERMS_VERSION)
+        session["terms_ok_version"] = _legal.TERMS_VERSION
+        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+        return redirect(nxt or url_for("make_page"))
 
     def _safe_next(target: Optional[str]) -> str:
         """Only allow same-site relative redirects (open-redirect guard)."""
@@ -19802,6 +20770,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def developer_login_post():
         if not _auth.dev_login_enabled():
             abort(404)
+        if _auth_rate_limited("developer"):
+            return _auth_rate_limit_response()
         if _auth.verify_dev_key(request.form.get("dev_key")):
             _auth.login_dev_operator()
             nxt = _safe_next(request.args.get("next") or request.form.get("next"))
@@ -20406,11 +21376,12 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         'pointer-events:none;opacity:0.6">Not yet available</div>'
                     )
                 else:
+                    # CCR 2013: route through the pre-contract information
+                    # page (/billing/confirm) before any payment step.
                     cta = (
-                        f'<form method="post" action="{url_for("billing_checkout")}" style="margin:0">'
-                        f'<input type="hidden" name="plan" value="{_h(tier.plan)}">'
-                        f'<button type="submit" class="btn" style="width:100%">'
-                        f"Upgrade to {_h(tier.name)}</button></form>"
+                        f'<a class="btn" style="width:100%;text-align:center" '
+                        f'href="{url_for("billing_confirm", plan=tier.plan)}">'
+                        f"Upgrade to {_h(tier.name)}</a>"
                     )
 
             highlight = (
@@ -20430,16 +21401,14 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 
         # Honest banner about where pricing stands (ADR-0011 / PC.4).
         if configured:
-            note = (
-                "Paid plans are billed through Stripe. The exact price is shown " "during checkout."
-            )
+            note = "Paid plans are billed through Stripe. The exact price is shown during checkout."
         else:
             note = (
                 "Billing is not configured on this deployment, so paid plans "
                 "can&rsquo;t be purchased here &mdash; the Free tier is fully usable."
             )
         note_html = (
-            '<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">' f"{note}</p>"
+            f'<p class="dim" style="font-size:13px;margin-top:24px;text-align:center">{note}</p>'
         )
 
         body = (
@@ -20467,7 +21436,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body = (
                 '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
                 '<span class="mh-hero-eyebrow">Billing</span>'
-                '<h1>Billing</h1>'
+                "<h1>Billing</h1>"
                 '<p class="lede">Manage your subscription.</p>'
                 "</section>"
                 '<div class="card" style="padding:24px 28px;max-width:560px">'
@@ -20526,6 +21495,87 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         )
         return _layout("Billing", body, active="signin")
 
+    @app.route("/billing/confirm", methods=["GET"])
+    def billing_confirm():
+        """Pre-contract information page (CCR 2013 / DMCCA) shown BEFORE the
+        Stripe checkout: what you're buying, renewal terms, how to cancel,
+        and the 14-day cooling-off acknowledgement."""
+        user = _auth.current_user(_user_store())
+        if user is None:
+            return redirect(url_for("login_page", next=url_for("pricing_page")))
+        if not _billing.billing_configured():
+            return _billing_unconfigured_response()
+        plan = (request.args.get("plan") or "").strip().lower()
+        tier = next((t for t in _billing.TIERS if t.plan == plan), None)
+        if tier is None or plan not in (_auth.PLAN_CLUB, _auth.PLAN_FEDERATION):
+            return redirect(url_for("pricing_page"))
+        # Price line: evidence-gated list price when it exists (PC.4), else
+        # the honest statement that the exact total shows at checkout before
+        # any commitment to pay.
+        price_line = (
+            "The exact total price and billing interval are shown on the secure "
+            "Stripe checkout page before you confirm payment."
+        )
+        try:
+            from mediahub.commercial.wtp import QuoteStore, public_list_price
+
+            lp = public_list_price(QuoteStore().list_all())
+            if plan == _auth.PLAN_CLUB and lp is not None:
+                symbol = {"gbp": "£", "usd": "$", "eur": "€"}.get(lp["currency"], "")
+                amount = lp["amount_pence"]
+                figure = (
+                    f"{symbol}{amount // 100}"
+                    if amount % 100 == 0
+                    else f"{symbol}{amount / 100:.2f}"
+                )
+                price_line = (
+                    f"{figure} per year (billed annually). The total is also shown "
+                    "on the secure Stripe checkout page before you confirm payment."
+                )
+        except Exception:
+            pass
+        features = "".join(f"<li>{_h(f)}</li>" for f in tier.features)
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);'
+            'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Subscribe</span>'
+            f'<h1>Before you <em class="editorial">subscribe</em>.</h1>'
+            f'<p class="lede">The {_h(tier.name)} plan, in plain terms.</p></section>'
+            '<div class="card">'
+            f"<h2>What you get</h2><p>{_h(tier.blurb)}</p><ul>{features}</ul>"
+            f"<p><strong>Price:</strong> {price_line}</p>"
+            "<p><strong>Renewal:</strong> your subscription renews automatically at "
+            "the interval shown at checkout until you cancel. For annual plans we "
+            "send a reminder before renewal.</p>"
+            "<p><strong>Cancelling:</strong> as easy as subscribing — open "
+            "<em>Billing &rarr; Manage billing</em> any time; cancelling stops future "
+            "renewals and you keep access for the period already paid.</p>"
+            "<p><strong>Your 14-day cancellation right:</strong> you can cancel within "
+            "14 days of purchase for a refund. Because the service starts immediately, "
+            "if you use it and then cancel within the 14 days we may deduct a "
+            "proportionate amount for the service already supplied. Email "
+            f"<a href='mailto:{_legal.CONTACT_EMAIL}'>{_legal.CONTACT_EMAIL}</a> to "
+            "cancel within the cooling-off period.</p>"
+            f'<form method="post" action="{url_for("billing_checkout")}">'
+            f'<input type="hidden" name="plan" value="{_h(plan)}">'
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin:14px 0">'
+            '<input type="checkbox" name="immediate_supply" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I expressly request that the service starts immediately, and I "
+            "acknowledge that if I cancel within 14 days I may be charged a "
+            "proportionate amount for what has already been supplied &mdash; and that "
+            "for digital content already downloaded, the cancellation right is "
+            "lost once supply has begun with my consent.</span></label>"
+            f'<button type="submit" class="btn">Continue to secure checkout &rarr;</button> '
+            f'<a class="btn secondary" href="{url_for("pricing_page")}">Cancel</a>'
+            "</form>"
+            f'<p class="muted" style="margin-top:14px">Full terms: '
+            f'<a href="{url_for("terms_page")}">Terms of Service</a>.</p>'
+            "</div>"
+        )
+        return _layout("Before you subscribe", body, active="signin")
+
     @app.route("/billing/checkout", methods=["POST"])
     def billing_checkout():
         user = _auth.current_user(_user_store())
@@ -20540,6 +21590,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 _billing_error_body("That plan can&rsquo;t be purchased."),
                 active="signin",
             ), 400
+        # CCR 2013: no checkout without the recorded immediate-supply /
+        # cooling-off acknowledgement from the pre-contract page.
+        if (request.form.get("immediate_supply") or "") != "1":
+            return redirect(url_for("billing_confirm", plan=plan))
+        _legal.AcceptanceStore().record(
+            user.email, _legal.DOC_COOLING_OFF, _legal.TERMS_VERSION, org_id=plan
+        )
         try:
             checkout_url = _billing.create_checkout_session(
                 plan=plan,
@@ -20783,16 +21840,16 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<form method="post" action="{sign_in_url}" style="flex:1;display:flex" data-loader-text="Switching organisation">'
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 f'<button type="submit" class="btn-sign-in">'
-                f'{"Continue" if is_current else "Sign in"} &rarr;</button>'
-                '</form>'
+                f"{'Continue' if is_current else 'Sign in'} &rarr;</button>"
+                "</form>"
                 f'<form method="post" action="{delete_url}" data-no-loader="1" '
-                f'onsubmit="return confirm(\'Delete the &quot;{_h(p.display_name)}&quot; profile? '
-                f'Its runs stay on disk but it disappears from this picker. This cannot be undone.\')">'
+                f"onsubmit=\"return confirm('Delete the &quot;{_h(p.display_name)}&quot; profile? "
+                f"Its runs stay on disk but it disappears from this picker. This cannot be undone.')\">"
                 f'<input type="hidden" name="profile_id" value="{_h(p.profile_id)}">'
                 f'<button type="submit" class="btn-delete" aria-label="Delete profile" title="Delete profile">&times;</button>'
-                '</form>'
-                '</div>'
-                '</div>'
+                "</form>"
+                "</div>"
+                "</div>"
             )
 
         new_org_url = url_for("organisation_setup", fresh="1")
@@ -20826,10 +21883,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             '<span class="mh-hero-eyebrow">Sign in</span>'
             '<h1>Pick the <em class="editorial">organisation</em>.</h1>'
             f'<p class="lede">{len(profiles):02d} saved {"profile" if len(profiles) == 1 else "profiles"} on this deployment. '
-            'Picking one loads its brand voice, palette, logo, and history. '
-            'Switch any time from the home page.</p>'
-            '</section>'
-            f'{err_html}'
+            "Picking one loads its brand voice, palette, logo, and history. "
+            "Switch any time from the home page.</p>"
+            "</section>"
+            f"{err_html}"
             f'<div class="mh-profile-grid">{cards_html}</div>'
         )
         return _layout("Sign in", body, active="signin")
@@ -20850,7 +21907,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             # Same message for "doesn't exist" and "members-only" so the
             # picker can't be used to probe which orgs exist (ADR-0014).
             session["sign_in_error"] = (
-                f"Couldn't find a profile with id '{pid}'. " "It may have been deleted."
+                f"Couldn't find a profile with id '{pid}'. It may have been deleted."
             )
             return redirect(url_for("sign_in_page"))
         _pin_active_profile(prof.profile_id)
@@ -21007,7 +22064,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<form method="post" action="{url_for("organisation_members_page")}" '
                 'style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
                 '<input type="hidden" name="action" value="add"/>'
-                '<div><label>Email</label><br/>'
+                "<div><label>Email</label><br/>"
                 '<input type="email" name="email" required placeholder="coach@club.org" '
                 'style="padding:8px 10px;min-width:260px"/></div>'
                 "<div><label>Role</label><br/>"
@@ -21053,6 +22110,61 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
         return _layout("Workspace members", body, active="organisation")
+
+    # ---- DPA + lawful-basis attestation at workspace setup (UK legal) ----
+
+    def _org_attestation_recorded(profile_id: str) -> bool:
+        return _legal.AcceptanceStore().org_has_acceptance(
+            profile_id, _legal.DOC_DPA, _legal.DPA_VERSION
+        )
+
+    def _org_attestation_form_html(prof) -> str:
+        """The DPA-acceptance + lawful-basis attestation block for both org
+        setup forms. Hidden once this workspace has a current-version record."""
+        if prof is not None and _org_attestation_recorded(prof.profile_id):
+            return ""
+        return (
+            '<div class="card" style="margin:18px 0">'
+            "<h2>Athlete data &amp; processing terms</h2>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted);margin-bottom:10px">'
+            '<input type="checkbox" name="accept_dpa" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I accept the "
+            f'<a href="{url_for("dpa_page")}" target="_blank" '
+            'style="color:var(--accent)">Data Processing Agreement</a> on behalf of '
+            "this organisation.</span></label>"
+            '<label style="display:flex;gap:10px;align-items:flex-start;'
+            'font-size:13px;color:var(--ink-muted)">'
+            '<input type="checkbox" name="confirm_lawful_basis" value="1" required '
+            'style="margin-top:3px" />'
+            "<span>I confirm this organisation is entitled to process the athlete "
+            "and member data it uploads, and holds the necessary consents &mdash; "
+            "including <strong>parental consent for under-18s</strong> where "
+            "required &mdash; for the content it publishes.</span></label>"
+            "</div>"
+        )
+
+    def _require_org_data_attestation(profile_id: str):
+        """Server-side gate for both setup POSTs: record (or require) the
+        DPA + lawful-basis attestation before a workspace is created or
+        updated. Returns a redirect response when blocked, else None.
+
+        Tests bypass by default (same pattern as _gate_until_org_ready);
+        attestation-specific tests set ENFORCE_ATTESTATION_GATE."""
+        if app.config.get("TESTING") and not app.config.get("ENFORCE_ATTESTATION_GATE"):
+            return None
+        if _org_attestation_recorded(profile_id):
+            return None
+        if (request.form.get("accept_dpa") or "") != "1" or (
+            request.form.get("confirm_lawful_basis") or ""
+        ) != "1":
+            return redirect(url_for("organisation_setup"))
+        email = _auth.current_user_email() or ""
+        store = _legal.AcceptanceStore()
+        store.record(email, _legal.DOC_DPA, _legal.DPA_VERSION, org_id=profile_id)
+        store.record(email, _legal.DOC_DATA_ATTESTATION, _legal.DPA_VERSION, org_id=profile_id)
+        return None
 
     # into session so the user never sees this page again unless they
     # ask to re-run it.
@@ -21210,10 +22322,10 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                         '<details style="margin-top:10px">'
                         '<summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);'
                         'user-select:none">Where these colours came from '
-                        f'({len(sources_dict)} source{"s" if len(sources_dict) != 1 else ""})</summary>'
+                        f"({len(sources_dict)} source{'s' if len(sources_dict) != 1 else ''})</summary>"
                         f'<div style="margin-top:8px;padding:10px;background:rgba(255,255,255,0.02);'
                         f'border-radius:6px">{"".join(rows)}</div>'
-                        '</details>'
+                        "</details>"
                     )
 
             reasoning_html = ""
@@ -21436,7 +22548,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
      background:rgba(212,255,58,0.04)">
   <h3 style="margin-top:0;margin-bottom:8px">What MediaHub learned about {_h(prof.display_name)}</h3>
   <p style="font-size:14px;color:var(--ink);line-height:1.5;margin:0 0 10px 0">
-    {_h(prof.brand_voice_summary or '(no voice summary yet — capture again from a richer source)')}</p>
+    {_h(prof.brand_voice_summary or "(no voice summary yet — capture again from a richer source)")}</p>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Keywords</div>
   <div style="margin-bottom:10px">{kw_chips or '<span class="dim" style="font-size:12px">(none)</span>'}</div>
   <div style="font-size:12px;color:var(--ink-dim);margin-bottom:4px">Palette in use</div>
@@ -21445,7 +22557,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <div style="margin-bottom:6px">{ai_row}</div>
   {reasoning_html}
   {sources_html}
-  <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or '—')} &middot; captured {_h((prof.brand_captured_at or '')[:19])}</p>
+  <p class="muted" style="font-size:12px;margin:10px 0 0 0">Source: {_h(prof.brand_source_url or "—")} &middot; captured {_h((prof.brand_captured_at or "")[:19])}</p>
   {reorder_block_html}
   {confirm_form_html}
   {_repair_callout_html}
@@ -21502,8 +22614,8 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 else:
                     preview = (
                         '<div style="display:flex;align-items:center;justify-content:center;'
-                        'height:96px;background:rgba(245,242,232,0.04);border-radius:4px;'
-                        'font-family:var(--font-mono,monospace);font-size:11px;'
+                        "height:96px;background:rgba(245,242,232,0.04);border-radius:4px;"
+                        "font-family:var(--font-mono,monospace);font-size:11px;"
                         f'color:var(--ink-muted,#7A7869)">{_h(mime.split("/")[-1] or "FILE")}</div>'
                     )
                 colours = logo.get("ai_dominant_colours") or []
@@ -21611,15 +22723,15 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 'border-radius:8px;background:rgba(44,201,127,0.05);font-size:12px;line-height:1.5">'
                 f'<div style="font-weight:600;color:var(--ink)">Loaded: {_h(prof.brand_guidelines_filename)}</div>'
                 f'<div class="muted" style="margin-top:2px">{_h(prof.brand_guidelines_uploaded_at[:19] if prof.brand_guidelines_uploaded_at else "")}'
-                f' &middot; {_h(prof.brand_guidelines_status or "")} via {_h(prof.brand_guidelines_extractor or "")}</div>'
+                f" &middot; {_h(prof.brand_guidelines_status or '')} via {_h(prof.brand_guidelines_extractor or '')}</div>"
                 + (
                     f'<div style="margin-top:6px;color:var(--ink-dim)">{_h(summary)}</div>'
                     if summary
                     else ""
                 )
                 + f'<div style="margin-top:6px;color:var(--ink-dim)">Voice attributes: {_h(attrs)} &middot; '
-                f'{n_dos} do{"s" if n_dos != 1 else ""}, {n_donts} don\'t{"s" if n_donts != 1 else ""}, '
-                f'{n_prohib} prohibited word{"s" if n_prohib != 1 else ""}.</div>'
+                f"{n_dos} do{'s' if n_dos != 1 else ''}, {n_donts} don't{'s' if n_donts != 1 else ''}, "
+                f"{n_prohib} prohibited word{'s' if n_prohib != 1 else ''}.</div>"
                 + rules_html
                 + '<div class="muted" style="font-size:11px;margin-top:6px">Upload a new file to replace, or leave blank to keep this one.</div>'
                 "</div>"
@@ -21803,7 +22915,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f'<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;'
             f'color:var(--ink-dim);margin:0">'
             f'<input type="checkbox" name="platforms" value="{_h(key)}"'
-            f'{" checked" if key in _m_platforms else ""}/> {_h(label)}</label>'
+            f"{' checked' if key in _m_platforms else ''}/> {_h(label)}</label>"
             for key, label, _ph in _PLATFORMS
         )
         _m_tone_notes = (prof.tone_notes or "") if prof else ""
@@ -21835,6 +22947,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             )
 
         capture_url = url_for("organisation_setup_capture")
+        # UK legal baseline: DPA acceptance + lawful-basis attestation block,
+        # rendered in BOTH setup forms until this workspace has a record.
+        _attestation_html = _org_attestation_form_html(prof)
         body = f"""
 <div style="max-width:840px;margin:0 auto">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
@@ -21989,6 +23104,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   {_logos_grid_html}
 </div>
 
+{_attestation_html}
 {_bottom_cta_html}
 </form>
 </div>
@@ -22065,7 +23181,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
              onchange="var f=document.getElementById('ms-fourth-wrap'); if (f) f.style.display = this.checked ? 'flex' : 'none';"/>
       Add a fourth brand colour
     </label>
-    <label id="ms-fourth-wrap" style="display:{'flex' if _m_use_fourth_checked else 'none'};flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Fourth
+    <label id="ms-fourth-wrap" style="display:{"flex" if _m_use_fourth_checked else "none"};flex-direction:column;gap:6px;font-size:13px;color:var(--ink-dim)">Fourth
       <input type="color" name="manual_fourth" value="{_h(_m_fourth)}"
              style="width:64px;height:40px;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:2px"/>
     </label>
@@ -22081,6 +23197,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
          accept="image/*,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tiff,.svg,.eps,.ai,.pdf"/>
 </div>
 
+{_attestation_html}
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;flex-wrap:wrap">
   <button type="submit" class="btn">Create my organisation &rarr;</button>
   <span class="muted" style="font-size:12px">
@@ -22393,6 +23510,10 @@ function mhSetupMode(mode) {{
                 # workspace this session may not touch (PC.3): either way,
                 # set up a fresh profile instead of clobbering it.
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _setup_is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
@@ -22725,6 +23846,10 @@ function mhSetupMode(mode) {{
                 or not _session_can_use_profile(profile_id)
             ):
                 profile_id = f"{profile_id}-{uuid.uuid4().hex[:6]}"
+
+        blocked = _require_org_data_attestation(profile_id)
+        if blocked is not None:
+            return blocked
 
         _is_new_profile = load_profile(profile_id) is None
         prof = load_profile(profile_id) or ClubProfile(
@@ -23214,15 +24339,15 @@ function mhSetupMode(mode) {{
                 '<span class="mh-hero-eyebrow">Content builder</span>'
                 '<h1>Nothing <em class="editorial">approved</em> yet.</h1>'
                 '<p class="lede">'
-                f'The content builder holds the cards you approve in <strong>{meet_name}</strong>. '
-                'Approve a few in the review queue and they land here &mdash; ready to caption, turn into '
-                'graphics and video, then schedule to Buffer or download.'
-                '</p>'
+                f"The content builder holds the cards you approve in <strong>{meet_name}</strong>. "
+                "Approve a few in the review queue and they land here &mdash; ready to caption, turn into "
+                "graphics and video, then schedule to Buffer or download."
+                "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{_review_url}">Go to review &amp; approve &rarr;</a>'
                 f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">All runs</a>'
-                '</div>'
-                '</section>'
+                "</div>"
+                "</section>"
             )
             return _layout("Content builder", body, active="home")
 
@@ -23274,7 +24399,34 @@ function mhSetupMode(mode) {{
         _newsletter_text_url = _newsletter_html_url + "?format=text"
         _newsletter_zip_url = _newsletter_html_url + "?format=zip"
         _zip_url = url_for("content_pack_zip", run_id=run_id)
+        _certs_url = url_for("pack_certificates_zip", run_id=run_id)
         _turn_into_html = _render_turn_into_card(run_id)
+
+        # W.14: what this club's own approval history says it prefers —
+        # deterministic, explainable, straight from the telemetry store.
+        _prefs_html = ""
+        try:
+            from mediahub.observability.approval_telemetry import preference_summary
+
+            _prefs_pid = profile_id or _run_owner_profile_id(run_id) or ""
+            if _prefs_pid:
+                _prefs = preference_summary(_prefs_pid)
+                if _prefs["reasons"]:
+                    _reasons_li = "".join(
+                        f'<li style="margin:2px 0">{_h(r)}</li>' for r in _prefs["reasons"][:4]
+                    )
+                    _prefs_html = (
+                        '<div class="card no-print" style="margin-bottom:14px;'
+                        'border-left:3px solid var(--accent)">'
+                        '<div style="font-size:13px;font-weight:700">What this club prefers</div>'
+                        '<div style="font-size:12px;color:var(--ink-dim);margin:2px 0 6px">'
+                        f"Learned from {_prefs['total_events']} of your own approve/reject "
+                        "decisions — no guesswork, no AI ranking.</div>"
+                        f'<ul style="margin:0;padding-left:18px;font-size:13px">{_reasons_li}</ul>'
+                        "</div>"
+                    )
+        except Exception:
+            _prefs_html = ""
 
         # Single global AI-availability banner (same pattern as /review).
         try:
@@ -23342,6 +24494,16 @@ function mhSetupMode(mode) {{
   </div>
 </div>
 
+{_prefs_html}
+
+<div class="card no-print" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <div style="font-size:13px;font-weight:700">Print for the noticeboard</div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-top:2px">A branded A4 certificate for every approved achievement — the thing families frame. Photo/name consent is honoured automatically.</div>
+  </div>
+  <a class="btn secondary" style="font-size:12px;padding:6px 12px" href="{_h(_certs_url)}">Download certificates (.zip of PDFs)</a>
+</div>
+
 <div class="no-print">{_turn_into_html}</div>
 
 <h2 style="margin:18px 0 12px">Approved cards <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(approved)}</span></h2>
@@ -23397,12 +24559,31 @@ function mhSetupMode(mode) {{
                     return jsonify({"error": "consent_blocked", "reason": reason}), 403
             notes = payload.get("notes")
             ws.set_status(run_id, card_id, status, notes=notes)
+            # Phase W: approval telemetry (W.14) + records-on-approval (W.3).
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(
+                    _run_owner_profile_id(run_id) or _active_profile_id() or "",
+                    run_id,
+                    card_id,
+                    _action,
+                )
             summary = ws.summary(run_id)
             return jsonify({"ok": True, "status": status_str, "summary": summary})
 
         if action == "set_edits":
             edits = payload.get("edits", {})
             ws.set_edits(run_id, card_id, edits)
+            _phase_w_after_status_change(
+                _run_owner_profile_id(run_id) or _active_profile_id() or "",
+                run_id,
+                card_id,
+                "edited",
+            )
             # Auto-bump status to 'edited' if currently in queue, so the user
             # sees that this card has been modified. Don't overwrite approved/posted.
             try:
@@ -23848,7 +25029,7 @@ function mhSetupMode(mode) {{
         skipped_html = ""
         if skipped:
             items = "".join(
-                f'<li><strong>{_h(s.get("type",""))}</strong>: ' f'{_h(s.get("reason",""))}</li>'
+                f"<li><strong>{_h(s.get('type', ''))}</strong>: {_h(s.get('reason', ''))}</li>"
                 for s in skipped
             )
             skipped_html = (
@@ -23915,7 +25096,7 @@ function mhSetupMode(mode) {{
                         sub += (
                             f'<div style="margin-bottom:10px">'
                             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-                            f'<span class="muted" style="font-size:11px">Post {ti+1}</span>'
+                            f'<span class="muted" style="font-size:11px">Post {ti + 1}</span>'
                             f'<span class="tag {cls}" style="font-size:10px">{post_chars}/280</span>'
                             f"</div>"
                             f'<textarea class="ti-cap" data-artefact="{art_idx}" '
@@ -23968,10 +25149,10 @@ function mhSetupMode(mode) {{
                     rows += (
                         '<div style="padding:10px;background:rgba(255,255,255,0.03);'
                         'border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
-                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer",""))} '
-                        f'&middot; {_h(c.get("event",""))}</div>'
-                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline",""))}</div>'
-                        '</div>'
+                        f'<div style="font-size:13px;font-weight:700">{_h(c.get("swimmer", ""))} '
+                        f"&middot; {_h(c.get('event', ''))}</div>"
+                        f'<div style="font-size:12px;color:var(--ink-dim);margin-top:4px">{_h(c.get("headline", ""))}</div>'
+                        "</div>"
                     )
                 sub_cards_html = f'<div style="margin-bottom:12px">{rows}</div>'
 
@@ -24263,7 +25444,7 @@ function tiRegenerate() {{
                     _prio_num = 0.0
                 rows += f"""
 <div class="card mh-pack-card" id="g-{card_uuid}"
-     data-quality-band="{_h(item.get('quality_band') or '')}"
+     data-quality-band="{_h(item.get("quality_band") or "")}"
      data-band-rank="{_band_rank}"
      data-priority="{_prio_num:.4f}"
      style="margin-bottom:12px">
@@ -24337,7 +25518,7 @@ function tiRegenerate() {{
   <summary style="cursor:pointer;font-size:16px;font-weight:700;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px;list-style:none">Weekend in numbers</summary>
   <div class="card">
     <div class="stat-block">{stats_html}</div>
-    {f'<ul style="margin-top:10px">'+ hl_html +'</ul>' if hl_html else ""}
+    {f'<ul style="margin-top:10px">' + hl_html + "</ul>" if hl_html else ""}
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn secondary" style="font-size:12px;padding:4px 10px" onclick="copyText(this,'win-cap')">Copy caption</button>
       <textarea id="win-cap" style="display:none">{cap_txt}</textarea>
@@ -24372,10 +25553,10 @@ function tiRegenerate() {{
                     }.get(fmt, fmt)
                     tiles.append(f"""
 <div class="card" style="padding:10px;display:flex;flex-direction:column;gap:8px;width:200px;flex:0 0 200px">
-  <img src="{url_for('api_visual_png', vid=vid, format_name=fmt)}" alt="" style="width:100%;border-radius:6px;display:block" loading="lazy">
+  <img src="{url_for("api_visual_png", vid=vid, format_name=fmt)}" alt="" style="width:100%;border-radius:6px;display:block" loading="lazy">
   <div style="font-size:11px;color:var(--ink-dim)">{_h(fmt_label)}</div>
   <div style="font-size:12px;line-height:1.3">{_h(cap)}</div>
-  <a class="btn secondary" style="font-size:12px;padding:4px 10px" target="_blank" rel="noopener" href="{url_for('api_visual_png', vid=vid, format_name=fmt)}">Download PNG</a>
+  <a class="btn secondary" style="font-size:12px;padding:4px 10px" target="_blank" rel="noopener" href="{url_for("api_visual_png", vid=vid, format_name=fmt)}">Download PNG</a>
 </div>""")
                 if tiles:
                     _zip_url = url_for("content_pack_zip", run_id=run_id)
@@ -24506,7 +25687,7 @@ function generateReelGrouped(btn, reelUrl, fmt) {{
   var success = function(videoUrl) {{
     btn.disabled = false; btn.textContent = origLabel;
     var chips = '';
-    ['story', 'square', 'landscape'].forEach(function(f) {{
+    ['story', 'portrait', 'square', 'landscape'].forEach(function(f) {{
       var label = f.charAt(0).toUpperCase() + f.slice(1);
       if (f === fmt) {{
         chips += '<span class="btn secondary" style="font-size:12px;padding:4px 12px;opacity:0.55;pointer-events:none">' + label + ' &#x2713;</span>';
@@ -24750,11 +25931,11 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             rows_html += f"""
 <tr>
   <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
-  <td>{ad.get('type','')}</td>
+  <td>{ad.get("type", "")}</td>
   <td>{athlete_names}</td>
-  <td>{ad.get('linked_venue') or ad.get('linked_event') or ''}</td>
-  <td>{ad.get('permission_status','')}</td>
-  <td><code>{ad.get('id','')[:12]}</code></td>
+  <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
+  <td>{ad.get("permission_status", "")}</td>
+  <td><code>{ad.get("id", "")[:12]}</code></td>
   <td>
     <form method="post" action="{_delete_url}" style="display:inline"
           onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
@@ -24775,7 +25956,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 <div class="card">
   <h2>Upload a photo</h2>
   <p class="dim" style="margin-bottom:var(--sp-5)">Reusable photos for branded content cards. Each upload is parsed for athlete, venue, and event metadata so the engine can pull the right shot into the right moment.</p>
-  <form method="POST" action="{url_for('api_media_library_upload')}" enctype="multipart/form-data" data-loader-text="Uploading photo">
+  <form method="POST" action="{
+            url_for("api_media_library_upload")
+        }" enctype="multipart/form-data" data-loader-text="Uploading photo">
     <label class="req" for="ml-file">File</label>
     <input id="ml-file" type="file" name="file" accept="image/*" required>
     <label for="ml-desc">Description</label>
@@ -24795,16 +25978,22 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
 </div>
 
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {"asset" if len(assets) == 1 else "assets"} in library</div>
+  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
+            "asset" if len(assets) == 1 else "assets"
+        } in library</div>
   <table style="width:100%">
     <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
-    <tbody>{rows_html or (
-        '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
-        'Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. '
-        'Uploads above still work; if this persists, ask your operator to check the data volume.'
-        '</td></tr>' if store_failed else
-        '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
-    )}</tbody>
+    <tbody>{
+            rows_html
+            or (
+                '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
+                "Uploads above still work; if this persists, ask your operator to check the data volume."
+                "</td></tr>"
+                if store_failed
+                else '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+            )
+        }</tbody>
   </table>
 </div>
 """
@@ -25029,6 +26218,94 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                     "url": url_for("api_media_library_file", asset_id=asset.id),
                     "label": athlete or "uploaded photo",
                     "suggested": True,
+                },
+            }
+        )
+
+    @app.route("/api/runs/<run_id>/venue-import", methods=["POST"])
+    def api_venue_import(run_id: str):
+        """Save one venue-search result into the org's media library.
+
+        The venue picker (per-graphic photo chips) calls this with a chosen
+        ``venue_search.VenueImageResult``; the image is downloaded once,
+        stored as a venue asset with its licence/attribution preserved, and
+        returned in the same shape as a card photo upload so the UI can
+        attach it to the graphic immediately.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        if run_data is None:
+            return jsonify({"error": "run_not_found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        direct_url = str(body.get("direct_url") or "").strip()
+        if not direct_url.startswith(("http://", "https://")):
+            return jsonify({"error": "bad_image_url"}), 400
+        title = str(body.get("title") or "").strip()
+        licence = str(body.get("licence") or "").strip()
+        source_url = str(body.get("source_url") or "").strip()
+        attribution = str(body.get("attribution") or "").strip()
+
+        profile_id = run_data.get("profile_id") or run_data.get("club_filter") or "_run_" + run_id
+        profile_id = re.sub(r"[^a-z0-9_-]", "-", profile_id.lower()).strip("-") or (
+            "_run_" + run_id
+        )
+        if not _session_can_access_profile(profile_id):
+            return jsonify({"error": "forbidden"}), 403
+
+        import requests as _requests
+
+        try:
+            resp = _requests.get(direct_url, timeout=15, stream=True)
+            resp.raise_for_status()
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            if not ctype.startswith("image/"):
+                return jsonify({"error": "not_an_image"}), 400
+            data = resp.raw.read(15 * 1024 * 1024 + 1, decode_content=True)
+        except Exception as e:
+            return jsonify({"error": f"download_failed: {e}"}), 502
+        if len(data) > 15 * 1024 * 1024:
+            return jsonify({"error": "image_too_large", "max_mb": 15}), 400
+
+        ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(
+            ctype.split(";")[0].strip(), ".jpg"
+        )
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest = upload_dir / f"asset_{uuid.uuid4().hex[:12]}{ext}"
+        dest.write_bytes(data)
+
+        store = _v8_get_media_store()
+        from mediahub.media_library.models import MediaAsset
+
+        meet = run_data.get("meet") or {}
+        venue = str(meet.get("venue") or run_data.get("venue") or "").strip()
+        asset = MediaAsset(
+            id="",
+            filename=dest.name,
+            path=str(dest),
+            type="venue_photo",
+            description_raw=title or (venue and f"Venue photo — {venue}") or "venue photo",
+            profile_id=profile_id,
+            linked_venue=venue or None,
+            linked_meet_ids=[run_id],
+            source_url=source_url or direct_url,
+            source_attribution=attribution or None,
+            source_licence=licence or None,
+            permission_status=str(body.get("permission_status") or "approved_public"),
+            approval_status="approved",
+        )
+        asset = store.save(asset)
+        return jsonify(
+            {
+                "ok": True,
+                "asset": {
+                    "id": asset.id,
+                    "url": url_for("api_media_library_file", asset_id=asset.id),
+                    "label": title or venue or "venue photo",
                 },
             }
         )
@@ -25639,13 +26916,13 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if not sponsor_name:
             body = (
                 f'<p class="dim"><a href="{url_for("content_pack_grouped", run_id=run_id)}">'
-                f'&larr; Back to recommendations</a></p>'
-                '<h1>Sponsor variant unavailable</h1>'
+                f"&larr; Back to recommendations</a></p>"
+                "<h1>Sponsor variant unavailable</h1>"
                 '<div class="card empty">'
-                '<p>No sponsor is configured for this organisation.</p>'
+                "<p>No sponsor is configured for this organisation.</p>"
                 f'<p><a class="btn" href="{url_for("organisation_page")}">'
-                'Add a sponsor name on the Organisation page &rarr;</a></p>'
-                '</div>'
+                "Add a sponsor name on the Organisation page &rarr;</a></p>"
+                "</div>"
             )
             return _layout("Sponsor variant", body, active="home")
 
@@ -25790,7 +27067,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         event = _h(ach.get("event") or "")
         body = f"""
 <p class="dim"><a href="{_pack_url}">&larr; Back to recommendations</a></p>
-<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(' · ' + event) if event else ''}</h1>
+<h1 style="margin-bottom:4px">Sponsor variant &mdash; {swimmer}{(" · " + event) if event else ""}</h1>
 <p class="dim" style="margin-bottom:24px">Sponsor-branded result card + sponsor-acknowledging caption for <b>{_h(sponsor_name)}</b>. Generated on demand &mdash; refresh to regenerate.</p>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
   <div class="card">
@@ -26272,8 +27549,8 @@ ever appear; queued, edited and rejected cards never do.</p>
                 "<item>"
                 f"<title>{title}</title>"
                 f"<link>{_xml_escape(wall_url)}</link>"
-                f"<guid isPermaLink=\"false\">{_xml_escape(img)}</guid>"
-                f"<enclosure url=\"{_xml_escape(img)}\" type=\"image/png\"/>"
+                f'<guid isPermaLink="false">{_xml_escape(img)}</guid>'
+                f'<enclosure url="{_xml_escape(img)}" type="image/png"/>'
                 f"<description>{_xml_escape(c['alt_text'])}</description>"
                 "</item>"
             )
@@ -27357,6 +28634,31 @@ voice, and queues them for one-click approval.</p>
             str(mp4), mimetype="video/mp4", as_attachment=False, download_name=out_name
         )
 
+    @app.route("/api/runs/<run_id>/card/<card_id>/motion/manifest", methods=["GET"])
+    def api_card_motion_manifest(run_id: str, card_id: str):
+        """The motion render's explainability record — archetype, motion
+        intent, mood, colour source, seed — written as a JSON sidecar beside
+        every rendered MP4. 404 until the matching cut has been rendered."""
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            return jsonify({"error": "run_not_found"}), 404
+        try:
+            from mediahub.visual import motion as _motion
+
+            fmt = (request.args.get("format") or _motion.DEFAULT_MOTION_FORMAT).strip().lower()
+            valid = fmt in _motion.MOTION_FORMATS
+        except Exception:
+            fmt, valid = "story", True
+        if not valid:
+            return jsonify({"error": "bad_format"}), 400
+        name = f"{card_id}.json" if fmt == "story" else f"{card_id}_{fmt}.json"
+        sidecar = RUNS_DIR / run_id / "motion" / name
+        if not sidecar.exists():
+            return jsonify({"error": "manifest_not_found", "detail": "render this cut first"}), 404
+        try:
+            return jsonify(json.loads(sidecar.read_text(encoding="utf-8")))
+        except Exception as e:
+            return jsonify({"error": f"manifest_unreadable: {e}"}), 500
+
     def _assemble_reel_inputs(run_id: str):
         """Shared validation + payload assembly for the reel routes.
 
@@ -27652,6 +28954,20 @@ voice, and queues them for one-click approval.</p>
         path = RUNS_DIR / run_id / "motion" / name
         if not path.exists():
             return jsonify({"error": "reel_not_rendered"}), 404
+        if (request.args.get("poster") or "").strip().lower() in {"1", "true", "yes"}:
+            # The poster-frame PNG sidecar written beside the rendered MP4
+            # (visual/audio_mux.py) — a thumbnail for review surfaces and
+            # platforms that want one. 404s honestly when absent (e.g. a
+            # reel rendered before posters existed).
+            poster = path.with_suffix(".poster.png")
+            if not poster.exists():
+                return jsonify({"error": "poster_not_rendered"}), 404
+            return send_file(
+                str(poster),
+                mimetype="image/png",
+                as_attachment=False,
+                download_name=poster.name,
+            )
         return send_file(
             str(path),
             mimetype="video/mp4",
@@ -27896,11 +29212,20 @@ voice, and queues them for one-click approval.</p>
 
         q = _req.args.get("q", "").strip()
         if not q:
-            return jsonify({"results": []})
+            # Default to the run's own venue / meet name so the picker can
+            # offer backdrops with zero typing.
+            run_data = _load_run(run_id) or {}
+            meet = run_data.get("meet") or {}
+            q = str(meet.get("venue") or run_data.get("venue") or meet.get("name") or "").strip()
+        if not q:
+            return jsonify({"results": [], "query": ""})
         try:
             results = _v8_search_venue(q, limit=8)
             return jsonify(
-                {"results": [r.__dict__ if hasattr(r, "__dict__") else r for r in results]}
+                {
+                    "query": q,
+                    "results": [r.to_dict() if hasattr(r, "to_dict") else r for r in results],
+                }
             )
         except Exception as e:
             return jsonify({"error": str(e), "results": []}), 500
@@ -27936,6 +29261,18 @@ voice, and queues them for one-click approval.</p>
 
         buf = io.BytesIO()
         approval = []
+        # W.11: the approver-edited alt text (saved in review) outranks
+        # whatever the visual sidecar recorded at generation time.
+        _wf_alt_edits: dict[str, str] = {}
+        try:
+            _ws_zip = _get_wf_store()
+            if _ws_zip is not None:
+                for _cid, _st in (_ws_zip.load(run_id) or {}).items():
+                    _alt = ((_st.edited_captions or {}) if _st else {}).get("alt_text", "")
+                    if _alt:
+                        _wf_alt_edits[_cid] = _alt
+        except Exception:
+            _wf_alt_edits = {}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for brief_dir in sorted(vdir.iterdir()):
                 if not brief_dir.is_dir():
@@ -27963,7 +29300,11 @@ voice, and queues them for one-click approval.</p>
                     z.writestr(arcname, png.read_bytes())
                 # Caption
                 cap = visual.get("caption") or ""
-                alt = visual.get("alt_text") or ""
+                alt = (
+                    _wf_alt_edits.get(visual.get("content_item_id") or "")
+                    or visual.get("alt_text")
+                    or ""
+                )
                 z.writestr(
                     f"{run_id}/captions/{vid}.txt",
                     f"CAPTION:\n{cap}\n\nALT TEXT:\n{alt}\n",
@@ -28001,14 +29342,14 @@ voice, and queues them for one-click approval.</p>
         body = (
             '<section class="mh-hero" data-lane="404" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">Page not found</span>'
-            '<h1>Off the lane.</h1>'
+            "<h1>Off the lane.</h1>"
             f'<p class="lede">The page <code>{_h(request.path)}</code> doesn\'t exist on this deployment. '
-            'It may have been moved, renamed, or never minted.</p>'
+            "It may have been moved, renamed, or never minted.</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
             f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Recent activity</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("Not found", body, active=""), 404
 
@@ -28024,18 +29365,18 @@ voice, and queues them for one-click approval.</p>
         body = (
             '<section class="mh-hero" data-lane="500" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">Server error</span>'
-            '<h1>The engine stalled.</h1>'
+            "<h1>The engine stalled.</h1>"
             '<p class="lede">'
-            'Something failed on the server. Nothing you uploaded was lost — '
-            'refresh, or try a different action. If it keeps happening, the '
-            'deployment status page has the latest health signal.'
-            '</p>'
+            "Something failed on the server. Nothing you uploaded was lost — "
+            "refresh, or try a different action. If it keeps happening, the "
+            "deployment status page has the latest health signal."
+            "</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("home")}">Back to home &rarr;</a>'
             '<a class="mh-cta-secondary" href="javascript:history.back()">Go back</a>'
             f'<a class="mh-cta-secondary" href="{url_for("status_page")}">Check status</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("Error", body, active=""), 500
 
@@ -28047,18 +29388,1146 @@ voice, and queues them for one-click approval.</p>
         body = (
             '<section class="mh-hero" data-lane="413" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">'
             '<span class="mh-hero-eyebrow">413 / payload too large</span>'
-            '<h1>File too big.</h1>'
+            "<h1>File too big.</h1>"
             '<p class="lede">'
-            'The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first '
-            '— most meet exports are well under 5&nbsp;MB.'
-            '</p>'
+            "The upload exceeded 50&nbsp;MB. Try compressing or trimming the file first "
+            "— most meet exports are well under 5&nbsp;MB."
+            "</p>"
             '<div class="mh-hero-actions">'
             f'<a class="mh-cta-primary" href="{url_for("upload")}">Try a smaller file &rarr;</a>'
             f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
-            '</div>'
-            '</section>'
+            "</div>"
+            "</section>"
         )
         return _layout("File too large", body, active=""), 413
+
+    # ------------------------------------------------------------------
+    # Phase W — club data surfaces (ADR-0016)
+    # W.1 athletes + merge · W.2 consent · W.3 records · W.7 live meet ·
+    # W.8 season wraps · W.9 magic links · W.12 print exports
+    # ------------------------------------------------------------------
+
+    def _phase_w_org():
+        """Active workspace id, or None (pages render a sign-in prompt)."""
+        return _active_profile_id() or None
+
+    _PW_NO_ORG = (
+        '<div class="card"><h2>Pick an organisation first</h2>'
+        '<p class="dim">Club data is workspace-scoped. Sign in and choose your '
+        "organisation, then come back here.</p></div>"
+    )
+
+    @app.route("/club-data")
+    def club_data_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Club data", _PW_NO_ORG, active="clubdata")
+        tiles = [
+            (
+                url_for("athletes_page"),
+                "Athletes &amp; consent",
+                "Your swimmer roster across every meet — merge duplicate names, "
+                "set photo/name permission per athlete, import the consent "
+                "register, export it for the welfare officer.",
+            ),
+            (
+                url_for("club_records_page"),
+                "Club records",
+                "Import the records sheet once; every faster swim becomes a "
+                "ranked NEW CLUB RECORD card, and the table updates only when "
+                "you approve it.",
+            ),
+            (
+                url_for("live_meet_page"),
+                "Live meet",
+                "Point MediaHub at the host club's live-results page during a "
+                "gala. New results queue cards for approval as they land — "
+                "nothing posts itself.",
+            ),
+            (
+                url_for("season_wraps_page"),
+                "Season wraps",
+                "Month-in-numbers and season recap packs built from your stored "
+                "history — PBs, medals, records, debuts, busiest swimmer.",
+            ),
+        ]
+        body = (
+            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Club data</span>'
+            '<h1>The club&rsquo;s <em class="editorial">memory</em></h1>'
+            '<p class="lede">Athletes, consent, records and history — the layer that '
+            "makes milestone, record and recap content possible.</p></section>"
+            '<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">'
+            + "".join(
+                f'<a class="card" href="{href}" style="display:block;text-decoration:none">'
+                f'<h2 style="margin-top:0">{title}</h2><p class="dim">{desc}</p></a>'
+                for href, title, desc in tiles
+            )
+            + "</div>"
+        )
+        return _layout("Club data", body, active="clubdata")
+
+    # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
+
+    @app.route("/athletes")
+    def athletes_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Athletes", _PW_NO_ORG, active="clubdata")
+        from mediahub.athletes import list_athletes
+        from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
+
+        roster = list_athletes(pid)
+        consent = list_consent(pid)
+        regime = regime_active(pid)
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+
+        level_options = list(LEVEL_LABELS.items())
+        rows = []
+        for rec in roster:
+            current = (consent.get(rec.athlete_id) or {}).get("level") or "unknown"
+            opts = "".join(
+                f'<option value="{_h(val)}" {"selected" if val == current else ""}>'
+                f"{_h(label)}</option>"
+                for val, label in level_options
+                if val != "unknown"
+            )
+            unknown_opt = (
+                f'<option value="" {"selected" if current == "unknown" else ""}>'
+                f"{_h(LEVEL_LABELS['unknown'])}</option>"
+            )
+            aliases = ", ".join(a for a in rec.aliases if a != rec.canonical_name.casefold())
+            rows.append(
+                "<tr>"
+                f"<td><strong>{_h(rec.canonical_name)}</strong>"
+                + (
+                    f'<br/><span class="muted" style="font-size:11px">also seen as: {_h(aliases)}</span>'
+                    if aliases
+                    else ""
+                )
+                + "</td>"
+                f"<td>{rec.race_count}</td>"
+                f"<td>{_h(str(rec.birth_year or ''))}</td>"
+                f'<td><form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:6px;align-items:center">'
+                f'<input type="hidden" name="action" value="set_consent"/>'
+                f'<input type="hidden" name="athlete_id" value="{_h(rec.athlete_id)}"/>'
+                f'<select name="level" style="font-size:12px">{unknown_opt}{opts}</select>'
+                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px">Save</button>'
+                f"</form></td>"
+                "</tr>"
+            )
+        rows_html = (
+            "".join(rows)
+            if rows
+            else '<tr><td colspan="4" class="muted">No athletes yet — run a meet '
+            "through the pipeline, or click &ldquo;Build from past runs&rdquo; below.</td></tr>"
+        )
+
+        merge_opts = "".join(
+            f'<option value="{_h(r.athlete_id)}">{_h(r.canonical_name)} ({r.race_count} races)</option>'
+            for r in roster
+        )
+        regime_note = (
+            '<p class="tag good" style="margin:0">Consent enforcement is ACTIVE — '
+            "athletes with no consent on file are blocked from content.</p>"
+            if regime
+            else '<p class="tag warn" style="margin:0">No consent regime yet — cards '
+            "behave as before. Import your consent register (or switch enforcement "
+            "on) and unknown athletes become most-restricted automatically.</p>"
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Athletes</span>
+  <h1>Athletes &amp; <em class="editorial">consent</em></h1>
+  <p class="lede">One identity per swimmer across every meet. Milestones (debut,
+  50th race), records and season wraps hang off this roster — and so does
+  photo/name permission.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">{regime_note}
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    <form method="POST" action="{url_for("athletes_action")}">
+      <input type="hidden" name="action" value="toggle_enforce"/>
+      <button type="submit" class="btn secondary">{"Switch enforcement off" if regime else "Switch enforcement on"}</button>
+    </form>
+    <a class="btn secondary" href="{url_for("athletes_consent_export")}">Welfare-officer export (.csv)</a>
+    <form method="POST" action="{url_for("athletes_action")}">
+      <input type="hidden" name="action" value="backfill"/>
+      <button type="submit" class="btn secondary" title="Scan this organisation's past runs and build the roster">Build from past runs</button>
+    </form>
+  </div>
+</div>
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Roster</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Athlete</th><th>Races logged</th><th>Born</th><th>Photo &amp; name permission</th></tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Same swimmer twice?</h2>
+  <p class="dim" style="font-size:13px">Results files spell names differently
+  ("Maya Patel" / "Patel, Maya"). Merge them and the decision sticks for every
+  future upload. Merges are recorded in the audit log.</p>
+  <form method="POST" action="{url_for("athletes_action")}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input type="hidden" name="action" value="merge"/>
+    <label>Keep</label><select name="keep_id">{merge_opts}</select>
+    <label>absorbs</label><select name="merge_id">{merge_opts}</select>
+    <button type="submit" class="btn">Merge</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Import the consent register (.csv)</h2>
+  <p class="dim" style="font-size:13px">One row per athlete:
+  <code>name, permission[, note]</code> &mdash; permission is one of
+  <code>photo ok</code>, <code>no photo</code>, <code>initials only</code>,
+  <code>do not feature</code>. Rows we can&rsquo;t read are reported, never guessed.</p>
+  <form method="POST" action="{url_for("athletes_action")}">
+    <input type="hidden" name="action" value="import_consent"/>
+    <textarea name="csv_text" rows="6" style="width:100%;max-width:640px"
+      placeholder="Maya Patel, initials only, parent form 2026&#10;Joe Bloggs, photo ok"></textarea>
+    <div style="margin-top:8px"><button type="submit" class="btn">Import</button></div>
+  </form>
+</div>
+"""
+        return _layout("Athletes & consent", body, active="clubdata")
+
+    @app.route("/athletes/action", methods=["POST"])
+    def athletes_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.athletes import backfill_from_runs, merge_athletes
+        from mediahub.safeguarding import import_csv as consent_import
+        from mediahub.safeguarding import regime_active, set_consent, set_enforce
+        from mediahub.safeguarding.consent import LEVELS as _CONSENT_LEVELS
+
+        actor = (session.get("user_email") or "web").strip()
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "set_consent":
+            athlete_id = (request.form.get("athlete_id") or "").strip()
+            level = (request.form.get("level") or "").strip()
+            if level in _CONSENT_LEVELS and athlete_id:
+                set_consent(pid, athlete_id, level, actor=actor)
+                msg = "Consent updated."
+            elif athlete_id and not level:
+                msg = "Pick a permission level first."
+        elif action == "merge":
+            keep_id = (request.form.get("keep_id") or "").strip()
+            merge_id = (request.form.get("merge_id") or "").strip()
+            if keep_id and merge_id and keep_id != merge_id:
+                ok = merge_athletes(pid, keep_id, merge_id, actor=actor)
+                msg = "Merged — the decision is recorded and persists." if ok else "Merge failed."
+            else:
+                msg = "Pick two different athletes to merge."
+        elif action == "toggle_enforce":
+            now_on = regime_active(pid)
+            set_enforce(pid, not now_on, actor=actor)
+            msg = "Consent enforcement switched " + ("off." if now_on else "on.")
+        elif action == "import_consent":
+            result = consent_import(pid, request.form.get("csv_text") or "", actor=actor)
+            msg = f"Imported {result['imported']} rows."
+            if result["skipped"]:
+                msg += f" Skipped {len(result['skipped'])} (unreadable level/name)."
+        elif action == "backfill":
+            prof = load_profile(pid)
+
+            def _is_ours(code):
+                return prof.is_ours(code, None) if prof else True
+
+            stats = backfill_from_runs(pid, RUNS_DIR, is_ours=_is_ours)
+            msg = (
+                f"Scanned {stats['runs']} past runs — {stats['swims']} swims logged "
+                "into the roster."
+            )
+        return redirect(url_for("athletes_page", msg=msg))
+
+    @app.route("/athletes/consent.csv")
+    def athletes_consent_export():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.safeguarding import export_csv
+
+        out = export_csv(pid)
+        resp = make_response(out)
+        resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+        resp.headers["Content-Disposition"] = 'attachment; filename="consent-register.csv"'
+        return resp
+
+    # ---- W.3: club records ------------------------------------------------
+
+    @app.route("/records")
+    def club_records_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Club records", _PW_NO_ORG, active="clubdata")
+        from mediahub.club_records import list_records
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        records = list_records(pid)
+        rows = "".join(
+            "<tr>"
+            f"<td>{r.distance}m {_h(r.stroke)}</td><td>{_h(r.course)}</td>"
+            f"<td>{_h(r.gender)}</td><td>{_h(r.age_group)}</td>"
+            f"<td><strong>{_h(r.time_str)}</strong></td><td>{_h(r.holder)}</td>"
+            f"<td>{_h(r.set_date or '')}</td>"
+            f'<td><form method="POST" action="{url_for("club_records_action")}">'
+            f'<input type="hidden" name="action" value="delete"/>'
+            f'<input type="hidden" name="distance" value="{r.distance}"/>'
+            f'<input type="hidden" name="stroke" value="{_h(r.stroke)}"/>'
+            f'<input type="hidden" name="course" value="{_h(r.course)}"/>'
+            f'<input type="hidden" name="gender" value="{_h(r.gender)}"/>'
+            f'<input type="hidden" name="age_group" value="{_h(r.age_group)}"/>'
+            f'<button type="submit" class="btn secondary" style="font-size:11px;padding:3px 8px">Remove</button>'
+            f"</form></td></tr>"
+            for r in records
+        ) or (
+            '<tr><td colspan="8" class="muted">No records yet — import the club '
+            "records sheet below. That one import is what turns record swims into "
+            "NEW CLUB RECORD cards.</td></tr>"
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Records</span>
+  <h1>Club <em class="editorial">records</em></h1>
+  <p class="lede">The highest-emotion post a club makes. When a swim beats a mark
+  here, a NEW CLUB RECORD card outranks everything — and this table only changes
+  when you approve that card.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Current records ({len(records)})</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Event</th><th>Course</th><th>Sex</th><th>Age group</th><th>Time</th><th>Holder</th><th>Set</th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Import the records sheet (.csv)</h2>
+  <p class="dim" style="font-size:13px">One row per record:
+  <code>event, course, sex, age group, time, holder[, date]</code><br/>
+  e.g. <code>100 Freestyle, LC, F, open, 1:02.10, Erin Jones, 2019-05-01</code>
+  &mdash; age group is <code>open</code> or a band like <code>13-14</code>.
+  Unreadable rows are reported back, never guessed.</p>
+  <form method="POST" action="{url_for("club_records_action")}">
+    <input type="hidden" name="action" value="import"/>
+    <textarea name="csv_text" rows="8" style="width:100%;max-width:640px"
+      placeholder="100 Freestyle, LC, F, open, 1:02.10, Erin Jones, 2019-05-01"></textarea>
+    <div style="margin-top:8px"><button type="submit" class="btn">Import records</button></div>
+  </form>
+</div>
+"""
+        return _layout("Club records", body, active="clubdata")
+
+    @app.route("/records/action", methods=["POST"])
+    def club_records_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.club_records import delete_record, import_csv
+
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "import":
+            result = import_csv(pid, request.form.get("csv_text") or "")
+            msg = f"Imported {result['imported']} records."
+            if result["skipped"]:
+                msg += f" Skipped {len(result['skipped'])} unreadable rows."
+        elif action == "delete":
+            try:
+                ok = delete_record(
+                    pid,
+                    distance=int(request.form.get("distance") or 0),
+                    stroke=request.form.get("stroke") or "",
+                    course=request.form.get("course") or "",
+                    gender=request.form.get("gender") or "",
+                    age_group=request.form.get("age_group") or "open",
+                )
+                msg = "Record removed." if ok else "Record not found."
+            except (TypeError, ValueError):
+                msg = "Record not found."
+        return redirect(url_for("club_records_page", msg=msg))
+
+    # ---- W.7: live meet mode ----------------------------------------------
+
+    def _live_watch_runner(watch, data: bytes, new_swim_keys: list[str]) -> None:
+        """Re-run the full pipeline into the watch's fixed run id.
+
+        Idempotent per swim key: card ids derive from swim identity, so a
+        re-run upserts the same cards; the workflow sidecar (approvals so
+        far) is a separate file and survives. Cards land in QUEUE — the
+        autonomy posture is structural, nothing here can publish.
+        """
+        from mediahub.web.pipeline_v4 import run_pipeline_v4
+
+        run = run_pipeline_v4(
+            data,
+            f"live-{watch.id}.html",
+            profile_id=watch.profile_id,
+            run_id=watch.run_id or watch.id,
+        )
+        _persist_run(run, f"Live watch: {watch.label or watch.url}")
+
+    @app.route("/live")
+    def live_meet_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Live meet", _PW_NO_ORG, active="clubdata")
+        from mediahub.results_fetch.live_watch import list_watches
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        watches = list_watches(pid)
+        rows = (
+            "".join(
+                "<tr>"
+                f"<td>{_h(w.label or w.url)}<br/><span class='muted' style='font-size:11px'>{_h(w.url)}</span></td>"
+                f"<td><span class='tag {'good' if w.status == 'active' else 'warn'}'>{_h(w.status)}</span></td>"
+                f"<td>every {w.interval_minutes} min</td>"
+                f"<td>{w.polls} polls &middot; {w.new_swims_total} new swims</td>"
+                f"<td>{_h((w.last_error or '')[:80])}</td>"
+                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                f'href="{url_for("review", run_id=w.run_id or w.id)}">Review cards</a></td>'
+                f'<td><form method="POST" action="{url_for("live_meet_action")}">'
+                f'<input type="hidden" name="action" value="stop"/>'
+                f'<input type="hidden" name="watch_id" value="{_h(w.id)}"/>'
+                f'<button type="submit" class="btn secondary" style="font-size:12px;padding:4px 10px"'
+                f"{' disabled' if w.status != 'active' else ''}>Stop</button></form></td>"
+                "</tr>"
+                for w in watches
+            )
+            or '<tr><td colspan="7" class="muted">No live watches yet.</td></tr>'
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Live meet</span>
+  <h1>Live <em class="editorial">meet</em> mode</h1>
+  <p class="lede">Paste the host club&rsquo;s live-results page. MediaHub checks it
+  politely during the gala; each new result runs through recognition and queues a
+  card for approval — you get a push, nothing posts itself, and the watch stops
+  on its own.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">Watch a results page</h2>
+  <p class="dim" style="font-size:13px">Use the meet results page on the host
+  club&rsquo;s own website or results.swimming.org. Meet Mobile and rankings sites
+  are not supported — they don&rsquo;t allow it.</p>
+  <form method="POST" action="{url_for("live_meet_action")}" style="display:grid;gap:8px;max-width:640px">
+    <input type="hidden" name="action" value="create"/>
+    <label>Live results page URL</label>
+    <input type="url" name="url" required placeholder="https://hostclub.org.uk/gala/live-results.htm"/>
+    <label>Name (so you recognise it)</label>
+    <input type="text" name="label" placeholder="Swansea Spring Open — Sunday"/>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div><label>Check every</label>
+        <select name="interval_minutes"><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select></div>
+      <div><label>Stop after</label>
+        <select name="hours"><option value="6">6 hours</option><option value="12" selected>12 hours</option><option value="24">24 hours</option></select></div>
+    </div>
+    <div><button type="submit" class="btn">Start watching</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Watches</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Meet</th><th>Status</th><th>Interval</th><th>Activity</th><th>Last issue</th><th></th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+"""
+        return _layout("Live meet", body, active="clubdata")
+
+    @app.route("/live/action", methods=["POST"])
+    def live_meet_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from datetime import timedelta as _td
+
+        from mediahub.results_fetch.live_watch import create_watch, stop_watch
+
+        action = (request.form.get("action") or "").strip()
+        msg = ""
+        if action == "create":
+            try:
+                hours = max(1, min(48, int(request.form.get("hours") or 12)))
+            except (TypeError, ValueError):
+                hours = 12
+            rid = uuid.uuid4().hex[:12]
+            try:
+                watch = create_watch(
+                    pid,
+                    (request.form.get("url") or "").strip(),
+                    interval_minutes=int(request.form.get("interval_minutes") or 5),
+                    expires_at=datetime.now(timezone.utc) + _td(hours=hours),
+                    label=(request.form.get("label") or "").strip(),
+                    run_id=rid,
+                    review_url=url_for("review", run_id=rid, _external=True),
+                )
+                _ensure_live_watch_schedule()
+                msg = f"Watching. Cards will queue under Review as results land ({watch.interval_minutes}-min checks)."
+            except ValueError as e:
+                msg = f"Could not start the watch: {e}"
+        elif action == "stop":
+            ok = stop_watch(pid, (request.form.get("watch_id") or "").strip())
+            msg = "Watch stopped." if ok else "Watch not found."
+        return redirect(url_for("live_meet_page", msg=msg))
+
+    def _ensure_live_watch_schedule() -> None:
+        """One global poll task drives every org's due watches (idempotent)."""
+        try:
+            from mediahub.workflow.schedule import create_task as _ct
+            from mediahub.workflow.schedule import list_tasks as _lt
+
+            if not any(t.task_type == "live_meet_poll" for t in _lt()):
+                _ct(
+                    name="Live meet watch poll (W.7)",
+                    task_type="live_meet_poll",
+                    schedule_kind="cron",
+                    schedule_expr="*/2 * * * *",
+                )
+        except Exception:
+            log.warning("could not ensure live watch schedule", exc_info=True)
+
+    # ---- W.8: season wraps -------------------------------------------------
+
+    @app.route("/wraps")
+    def season_wraps_page():
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Season wraps", _PW_NO_ORG, active="clubdata")
+        from mediahub.season_wrap import list_drafts
+
+        msg = (request.args.get("msg") or "").strip()
+        msg_html = f'<p class="tag good" style="margin-bottom:14px">{_h(msg)}</p>' if msg else ""
+        drafts = list_drafts(pid)
+        rows = (
+            "".join(
+                "<tr>"
+                f"<td><strong>{_h(d.get('title', d.get('id', '')))}</strong></td>"
+                f"<td>{_h((d.get('window') or {}).get('start', ''))} &rarr; {_h((d.get('window') or {}).get('end', ''))}</td>"
+                f"<td>{(d.get('stats') or {}).get('n_runs', 0)} meets</td>"
+                f"<td><a class='btn secondary' style='font-size:12px;padding:4px 10px' "
+                f'href="{url_for("season_wrap_view", draft_id=d.get("id", ""))}">Open</a></td>'
+                "</tr>"
+                for d in drafts
+            )
+            or '<tr><td colspan="4" class="muted">No wrap drafts yet — generate one below.</td></tr>'
+        )
+        try:
+            from mediahub.workflow.schedule import list_tasks as _lt
+
+            monthly_on = any(
+                t.task_type == "season_wrap_draft" and (t.params or {}).get("profile_id") == pid
+                for t in _lt()
+            )
+        except Exception:
+            monthly_on = False
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Club data &middot; Wraps</span>
+  <h1>Season <em class="editorial">wraps</em></h1>
+  <p class="lede">Your stored history, turned into &ldquo;month in numbers&rdquo; and
+  season-recap packs — PBs, medals, records, debuts, the busiest swimmer.
+  Drafted for approval, never auto-posted.</p>
+</section>
+{msg_html}
+<div class="card" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="month"/>
+    <button type="submit" class="btn">Draft last month&rsquo;s wrap</button>
+  </form>
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="season"/>
+    <button type="submit" class="btn secondary">Draft this season&rsquo;s wrap (since 1 Sept)</button>
+  </form>
+  <form method="POST" action="{url_for("season_wraps_action")}">
+    <input type="hidden" name="action" value="{"monthly_off" if monthly_on else "monthly_on"}"/>
+    <button type="submit" class="btn secondary">{"Disable monthly auto-draft" if monthly_on else "Enable monthly auto-draft"}</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Drafts</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Wrap</th><th>Window</th><th>Coverage</th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+"""
+        return _layout("Season wraps", body, active="clubdata")
+
+    @app.route("/wraps/action", methods=["POST"])
+    def season_wraps_action():
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.season_wrap import (
+            build_monthly_draft,
+            build_season_draft,
+            save_draft,
+        )
+
+        action = (request.form.get("action") or "").strip()
+        now = datetime.now(timezone.utc)
+        msg = ""
+        if action == "month":
+            year, month = (now.year, now.month - 1) if now.month > 1 else (now.year - 1, 12)
+            draft = build_monthly_draft(pid, RUNS_DIR, year=year, month=month)
+            save_draft(pid, draft)
+            msg = f"Drafted: {draft.get('title', '')}"
+        elif action == "season":
+            season_start = f"{now.year}-09-01" if now.month >= 9 else f"{now.year - 1}-09-01"
+            draft = build_season_draft(
+                pid, RUNS_DIR, season_start=season_start, season_end=now.date().isoformat()
+            )
+            save_draft(pid, draft)
+            msg = f"Drafted: {draft.get('title', '')}"
+        elif action == "monthly_on":
+            try:
+                from mediahub.workflow.schedule import create_task as _ct
+                from mediahub.workflow.schedule import list_tasks as _lt
+
+                if not any(
+                    t.task_type == "season_wrap_draft" and (t.params or {}).get("profile_id") == pid
+                    for t in _lt()
+                ):
+                    _ct(
+                        name=f"Monthly wrap draft — {pid}",
+                        task_type="season_wrap_draft",
+                        schedule_kind="monthly",
+                        schedule_expr="1 06:30",
+                        params={"profile_id": pid, "runs_dir": str(RUNS_DIR)},
+                    )
+                msg = "Monthly auto-draft enabled — a wrap drafts itself on the 1st."
+            except Exception as e:
+                msg = f"Could not enable: {e}"
+        elif action == "monthly_off":
+            try:
+                from mediahub.workflow.schedule import delete_task as _dt
+                from mediahub.workflow.schedule import list_tasks as _lt
+
+                for t in _lt():
+                    if (
+                        t.task_type == "season_wrap_draft"
+                        and (t.params or {}).get("profile_id") == pid
+                    ):
+                        _dt(t.id)
+                msg = "Monthly auto-draft disabled."
+            except Exception as e:
+                msg = f"Could not disable: {e}"
+        return redirect(url_for("season_wraps_page", msg=msg))
+
+    @app.route("/wraps/<draft_id>")
+    def season_wrap_view(draft_id: str):
+        pid = _phase_w_org()
+        if not pid:
+            return _layout("Season wrap", _PW_NO_ORG, active="clubdata")
+        from mediahub.season_wrap import load_draft
+
+        draft = load_draft(pid, draft_id)
+        if not draft:
+            abort(404)
+        chips = "".join(
+            f'<div style="border:1px solid var(--border);border-radius:10px;padding:14px 18px;text-align:center">'
+            f'<div style="font-size:28px;font-weight:800">{_h(str(v))}</div>'
+            f'<div class="muted" style="font-size:12px">{_h(str(k))}</div></div>'
+            for k, v in (draft.get("stat_chips") or [])
+        )
+        highlights = (
+            "".join(
+                "<tr>"
+                f"<td>{_h(h.get('swimmer_name', ''))}</td><td>{_h(h.get('event', ''))}</td>"
+                f"<td>{_h(h.get('headline', ''))}</td>"
+                "</tr>"
+                for h in (draft.get("highlights") or [])
+            )
+            or '<tr><td colspan="3" class="muted">No highlights in this window.</td></tr>'
+        )
+        body = f"""
+<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Season wrap</span>
+  <h1>{_h(draft.get("title", "Wrap"))}</h1>
+  <p class="lede">Deterministic numbers from your stored run history. Print the
+  noticeboard poster, or use the highlights to build posts.</p>
+</section>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px">{chips}</div>
+<div class="card" style="margin-bottom:16px">
+  <a class="btn" href="{url_for("season_wrap_poster", draft_id=draft_id)}">Print A4 noticeboard poster (PDF)</a>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Highlights</h2>
+  <table class="mh-table" style="width:100%">
+    <thead><tr><th>Swimmer</th><th>Event</th><th>What happened</th></tr></thead>
+    <tbody>{highlights}</tbody>
+  </table>
+</div>
+"""
+        return _layout(draft.get("title", "Season wrap"), body, active="clubdata")
+
+    @app.route("/wraps/<draft_id>/poster.pdf")
+    def season_wrap_poster(draft_id: str):
+        pid = _phase_w_org()
+        if not pid:
+            abort(403)
+        from mediahub.graphic_renderer.print_export import (
+            build_poster_html,
+            render_html_to_pdf,
+        )
+        from mediahub.season_wrap import load_draft
+
+        draft = load_draft(pid, draft_id)
+        if not draft:
+            abort(404)
+        prof = load_profile(pid)
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        highlight_rows = [
+            {
+                "swimmer": h.get("swimmer_name", ""),
+                "event": h.get("event", ""),
+                "time": (h.get("raw_facts") or {}).get("time", "")
+                if isinstance(h.get("raw_facts"), dict)
+                else "",
+                "note": h.get("headline", ""),
+            }
+            for h in (draft.get("highlights") or [])[:10]
+        ]
+        html = build_poster_html(
+            title=draft.get("title", "Club wrap"),
+            meet_name=", ".join((draft.get("stats") or {}).get("meet_names", [])[:3]),
+            stat_lines=[(str(k), str(v)) for k, v in (draft.get("stat_chips") or [])],
+            highlight_rows=highlight_rows,
+            club_name=(prof.display_name if prof else pid),
+            brand=brand,
+        )
+        out = DATA_DIR / "print_exports" / f"wrap-{pid}-{draft_id}.pdf"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        render_html_to_pdf(html, out)
+        return send_file(
+            out,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"{draft_id}-poster.pdf",
+        )
+
+    # ---- W.9: magic-link mobile approvals -----------------------------------
+
+    @app.route("/api/runs/<run_id>/magic-link", methods=["POST"])
+    def api_mint_magic_link(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.web.magic_links import mint_review_token
+
+        pid = _run_owner_profile_id(run_id) or _phase_w_org() or ""
+        token = mint_review_token(app.secret_key or "", run_id, pid)
+        link = url_for("magic_review_page", token=token, _external=True)
+        # Best-effort push to the org's configured channels (ntfy/webhook).
+        sent = False
+        try:
+            from mediahub.notify.channels import Notification, all_channels
+
+            n = Notification(
+                title="MediaHub: pack ready to review",
+                message="Tap to approve this run's cards from your phone — no login needed.",
+                tags=("incoming_envelope",),
+                click_url=link,
+            )
+            for ch in all_channels():
+                try:
+                    sent = ch.send(n) or sent
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            from mediahub.workflow.autonomy import AuditLog
+
+            AuditLog().record(
+                pid or "-",
+                f"magiclink:{run_id}",
+                "magic_link_minted",
+                tool="api_mint_magic_link",
+                args={"run_id": run_id, "notified": sent},
+                result="minted",
+            )
+        except Exception:
+            pass
+        return jsonify({"ok": True, "url": link, "notified": sent, "expires_hours": 72})
+
+    @app.route("/api/runs/<run_id>/magic-link/revoke", methods=["POST"])
+    def api_revoke_magic_link(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        from mediahub.web.magic_links import revoke_run_tokens
+
+        revoke_run_tokens(run_id)
+        return jsonify({"ok": True, "revoked": True})
+
+    def _magic_ctx_or_error(token: str):
+        from mediahub.web.magic_links import (
+            MagicLinkError,
+            MagicLinkExpired,
+            MagicLinkRevoked,
+            verify_review_token,
+        )
+
+        try:
+            return verify_review_token(app.secret_key or "", token), None
+        except MagicLinkExpired:
+            return None, "This review link has expired. Ask for a fresh one."
+        except MagicLinkRevoked:
+            return None, "This review link was revoked. Ask for a fresh one."
+        except MagicLinkError:
+            return None, "This review link isn't valid."
+
+    def _magic_page(token: str, ctx: dict, flash: str = "") -> str:
+        """Mobile-first lite review: approve / edit caption / reject only.
+
+        Deliberately self-contained HTML (no app chrome, no JS framework):
+        pool-deck phones on one bar of signal are the target device.
+        """
+        run_id = ctx["run_id"]
+        data = _load_run(run_id) or {}
+        from mediahub.content_pack.builder import build_grouped_pack
+
+        pack = build_grouped_pack(data, ctx.get("profile_id") or "", RUNS_DIR)
+        items = (
+            list(pack.get("main_feed") or [])
+            + list(pack.get("stories") or [])
+            + list(pack.get("needs_review") or [])
+        )
+        cards_html = []
+        for item in items:
+            a = item.get("achievement") or {}
+            card_id = a.get("swim_id") or ""
+            if not card_id:
+                continue
+            status = item.get("wf_status", "queue")
+            consent = item.get("consent") or {}
+            blocked = bool(item.get("consent_blocked"))
+            caption = item.get("caption_only") or a.get("headline") or ""
+            pill = {
+                "approved": '<span class="pill ok">Approved</span>',
+                "rejected": '<span class="pill bad">Rejected</span>',
+                "edited": '<span class="pill warn">Edited</span>',
+            }.get(status, '<span class="pill">Waiting</span>')
+            block_html = (
+                f'<p class="blocked">&#9888; {_h(consent.get("reason") or "blocked: no consent on file")}</p>'
+                if blocked
+                else ""
+            )
+            action_url = url_for("magic_card_action", token=token, card_id=card_id)
+            cards_html.append(
+                f"""
+<div class="card{" is-blocked" if blocked else ""}">
+  <div class="card-top">{pill}<span class="evt">{_h(a.get("event", ""))}</span></div>
+  <h2>{_h(a.get("headline", ""))}</h2>
+  {block_html}
+  <form method="POST" action="{action_url}">
+    <textarea name="caption" rows="3" {"disabled" if blocked else ""}>{_h(caption)}</textarea>
+    <div class="btns">
+      <button class="approve" name="action" value="approve" {"disabled" if blocked else ""}>Approve</button>
+      <button class="save" name="action" value="save_caption" {"disabled" if blocked else ""}>Save edit</button>
+      <button class="reject" name="action" value="reject">Reject</button>
+    </div>
+  </form>
+</div>"""
+            )
+        meet_name = ((data.get("meet") or {}).get("name")) or data.get("file_name") or run_id
+        flash_html = f'<p class="flash">{_h(flash)}</p>' if flash else ""
+        return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex"/>
+<title>Approve — {_h(meet_name)}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin:0; padding:14px; background:#0A0B11; color:#F5F2E8;
+         font:16px/1.45 system-ui, -apple-system, sans-serif; }}
+  h1 {{ font-size:20px; margin:6px 0 2px; }}
+  .sub {{ color:#9a968c; font-size:13px; margin:0 0 14px; }}
+  .card {{ border:1px solid #2a2c36; border-radius:12px; padding:14px; margin-bottom:14px; background:#11131c; }}
+  .card.is-blocked {{ opacity:0.75; border-color:#7a2733; }}
+  .card-top {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }}
+  .evt {{ color:#9a968c; font-size:12px; }}
+  h2 {{ font-size:16px; margin:0 0 8px; }}
+  .pill {{ font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid #444; }}
+  .pill.ok {{ border-color:#2e7d32; color:#7bd88a; }}
+  .pill.bad {{ border-color:#a33; color:#ff8a80; }}
+  .pill.warn {{ border-color:#b8860b; color:#ffd54f; }}
+  .blocked {{ color:#ff8a80; font-size:13px; }}
+  textarea {{ width:100%; background:#0A0B11; color:#F5F2E8; border:1px solid #2a2c36;
+             border-radius:8px; padding:10px; font-size:15px; }}
+  .btns {{ display:flex; gap:8px; margin-top:10px; }}
+  button {{ flex:1; min-height:48px; border-radius:10px; border:1px solid #2a2c36;
+           font-size:15px; font-weight:700; cursor:pointer; }}
+  .approve {{ background:#1d4d27; color:#c9f0cf; border-color:#2e7d32; }}
+  .save {{ background:#1c2433; color:#cfe0ff; }}
+  .reject {{ background:#33161b; color:#ffc4be; border-color:#7a2733; }}
+  button:disabled {{ opacity:0.45; }}
+  .flash {{ background:#1d4d27; border:1px solid #2e7d32; padding:10px 12px; border-radius:8px; }}
+  .done {{ color:#9a968c; font-size:13px; text-align:center; margin:20px 0; }}
+</style></head><body>
+<h1>{_h(meet_name)}</h1>
+<p class="sub">Approve from your phone — changes save instantly. This link expires
+and can be revoked by the club.</p>
+{flash_html}
+{"".join(cards_html) or '<p class="done">Nothing waiting for review.</p>'}
+<p class="done">MediaHub &middot; secure review link</p>
+</body></html>"""
+
+    @app.route("/m/<token>")
+    def magic_review_page(token: str):
+        ctx, err = _magic_ctx_or_error(token)
+        if ctx is None:
+            return (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
+                "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
+                "<title>Link unavailable</title>"
+                "<style>body{font-family:system-ui;background:var(--bg,black);"
+                "color:white;padding:32px 18px;text-align:center}</style></head>"
+                f"<body><h1>\U0001f512</h1><p>{_h(err)}</p></body></html>",
+                410,
+            )
+        flash = (request.args.get("ok") or "").strip()
+        return _magic_page(token, ctx, flash)
+
+    @app.route("/m/<token>/card/<path:card_id>", methods=["POST"])
+    def magic_card_action(token: str, card_id: str):
+        ctx, err = _magic_ctx_or_error(token)
+        if ctx is None:
+            abort(410)
+        run_id = ctx["run_id"]
+        action = (request.form.get("action") or "").strip()
+        ws = WorkflowStore(RUNS_DIR)
+        pid = ctx.get("profile_id") or _run_owner_profile_id(run_id) or ""
+        flash = ""
+        if action == "approve":
+            ws.set_status(run_id, card_id, CardStatus.APPROVED, notes="via magic link")
+            _phase_w_after_status_change(pid, run_id, card_id, "approved", via="magic_link")
+            flash = "Approved."
+        elif action == "reject":
+            ws.set_status(run_id, card_id, CardStatus.REJECTED, notes="via magic link")
+            _phase_w_after_status_change(pid, run_id, card_id, "rejected", via="magic_link")
+            flash = "Rejected."
+        elif action == "save_caption":
+            caption = (request.form.get("caption") or "").strip()
+            if caption:
+                ws.set_edits(run_id, card_id, {"caption": caption})
+                _phase_w_after_status_change(pid, run_id, card_id, "edited", via="magic_link")
+                flash = "Caption saved."
+        try:
+            from mediahub.workflow.autonomy import AuditLog
+
+            AuditLog().record(
+                pid or "-",
+                f"magiclink:{run_id}",
+                "magic_link_action",
+                tool="magic_card_action",
+                args={"run_id": run_id, "card_id": card_id, "action": action},
+                result=flash or "noop",
+            )
+        except Exception:
+            pass
+        return redirect(url_for("magic_review_page", token=token, ok=flash))
+
+    # ---- W.14 + W.3 approval-seam hook --------------------------------------
+
+    def _phase_w_after_status_change(
+        pid: str, run_id: str, card_id: str, action: str, *, via: str = "web"
+    ) -> None:
+        """Telemetry + records-on-approval, fed by every approval surface.
+
+        Best-effort by design: a telemetry or records failure must never
+        block the approval itself.
+        """
+        card = None
+        try:
+            data = _load_run(run_id) or {}
+            for ra in (data.get("recognition_report") or {}).get("ranked_achievements") or []:
+                a = ra.get("achievement") or {}
+                if a.get("swim_id") == card_id:
+                    card = ra
+                    break
+        except Exception:
+            card = None
+        try:
+            from mediahub.observability.approval_telemetry import record_event
+
+            a = (card or {}).get("achievement") or {}
+            prof = load_profile(pid) if pid else None
+            record_event(
+                pid or "",
+                run_id,
+                card_id,
+                action,
+                achievement_type=a.get("type", ""),
+                post_angle=(card or {}).get("post_angle") or a.get("post_angle", ""),
+                tone=(getattr(prof, "tone", "") or "") if prof else "",
+                quality_band=str((card or {}).get("quality_band") or ""),
+                via=via,
+            )
+        except Exception:
+            log.warning("approval telemetry failed", exc_info=True)
+        if action == "approved" and card is not None:
+            try:
+                from mediahub.club_records import apply_approved_card
+
+                a = card.get("achievement") or {}
+                if a.get("type") == "club_record" and pid:
+                    updated = apply_approved_card(pid, dict(card, run_id=run_id))
+                    if updated:
+                        log.info("club record table updated from approved card %s", card_id)
+            except Exception:
+                log.warning("club record approval hook failed", exc_info=True)
+
+    # ---- W.12: print exports on the pack ------------------------------------
+
+    @app.route("/pack/<run_id>/certificates.zip")
+    def pack_certificates_zip(run_id: str):
+        if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
+            abort(404)
+        import io as _io
+        import zipfile as _zip
+
+        from mediahub.content_pack.builder import build_grouped_pack
+        from mediahub.graphic_renderer.print_export import (
+            build_certificate_html,
+            render_html_to_pdf,
+        )
+
+        data = _load_run(run_id)
+        if not data:
+            abort(404)
+        pid = _run_owner_profile_id(run_id) or ""
+        prof = load_profile(pid) if pid else None
+        pack = build_grouped_pack(data, pid, RUNS_DIR)
+        approved = [
+            item
+            for group in ("main_feed", "stories", "needs_review")
+            for item in (pack.get(group) or [])
+            if item.get("wf_status") in ("approved", "posted") and not item.get("consent_blocked")
+        ]
+        if not approved:
+            return (
+                _layout(
+                    "Certificates",
+                    '<div class="card"><h2>No approved cards yet</h2>'
+                    '<p class="dim">Certificates are printed from approved achievements '
+                    "only — approve some cards first, then come back.</p></div>",
+                ),
+                200,
+            )
+        brand = {
+            "primary": getattr(prof, "brand_primary", "#0A2540") if prof else "#0A2540",
+            "secondary": getattr(prof, "brand_secondary", "#000000") if prof else "#000000",
+        }
+        meet = data.get("meet") or {}
+        meet_name = meet.get("name") or data.get("file_name") or run_id
+        meet_date = str(meet.get("start_date") or "")
+        out_dir = DATA_DIR / "print_exports" / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for i, item in enumerate(approved):
+                a = item.get("achievement") or {}
+                name = a.get("swimmer_name") or "Swimmer"
+                facts = a.get("raw_facts") or {}
+                time_str = facts.get("new_time") or facts.get("time") or facts.get("time_str") or ""
+                html = build_certificate_html(
+                    swimmer_name=name,
+                    event_label=a.get("event", ""),
+                    time_str=str(time_str),
+                    achievement_headline=a.get("headline", "Achievement"),
+                    meet_name=meet_name,
+                    meet_date=meet_date,
+                    club_name=(prof.display_name if prof else pid or "Our club"),
+                    brand=brand,
+                    detail_line=a.get("angle_hint", ""),
+                )
+                pdf_path = out_dir / f"cert-{i:02d}.pdf"
+                render_html_to_pdf(html, pdf_path)
+                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{name}-{a.get('event', '')}")
+                zf.writestr(f"certificates/{i + 1:02d}-{safe_name}.pdf", pdf_path.read_bytes())
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"certificates-{run_id}.zip",
+        )
+
+    # ---- W.6: entry-file parsing for the event preview -----------------------
+
+    @app.route("/api/event-preview/parse-entries", methods=["POST"])
+    def api_event_preview_parse_entries():
+        """Turn an uploaded entry file into prefilled preview-form fields.
+
+        LENEX entries parse natively; CSV/TSV/plain text pass through with
+        light normalisation; anything unreadable returns an honest error.
+        Zero typing is the goal (W.6)."""
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"ok": False, "error": "No file uploaded."}), 400
+        data = f.read()
+        name = (f.filename or "").lower()
+        meet_name = ""
+        entries_text = ""
+        n_rows = 0
+        try:
+            if name.endswith((".lef", ".lxf")) or b"<LENEX" in data[:2048].upper():
+                from mediahub.interpreter.lenex_parser import (
+                    parse_lenex,
+                    parse_lenex_entries,
+                )
+
+                rows = parse_lenex_entries(data)
+                try:
+                    meet_name = parse_lenex(data).meet_name or ""
+                except Exception:
+                    meet_name = ""
+                lines = []
+                for r in rows:
+                    bits = [
+                        r.get("swimmer_name") or "",
+                        f"{r.get('distance_m') or ''}{(' ' + r['stroke']) if r.get('stroke') else ''}".strip(),
+                        r.get("entry_time") or "",
+                    ]
+                    lines.append(" — ".join(b for b in bits if b))
+                entries_text = "\n".join(lines)
+                n_rows = len(rows)
+            else:
+                text = data.decode("utf-8", errors="replace")
+                cleaned = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                if not cleaned:
+                    return jsonify(
+                        {"ok": False, "error": "Couldn't read any entries from that file."}
+                    ), 422
+                entries_text = "\n".join(cleaned[:400])
+                n_rows = len(cleaned)
+        except Exception:
+            log.warning("entry-file parse failed", exc_info=True)
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Couldn't read that entry file. Try the LENEX (.lef/.lxf) "
+                        "export from the meet organiser, or paste the entries as text."
+                    ),
+                }
+            ), 422
+        return jsonify(
+            {"ok": True, "meet_name": meet_name, "entries_text": entries_text, "rows": n_rows}
+        )
 
     # Start the in-process scheduler once per worker. Idempotent and self-
     # guarded (no-ops under pytest and when MEDIAHUB_SCHEDULER=0). Safe under
@@ -28076,6 +30545,28 @@ voice, and queues them for one-click approval.</p>
         # card just reports awaiting_human); a fully_autonomous type's cards
         # ride the publish gate on a cadence.
         register_approval_signal_task()
+        # Make each org's cadence task match its saved policy (covers orgs
+        # that opted into fully_autonomous before policy-save reconciliation
+        # existed; policy saves keep it in sync from here on).
+        from mediahub.workflow.approval import reconcile_all_approval_signal_cadences
+
+        reconcile_all_approval_signal_cadences()
+        # W.7: live-meet watch polling — cards queue for approval only;
+        # the runner re-runs the pipeline into the watch's fixed run id.
+        try:
+            from mediahub.results_fetch.live_watch import register_live_watch_task
+
+            register_live_watch_task(_live_watch_runner)
+        except Exception:
+            log.warning("live watch task not registered", exc_info=True)
+        # W.8: monthly season-wrap drafts (per-org schedule rows are created
+        # from the Wraps page; this just registers the handler).
+        try:
+            from mediahub.season_wrap import register_season_wrap_task
+
+            register_season_wrap_task()
+        except Exception:
+            log.warning("season wrap task not registered", exc_info=True)
         # PC.7: the demo-run sweep — demo previews are self-cleaning. The
         # task type is registered unconditionally (cheap no-op when there
         # are no demo runs); the daily schedule row is ensured once.
@@ -28099,10 +30590,13 @@ voice, and queues them for one-click approval.</p>
                     schedule_expr="03:30",
                 )
 
-        # Retention purge (Art 5(1)(e) storage limitation): every artifact
-        # class ages out per compliance.retention's schedule. Always
-        # registered + scheduled — disabling a class is an explicit env
-        # setting (days=0), not an absent job.
+        # Retention purge (Art 5(1)(e) storage limitation): ONE daily job.
+        # compliance.retention is the engine — per-class windows
+        # (runs/uploads/caches/security-log), tenant tightening, and it
+        # honours the legacy global MEDIAHUB_RETENTION_DAYS window from the
+        # UK-legal baseline as a ceiling for runs + raw uploads (so the
+        # Privacy page's stated setting stays true). Disabling a class is
+        # an explicit env setting (days=0), never an absent job.
         def _retention_handler(params: dict) -> None:
             from mediahub.compliance.retention import run_purge
 

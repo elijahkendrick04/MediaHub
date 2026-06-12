@@ -259,13 +259,25 @@ server:
 - **Meet reels** — data-driven length (`reel_duration_for`: 1 card → 7s …
   5 cards → 23s; 3 cards keep the historic 15s): branded cover with honest
   label-derived stat chips → rank-weighted card beats → club outro
-- **Formats** — story 1080×1920 (default), square 1080×1080, landscape
-  1920×1080 from the same compositions (`render.js --width/--height`)
+- **Formats** — story 1080×1920 (default), portrait 1080×1350, square
+  1080×1080, landscape 1920×1080 from the same compositions
+  (`render.js --width/--height`)
+- **Audio (opt-in, honest silent fallback)** — with `MEDIAHUB_VOICEOVER=1`,
+  reels/stories carry a deterministic fact-only narration (`visual/narration.py`
+  — fixed template over the same verified facts the video displays, no LLM);
+  `MEDIAHUB_REEL_MUSIC_DIR` adds an operator-licensed music bed (deterministic
+  track pick, ducked under narration). The mux (`visual/audio_mux.py`) is
+  engine-agnostic, stream-copies the video bits, folds the audio plan into the
+  cache key (silent-path keys stay byte-identical), and on any synthesis/mux
+  failure ships the video silent with the reason in the manifest — never a
+  fabricated track.
 
 The Node + Remotion stack lives at `src/mediahub/remotion/`. It is invoked
 from Python via `src/mediahub/visual/motion.py`, which shells out to
 `render.js` and caches outputs under `DATA_DIR/motion_cache/<hash>.mp4`,
-with a `<hash>.json` explainability manifest beside each MP4.
+with a `<hash>.json` explainability manifest and a `<hash>.poster.png`
+poster-frame sidecar beside each MP4 (the poster also ships next to the
+published file; the reel file route serves it via `?poster=1`).
 
 Outputs are programmatic and data-driven (never static templates), club-branded
 from the `BrandKit`, and use real athlete/team imagery where provided — no
@@ -277,9 +289,9 @@ synthetic AI-generated people unless explicitly requested.
 - `POST /api/runs/<run_id>/reel` — render the meet reel from the top-N cards
   (default 3, capped at 5; pass `?n=4` to override)
 
-Both accept `?format=story|square|landscape` (default `story`) and serve the
-rendered MP4 directly with `Content-Type: video/mp4`. Cache hits return the
-existing file (< 30s wall-clock); cold renders take 30–90s on the
+Both accept `?format=story|portrait|square|landscape` (default `story`) and
+serve the rendered MP4 directly with `Content-Type: video/mp4`. Cache hits
+return the existing file (< 30s wall-clock); cold renders take 30–90s on the
 deployment's worker. The free ffmpeg fallback engine renders the story format
 only and raises an honest `ReelEngineUnavailable` for the other cuts.
 

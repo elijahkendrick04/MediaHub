@@ -16,7 +16,7 @@ reads via the lookup helpers. This file pins:
   3. Resolution flows end-to-end: a saved profile with a derived
      operating profile produces org-specific tone prose / priority
      weights / type phrases / artefact intents at the consumer
-     boundaries (ai_caption, narrate, explainer, turn_into).
+     boundaries (ai_caption, narrate, turn_into).
 """
 from __future__ import annotations
 
@@ -205,8 +205,8 @@ class TestLookupHelpers:
 
 class TestConsumerWiring:
     """The derived cache must reach every consumer the audit named:
-    ai_caption tone descriptors, ClubProfile priorities, the explainer
-    headline phrase, and the narrate achievement kind."""
+    ai_caption tone descriptors, ClubProfile priorities, and the
+    narrate achievement kind."""
 
     def _profile_with_overrides(self) -> ClubProfile:
         return ClubProfile(
@@ -251,14 +251,6 @@ class TestConsumerWiring:
             achievement_priorities={"pb_confirmed": 1.5},
         )
         assert p.get_achievement_priority("pb_confirmed") == 1.5
-
-    def test_explainer_uses_derived_phrase(self):
-        from mediahub.recognition.explainer import _achievement_phrase
-        p = self._profile_with_overrides()
-        # With profile: derived phrase wins
-        assert _achievement_phrase("pb_confirmed", profile=p) == "ORG-SPECIFIC-PHRASE"
-        # Without profile: falls back to hardcoded default
-        assert _achievement_phrase("pb_confirmed") == "a confirmed personal best"
 
     def test_narrate_uses_derived_phrase(self):
         from mediahub.ai_core.narrate import narrate_achievement

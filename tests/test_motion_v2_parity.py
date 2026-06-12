@@ -11,7 +11,8 @@ Covers the reel-side catch-up with the Gen v2 still engine:
   * saliency photo focus (``photoPos``) reuses the still's deterministic maths;
   * every v2 still archetype maps to a motion scene (no archetype silently
     collapses back into the one hero layout);
-  * output formats: story / square / landscape sizes, cache-key sensitivity,
+  * output formats: story / portrait / square / landscape sizes, cache-key
+    sensitivity,
     and an honest error from the ffmpeg fallback engine for non-story cuts;
   * the explainability manifest written next to each cached MP4;
   * the reel's outro scene, honest cover stats, and deterministic per-beat
@@ -206,6 +207,7 @@ def test_photo_focus_for_brief_empty_without_photo():
 
 def test_motion_format_sizes():
     assert motion.motion_format_size("story") == (1080, 1920)
+    assert motion.motion_format_size("portrait") == (1080, 1350)  # 4:5 feed cut
     assert motion.motion_format_size("square") == (1080, 1080)
     assert motion.motion_format_size("landscape") == (1920, 1080)
     assert motion.motion_format_size("") == (1080, 1920)  # default
@@ -254,6 +256,37 @@ def test_ffmpeg_engine_rejects_non_story_formats_honestly(tmp_path, monkeypatch)
         motion.render_meet_reel(
             [_card(1)], BRAND, tmp_path / "y.mp4", format_name="landscape"
         )
+    with pytest.raises(ReelEngineUnavailable, match="story"):
+        motion.render_story_card(
+            _card(1), BRAND, tmp_path / "z.mp4", format_name="portrait"
+        )
+
+
+# ---------------------------------------------------------------------------
+# count_up intent + cover stat count-up (TSX source contracts)
+# ---------------------------------------------------------------------------
+
+
+def test_count_up_settles_on_the_verbatim_value():
+    """The count-up must end on the EXACT verified string (and ignore
+    non-numeric results entirely) — the same zero-invention rule the rest
+    of the renderer lives by. Checked at the source-contract level."""
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "StoryCard.tsx").read_text()
+    assert "countUpDisplay" in src
+    assert "resultProgress" in src
+    # Progress 1 returns the original text verbatim (no reformat).
+    assert "if (progress >= 1 || !t)" in src
+    # Mega/ticker sizing + crawl use the FINAL value, not the mid-count text.
+    assert "resultFinal" in src
+
+
+def test_reel_cover_chips_count_up_honestly():
+    src = (motion.REMOTION_DIR / "src" / "compositions" / "MeetReel.tsx").read_text()
+    # Chips count up to totals derived only from the honest reelStats.
+    assert "chipsProgress" in src
+    assert "progress: number" in src
+    # Pluralisation follows the final count (no mid-count flicker).
+    assert 'stats.pbs === 1 ? "" : "S"' in src
 
 
 # ---------------------------------------------------------------------------

@@ -44,6 +44,12 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | The club **colours, logo, fonts** | `src/mediahub/brand/` and `src/mediahub/theming/` |
 | The **website** and its buttons | `src/mediahub/web/` |
 | Who can **sign in to which club** (workspaces) | `src/mediahub/web/tenancy.py` |
+| Who each **swimmer is** across meets (and their milestones) | `src/mediahub/athletes/` |
+| **Photo / name permission** per athlete (consent) | `src/mediahub/safeguarding/` |
+| The **club records** book | `src/mediahub/club_records/` |
+| **Qualifying times** ("made Counties!") | `src/mediahub/standards/` + `data/standards/` |
+| Watching a **live meet** during a gala | `src/mediahub/results_fetch/live_watch.py` |
+| **Month / season recap** numbers | `src/mediahub/season_wrap/` |
 | The founder's **selling notebook** (quotes, leads) | `src/mediahub/commercial/` |
 | **Consent, "delete me", privacy rules** | `src/mediahub/compliance/` (the law paperwork: `docs/compliance/`) |
 

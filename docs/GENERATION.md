@@ -386,27 +386,45 @@ the number of ranked moments).
   archetype must consciously pick its scene group.
 - **`motion_intent` executed** — the design-spec director's motion language
   (`fade_in`, `snap_in_then_settle`, `slide_up`, `scale_in`, `crossfade`,
-  `kinetic_type`, `parallax`, `static`) flows spec → brief → props and is
-  executed as a frame-pure animation programme; a drift test holds the TSX to
-  the full `design_spec.MOTION_INTENTS` vocabulary.
+  `kinetic_type`, `parallax`, `count_up`, `static`) flows spec → brief →
+  props and is executed as a frame-pure animation programme; a drift test
+  holds the TSX to the full `design_spec.MOTION_INTENTS` vocabulary.
+  `count_up` is the sports-graphic staple: the result digit-counts up
+  (formatting-preserving) and settles on the exact verified value.
 - **Colour-role parity** — motion consumes the *same* resolved role set the
   still painted (`resolved_role_vars_for_brief`: Tier A baseline → APCA-gated
   director assignment → medal tint) via `roleGround/roleSurface/roleAccent/
   roleOnGround` props; brief-less callers keep the seed-permutation fallback.
 - **Saliency photo focus** — `saliency.focus_position` (shared with the still
   renderer's `--mh-photo-pos`) steers the video photo's `object-position`.
-- **Formats** — story 1080×1920 (default), square 1080×1080, landscape
-  1920×1080 from the same compositions (`render.js --width/--height`,
-  `?format=` on the motion/reel routes, format chips in the UI). The free
-  ffmpeg engine renders story only and raises an honest error otherwise.
+- **Formats** — story 1080×1920 (default), portrait 1080×1350 (4:5 feed),
+  square 1080×1080, landscape 1920×1080 from the same compositions
+  (`render.js --width/--height`, `?format=` on the motion/reel routes,
+  format chips in the UI). The free ffmpeg engine renders story only and
+  raises an honest error otherwise.
 - **Reel narrative** — branded cover with honest stat chips (PB/medal counts
-  derived only from card labels), rank-weighted beats (the top moment breathes
-  ~25% longer), deterministic per-beat transitions (crossfade/push/wipe from
-  the variation seed), and a club outro scene inside the unchanged
-  `reel_duration_for` budget.
+  derived only from card labels, counting up to their totals as the cover
+  plays), rank-weighted beats (the top moment breathes ~25% longer),
+  deterministic per-beat transitions (crossfade/push/wipe from the variation
+  seed), and a club outro scene inside the unchanged `reel_duration_for`
+  budget.
+- **Audio (opt-in, both engines)** — `MEDIAHUB_VOICEOVER=1` narrates the
+  video with a deterministic fact-only script (`visual/narration.py`: fixed
+  template over the same verified facts on screen, spoken-form times, no
+  LLM); `MEDIAHUB_REEL_MUSIC_DIR` lays an operator-licensed music bed under
+  it (deterministic pick, fixed duck). `visual/audio_mux.py` muxes post-
+  render (video stream copied untouched), folds the plan into the cache key
+  — silent-path keys stay byte-identical — and falls back to silent with
+  the reason recorded on any failure. A failed attach is retried on the
+  next cache hit without re-rendering the video.
+- **Poster frames** — every rendered MP4 gets a deterministic
+  `.poster.png` sidecar (story: mid-clip once the layers have animated in;
+  reel: the branded cover), published beside the output and served by the
+  reel file route via `?poster=1`.
 - **Explainability manifest** — every cached MP4 gets a `.json` sidecar:
   archetype, motion intent, colour source (still-parity vs seed), seed,
-  format, durations.
+  format, durations, audio record (what was mixed, or why it stayed
+  silent), poster filename.
 
 **Optional Tier C, behind `MEDIAHUB_GEN_BG` (default off):** activate the dormant
 `visual/ai_background.py` hook (already imported at `render.py`) via a

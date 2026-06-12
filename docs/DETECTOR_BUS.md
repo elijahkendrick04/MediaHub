@@ -35,7 +35,8 @@ class AchievementDetector(Protocol):
 ```
 
 Where `DetectorContext` exposes:
-- `swimmer_history` — past results from `mediahub.history.provider`
+- `swimmer_history` — past results (the V5 `SwimmerHistory` wrapper over
+  `mediahub.pb_discovery` snapshots)
 - `pb_snapshot` — verified PB data from `mediahub.pb_discovery`
 - `meet_field` — peer swims in the same event
 - `qualifying_times` — registered standards from `data/quals.json`

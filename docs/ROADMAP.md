@@ -12,6 +12,8 @@ the ADRs and companion docs linked under [Standing context](#standing-context).
 
 Newest first; hand-maintained by the daily roadmap engine. (The auto-refreshed **Status** block below is machine-managed — do not hand-edit it.)
 
+- **2026-06-12** — **UK legal compliance baseline shipped (PR #352)** (maintainer instruction "UK legal compliance audit + remediation"): a full code-evidence audit against UK GDPR/DPA 2018, PECR, CRA 2015, CCR 2013, DMCCA 2024, E-Commerce Regs, IP/licensing, OSA 2023 and publication risk ([`COMPLIANCE_AUDIT.md`](COMPLIANCE_AUDIT.md)), then the remediation build: ToS / accurate Art. 13/14 Privacy Notice / Cookie Policy / Art. 28 DPA in-product with versioned, timestamped acceptance (signup, re-acceptance on version bump, per-workspace DPA + parental-consent attestation at org setup); cascading erasure (runs → rendered assets, PB/research caches, caption memory, posting-log excerpts, motion cache), athlete-level erasure, password-verified account deletion, account export; correction/takedown workflow; `MEDIAHUB_RETENTION_DAYS` sweep; CCR/DMCCA pre-contract checkout (`/billing/confirm` + recorded cooling-off acknowledgement); auth rate limiting + security headers + `MEDIAHUB_LLM_PSEUDONYMISE`; DPIA draft ([`compliance/DPIA.md`](compliance/DPIA.md)); font/vendor licence records. This moves PC.11 and PC.13 to mostly-delivered and starts PC.12/PC.14 — the sell gate still needs the founder half (ICO registration, identity placeholders, vendor DPAs/transfer mechanisms, Stripe renewal reminders, solicitor sign-off) tracked in [`COMPLIANCE_HANDOVER.md`](COMPLIANCE_HANDOVER.md). [compliance build]
+- **2026-06-12** — **Compliance-readiness audit: Phase C was pushing "go sell" with zero legal/compliance surface in place** (maintainer instruction "assess how the roadmap told me to sell with no compliance"). Root cause: Phase C was composed entirely from the 2026 *scaling* diligence, whose question was "what blocks revenue?" — so every PC item is a revenue mechanic, and "lawful to operate" was never an exit criterion. Compliance only ever entered the plan through side doors: as a data-*acquisition* risk (PC.6(a)'s "prefer the official API over scraping") and as a sellable *feature* (W.2 consent manager, filed in the optional pick-list). Engineering-shaped safety shipped (ADR-0003 isolation, publish-gate safeguarding rule, initials-first wall) because code review owns it; the document/contract/registration half (terms, privacy notice, DPA, ICO registration, deletion/export rights, breach process) had no owning channel and fell through. Fix: a third **compliance-readiness ("lawful-to-sell") exit gate** on Phase C — no paid contract before it holds — implemented as four new sell-gate items **PC.11–PC.14** (legal & privacy pack; minors' consent gate, promoting W.2 to load-bearing; data lifecycle & rights; operational trust pack: transactional email/password reset, backups + restore drill, support + incident runbook, billing hygiene). Decision recorded in [`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md). [compliance audit]
 - **2026-06-11** — **Phase C build-out: PC.7 + PC.8 + PC.10 shipped; PC.4's `/pricing` gate enforced** (maintainer instruction "complete PC.4/6/7/8/10"): the public try-before-signup demo (`/try`, watermarked ≤3-card preview, capped, sandboxed, self-cleaning, claimable on conversion), the sponsor manager + per-sponsor exposure reports (`/sponsors`, deterministic rotation, exposure ledger, monthly report), and the public achievements wall + embed + RSS/JSON (`/wall/<token>`, opt-in, approved-only, initials-first, structurally revocable). PC.4's remaining engineering gap closed — `/pricing` now reads `pc4_pricing_gate` and commits a list price only from ≥5 revealed annual payments (the highest tested price that cleared). PC.6 was audited build-complete (lead ledger, cold-share + referral-debt readouts, NGB application drafted + tracked); what remains on PC.4/PC.6 is the founder's selling motion, which code cannot close. [completion pass]
 - **2026-06-11** — **Phase 6 — Creative-suite breadth added** (maintainer instruction): every content-creation feature in the two checked-in competitor inventories ([Canva](research/CANVA_FEATURE_INVENTORY_2026.md), [Adobe Express](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)) now has a MediaHub-shaped build plan — **our own first-party versions, not integrations of theirs** — organised into 24 gated work packages (P6.1–P6.24) with a feature-by-feature coverage index proving nothing was missed. Long-form mapping: [`CREATIVE_SUITE_PARITY.md`](CREATIVE_SUITE_PARITY.md). Phase 6 sits behind the Phase C gates like P3/P4/P5; standing rules (hosted-only, approval-first, deterministic engine, Gemini-first honest-error AI, GWS exclusion) all hold. [roadmap engine]
 - **2026-06-11** — Daily scan: no material change. Competitor watch (Gipper, SwimTopia, TeamUnify, Swimcloud) shows no results-ingestion / auto-graphics move; platform policies (Instagram Graph API, TikTok Content-Posting audit gate, Bluesky/Mastodon) unchanged vs last run; Swim England’s club-management data API (Swim Club Manager / Swim Manager / SportsEngine; “more in 2026”) is already captured under PC.6 + ADR-0012 and only reinforces — does not change — the queued Route C go/no-go. No roadmap statuses changed (engineering shipped since 2026-06-08, e.g. publish kill-switch #288 and per-type autonomy #297, is tracked by the auto-Status block, not the strategy layer). Source: swimming.org (Sept 2025). [roadmap engine]
@@ -29,7 +31,7 @@ in any commit message to move an item:
 > moves it back to To do with the matching badge.
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `69c703ea0` · Merge pull request #344: Phase C build-out — PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall;
+**Last updated:** 2026-06-12 · `030bc35eb` · Merge pull request #352: UK legal compliance — audit + remediation baseline
 <!-- /ROADMAP:LAST_UPDATED -->
 
 **Recent activity**
@@ -37,16 +39,18 @@ in any commit message to move an item:
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
-| 2026-06-12 | `950a19f7e` | Full-suite verification fixes: env inventory, wall-token route swept by isolation invariants |
-| 2026-06-11 | `943dff64a` | Phase C build-out: PC.7 try-demo, PC.8 sponsor manager, PC.10 public wall; close PC.4's /pricing gat |
-| 2026-06-11 | `23b91e2ed` | chore: format the whole back-catalogue and make repo hygiene blocking |
-| 2026-06-11 | `db4953273` | style: ruff-format (pinned 0.8.4) on touched files |
-| 2026-06-11 | `64ca81ee6` | Motion ↔ still parity: archetype scenes, motion intents, role parity, formats, reel narrative |
-| 2026-06-11 | `fe6e607c3` | docs(roadmap): add Phase 6 — our own creative suite (P6.1–P6.24) |
-| 2026-06-11 | `eaf6da84b` | docs(roadmap): absorb the June 2026 ideas backlog into the plan |
-| 2026-06-11 | `f99ba5fd6` | Skip Render deploys for docs-only roadmap bot merges |
-| 2026-06-11 | `42ae68f42` | fix: a11y: Documents must have <title> element to aid in navigati (#332) |
-| 2026-06-11 | `001d28a7d` | autotest: close the loop — state-branch memory, fixed lifecycle, deploy grace, judge grounding |
+| 2026-06-12 | `ecc015a61` | Fix nav badge falsely showing "offline" on healthy deployments |
+| 2026-06-12 | `5b54b1338` | Apply pre-commit ruff-format to Phase W files (hygiene hook parity) |
+| 2026-06-12 | `22143a30a` | autotest: verify CI green before the clean-status direct merge; roadmap bot prefers the PAT |
+| 2026-06-12 | `56d01c8fa` | docs(roadmap): record the UK legal compliance baseline against the PC.11-PC.14 sell gate |
+| 2026-06-12 | `cd34d6807` | style: apply pre-commit ruff-format (fixes Repo hygiene CI) |
+| 2026-06-12 | `7281b6731` | Graphic/reel builder 10x wave 1: audio, count-up, portrait, posters |
+| 2026-06-12 | `ebe45429d` | Remove retired explainer, unintegratable history package, satori placeholder |
+| 2026-06-12 | `771fc265c` | autotest workflow: make fix-pass failures visible (pipefail + honest rc classification) |
+| 2026-06-12 | `3efafab59` | Drop generated colour-inventory CSV from the tree (runtime artifact) |
+| 2026-06-12 | `b5827079d` | Phase W finish: alt text on Buffer payloads, W.6 zero-typing meet name, docs + roadmap status, suite |
+| 2026-06-12 | `17149b055` | autotest: verify the fix commit and push; classify empty-branch PR errors honestly |
+| 2026-06-12 | `81d6ee69e` | docs(compliance): handover — commit map, placeholder list, operational checklist, closing verdict |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## To do
@@ -59,21 +63,11 @@ Standing context).
 <!-- ROADMAP:TODO -->
 - **PC.4** · Phase C 🥇 — Pricing & packaging by revealed willingness-to-pay: quote real annual prices to the first hand-sold clubs; keep `/pricing` at "TBC" until ≥5 clubs have paid annual at a tested price · 🔵 **IN PROGRESS**
 - **PC.6** · Phase C 🥇 — Go-to-market: warm-first hand-sell of the first ~10 clubs (local Swansea/South-Wales base + referrals; cold capped) and apply for Swim England's approved-systems data API · 🔵 **IN PROGRESS**
+- **PC.11** · Phase C 🥇 (sell gate) — Legal & privacy pack: public Terms + Privacy Notice with versioned signup acceptance, club DPA (Art. 28 processor terms), published subprocessor register + transfer disclosures, ICO registration (founder action) · 🔵 **IN PROGRESS — code surface shipped (PR #352); remaining: ICO registration, identity placeholders, solicitor sign-off, subprocessor guard test**
+- **PC.12** · Phase C 🥇 (sell gate) — Minors' consent & safeguarding gate: W.2's consent ledger enforced at generation + public wall + publish gate, plus a Children's-Code pass on the public surfaces · 🔵 **IN PROGRESS — onboarding parental-consent attestation shipped (PR #352); the per-athlete consent registry (W.2) and Children's-Code pass remain**
+- **PC.13** · Phase C 🥇 (sell gate) — Data lifecycle & rights: self-serve account/org deletion, org-level data export (SAR/portability), documented retention schedule · 🔵 **IN PROGRESS — account deletion, athlete erasure cascade, account export, retention schedule + sweep shipped (PR #352); remaining: whole-org deletion + org takeout ZIP**
+- **PC.14** · Phase C 🥇 (sell gate) — Operational trust pack: transactional-email seam (password reset, verification, breach notice, member invites), DATA_DIR backup + restore drill, support contact + incident runbook, VAT/invoice hygiene · 🔵 **IN PROGRESS — CCR/DMCCA pre-contract checkout + support-contact surface (placeholder) shipped (PR #352); email seam, backups, runbook, VAT remain**
 - **PC.9** · Phase C 🥇 — In-product referral engine: codes, tracked intros, Stripe-coupon reward on a paid referral · ❌ **NOT STARTED**
-- **W.1** · Phase W (selectable) — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) · ❌ **NOT STARTED**
-- **W.2** · Phase W (selectable) — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate · ❌ **NOT STARTED**
-- **W.3** · Phase W (selectable) — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs · ❌ **NOT STARTED**
-- **W.4** · Phase W (selectable) — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets · ❌ **NOT STARTED**
-- **W.5** · Phase W (selectable) — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format · ❌ **NOT STARTED**
-- **W.6** · Phase W (selectable) — Data-driven meet previews from entry/psych-sheet files (replaces the form-based stub) · ❌ **NOT STARTED**
-- **W.7** · Phase W (selectable) — Live meet mode: watch a club-controlled live-results URL, queue cards mid-gala for approval · ❌ **NOT STARTED**
-- **W.8** · Phase W (selectable) — Season wraps / monthly recap packs from accumulated run history · ❌ **NOT STARTED**
-- **W.9** · Phase W (selectable) — Magic-link mobile approvals (signed expiring review links; no login) · ❌ **NOT STARTED**
-- **W.10** · Phase W (selectable) — OCR fallback for scanned/photographed result PDFs with per-row uncertainty flags · ❌ **NOT STARTED**
-- **W.11** · Phase W (selectable) — Result-grounded alt-text on every exported/published card · ❌ **NOT STARTED**
-- **W.12** · Phase W (selectable) — Print exports: per-swimmer PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
-- **W.13** · Phase W (selectable) — Bilingual captions (Welsh first) per-workspace language setting · ❌ **NOT STARTED**
-- **W.14** · Phase W (selectable) — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 · ❌ **NOT STARTED**
 - **P3.1** · Phase 3 (gated) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
 - **P3.2** · Phase 3 (gated) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
 - **P3.3** · Phase 3 (gated) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
@@ -117,6 +111,20 @@ Standing context).
 ## Completed
 
 <!-- ROADMAP:DONE -->
+- ✅ **W.1** · Phase W — Athlete registry + milestone detectors (identity across runs; 50th race, debuts, comebacks) *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.2** · Phase W — Consent & safeguarding manager: per-athlete photo/name/initials-only consent enforced at generation + publish gate *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.3** · Phase W — Club records engine + deterministic "NEW CLUB RECORD" detector outranking PBs *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.4** · Phase W — Season-current qualifying-time packs ("Qualified for Counties!") as curated versioned datasets *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.5** · Phase W — LENEX (.lef/.lxf) ingestion: the open SportSystems/European interchange format *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.6** · Phase W — Data-driven meet previews from entry/psych-sheet files (replaces the form-based stub) *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.7** · Phase W — Live meet mode: watch a club-controlled live-results URL, queue cards mid-gala for approval *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.8** · Phase W — Season wraps / monthly recap packs from accumulated run history *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.9** · Phase W — Magic-link mobile approvals (signed expiring review links; no login) *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.10** · Phase W — OCR fallback for scanned/photographed result PDFs with per-row uncertainty flags *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.11** · Phase W — Result-grounded alt-text on every exported/published card *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.12** · Phase W — Print exports: per-swimmer PB certificates + A4 noticeboard posters *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.13** · Phase W — Bilingual captions (Welsh first) per-workspace language setting *(completed 2026-06-12 — Phase W integration pass, ADR-0016)*
+- ✅ **W.14** · Phase W — Engagement feedback loop: approval telemetry now; platform metrics after P4.2 *(phase 1 completed 2026-06-12 — Phase W integration pass, ADR-0016; phase 2 waits for P4.2)*
 - ✅ **P0.2** · Phase 0 — Cutout free-by-default: in-process rembg is the default (`MEDIAHUB_CUTOUT_PROVIDER=server`); Replicate/PhotoRoom opt-in *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P5.5** · Phase 5 — rembg cutout shipped as the default (MODNet noted as optional upgrade) *(completed pre-2026-06 — detail in the phase sections below)*
 - ✅ **P1.1** · Phase 1 — Sport-profile schema + loader + `AutonomyLevel` + swimming/football YAML profiles (inert scaffolding) *(completed pre-2026-06 — detail in the phase sections below)*
@@ -155,6 +163,12 @@ linked ADRs and research docs:
   ([SCALING_DILIGENCE_2026](research/SCALING_DILIGENCE_2026.md)).
 - **Stop polishing and sell.** P1.4 cleared the "sellable wedge" bar; further
   graphics work sits strictly behind Phase C sell-side progress.
+- **Lawful-to-sell before sold.** No paid contract before the
+  compliance-readiness gate holds: versioned Terms + Privacy Notice accepted at
+  signup, a club DPA, ICO registration, the minors' consent gate (PC.12),
+  deletion/export rights (PC.13), and password-reset / breach-notice / backup
+  basics (PC.14)
+  ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
 - **The deterministic engine is the moat.** Parsers, detectors, the ranker,
   and colour-science stay AI-free; AI judgement goes through
   `media_ai.llm`/`ai_core.llm` with honest errors, never heuristic fakes
@@ -216,7 +230,10 @@ The plan now has **seven stages, Phase 0 to Phase 6**:
 
 > **Ahead of all six in priority (added 2026-06)** sits a new
 > **Phase C — Commercialise & Distribute**: self-serve signup, billing, true
-> multi-tenancy, sane pricing, and a real way to reach clubs. The numbered phases
+> multi-tenancy, sane pricing, a real way to reach clubs — and, added
+> 2026-06-12, the **legal/compliance pack** (terms, privacy, a club data
+> agreement, minors' consent, data rights, backups) that makes the first sale
+> lawful and trustworthy. The numbered phases
 > describe *capability*; **Phase C is about getting paid for it** — and a hard-nosed
 > scaling diligence
 > ([research/SCALING_DILIGENCE_2026.md](research/SCALING_DILIGENCE_2026.md))
@@ -228,9 +245,12 @@ The plan now has **seven stages, Phase 0 to Phase 6**:
 > **Beside the stages sits a pick-list (added 2026-06-11): Phase W — make the
 > swimming product deeper.** Fourteen researched extras — things like club
 > records, photo-consent tracking, live updates during a gala, printable
-> certificates, Welsh captions. It has no fixed order and no gate; we pull an
-> item from it whenever it helps win or keep a club. The research behind all of
-> it (22 ideas; the other eight became Phase C and Phase 4 items) lives in
+> certificates, Welsh captions. **All fourteen were built in one integration
+> pass on 2026-06-12** (council-pressure-tested placement in
+> [`adr/0016-phase-w-integration-plan.md`](adr/0016-phase-w-integration-plan.md));
+> only W.14's platform-metrics half still waits for the P4.2 connectors. The
+> research behind all of it (22 ideas; the other eight became Phase C and
+> Phase 4 items) lives in
 > [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md).
 
 Each task carries a little badge so you can see how it's going:
@@ -780,7 +800,7 @@ The "Agent Inbox" pattern (langchain-social-media-agent — *verify*) as referen
 
 ---
 
-## Phase C — Commercialise & Distribute · PC · 🔵 **BUILD SIDE COMPLETE (2026-06-11) — sell side open** · 🥇 TOP PRIORITY
+## Phase C — Commercialise & Distribute · PC · 🔵 **sell side open — compliance build-out reopened 2026-06-12 (PC.11–PC.14)** · 🥇 TOP PRIORITY
 
 > **Why "Phase C", not "P6".** It is lettered, not numbered, because it does not sit
 > *after* Phase 5 — it sits **ahead of the expansion phases (P3/P4/P5) in priority.** The
@@ -815,12 +835,33 @@ drafted Swim England application) landed with it on the operator console
 referral motion, submit the NGB application. The exit gates are unchanged and unmet —
 **zero paying clubs** today; code can no longer be the excuse.
 
-**Exit criteria (both are hard gates on later phases).**
+**Update 2026-06-12 — the build side is reopened: the compliance surface was never
+built.** A compliance-readiness audit (maintainer-instructed) found that "sell now"
+was being pushed with **no Terms of Service, no Privacy Notice (the existing
+`/privacy` route is a data-inventory/delete tool, not a policy), no club DPA, no
+ICO registration, no terms acceptance at signup, no account deletion, no data
+export, no password reset (no transactional email at all), and no backup/restore
+story** — while the product processes **minors'** names, ages, performance data and
+photos for UK clubs and publishes them on a public wall. Root cause and decision in
+[`adr/0015-compliance-readiness-sell-gate.md`](adr/0015-compliance-readiness-sell-gate.md):
+Phase C was composed from a *revenue* diligence, so "lawful to operate" was never an
+exit criterion. **PC.11–PC.14** close the gap and a third exit gate below makes it
+structural. The selling motion can be *prepared* in parallel (warm conversations,
+the NGB application, the demo), but **no club pays before gate 3 holds.**
+
+**Exit criteria (all three are hard gates; 1–2 gate later phases, 3 gates the first paid contract).**
 1. **Commercial-readiness gate:** *a club can sign up, pay, and publish with zero founder
    involvement.* No scaling work (P3/P4/P5) starts until this holds.
 2. **Traction gate:** *≥10 clubs paying annually* before any new sport (P3). If the wedge
    stalls below ~50 clubs over time, that is a retention/PMF problem to fix — **not** a
    signal to add sports.
+3. **Compliance-readiness ("lawful-to-sell") gate — added 2026-06-12:** *no paid
+   contract before* versioned Terms + Privacy Notice are live and accepted at signup,
+   the club DPA exists, ICO registration is done, the minors' consent gate (PC.12)
+   enforces at generation/wall/publish, deletion + export (PC.13) work end-to-end,
+   and password reset / breach notice / verified backups (PC.14) are in place.
+   PC.4's pricing ledger and PC.6's funnel keep moving, but a quote may not convert
+   to payment until this gate holds ([ADR-0015](adr/0015-compliance-readiness-sell-gate.md)).
 
 ### PC.1 — Self-serve signup + auth · ✅ **DONE**
 The signup/login/session half of Appendix B **Step 7** (email+password, hashed; signed
@@ -1051,6 +1092,139 @@ What shipped:
 Pinned by `tests/test_public_wall.py` (token resolution, approved-only, initials,
 exclusions, revocation, feeds, and cross-tenant isolation).
 
+### PC.11 — Legal & privacy pack · 🔵 **IN PROGRESS — code surface shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
+
+> **2026-06-12 status:** the in-product half is built — `/terms`, `/privacy`
+> (rewritten as an accurate Art. 13/14 notice), `/cookies`, `/dpa`; versioned
+> signup acceptance recorded in `legal_acceptances.jsonl` with re-acceptance
+> forced on a `TERMS_VERSION` bump; per-workspace DPA acceptance + lawful-basis
+> attestation at org setup; subprocessor + transfer disclosures inside the
+> Privacy Notice §3/§7 and DPA §6. Remaining: the founder checklist (ICO
+> registration, `[COMPANY_NAME]`-style identity placeholders, solicitor
+> sign-off — see `COMPLIANCE_HANDOVER.md`) and a guard test pinning the
+> subprocessor register against the env-flag surface.
+
+**The contractual minimum to take a club's money.** MediaHub is a **processor**
+for clubs (the controllers) over personal data that is largely **children's** —
+names, ages, race performance, photos — and today there is no Terms of Service,
+no Privacy Notice, no DPA, and signup records no acceptance of anything.
+**Build:**
+- Public **Terms of Service** + **Privacy Notice** routes (e.g. `/legal/terms`,
+  `/legal/privacy` — the existing `/privacy` data-inventory tool keeps its URL),
+  versioned documents stored in-repo; signup requires an explicit acceptance
+  checkbox and records `{terms_version, accepted_at}` in the `users.jsonl`
+  ledger; material changes force re-acceptance at next login.
+- A club-facing **Data Processing Agreement** (UK GDPR Art. 28 processor terms,
+  minors' data explicitly in scope) presented to the org owner at org creation /
+  first paid quote, acceptance recorded per org.
+- A published **subprocessor register** with transfer mechanisms, kept truthful
+  against the dependency register: Render (hosting + disk), Stripe (payments),
+  Google Gemini + Anthropic (LLM — athlete names/results ride in prompts),
+  Buffer (when scheduled), Replicate/PhotoRoom (opt-in cutouts), the TTS
+  provider when voiceover is on. A guard test pins the register against the
+  env-flag surface so a new provider can't ship undisclosed.
+- **Founder (non-code) checklist, tracked on `/operator/commercial`:** ICO
+  registration (data-protection fee), and a professional review of the three
+  documents before the first paid contract — drafts can be assembled in-repo,
+  but sign-off is a human act.
+**Exit:** an account cannot be created without recorded acceptance of a
+versioned ToS + Privacy Notice; an org owner has a recorded DPA acceptance;
+the subprocessor page renders and its guard test is green; ICO registration is
+logged on the operator console.
+
+### PC.12 — Minors' consent & safeguarding gate · 🔵 **IN PROGRESS — attestation shipped 2026-06-12 (PR #352); consent registry outstanding** · *(sell gate — W.2 promoted 2026-06-12)*
+
+> **2026-06-12 status:** workspace setup now requires a recorded
+> parental-consent / lawful-basis attestation from the club, and the Privacy
+> Notice carries the children's-data section. The load-bearing half — W.2's
+> per-athlete consent registry enforced at generation, photo scoring, the
+> public wall and the publish gate — plus the Children's-Code pass are still
+> to build.
+
+**W.2 stops being optional the day money changes hands.** The product's core
+output is *publishing children's achievements*; Swim England's Social Media
+Good Club Guide expects photo-consent handling, the drafted NGB application
+already cites safeguarding evidence, and the public wall (PC.10) currently
+leans on an initials-only default rather than recorded consent. **Build:** ship
+**W.2** (per-athlete consent registry — photo OK / full name OK / initials-only /
+do-not-feature; most-restrictive default; CSV import; enforced deterministically
+at generation, in `media_library/selector.py` photo scoring, on the public wall,
+and as a publish-gate check; welfare-officer export; audited changes). A
+name-keyed minimal ledger is acceptable for this gate if W.1's full athlete
+registry hasn't landed; it migrates onto the W.1 spine when that ships. Plus a
+documented **Children's-Code (Age Appropriate Design) pass** over the public
+surfaces (`/wall`, embed, RSS/JSON feeds, `/try`). **Exit:** a card for a
+no-consent athlete cannot render a name/photo and cannot pass the gate or
+appear on the wall; the review UI explains why; the Children's-Code pass is
+recorded; the NGB application's safeguarding claims are all true in code.
+
+### PC.13 — Data lifecycle & rights · 🔵 **IN PROGRESS — rights plumbing shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
+
+> **2026-06-12 status:** shipped — self-serve account deletion (compacting,
+> tombstone-free across `users.jsonl` / acceptances / memberships), athlete
+> erasure cascading through runs, rendered assets, PB + research caches,
+> caption memory and posting-log excerpts (test-pinned), account export,
+> a post-publication correction/takedown workflow, and the retention schedule
+> published in the Privacy Notice + enforced by the `MEDIAHUB_RETENTION_DAYS`
+> daily sweep. Remaining: whole-org deletion and the org-level takeout ZIP
+> (runs + media + consent state + audit log in one bundle).
+
+**Deletion, export, retention — the data-subject-rights plumbing a controller
+club will ask its processor for.** Today `/privacy` deletes individual runs,
+demo runs sweep at 24h — and that's the whole story: no account deletion, no
+org deletion, no export, no retention schedule. **Build:**
+- **Self-serve account deletion** (user row + memberships) and **org deletion**
+  cascading runs, media assets, content packs, wall token, sponsor/exposure
+  ledgers, consent registry — with the Stripe customer handled per the DPA
+  (financial records have their own statutory retention).
+- **Org-level data export** (takeout ZIP: runs JSON, media, captions, consent
+  state, audit log) — serves SARs and portability in one mechanism.
+- A documented **retention schedule** (runs, uploads, media, logs, audit
+  trails, demo runs, deleted-org grace window) published in the Privacy Notice
+  and enforced by scheduler jobs where automatic.
+**Exit:** a club owner can delete their org or export everything it holds
+without founder involvement; deletion verifiably removes the data from
+`DATA_DIR` (pinned by tests under the ADR-0003/0014 isolation invariants);
+the retention schedule in the Privacy Notice matches what the code does.
+
+### PC.14 — Operational trust pack · 🔵 **IN PROGRESS — billing-hygiene slice shipped 2026-06-12 (PR #352)** · *(sell gate — ADR-0015)*
+
+> **2026-06-12 status:** the CCR/DMCCA pre-contract checkout shipped
+> (`/billing/confirm`: price honesty, auto-renewal disclosure, cancellation
+> parity, recorded cooling-off acknowledgement) and the support contact is
+> surfaced in the footer/ToS (as a `[CONTACT_EMAIL]` placeholder until the
+> founder fills it). Still to build: the transactional-email seam (password
+> reset / verification / breach notice / invites), backups + restore drill,
+> the incident runbook, and VAT/invoice hygiene. Stripe renewal-reminder
+> emails are a dashboard setting — tracked in `COMPLIANCE_HANDOVER.md`.
+
+**The boring things a paying customer silently assumes.** Found missing in the
+2026-06-12 audit: there is **no transactional email at all** (so no password
+reset — a locked-out volunteer is locked out forever; PC.3's member invites
+never send; a breach could not be notified), **no backup story** beyond the
+single 1 GB Render disk that holds `users.jsonl`, the payment/WTP ledgers and
+every run, and no support or incident path. **Build:**
+- **Transactional-email seam** (Resend-style HTTP API behind an env key,
+  honest-503 unconfigured — pulls P4.5's seam forward without the digest
+  product): password reset (signed expiring token), email verification,
+  member-invite delivery, and an operator "notify all users" path for breach
+  notification (the ICO's 72-hour clock needs a working channel, not a plan to
+  build one).
+- **Backups + restore drill:** confirm Render disk-snapshot coverage, add a
+  scheduled off-site `DATA_DIR` backup (ledgers + `data.db` + runs) with the
+  key material handled per the DPA, and a *documented, rehearsed* restore —
+  an unrestored backup is a hypothesis.
+- **Support + incident runbook:** a real support contact surfaced in-product
+  and in the ToS; a short incident/breach runbook (detect → contain → assess →
+  notify ICO/clubs) checked into `docs/`; `/healthz` uptime already exists —
+  surface it honestly to customers.
+- **Billing hygiene:** decide VAT handling (Stripe Tax vs below-threshold
+  statement), and ensure Checkout emits an invoice/receipt a volunteer
+  treasurer can put through club accounts.
+**Exit:** a user can reset their password unaided; an invite email actually
+arrives; a restore from backup has been performed and documented; the support
+contact and runbook exist; a test payment produces an expensable invoice.
+
 **Building blocks.** Stripe (Checkout + Customer Portal + webhooks); the existing
 `DATA_DIR` persistence (a `users.jsonl`-style ledger per Step 7 — no SQLAlchemy); the
 shipped cross-tenant isolation invariant (ADR-0003) as the multi-tenancy seed; Postiz /
@@ -1086,7 +1260,7 @@ US-schools repositioning (Route B) for *revenue*.
 
 ---
 
-## Phase W — Deepen the swimming wedge · W · ❌ **NOT STARTED (selectable backlog, added 2026-06-11)**
+## Phase W — Deepen the swimming wedge · W · ✅ **BUILT (all 14 items landed 2026-06-12 — single integration pass, ADR-0016; W.14 phase 2 still waits for P4.2)**
 
 **Goal.** Make the swim wedge easier to sell, safer to run, and richer in content
 moments — without waiting for, or blocking, the P3/P4/P5 gates. Every item is
@@ -1108,10 +1282,11 @@ sellable*, but **not ahead of billing**"). The discipline: pick an item **only w
 it unblocks a sale, a pilot, the NGB application, or a known churn risk** — never
 as polish for its own sake, and never as a reason to defer the selling motion. No
 fixed phase exit; every item carries its own. Recommended first picks: **W.1 → W.2**
-(the consent story committees ask about), **W.4** (cheap, parent-delighting), and
-**W.10** (demo-day ingestion robustness).
+(the consent story committees ask about — and W.2 is no longer merely recommended:
+it was **promoted into the PC.12 sell gate on 2026-06-12**), **W.4** (cheap,
+parent-delighting), and **W.10** (demo-day ingestion robustness).
 
-### W.1 — Athlete registry + milestone detectors · ❌ **NOT STARTED**
+### W.1 — Athlete registry + milestone detectors · ✅ **DONE (2026-06-12)**
 **The data spine for W.2/W.3/W.8 — and per-athlete celebration at scale, which the
 competitive pass verified nobody automates.** Today there is no athlete identity
 across runs: names are per-run strings (`media_library` linking included), so
@@ -1128,7 +1303,7 @@ org-scoped under the ADR-0003/ADR-0014 invariants. **Exit:** the same swimmer is
 one entity across ≥2 runs; a 50th-race card generates with a provenance trail;
 merge decisions persist and are auditable.
 
-### W.2 — Consent & safeguarding manager · ❌ **NOT STARTED** *(depends on W.1)*
+### W.2 — Consent & safeguarding manager · ✅ **DONE (2026-06-12)** *(also load-bearing for the **PC.12 sell gate** — the registry-keyed ledger + generation/publish-gate enforcement shipped here; PC.12's remaining slice is the public-wall consent surface + the Children's-Code pass: see Phase C / ADR-0015)*
 **The committee objection-killer and the strongest §4 evidence for the Swim England
 application.** Swim England's own Social Media Good Club Guide expects photo-consent
 handling; the competitive pass found **no content tool encodes minors' rules**; the
@@ -1144,7 +1319,7 @@ welfare-officer export lists consent state; every consent change is audited.
 pass the gate; the review page explains why; pinned by tests alongside the
 ADR-0003 invariant suites.
 
-### W.3 — Club records engine + "NEW CLUB RECORD" cards · ❌ **NOT STARTED**
+### W.3 — Club records engine + "NEW CLUB RECORD" cards · ✅ **DONE (2026-06-12)**
 **The highest-emotion moment a club posts, and no detector exists for it**
 ([`DETECTOR_INVENTORY.md`](DETECTOR_INVENTORY.md)); admin incumbents *display*
 records but never generate content from them. *(Idea #10.)* **Build:** a
@@ -1157,7 +1332,7 @@ the record" as a planner signal; a records-wall block on the PC.10 public page.
 ranked NEW CLUB RECORD card carrying old mark, new mark and provenance; the table
 updates only when the card is approved.
 
-### W.4 — Season-current qualifying-time packs · ❌ **NOT STARTED**
+### W.4 — Season-current qualifying-time packs · ✅ **DONE (2026-06-12)** *(operator curates each season's tables per the runbook in `data/standards/README.md`)*
 **"Qualified for Counties!" is a parent-shareable trigger plain PB detection
 misses — and the detector already exists** (V5 `QualifyingTimeDetector`;
 `ClubProfile.important_standards` is already a field). What's missing is **data**:
@@ -1171,7 +1346,7 @@ motivational times (official free PDFs, fixed 4-year cycle) for US expansion.
 **Exit:** a club selects its standards and a qualifying swim yields a "qualified"
 card naming the standard and its source.
 
-### W.5 — LENEX (.lef/.lxf) ingestion · ❌ **NOT STARTED**
+### W.5 — LENEX (.lef/.lxf) ingestion · ✅ **DONE (2026-06-12)**
 **The highest-value UK ingestion add** (June 2026 data-ecosystem pass): LENEX 3.0
 is the openly licensed XML interchange format ("free of charge and without
 restriction"), it is what SportSystems exports, and Swim England's results
@@ -1185,7 +1360,7 @@ official spec example files. Deterministic throughout. **Exit:** a SportSystems
 `.lxf` export runs the full pipeline with output parity to the HY3 path on the
 same meet.
 
-### W.6 — Data-driven meet previews from entry files · ❌ **NOT STARTED**
+### W.6 — Data-driven meet previews from entry files · ✅ **DONE (2026-06-12)**
 **Doubles content per meet (before + after) from files clubs already hold.** The
 `event_preview` type exists but is form-based — a human types everything; the
 P1.3 planner already wants upcoming-event signals. *(Idea #12.)* **Build:**
@@ -1197,7 +1372,7 @@ signal for the meet date. Ambiguous rows flagged, never guessed. **Exit:**
 uploading an entry file yields an approvable "good luck this weekend" pack with
 zero typing.
 
-### W.7 — Live meet mode (watch a results URL mid-gala) · ❌ **NOT STARTED**
+### W.7 — Live meet mode (watch a results URL mid-gala) · ✅ **DONE (2026-06-12)**
 **Clubs are told to post PBs on event day; nobody can without a volunteer glued to
 a laptop — and it is the most theatrical hand-sell demo available.** Ingestion
 today is single-shot. The ToS-clean path is verified: Hy-Tek "Real-Time Results"
@@ -1214,7 +1389,7 @@ click-URL straight into review (pairs with W.9); watches auto-expire at meet end
 interval, with zero duplicates and zero auto-publishing, and the watch stops
 itself.
 
-### W.8 — Season wraps / monthly recap packs · ❌ **NOT STARTED**
+### W.8 — Season wraps / monthly recap packs · ✅ **DONE (2026-06-12)**
 **Retention work that lands exactly when annual renewal (PC.4's model) comes due**
 — accumulated history becomes switching cost, Wrapped-style. The v7.3
 weekend-in-numbers pattern exists per-run; this generalises it across the season.
@@ -1226,7 +1401,7 @@ through the autonomy queue for approval; a configurable season-end wrap. **Exit:
 one click (or the monthly draft) yields an approvable "month in numbers" pack
 consistent with stored history.
 
-### W.9 — Magic-link mobile approvals · ❌ **NOT STARTED**
+### W.9 — Magic-link mobile approvals · ✅ **DONE (2026-06-12)**
 **The approval bottleneck is the head coach's Sunday evening, not the software** —
 and a volunteer-shaped approval loop is unclaimed by competitors (enterprise tools
 or generic design suites only). Also closes the KNOWN_ISSUES unsigned-run-id
@@ -1240,7 +1415,7 @@ run; org-bound, no account needed. **Exit:** an approver on a phone clears a pac
 end-to-end from the link; expiry/revocation enforced; audit parity with logged-in
 approval.
 
-### W.10 — OCR fallback for scanned PDFs · ❌ **NOT STARTED**
+### W.10 — OCR fallback for scanned PDFs · ✅ **DONE (2026-06-12)** *(engine ships in the Docker image; sandbox runs the honest no-engine path)*
 **A failed first upload during a hand-sell demo is a lost club.** KNOWN_ISSUES:
 low-DPI scans parse to gibberish; the interpreter already marks image uploads
 "needs OCR" but no OCR exists — and committee secretaries *will* upload phone
@@ -1252,7 +1427,7 @@ guessed; `interpreting`-phase logs record OCR engagement. Deterministic.
 **Exit:** a phone photo of a printed results sheet produces parsed rows with
 uncertainty flags instead of gibberish or a dead end.
 
-### W.11 — Result-grounded alt-text on every export · ❌ **NOT STARTED**
+### W.11 — Result-grounded alt-text on every export · ✅ **DONE (2026-06-12)**
 **KNOWN_ISSUES: exports carry no alt text.** Cards are data-dense graphics, so the
 alt text must restate the result ("Maya Patel, 50m freestyle, 31.24 — a 0.8s PB at
 the Swansea Spring Open"), under ~125 chars, human-reviewable — which the approval
@@ -1264,7 +1439,7 @@ attributes) and every publish payload; editable in review beside the caption.
 **Exit:** every exported or published card carries result-grounded alt text the
 approver saw.
 
-### W.12 — PB certificates + A4 noticeboard posters · ❌ **NOT STARTED**
+### W.12 — PB certificates + A4 noticeboard posters · ✅ **DONE (2026-06-12)**
 **Parents currently DIY this with generic certificate templates — the competitive
 pass surfaced printable certificates as the existing "solution" to per-child
 celebration.** A branded certificate carrying the verified time is the artifact
@@ -1276,7 +1451,7 @@ BrandKit tokens reused so print matches cards; W.2 consent honoured in batch
 exports. **Exit:** one click exports print-ready branded certificates for every
 approved achievement in a run.
 
-### W.13 — Bilingual captions (Welsh first) · ❌ **NOT STARTED**
+### W.13 — Bilingual captions (Welsh first) · ✅ **DONE (2026-06-12)**
 **The first ten clubs are being hand-sold in Swansea / South-East Wales (PC.6) —
 bilingual posting is locally resonant and no US competitor will ever bother.**
 Marginal cost ≈ 0 on the existing Gemini call (tone-preserving in-pipeline
@@ -1288,7 +1463,7 @@ text; the same seam serves any future locale. Honest-error when no provider — 
 machine-translation heuristics. **Exit:** a bilingual club approves Cymraeg +
 English captions in one pass and the gate's length checks hold.
 
-### W.14 — Engagement feedback loop · ❌ **NOT STARTED** *(phase 2 needs P4.2)*
+### W.14 — Engagement feedback loop · ✅ **DONE — phase 1 (2026-06-12)** *(phase 2 needs P4.2)*
 **The compounding intelligence-layer moat: every approval teaches the next plan —
 template tools cannot replicate it.** *(Idea #22.)* **Build, phase 1 (no external
 APIs):** record per-club which tone variant / archetype is approved, edited or
@@ -1477,8 +1652,9 @@ provider seam — the P0.4 guard fails the build on any unslotted ASR import.
 ### P5.4 — Satori graphics fast-path · ❌ **NOT STARTED**
 Lighter card rendering (~100× lighter than headless Chromium). A *performance*
 play, not a licensing one — P0.1's shipped ffmpeg engine already removed the
-Remotion requirement; this slots into the same `MEDIAHUB_REEL_ENGINE` seam
-(the `satori` engine name is registered and honest-errors until it ships).
+Remotion requirement; this would slot into the same `MEDIAHUB_REEL_ENGINE` seam.
+(The placeholder `satori` engine name was removed in the dormant-features
+audit — register it again when the engine actually ships.)
 
 ### P5.5 — rembg / MODNet cutout · ✅ **DONE**
 Already the shipped default (rembg). MODNet is an optional higher-quality matting
@@ -1733,17 +1909,14 @@ including more graphics polish — and P3/P4/P5 are explicitly deferred behind i
    instrumented on `/operator/commercial`. What's left of Phase C is the founder's
    selling motion: set `STRIPE_*`, pre-bind pilots, quote real prices, submit the Swim
    England application, win the first 10 annual clubs.)
-2. **Phase W — the wedge-depth backlog (selectable, ungated; added 2026-06-11).**
-   Fourteen researched items (athlete registry, consent manager, club records,
-   qualifying times, LENEX, meet previews, live meet mode, season wraps,
-   magic-link approvals, OCR, alt-text, certificates, Welsh captions, engagement
-   telemetry) absorbed from
-   [`research/PRODUCT_IDEAS_2026-06.md`](research/PRODUCT_IDEAS_2026-06.md); the
-   sell-side four became **PC.7–PC.10** and the distribution slice **P4.5/P4.6**.
-   Pick an item **only when it unblocks a sale, a pilot, the NGB application, or
-   a churn risk** — never ahead of the selling motion. Recommended first picks:
-   W.1→W.2 (consent), W.4 (qualifying times), W.10 (demo-day OCR robustness),
-   PC.7 (the instant demo). *Exit:* per item.
+2. **Phase W — the wedge-depth backlog — ✅ built (2026-06-12).** All fourteen
+   items (athlete registry, consent manager, club records, qualifying times,
+   LENEX, meet previews, live meet mode, season wraps, magic-link approvals,
+   OCR, alt-text, certificates, Welsh captions, engagement telemetry) landed in
+   one council-pressure-tested integration pass —
+   [`adr/0016-phase-w-integration-plan.md`](adr/0016-phase-w-integration-plan.md).
+   Remaining tails: W.14 phase 2 (platform metrics) waits for P4.2, and W.4's
+   seasonal tables are operator-curated per `data/standards/README.md`.
 3. **P1.4 graphics — ✅ done (2026-06-10).** The full spine shipped (PR #301: Tier B
    director/pool/compliance, the gated SEQ-3 cutover with the A/B review approved, and
    the SEQ-4 video stage), all §5 acceptance criteria met — so the "sellable wedge" bar

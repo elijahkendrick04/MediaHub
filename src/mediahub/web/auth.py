@@ -391,6 +391,30 @@ class UserStore:
             self._append(user)
             return user
 
+    def delete(self, email: str) -> bool:
+        """Erase an account from the ledger entirely (UK GDPR Art. 17).
+
+        Unlike every other write this is a compacting rewrite, not an
+        append — a tombstone line would keep the email on disk, defeating
+        the erasure. Returns True when a record was removed.
+        """
+        norm = normalize_email(email)
+        with _LEDGER_LOCK:
+            users = self._read_all()
+            if norm not in users:
+                return False
+            del users[norm]
+            tmp = self._path.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as fh:
+                for user in users.values():
+                    fh.write(json.dumps(user.to_record(), ensure_ascii=False) + "\n")
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            tmp.replace(self._path)
+            return True
+
     def find_by_customer_id(self, customer_id: str) -> Optional[User]:
         """Look a user up by their Stripe customer id (webhook reconciliation)."""
         cid = str(customer_id or "").strip()

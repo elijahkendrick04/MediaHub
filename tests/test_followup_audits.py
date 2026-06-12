@@ -9,6 +9,7 @@ file. Followed by 3 independent verification subtasks at the bottom.
   M4. Logo formats should accept "whatever format the club likes".
   M5. Per-link AI status + re-read-now control surfaced in the UI.
 """
+
 from __future__ import annotations
 
 import sys
@@ -35,7 +36,6 @@ def _with_csrf(client, data: dict) -> dict:
         sess["_csrf"] = token
     return {**data, "csrf_token": token}
 
-
 @pytest.fixture
 
 
@@ -48,17 +48,22 @@ def iso_root(tmp_path, monkeypatch):
 def client(iso_root, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     from mediahub.brand import link_handlers
-    monkeypatch.setattr(link_handlers, "process_links",
-                         lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}})
+
+    monkeypatch.setattr(
+        link_handlers,
+        "process_links",
+        lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}},
+    )
     from mediahub.web.web import create_app
+
     app = create_app()
     return app.test_client()
 
 
 def _seed_profile(profile_id="audit", **kw) -> ClubProfile:
-    prof = ClubProfile(profile_id=profile_id,
-                        display_name=kw.pop("display_name", "Audit Org"),
-                        **kw)
+    prof = ClubProfile(
+        profile_id=profile_id, display_name=kw.pop("display_name", "Audit Org"), **kw
+    )
     save_profile(prof)
     return prof
 
@@ -67,8 +72,8 @@ def _seed_profile(profile_id="audit", **kw) -> ClubProfile:
 # M2 — "Where can AI read you" is visually optional
 # ---------------------------------------------------------------------------
 
-class TestM2OptionalSection:
 
+class TestM2OptionalSection:
     def test_section_is_collapsible_details_element(self, client):
         body = client.get("/organisation/setup").get_data(as_text=True)
         # The section is wrapped in <details>, not a plain <div>
@@ -86,6 +91,7 @@ class TestM2OptionalSection:
         body = client.get("/organisation/setup").get_data(as_text=True)
         # Match either standalone "open" attribute or open + style
         import re
+
         opening_tag = re.search(
             r'<details class="card mh-optional-section"[^>]*>',
             body,
@@ -106,6 +112,8 @@ class TestM2OptionalSection:
         the POST body — verify by submitting with no link data."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
         resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
+            "accept_dpa": "1",
+            "confirm_lawful_basis": "1",
             "display_name": "No Links Org",
             "country": "France",
         }))
@@ -121,10 +129,11 @@ class TestM2OptionalSection:
 # M3 — "As many logos as the club likes"
 # ---------------------------------------------------------------------------
 
-class TestM3LogoCap:
 
+class TestM3LogoCap:
     def test_cap_is_far_above_realistic_use(self):
         from mediahub.brand.logos import MAX_LOGOS_PER_PROFILE
+
         # Per the user's "as many as you like" directive, the cap is
         # only there to stop pathological automation. Anything below
         # ~100 would feel constraining.
@@ -132,6 +141,7 @@ class TestM3LogoCap:
 
     def test_store_logo_accepts_well_beyond_the_old_cap(self, iso_root):
         from mediahub.brand import logos as _logos
+
         existing = [{"logo_id": f"x{i}"} for i in range(30)]
         # Old cap was 25; new cap must accept 30 cleanly
         meta = _logos.store_logo(
@@ -154,6 +164,7 @@ class TestM3LogoCap:
 
     def test_per_file_size_cap_increased_for_design_files(self):
         from mediahub.brand.logos import MAX_LOGO_BYTES
+
         # Native design-tool files (PSD, INDD) can easily run 30-40 MB.
         # The old 20 MB cap was too low.
         assert MAX_LOGO_BYTES >= 40 * 1024 * 1024
@@ -162,6 +173,7 @@ class TestM3LogoCap:
         """The cap isn't gone, it's just generous. Verify the upper
         bound still raises — otherwise a buggy script could fill disk."""
         from mediahub.brand import logos as _logos
+
         existing = [{"logo_id": f"x{i}"} for i in range(_logos.MAX_LOGOS_PER_PROFILE)]
         with pytest.raises(ValueError):
             _logos.store_logo(
@@ -176,15 +188,32 @@ class TestM3LogoCap:
 # M4 — "Whatever format the club likes"
 # ---------------------------------------------------------------------------
 
-class TestM4LogoFormats:
 
-    @pytest.mark.parametrize("ext", [
-        "bmp", "heic", "heif", "avif", "ico", "jxl",
-        "psd", "indd", "sketch", "fig", "xd",
-        "afdesign", "afphoto", "cdr", "exr", "dng",
-    ])
+class TestM4LogoFormats:
+    @pytest.mark.parametrize(
+        "ext",
+        [
+            "bmp",
+            "heic",
+            "heif",
+            "avif",
+            "ico",
+            "jxl",
+            "psd",
+            "indd",
+            "sketch",
+            "fig",
+            "xd",
+            "afdesign",
+            "afphoto",
+            "cdr",
+            "exr",
+            "dng",
+        ],
+    )
     def test_new_format_extensions_are_accepted(self, iso_root, ext):
         from mediahub.brand import logos as _logos
+
         assert ext in _logos.ALLOWED_EXTENSIONS, (
             f"format .{ext} should be accepted per 'whatever format' brief"
         )
@@ -199,18 +228,17 @@ class TestM4LogoFormats:
         """The expansion is for *design* formats. Executables, scripts,
         archives must still be rejected — they aren't logos."""
         from mediahub.brand import logos as _logos
+
         for ext in ("exe", "dll", "sh", "py", "zip", "tar"):
             assert ext not in _logos.ALLOWED_EXTENSIONS
         with pytest.raises(ValueError):
-            _logos.store_logo(profile_id="x",
-                               filename="hack.exe", file_bytes=b"MZ")
+            _logos.store_logo(profile_id="x", filename="hack.exe", file_bytes=b"MZ")
 
     def test_accept_attribute_advertises_design_tool_formats(self, client):
         body = client.get("/organisation/setup").get_data(as_text=True)
         # Spot-check that the file input's accept= advertises the new
         # formats so the OS file picker filters correctly on macOS / Win.
-        for token in (".psd", ".indd", ".sketch", ".fig", ".xd",
-                       ".heic", ".avif", ".bmp", ".ico"):
+        for token in (".psd", ".indd", ".sketch", ".fig", ".xd", ".heic", ".avif", ".bmp", ".ico"):
             assert token in body, f"accept= missing {token!r}"
 
     def test_helper_text_mentions_the_design_formats(self, client):
@@ -223,6 +251,7 @@ class TestM4LogoFormats:
 
     def test_format_count_significantly_expanded(self):
         from mediahub.brand.logos import ALLOWED_EXTENSIONS
+
         # Old set had 11 entries; new set should be at least double.
         assert len(ALLOWED_EXTENSIONS) >= 22
 
@@ -231,8 +260,8 @@ class TestM4LogoFormats:
 # M5 — Per-link AI status + re-read-now control
 # ---------------------------------------------------------------------------
 
-class TestM5StatusAndReread:
 
+class TestM5StatusAndReread:
     def test_idle_chip_shown_for_unfilled_platforms(self, client):
         """A fresh user with no link data sees an Idle chip per row so
         they understand what the chip is for once they fill the field."""
@@ -244,14 +273,19 @@ class TestM5StatusAndReread:
 
     def test_learned_chip_replaces_idle_after_capture(self, iso_root, client):
         from mediahub.brand import link_handlers, social_dna
+
         prof = _seed_profile(
             profile_id="m5",
             social_links={"instagram": "https://instagram.com/x"},
-            link_capture_state={"instagram": {
-                "url": "https://instagram.com/x",
-                "status": "real_content", "playbook_age": 0,
-                "regenerated": False, "voice_digest": "demo",
-            }},
+            link_capture_state={
+                "instagram": {
+                    "url": "https://instagram.com/x",
+                    "status": "real_content",
+                    "playbook_age": 0,
+                    "regenerated": False,
+                    "voice_digest": "demo",
+                }
+            },
         )
         with client as c:
             with c.session_transaction() as sess:
@@ -264,11 +298,15 @@ class TestM5StatusAndReread:
         _seed_profile(
             profile_id="m5b",
             social_links={"facebook": "https://facebook.com/x"},
-            link_capture_state={"facebook": {
-                "url": "https://facebook.com/x",
-                "status": "hard_blocked", "playbook_age": 0,
-                "regenerated": False, "voice_digest": "",
-            }},
+            link_capture_state={
+                "facebook": {
+                    "url": "https://facebook.com/x",
+                    "status": "hard_blocked",
+                    "playbook_age": 0,
+                    "regenerated": False,
+                    "voice_digest": "",
+                }
+            },
         )
         with client as c:
             with c.session_transaction() as sess:
@@ -296,18 +334,24 @@ class TestM5StatusAndReread:
                 "regenerated": True,
                 "dna": {"voice_summary": "Fresh voice."},
             }
+
         monkeypatch.setattr(ig_handler, "process", fake_process)
 
         _seed_profile(
             profile_id="m5c",
             social_links={"instagram": "https://instagram.com/x"},
-            link_capture_state={"instagram": {"status": "hard_blocked",
-                                                "url": "https://instagram.com/x",
-                                                "playbook_age": 0,
-                                                "regenerated": False,
-                                                "voice_digest": ""}},
+            link_capture_state={
+                "instagram": {
+                    "status": "hard_blocked",
+                    "url": "https://instagram.com/x",
+                    "playbook_age": 0,
+                    "regenerated": False,
+                    "voice_digest": "",
+                }
+            },
         )
         from mediahub.web.web import create_app
+
         app = create_app()
         with app.test_client() as c:
             with c.session_transaction() as sess:
@@ -329,6 +373,7 @@ class TestM5StatusAndReread:
         """Audit safety: re-read must redirect cleanly when there's no
         session profile (anyone hitting the URL directly)."""
         from mediahub.web.web import create_app
+
         app = create_app()
         with app.test_client() as c:
             with c.session_transaction() as sess:
@@ -345,6 +390,7 @@ class TestM5StatusAndReread:
 # Verification subtasks — 3 independent end-to-end confirmations
 # ---------------------------------------------------------------------------
 
+
 class TestV1FullSignupFlow:
     """V1 — full smoke test from blank profile to next-page."""
 
@@ -354,25 +400,47 @@ class TestV1FullSignupFlow:
         from mediahub.brand.link_handlers import instagram as ig
 
         # Stub out the heavy pipeline so we test orchestration only.
-        monkeypatch.setattr(link_handlers, "process_links", lambda **kw: {
-            "any_real": True,
-            "state": {"website": {"url": kw.get("website_url", ""),
-                                    "status": "real_content",
-                                    "playbook_age": 0, "regenerated": True,
-                                    "voice_digest": "Demo voice."}},
-            "merged_dna": {"voice_summary": "Inclusive grassroots club.",
-                            "keywords": ["inclusive"], "phrases_to_use": [],
-                            "phrases_to_avoid": [], "palette_mentions": ["#0066cc"],
-                            "typography_hint": "sans", "sponsor_mentions": [],
-                            "hashtag_patterns": []},
-        })
-        monkeypatch.setattr(ig, "process", lambda url: {
-            "platform": "instagram", "url": url, "status": "real_content",
-            "playbook_age": 0, "regenerated": True,
-            "dna": {"voice_summary": "IG voice."},
-        })
+        monkeypatch.setattr(
+            link_handlers,
+            "process_links",
+            lambda **kw: {
+                "any_real": True,
+                "state": {
+                    "website": {
+                        "url": kw.get("website_url", ""),
+                        "status": "real_content",
+                        "playbook_age": 0,
+                        "regenerated": True,
+                        "voice_digest": "Demo voice.",
+                    }
+                },
+                "merged_dna": {
+                    "voice_summary": "Inclusive grassroots club.",
+                    "keywords": ["inclusive"],
+                    "phrases_to_use": [],
+                    "phrases_to_avoid": [],
+                    "palette_mentions": ["#0066cc"],
+                    "typography_hint": "sans",
+                    "sponsor_mentions": [],
+                    "hashtag_patterns": [],
+                },
+            },
+        )
+        monkeypatch.setattr(
+            ig,
+            "process",
+            lambda url: {
+                "platform": "instagram",
+                "url": url,
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "dna": {"voice_summary": "IG voice."},
+            },
+        )
 
         from mediahub.web.web import create_app
+
         app = create_app()
         with app.test_client() as c:
             # 1. GET signup
@@ -381,6 +449,8 @@ class TestV1FullSignupFlow:
 
             # 2. POST capture with the full form
             r2 = c.post("/organisation/setup/capture", data=_with_csrf(c, {
+                "accept_dpa": "1",
+                "confirm_lawful_basis": "1",
                 "display_name": "Verify Club",
                 "org_type": "swimming_club",
                 "country": "United Kingdom",
@@ -435,22 +505,29 @@ class TestV2BrandContextSurfacesEverything:
             brand_phrases_to_use=["lap by lap"],
             brand_phrases_to_avoid=["elite only"],
             brand_palette_extracted={"primary": "#0066cc"},
-            voice_profile={"sentence_length_avg": 18.0,
-                            "emoji_rate_per_caption": 0.5},
-            brand_guidelines={"summary": "Be warm and direct.",
-                                "tone_dos": ["be specific"]},
+            voice_profile={"sentence_length_avg": 18.0, "emoji_rate_per_caption": 0.5},
+            brand_guidelines={"summary": "Be warm and direct.", "tone_dos": ["be specific"]},
             brand_guidelines_mandatory_rules=[
                 "ALWAYS include the hashtag #V2Tag in every caption.",
             ],
-            brand_logos=[{"logo_id": "a", "original_filename": "x.svg",
-                            "label": "Primary wordmark",
-                            "mime": "image/svg+xml",
-                            "ai_description": "V2 wordmark for light backgrounds."}],
-            link_capture_state={"website": {"status": "real_content",
-                                              "url": "https://v2.example",
-                                              "playbook_age": 0,
-                                              "regenerated": False,
-                                              "voice_digest": "demo"}},
+            brand_logos=[
+                {
+                    "logo_id": "a",
+                    "original_filename": "x.svg",
+                    "label": "Primary wordmark",
+                    "mime": "image/svg+xml",
+                    "ai_description": "V2 wordmark for light backgrounds.",
+                }
+            ],
+            link_capture_state={
+                "website": {
+                    "status": "real_content",
+                    "url": "https://v2.example",
+                    "playbook_age": 0,
+                    "regenerated": False,
+                    "voice_digest": "demo",
+                }
+            },
         )
         save_profile(prof)
         loaded = load_profile("v2")
@@ -458,10 +535,19 @@ class TestV2BrandContextSurfacesEverything:
 
         # Every field that affects voice must appear verbatim
         markers = [
-            "V2 Verification Club", "V2VC", "swimming club", "France",
-            "FFN", "V2 Sponsor", "spirited grassroots squad",
-            "grassroots", "spirit", "lap by lap", "elite only",
-            "Be warm and direct", "be specific",
+            "V2 Verification Club",
+            "V2VC",
+            "swimming club",
+            "France",
+            "FFN",
+            "V2 Sponsor",
+            "spirited grassroots squad",
+            "grassroots",
+            "spirit",
+            "lap by lap",
+            "elite only",
+            "Be warm and direct",
+            "be specific",
             "ALWAYS include the hashtag #V2Tag in every caption.",
         ]
         for m in markers:
@@ -486,6 +572,7 @@ class TestV3LegacyBackwardCompat:
     def test_pre_round2_profile_still_loads_and_renders(self, iso_root):
         import json
         from mediahub.web.web import create_app
+
         # Profile with the old field set only — no link_capture_state,
         # no brand_logos, no mandatory rules.
         legacy = {

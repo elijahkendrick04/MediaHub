@@ -25,6 +25,7 @@ the behaviour we found / fixed during the audit.
   E8. [Next-page] AI memory persistence — save_profile → load_profile
       round-trips every field used by brand_context_for_llm.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,17 +54,21 @@ def _with_csrf(client, data: dict) -> dict:
         sess["_csrf"] = token
     return {**data, "csrf_token": token}
 
-
 def test_link_handlers_pipeline_is_llm_driven():
     """Every link-handler delegate (strategy, block_detector,
     endpoint_discoverer, content_extractor) MUST consult the LLM
     wrapper when one is available — no hardcoded extractor regressions.
     """
     from mediahub.brand.link_learners import (
-        strategy, block_detector, endpoint_discoverer, content_extractor,
+        strategy,
+        block_detector,
+        endpoint_discoverer,
+        content_extractor,
     )
+
     # Each module has the LLM call wired in.
     import inspect
+
     for mod in (strategy, block_detector, endpoint_discoverer, content_extractor):
         src = inspect.getsource(mod)
         assert "is_available" in src, f"{mod.__name__} bypasses the LLM wrapper"
@@ -75,6 +80,7 @@ def test_guidelines_pipeline_calls_llm_in_two_passes():
     structured interpretation and once for mandatory-rule extraction."""
     import inspect
     from mediahub.brand import guidelines
+
     src = inspect.getsource(guidelines)
     # Two distinct system prompt constants
     assert "_LLM_SYSTEM" in src
@@ -86,6 +92,7 @@ def test_logos_pipeline_has_optional_vision_seam():
     when a vision-capable model is configured. Verify the seam exists."""
     import inspect
     from mediahub.brand import logos
+
     src = inspect.getsource(logos)
     assert "describe_logo_with_ai" in src
     assert "generate_vision" in src  # the multimodal llm-wrapper hook
@@ -95,12 +102,14 @@ def test_logos_pipeline_has_optional_vision_seam():
 # E2. User-friendliness audit
 # ---------------------------------------------------------------------------
 
+
 def test_setup_form_carries_loader_text(monkeypatch, tmp_path):
     """The form takes 10-30s on the capture step; the loader overlay
     must announce that to the user instead of leaving them staring at
     a frozen page."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.web.web import create_app
+
     app = create_app()
     client = app.test_client()
     resp = client.get("/organisation/setup")
@@ -113,6 +122,7 @@ def test_setup_form_carries_loader_text(monkeypatch, tmp_path):
 def test_country_combobox_has_aria_attributes(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.web.web import create_app
+
     app = create_app()
     client = app.test_client()
     resp = client.get("/organisation/setup")
@@ -126,6 +136,7 @@ def test_country_combobox_has_aria_attributes(monkeypatch, tmp_path):
 def test_drop_zone_has_dragover_class_hook(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.web.web import create_app
+
     app = create_app()
     client = app.test_client()
     resp = client.get("/organisation/setup")
@@ -139,10 +150,16 @@ def test_drop_zone_has_dragover_class_hook(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 EXPECTED_FORM_FIELDS = {
-    "display_name", "org_type", "country", "governing_body",
+    "display_name",
+    "org_type",
+    "country",
+    "governing_body",
     "website_url",
-    "social_instagram", "social_facebook", "social_twitter",
-    "social_tiktok", "social_linkedin",
+    "social_instagram",
+    "social_facebook",
+    "social_twitter",
+    "social_tiktok",
+    "social_linkedin",
     "brand_guidelines_file",
     "brand_logos",
 }
@@ -151,6 +168,7 @@ EXPECTED_FORM_FIELDS = {
 def test_setup_form_contains_all_expected_fields(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from mediahub.web.web import create_app
+
     app = create_app()
     client = app.test_client()
     resp = client.get("/organisation/setup")
@@ -168,12 +186,17 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     from mediahub.web.web import create_app
     from mediahub.brand import link_handlers
-    monkeypatch.setattr(link_handlers, "process_links",
-                         lambda **kw: {"any_real": False, "state": {},
-                                        "merged_dna": {}})
+
+    monkeypatch.setattr(
+        link_handlers,
+        "process_links",
+        lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}},
+    )
     app = create_app()
     client = app.test_client()
     resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
+        "accept_dpa": "1",
+        "confirm_lawful_basis": "1",
         "display_name": "Test Aquatics",
         "org_type": "swimming_club",
         "country": "United Kingdom",
@@ -204,12 +227,19 @@ def test_capture_writes_every_form_field_to_profile(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 PROFILE_FIELDS_THAT_AFFECT_VOICE = (
-    "display_name", "short_name", "org_type", "country", "governing_body",
+    "display_name",
+    "short_name",
+    "org_type",
+    "country",
+    "governing_body",
     "sponsor_name",
-    "brand_voice_summary", "brand_keywords",
-    "brand_phrases_to_use", "brand_phrases_to_avoid",
+    "brand_voice_summary",
+    "brand_keywords",
+    "brand_phrases_to_use",
+    "brand_phrases_to_avoid",
     "voice_profile",
-    "brand_guidelines", "brand_guidelines_mandatory_rules",
+    "brand_guidelines",
+    "brand_guidelines_mandatory_rules",
     "brand_logos",
 )
 
@@ -231,23 +261,37 @@ def test_every_voice_relevant_field_surfaces_in_brand_context():
         brand_phrases_to_use=["audit-phrase-use"],
         brand_phrases_to_avoid=["audit-phrase-avoid"],
         voice_profile={"sentence_length_avg": 22.0, "emoji_rate_per_caption": 1.5},
-        brand_guidelines={"summary": "AUDIT-GUIDELINES-SUMMARY",
-                            "tone_dos": ["AUDIT-DO"],
-                            "tone_donts": ["AUDIT-DONT"]},
+        brand_guidelines={
+            "summary": "AUDIT-GUIDELINES-SUMMARY",
+            "tone_dos": ["AUDIT-DO"],
+            "tone_donts": ["AUDIT-DONT"],
+        },
         brand_guidelines_mandatory_rules=["AUDIT-MUST-RULE"],
         brand_logos=[
-            {"logo_id": "x", "label": "AUDIT-LOGO-LABEL",
-              "original_filename": "x.png", "mime": "image/png",
-              "ai_description": "AUDIT-LOGO-DESC"},
+            {
+                "logo_id": "x",
+                "label": "AUDIT-LOGO-LABEL",
+                "original_filename": "x.png",
+                "mime": "image/png",
+                "ai_description": "AUDIT-LOGO-DESC",
+            },
         ],
     )
     ctx = brand_context_for_llm(prof)
     # Hard fail any field that doesn't make it into the prose.
     must_appear = [
-        "AUDIT-NAME", "AUDITSHORT",  "AUDIT-COUNTRY", "AUDIT-BODY",
-        "AUDIT-SPONSOR", "AUDIT-VOICE-SUMMARY", "audit-keyword",
-        "audit-phrase-use", "audit-phrase-avoid",
-        "AUDIT-GUIDELINES-SUMMARY", "AUDIT-DO", "AUDIT-DONT",
+        "AUDIT-NAME",
+        "AUDITSHORT",
+        "AUDIT-COUNTRY",
+        "AUDIT-BODY",
+        "AUDIT-SPONSOR",
+        "AUDIT-VOICE-SUMMARY",
+        "audit-keyword",
+        "audit-phrase-use",
+        "audit-phrase-avoid",
+        "AUDIT-GUIDELINES-SUMMARY",
+        "AUDIT-DO",
+        "AUDIT-DONT",
         "AUDIT-MUST-RULE",
     ]
     for marker in must_appear:
@@ -280,9 +324,11 @@ def test_org_type_shows_up_as_organisational_phrase():
 # E5. Brand guidelines respect audit
 # ---------------------------------------------------------------------------
 
+
 def test_must_rules_lead_and_recheck_trails():
     prof = ClubProfile(
-        profile_id="x", display_name="X",
+        profile_id="x",
+        display_name="X",
         brand_guidelines_mandatory_rules=[
             "ALWAYS include the hashtag #ProbeTag in every caption.",
         ],
@@ -299,8 +345,7 @@ def test_must_rules_lead_and_recheck_trails():
 
 
 def test_no_must_rules_means_no_overhead():
-    prof = ClubProfile(profile_id="x", display_name="X",
-                        brand_voice_summary="Generic.")
+    prof = ClubProfile(profile_id="x", display_name="X", brand_voice_summary="Generic.")
     ctx = brand_context_for_llm(prof)
     assert "NON-NEGOTIABLE" not in ctx
     assert "re-read the NON-NEGOTIABLE" not in ctx
@@ -312,7 +357,8 @@ def test_guidelines_lead_website_dna_in_prose():
     appear earlier in the prose so it outranks the website voice
     when the LLM weighs competing cues."""
     prof = ClubProfile(
-        profile_id="x", display_name="X",
+        profile_id="x",
+        display_name="X",
         brand_guidelines={"summary": "PRECEDENCE-CHECK-GUIDELINES"},
         brand_voice_summary="PRECEDENCE-CHECK-WEBSITE",
     )
@@ -326,16 +372,23 @@ def test_guidelines_lead_website_dna_in_prose():
 # E6. [Next-page] Identity transfer
 # ---------------------------------------------------------------------------
 
+
 def test_capture_pins_profile_into_session(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     from mediahub.web.web import create_app
     from mediahub.brand import link_handlers
-    monkeypatch.setattr(link_handlers, "process_links",
-                         lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}})
+
+    monkeypatch.setattr(
+        link_handlers,
+        "process_links",
+        lambda **kw: {"any_real": False, "state": {}, "merged_dna": {}},
+    )
     app = create_app()
     with app.test_client() as client:
         resp = client.post("/organisation/setup/capture", data=_with_csrf(client, {
+        "accept_dpa": "1",
+        "confirm_lawful_basis": "1",
             "display_name": "Pinned Org",
             "country": "United Kingdom",
         }))
@@ -356,12 +409,14 @@ def test_capture_pins_profile_into_session(monkeypatch, tmp_path):
 # E7. [Next-page] Link-derived context transfer
 # ---------------------------------------------------------------------------
 
+
 def test_link_derived_dna_reaches_next_page_prompt():
     """Populate a profile with the link-derived DNA fields, render
     brand_context_for_llm as if the next page were generating a
     caption, and verify each field appears."""
     prof = ClubProfile(
-        profile_id="x", display_name="X",
+        profile_id="x",
+        display_name="X",
         brand_voice_summary="Inclusive grassroots club.",
         brand_keywords=["inclusive", "grassroots"],
         brand_palette_extracted={"primary": "#0066cc", "secondary": "#f2a900"},
@@ -382,13 +437,16 @@ def test_link_capture_state_persists_for_audit(monkeypatch, tmp_path):
     digest did the AI pull". Verify it round-trips through save/load."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     prof = ClubProfile(
-        profile_id="x", display_name="X",
+        profile_id="x",
+        display_name="X",
         link_capture_state={
-            "instagram": {"url": "https://www.instagram.com/x/",
-                            "status": "real_content",
-                            "playbook_age": 0,
-                            "regenerated": True,
-                            "voice_digest": "Friendly community voice."},
+            "instagram": {
+                "url": "https://www.instagram.com/x/",
+                "status": "real_content",
+                "playbook_age": 0,
+                "regenerated": True,
+                "voice_digest": "Friendly community voice.",
+            },
         },
     )
     save_profile(prof)
@@ -400,13 +458,15 @@ def test_link_capture_state_persists_for_audit(monkeypatch, tmp_path):
 # E8. [Next-page] AI memory persistence
 # ---------------------------------------------------------------------------
 
+
 def test_full_profile_roundtrips_through_disk(tmp_path, monkeypatch):
     """Close the browser, reopen — i.e. write the profile to disk,
     load it fresh, and confirm the system-prompt block produced from
     the loaded copy is identical to the in-memory original."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     prof = ClubProfile(
-        profile_id="round-trip", display_name="Round Trip Org",
+        profile_id="round-trip",
+        display_name="Round Trip Org",
         org_type="swimming_club",
         country="United Kingdom",
         governing_body="Swim England",
@@ -417,9 +477,13 @@ def test_full_profile_roundtrips_through_disk(tmp_path, monkeypatch):
         brand_guidelines={"summary": "Be warm.", "tone_dos": ["be warm"]},
         brand_guidelines_mandatory_rules=["NEVER name minors without consent."],
         brand_logos=[
-            {"logo_id": "a", "original_filename": "x.svg",
-              "label": "Main wordmark", "mime": "image/svg+xml",
-              "ai_description": "Wordmark for light backgrounds."},
+            {
+                "logo_id": "a",
+                "original_filename": "x.svg",
+                "label": "Main wordmark",
+                "mime": "image/svg+xml",
+                "ai_description": "Wordmark for light backgrounds.",
+            },
         ],
         voice_profile={"sentence_length_avg": 18.0},
     )

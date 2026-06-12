@@ -45,10 +45,29 @@ def consent_block_reason(
     *,
     age: Optional[int] = None,
 ) -> Optional[str]:
-    """Why this athlete must NOT appear in public content — or None if OK."""
+    """Why this athlete must NOT appear in public content — or None if OK.
+
+    Consults BOTH consent systems: the W.2 safeguarding registry
+    (per-athlete levels) and this compliance ledger (opt-outs, Art 18
+    restriction, opt-in/parental mode, erasure suppression). Blocked if
+    either blocks — one effective policy at every enforcement point.
+    """
     name = (athlete_name or "").strip()
     if not name:
         return None  # cards without an athlete (e.g. club summary) pass
+
+    # W.2 safeguarding levels (do_not_feature blocks; the photo/initials
+    # levels are enforced at media selection / rendering, not here).
+    try:
+        from mediahub.safeguarding import effective_policy, regime_active  # noqa: PLC0415
+
+        if profile_id and regime_active(profile_id):
+            policy = effective_policy(profile_id, name)
+            if policy.blocked:
+                return policy.reason or f"{name}'s consent level does not allow featuring"
+    except Exception:
+        pass  # ledger below still enforces; the publish gate fails closed separately
+
     registry = ConsentRegistry(profile_id)
     rec = registry.get(name)
 

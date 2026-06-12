@@ -71,7 +71,20 @@ def global_days(artifact_class: str) -> int:
         days = int(raw) if raw else default
     except ValueError:
         days = default
-    return max(0, days)
+    days = max(0, days)
+    # The UK-legal baseline's single global window (MEDIAHUB_RETENTION_DAYS,
+    # mediahub.privacy.retention) acts as a CEILING for the data-bearing
+    # classes — whichever window is shorter wins, so the setting shown on
+    # the Privacy page is always honoured.
+    if artifact_class in ("runs", "raw_uploads"):
+        legacy_raw = os.environ.get("MEDIAHUB_RETENTION_DAYS", "").strip()
+        try:
+            legacy = max(0, int(legacy_raw)) if legacy_raw else 0
+        except ValueError:
+            legacy = 0
+        if legacy:
+            days = min(days, legacy) if days else legacy
+    return days
 
 
 def effective_days(artifact_class: str, profile_id: str = "") -> int:

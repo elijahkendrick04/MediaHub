@@ -289,6 +289,7 @@ def test_crawl_never_navigates_an_asset(monkeypatch):
 # --- clean-status merge fallthrough ----------------------------------------------
 def test_merge_to_main_falls_through_to_direct_merge(monkeypatch):
     monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
+    monkeypatch.setenv("AUTOTEST_MERGE_CHECKS_WAIT", "0")
     monkeypatch.setattr("shutil.which", lambda x: "/usr/bin/gh")
     calls = []
 
@@ -298,6 +299,13 @@ def test_merge_to_main_falls_through_to_direct_merge(monkeypatch):
             return SimpleNamespace(returncode=1, stdout="",
                                    stderr="GraphQL: Pull request Pull request is in "
                                           "clean status (enablePullRequestAutoMerge)")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            # The fallthrough now verifies CI before merging directly — serve a
+            # green rollup so this test keeps pinning its original intent:
+            # clean status + genuinely green checks → the direct merge fires.
+            rollup = json.dumps({"statusCheckRollup": [
+                {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]})
+            return SimpleNamespace(returncode=0, stdout=rollup, stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(gitops.subprocess, "run", fake_run)

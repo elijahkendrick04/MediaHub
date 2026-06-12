@@ -72,3 +72,12 @@ bcrypt>=4.0
 # for verifying legacy hashes, upgraded on next login.
 argon2-cffi>=23.1
 stripe>=7.0
+
+# W.10 OPTIONAL OCR fallback (interpreter/ocr.py) — deliberately NOT installed
+# here. Scanned/photographed result sheets need a real OCR engine; without one
+# the interpreter keeps the honest "image-needs-ocr" review flag instead of
+# fabricating text. The deployed Docker image installs the engine (apt
+# tesseract-ocr + pip pytesseract) and the scanned-PDF page rasteriser
+# (pypdfium2) — see Dockerfile. Elsewhere, opt in with the `ocr` extra
+# (pyproject: pip install -e ".[ocr]", needs the tesseract binary on PATH) or
+# the pure-pip alternative: pip install rapidocr-onnxruntime pypdfium2

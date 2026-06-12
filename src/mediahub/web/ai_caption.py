@@ -27,6 +27,7 @@ system-prompt branch. The model decides exactly what that looks like.
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import sys
@@ -129,7 +130,7 @@ _NO_COURSE_ABBREV_INSTRUCTION: str = (
 )
 
 _SHARED_TONE_BANS: str = (
-    'Do not open with "Another …" or "What a …"; never use the phrase ' '"testament to".'
+    'Do not open with "Another …" or "What a …"; never use the phrase "testament to".'
 )
 
 
@@ -212,7 +213,7 @@ def _locale_instruction(club_profile) -> str:
         "northern ireland",
     }
     if country.lower() in uk_names:
-        return "Write in British English (programme, recognise, centre, " "organise; metres)."
+        return "Write in British English (programme, recognise, centre, organise; metres)."
     return f"Write in the natural English variant for {country}."
 
 
@@ -260,14 +261,14 @@ _PLATFORM_SPECS: dict[str, dict] = {
         "label": "Instagram/Facebook feed",
         "max_chars": 280,
         "guidance": (
-            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally " "in a feed scroll"
+            "casual and warm, emoji welcome, 1–3 hashtags, reads naturally in a feed scroll"
         ),
     },
     "story": {
         "label": "Instagram/TikTok story",
         "max_chars": 100,
         "guidance": (
-            "punchy single sentence, no hashtags, fits on a visual card, " "immediate impact"
+            "punchy single sentence, no hashtags, fits on a visual card, immediate impact"
         ),
     },
     "x": {
@@ -383,6 +384,41 @@ def _voice_profile_prose(vp: Optional[dict]) -> str:
     return " ".join(bits)
 
 
+def _llm_pseudonymise_enabled() -> bool:
+    """MEDIAHUB_LLM_PSEUDONYMISE=1 — data minimisation toward LLM providers.
+
+    When on, the athlete's name is replaced with a neutral token in the
+    prompt and restored in the returned caption, so the cloud provider never
+    receives the child's name. Trade-off (documented in .env.example and the
+    DPIA): name-style nuance (first-name vs surname address) flattens to the
+    full name, and brief-prose callers (the content engine) are not covered
+    because the name isn't separable there. Off by default.
+    """
+    return (os.environ.get("MEDIAHUB_LLM_PSEUDONYMISE") or "").strip() == "1"
+
+
+_PSEUDONYM_TOKEN = "Athlete A"
+
+
+def _pseudonymise_prose(prose: str, swimmer_name: str) -> tuple[str, bool]:
+    """Replace the swimmer's full name (and bare first name) with the token.
+
+    Returns (new_prose, replaced_anything).
+    """
+    name = (swimmer_name or "").strip()
+    if not name:
+        return prose, False
+    out = re.sub(re.escape(name), _PSEUDONYM_TOKEN, prose, flags=re.IGNORECASE)
+    first = name.split()[0]
+    if len(first) >= 3 and first.lower() != _PSEUDONYM_TOKEN.lower():
+        out = re.sub(rf"\b{re.escape(first)}\b", _PSEUDONYM_TOKEN, out, flags=re.IGNORECASE)
+    return out, out != prose
+
+
+def _restore_pseudonym(text: str, swimmer_name: str) -> str:
+    return re.sub(re.escape(_PSEUDONYM_TOKEN), swimmer_name.strip(), text, flags=re.IGNORECASE)
+
+
 def generate_caption_for_tone(
     achievement_dict: dict,
     club_brand: Optional[dict] = None,
@@ -414,6 +450,64 @@ def generate_caption_for_tone(
     ``requirements`` is a one-line description of what the brief is — both are
     folded into the system prompt when present.
     """
+    system, user_prose = _compose_caption_prompt(
+        achievement_dict,
+        club_brand=club_brand,
+        tone=tone,
+        voice_profile=voice_profile,
+        club_profile=club_profile,
+        recent_captions=recent_captions,
+        brief_prose=brief_prose,
+        direction=direction,
+        requirements=requirements,
+        few_shot_examples=few_shot_examples,
+    )
+    # Tiny random suffix breaks identical-output caching at the provider's
+    # end without leaking into the visible caption (the prompt asks for
+    # caption-only output, so the model will not echo the seed).
+    nonce = random.randint(10_000, 99_999)
+    user_prose = user_prose + f"\n\n[Generate a fresh caption. seed={nonce}]"
+
+    # Data minimisation (MEDIAHUB_LLM_PSEUDONYMISE=1): swap the athlete's
+    # name for a neutral token before the prompt leaves the box; restore it
+    # in the returned caption. Only achievement-led calls carry a separable
+    # name; brief-prose calls go through unchanged (see helper docstring).
+    swimmer_name = str((achievement_dict or {}).get("swimmer_name") or "").strip()
+    pseudonymised = False
+    if _llm_pseudonymise_enabled() and swimmer_name and not brief_prose:
+        user_prose, pseudonymised = _pseudonymise_prose(user_prose, swimmer_name)
+
+    # Route through the local call_claude shim so tests that patch
+    # `mediahub.web.ai_caption.call_claude` continue to work, and the
+    # production path still goes through ai_core under the hood.
+    try:
+        text = call_claude(system=system, user=user_prose, max_tokens=400)
+    except ClaudeUnavailableError:
+        raise
+    text = (text or "").strip()
+    if not text:
+        raise ClaudeUnavailableError("provider returned an empty caption")
+    if pseudonymised:
+        text = _restore_pseudonym(text, swimmer_name)
+    return text
+
+
+def _compose_caption_prompt(
+    achievement_dict: dict,
+    *,
+    club_brand: Optional[dict] = None,
+    tone: str = "ai",
+    voice_profile: Optional[dict] = None,
+    club_profile=None,
+    recent_captions: Optional[list[str]] = None,
+    brief_prose: Optional[str] = None,
+    direction: Optional[dict] = None,
+    requirements: str = "",
+    few_shot_examples: Optional[list[str]] = None,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt pair shared by the caption-only
+    primitive and the W.11/W.13 bundle. Raises ClaudeUnavailableError when
+    the source facts are too thin to write from."""
     from mediahub.ai_core import narrate_achievement, narrate_brand
 
     tone_desc = _resolve_tone_descriptor(club_profile, tone)
@@ -558,6 +652,8 @@ def generate_caption_for_tone(
     # uploaded-file fields, so it rides inside data delimiters; detected
     # instruction-shaped text hardens the wrapper and is logged — never
     # silently rewritten (the human reviewing the card stays the decider).
+    # Lives HERE so both generate_caption_for_tone and the W.11 bundle
+    # inherit the same boundary.
     from mediahub.ai_core.prompt_guard import delimit_untrusted, scan as _injection_scan
 
     _injection_hits = _injection_scan(user_prose)
@@ -573,23 +669,140 @@ def generate_caption_for_tone(
         except Exception:
             pass
     user_prose = delimit_untrusted(user_prose, flagged=bool(_injection_hits))
-    # Tiny random suffix breaks identical-output caching at the provider's
-    # end without leaking into the visible caption (the prompt asks for
-    # caption-only output, so the model will not echo the seed).
+    return system, user_prose
+
+
+_BUNDLE_ALT_TEXT_RULES = (
+    "alt_text: a factual restatement of the result for screen readers — "
+    "who, event, time, what made it notable — under 125 characters, plain "
+    "prose, no hashtags, no emojis, no editorialising beyond the facts given."
+)
+
+
+def generate_caption_bundle(
+    achievement_dict: dict,
+    club_brand: Optional[dict] = None,
+    tone: str = "ai",
+    voice_profile: Optional[dict] = None,
+    club_profile=None,
+    recent_captions: Optional[list[str]] = None,
+    *,
+    language: str = "en",
+    brief_prose: Optional[str] = None,
+    direction: Optional[dict] = None,
+    requirements: str = "",
+    few_shot_examples: Optional[list[str]] = None,
+) -> dict:
+    """One LLM call → caption + result-grounded alt text (+ Welsh variant).
+
+    W.11/W.13: the alt text and the Cymraeg caption ride the SAME provider
+    call as the caption — zero added latency or cost. Returns
+    ``{"caption": str, "alt_text": str, "caption_cy": str|None}``.
+
+    ``language``: ``en`` (caption in English), ``cy`` (caption in Welsh),
+    or ``bilingual`` (caption in English + ``caption_cy`` Welsh variant).
+    Raises ClaudeUnavailableError on no provider or a malformed bundle —
+    NO heuristic fallback, per the standing AI rule.
+    """
+    lang = (language or "en").strip().lower()
+    if lang not in ("en", "cy", "bilingual"):
+        lang = "en"
+    system, user_prose = _compose_caption_prompt(
+        achievement_dict,
+        club_brand=club_brand,
+        tone=tone,
+        voice_profile=voice_profile,
+        club_profile=club_profile,
+        recent_captions=recent_captions,
+        brief_prose=brief_prose,
+        direction=direction,
+        requirements=requirements,
+        few_shot_examples=few_shot_examples,
+    )
+    keys = ["caption", "alt_text"]
+    lang_rules = []
+    if lang == "cy":
+        lang_rules.append(
+            "Write the caption AND alt_text in natural Welsh (Cymraeg), with "
+            "swimming terminology correct (e.g. dull rhydd = freestyle, dull "
+            "cefn = backstroke, dull broga = breaststroke, dull pili-pala = "
+            "butterfly, record personol = personal best). Keep names and "
+            "times exactly as given."
+        )
+    elif lang == "bilingual":
+        keys.append("caption_cy")
+        lang_rules.append(
+            "caption_cy: the same caption written in natural Welsh (Cymraeg) "
+            "— a tone-preserving translation, not word-for-word; swimming "
+            "terminology correct (dull rhydd, dull cefn, dull broga, dull "
+            "pili-pala, record personol); names and times exactly as given."
+        )
+    contract = (
+        "OUTPUT CONTRACT — this overrides any earlier output instruction: "
+        "respond with ONLY a JSON object (no markdown fences, no prose) with "
+        f"exactly these keys: {', '.join(keys)}. "
+        '"caption" follows every rule above. ' + _BUNDLE_ALT_TEXT_RULES
+    )
+    if lang_rules:
+        contract += " " + " ".join(lang_rules)
+    system = system + "\n\n" + contract
+
+
     nonce = random.randint(10_000, 99_999)
     user_prose = user_prose + f"\n\n[Generate a fresh caption. seed={nonce}]"
 
-    # Route through the local call_claude shim so tests that patch
-    # `mediahub.web.ai_caption.call_claude` continue to work, and the
-    # production path still goes through ai_core under the hood.
+    # Data minimisation (MEDIAHUB_LLM_PSEUDONYMISE=1): swap the athlete's
+    # name for a neutral token before the prompt leaves the box; restore it
+    # in every returned bundle field. Only achievement-led calls carry a
+    # separable name; brief-prose calls go through unchanged (see helper
+    # docstring).
+    swimmer_name = str((achievement_dict or {}).get("swimmer_name") or "").strip()
+    pseudonymised = False
+    if _llm_pseudonymise_enabled() and swimmer_name and not brief_prose:
+        user_prose, pseudonymised = _pseudonymise_prose(user_prose, swimmer_name)
+
     try:
-        text = call_claude(system=system, user=user_prose, max_tokens=400)
+        text = call_claude(system=system, user=user_prose, max_tokens=700)
     except ClaudeUnavailableError:
         raise
-    text = (text or "").strip()
-    if not text:
-        raise ClaudeUnavailableError("provider returned an empty caption")
-    return text
+    bundle = _parse_bundle_json(text or "")
+    caption = (bundle.get("caption") or "").strip()
+    if not caption:
+        raise ClaudeUnavailableError("provider returned a malformed caption bundle")
+    alt_text = (bundle.get("alt_text") or "").strip()
+    caption_cy = (bundle.get("caption_cy") or "").strip() or None
+    if lang == "bilingual" and not caption_cy:
+        raise ClaudeUnavailableError("provider returned no Welsh variant")
+    if pseudonymised:
+        caption = _restore_pseudonym(caption, swimmer_name)
+        if alt_text:
+            alt_text = _restore_pseudonym(alt_text, swimmer_name)
+        if caption_cy:
+            caption_cy = _restore_pseudonym(caption_cy, swimmer_name)
+    return {"caption": caption, "alt_text": alt_text, "caption_cy": caption_cy}
+
+
+def _parse_bundle_json(text: str) -> dict:
+    """Tolerant JSON extraction: strips code fences and trailing prose."""
+    import json as _json
+
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        if s.lower().startswith("json"):
+            s = s[4:]
+        s = s.strip()
+    start = s.find("{")
+    end = s.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ClaudeUnavailableError("provider returned a malformed caption bundle")
+    try:
+        obj = _json.loads(s[start : end + 1])
+    except ValueError as e:
+        raise ClaudeUnavailableError("provider returned a malformed caption bundle") from e
+    if not isinstance(obj, dict):
+        raise ClaudeUnavailableError("provider returned a malformed caption bundle")
+    return obj
 
 
 def generate_ai_caption(
@@ -750,8 +963,7 @@ def generate_platform_variants(
     for platform in target_platforms:
         spec = _PLATFORM_SPECS[platform]
         system_parts = [
-            f"You are a sports social-media writer. Adapt the given caption "
-            f"for {spec['label']}.",
+            f"You are a sports social-media writer. Adapt the given caption for {spec['label']}.",
             f"Rules: {spec['guidance']}. Maximum {spec['max_chars']} characters.",
             "Keep all factual details exactly as in the original caption. "
             "Output ONLY the adapted caption — no preamble, no quotes, "
@@ -808,6 +1020,7 @@ __all__ = [
     "AI_TELL_BAN_LIST",
     "generate_ai_caption",
     "generate_caption_for_tone",
+    "generate_caption_bundle",
     "generate_caption_candidates",
     "generate_platform_variants",
     "record_approved_caption",

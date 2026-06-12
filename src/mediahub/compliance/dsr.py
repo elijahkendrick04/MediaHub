@@ -371,7 +371,16 @@ def _memory_rows_matching(memory_store, tenant_id: str, key: str) -> list[dict]:
 
 
 def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") -> dict:
-    """Remove one athlete from every reachable store; report residuals."""
+    """Remove one athlete from every reachable store; report residuals.
+
+    ONE erasure engine, two layers: the UK-legal cascade
+    (``mediahub.privacy.erasure`` — runs/cards/rendered assets, PB caches,
+    research caches, caption memory, posting-log excerpts) runs first, then
+    this module's extras (media library photos, club-profile text, workflow
+    sidecars, turn-into packs, legacy unowned runs, the consent suppression
+    record, and the W.2 level set to do_not_feature). Both the Privacy-page
+    quick action and the Art 12A DSR workflow land here.
+    """
     key = athlete_key(athlete_name)
     slug = _slug(athlete_name)
     report: dict = {
@@ -393,6 +402,18 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
             "they must be removed on the platform itself.",
         ],
     }
+
+    # 0. UK-legal cascade first (privacy.erasure): runs + rendered assets,
+    # PB caches, research caches, caption memory, posting-log excerpts.
+    try:
+        from mediahub.privacy import erase_athlete as _cascade_erase
+
+        cascade = _cascade_erase(profile_id, athlete_name)
+        report["cascade"] = (
+            cascade.to_dict() if hasattr(cascade, "to_dict") else dict(getattr(cascade, "__dict__", {}))
+        )
+    except Exception as e:
+        report["residuals"].append(f"privacy cascade unavailable: {e}")
 
     # 1. Runs: drop the athlete's achievements/cards, redact remaining mentions.
     for path in _tenant_runs(profile_id):
@@ -576,6 +597,25 @@ def erase_athlete(profile_id: str, athlete_name: str, *, recorded_by: str = "") 
         note="erasure request honoured — suppression record (do not re-include)",
         recorded_by=recorded_by,
     )
+
+    # 6b. W.2 safeguarding registry: the erased athlete's consent level
+    # becomes do_not_feature — the second registry agrees they never
+    # reappear (the gate blocks if EITHER registry blocks).
+    try:
+        from mediahub.athletes.registry import resolve as _resolve_athlete
+        from mediahub.safeguarding import set_consent as _set_consent_level
+
+        rec_w = _resolve_athlete(profile_id, athlete_name)
+        if rec_w is not None:
+            _set_consent_level(
+                profile_id,
+                rec_w.athlete_id,
+                "do_not_feature",
+                actor=recorded_by or "erasure",
+                note="erasure request honoured — suppression",
+            )
+    except Exception:
+        pass
 
     # 7. Raw uploads: a results file names MANY athletes — deleting it to
     # erase one would destroy other subjects' provenance. Honest residual;

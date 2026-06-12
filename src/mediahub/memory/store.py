@@ -277,6 +277,58 @@ def clear(*, tenant_id: Optional[str] = None) -> None:
             conn.close()
 
 
+def delete_run(*, tenant_id: str, run_id: str) -> int:
+    """Erase every memory row created from one run (erasure cascade).
+
+    Run deletion must reach the caption memory too — a deleted run's
+    captions carrying athlete names cannot keep influencing future
+    generations. Returns the number of rows removed.
+    """
+    if not tenant_id or not run_id:
+        return 0
+    removed = 0
+    with _lock:
+        conn = _connect()
+        try:
+            for d in _known_dims(conn):
+                tbl = _table_for_dim(d)
+                cur = conn.execute(
+                    f"DELETE FROM {tbl} WHERE tenant_id=? AND run_id=?",
+                    (str(tenant_id), str(run_id)),
+                )
+                removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            conn.commit()
+        finally:
+            conn.close()
+    return removed
+
+
+def delete_matching(*, tenant_id: str, needle: str) -> int:
+    """Erase a tenant's memory rows whose caption or event context mentions
+    ``needle`` (case-insensitive) — the athlete-level erasure cascade.
+    Returns the number of rows removed."""
+    frag = (needle or "").strip().lower()
+    if not tenant_id or not frag:
+        return 0
+    like = f"%{frag}%"
+    removed = 0
+    with _lock:
+        conn = _connect()
+        try:
+            for d in _known_dims(conn):
+                tbl = _table_for_dim(d)
+                cur = conn.execute(
+                    f"DELETE FROM {tbl} WHERE tenant_id=? AND "
+                    "(LOWER(caption) LIKE ? OR LOWER(event_context) LIKE ?)",
+                    (str(tenant_id), like, like),
+                )
+                removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            conn.commit()
+        finally:
+            conn.close()
+    return removed
+
+
 __all__ = [
     "MemoryStoreUnavailable",
     "MemoryHit",
@@ -287,4 +339,6 @@ __all__ = [
     "count",
     "get_caption",
     "clear",
+    "delete_run",
+    "delete_matching",
 ]
