@@ -32,6 +32,10 @@ from swim_content_v5.achievements.relay import RelayMedalDetector, RelayStrongPe
 # OfficialPBDetector is new in V7.3
 from .official_pb import OfficialPBDetector
 
+# Phase W registry-fed detectors
+from .club_record import ClubRecordDetector
+from .milestones import MilestoneDetector
+
 __all__ = [
     "AchievementDetector",
     "Achievement",
@@ -53,4 +57,6 @@ __all__ = [
     "RelayMedalDetector",
     "RelayStrongPerformanceDetector",
     "OfficialPBDetector",
+    "ClubRecordDetector",
+    "MilestoneDetector",
 ]

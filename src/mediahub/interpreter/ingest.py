@@ -85,6 +85,8 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
             return "zip"
         if "hy3" in h:
             return "hy3"
+        if any(x in h for x in ("lef", "lxf", "lenex")):
+            return "lenex"
         if any(x in h for x in ("png", "jpg", "jpeg", "gif", "tiff", "bmp", "webp")):
             return "image"
     if data[:4] == _PDF_MAGIC:
@@ -92,6 +94,12 @@ def _sniff_format(data: bytes, hint: Optional[str] = None) -> str:
     if data[:4] == _ZIP_MAGIC:
         # .xlsx spreadsheets are ZIPs — disambiguate before generic zip handling.
         return "xlsx" if _is_xlsx(data) else "zip"
+    # LENEX .lef: XML declaration + a <LENEX root tag near the top.
+    # (The native parser in interpreter/__init__ intercepts these before
+    # the schema-induce pipeline; this sniff keeps routing honest.)
+    head2k = data[:2048]
+    if head2k.lstrip()[:5] == b"<?xml" and b"<lenex" in head2k.lower():
+        return "lenex"
     # HTML heuristic
     sample = data[:2000].lower()
     if b"<!doctype html" in sample or b"<html" in sample or b"<table" in sample:
@@ -735,6 +743,11 @@ def ingest(
         return _extract_zip(data, content_type_hint, source_path=source_path)
     elif fmt == "hy3":
         text, lines, tables = _extract_hy3(data)
+    elif fmt == "lenex":
+        # LENEX is parsed by interpreter.lenex_parser via the native fast
+        # path before ingest is reached; raw text keeps this branch honest
+        # for any direct caller.
+        text, lines, tables = _extract_text(data)
     elif fmt == "json":
         text, lines, tables = _extract_json(data)
     elif fmt == "csv":

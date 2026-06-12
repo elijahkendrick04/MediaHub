@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{SWIMMER_NAME}} — {{ACHIEVEMENT_HEADLINE}}</title>
+<style>
+{{FONTS_CSS}}
+
+/* A4 portrait print sheet — light paper, dark ink. Print is NOT the dark-first
+   product UI: this must look credible framed on a wall and photocopied in mono,
+   so colour carries brand (bands, rules) and never information. */
+@page { size: A4; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 210mm; }
+body {
+  font-family: 'Inter', sans-serif;
+  color: {{INK}};
+  background: {{PAPER}};
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.sheet {
+  position: relative;
+  width: 210mm;
+  height: 296mm; /* a hair under 297 so Chromium never spills a second page */
+  overflow: hidden;
+  background: {{PAPER}};
+}
+
+/* Decorative double frame — structural in mono, branded in colour. */
+.frame-outer {
+  position: absolute; inset: 8mm;
+  border: 1.2mm solid {{PRIMARY}};
+  pointer-events: none;
+}
+.frame-inner {
+  position: absolute; inset: 10.5mm;
+  border: 0.35mm solid {{ACCENT}};
+  pointer-events: none;
+}
+.corner {
+  position: absolute; width: 9mm; height: 9mm;
+  border-color: {{PRIMARY_DEEP}}; border-style: solid; border-width: 0;
+}
+.corner.tl { top: 13mm; left: 13mm; border-top-width: 0.8mm; border-left-width: 0.8mm; }
+.corner.tr { top: 13mm; right: 13mm; border-top-width: 0.8mm; border-right-width: 0.8mm; }
+.corner.bl { bottom: 13mm; left: 13mm; border-bottom-width: 0.8mm; border-left-width: 0.8mm; }
+.corner.br { bottom: 13mm; right: 13mm; border-bottom-width: 0.8mm; border-right-width: 0.8mm; }
+
+.inner { position: absolute; inset: 14mm 16mm; display: flex; flex-direction: column; align-items: center; text-align: center; }
+
+/* Branded header band */
+.band {
+  width: 100%;
+  margin-top: 2mm;
+  padding: 5mm 8mm 4.5mm;
+  background: linear-gradient(135deg, {{PRIMARY}} 0%, {{PRIMARY_DEEP}} 100%);
+  color: #FFFFFF;
+  border-bottom: 1.1mm solid {{ACCENT}};
+}
+.band .club {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 14pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.kicker {
+  margin-top: 9mm;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 9pt;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: {{PRIMARY_DEEP}};
+}
+.headline {
+  margin-top: 3mm;
+  font-family: 'Bowlby One', 'Anton', sans-serif;
+  font-size: 24pt;
+  line-height: 1.1;
+  color: {{PRIMARY}};
+  text-transform: uppercase;
+}
+.presented {
+  margin-top: 8mm;
+  font-size: 10.5pt;
+  font-style: italic;
+  color: #4A4742;
+}
+.swimmer {
+  margin-top: 4mm;
+  font-family: 'Anton', 'Bebas Neue', sans-serif;
+  font-size: 42pt;
+  line-height: 1.05;
+  letter-spacing: 0.015em;
+  text-transform: uppercase;
+  color: {{INK}};
+  max-width: 168mm;
+  overflow-wrap: break-word;
+}
+.name-rule {
+  margin-top: 4mm;
+  width: 58mm; height: 1mm;
+  background: {{ACCENT}};
+  border-bottom: 0.35mm solid {{PRIMARY_DEEP}};
+}
+
+.event {
+  margin-top: 8mm;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 15pt;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.time-card {
+  margin-top: 6mm;
+  padding: 5mm 14mm 6mm;
+  border: 0.6mm solid {{INK}};
+  background: #FFFFFF;
+}
+.time-card .lab {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 8pt;
+  letter-spacing: 0.30em;
+  text-transform: uppercase;
+  color: {{PRIMARY_DEEP}};
+}
+.time-card .time {
+  margin-top: 1.5mm;
+  font-family: 'Anton', 'JetBrains Mono', sans-serif;
+  font-size: 34pt;
+  line-height: 1.05;
+  color: {{INK}};
+}
+.detail-line {
+  margin-top: 5mm;
+  font-size: 10pt;
+  color: #4A4742;
+  max-width: 150mm;
+}
+.detail-line:empty { display: none; }
+
+.meet {
+  margin-top: 7mm;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 11pt;
+  letter-spacing: 0.06em;
+}
+.meet .date { color: #4A4742; font-weight: 500; }
+.meet .dot { color: {{ACCENT}}; padding: 0 2mm; }
+
+.footer {
+  margin-top: auto;
+  margin-bottom: 2.5mm;
+  width: 100%;
+  padding-top: 3.5mm;
+  border-top: 0.35mm solid #B9B4AA;
+  font-size: 8pt;
+  letter-spacing: 0.08em;
+  color: #6B675F;
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="frame-outer"></div>
+  <div class="frame-inner"></div>
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+
+  <div class="inner">
+    <div class="band">
+      <div class="club">{{CLUB_NAME}}</div>
+    </div>
+
+    <div class="kicker">Official Result &middot; Verified Time</div>
+    <div class="headline">{{ACHIEVEMENT_HEADLINE}}</div>
+
+    <div class="presented">Proudly presented to</div>
+    <div class="swimmer">{{SWIMMER_NAME}}</div>
+    <div class="name-rule"></div>
+
+    <div class="event">{{EVENT_LABEL}}</div>
+    <div class="time-card">
+      <div class="lab">Verified Time</div>
+      <div class="time">{{TIME_STR}}</div>
+    </div>
+    <div class="detail-line">{{DETAIL_LINE}}</div>
+
+    <div class="meet">{{MEET_NAME}}<span class="dot">&#9679;</span><span class="date">{{MEET_DATE}}</span></div>
+
+    <div class="footer">Verified from official results &mdash; generated by MediaHub</div>
+  </div>
+</div>
+</body>
+</html>

@@ -24,6 +24,8 @@ PATTERNS: list[dict] = [
             "biggest_drop",
             "fastest_since",
             "return_to_form",
+            "club_record",
+            "milestone",
         ],
         "format_priority": ["feed_portrait", "story", "feed_square"],
         "composition": (

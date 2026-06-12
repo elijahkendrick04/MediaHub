@@ -8,15 +8,18 @@ from __future__ import annotations
 
 from mediahub.recognition.registry import register_sport
 from swim_content_v5.achievements import get_all_detectors
+from .achievements.club_record import ClubRecordDetector
+from .achievements.milestones import MilestoneDetector
 from .achievements.official_pb import OfficialPBDetector
 
 
 def init():
     """Register swimming in the sport registry with all detectors."""
     detectors = get_all_detectors()
-    # Prepend OfficialPBDetector so it runs before other PB detectors
+    # Prepend OfficialPBDetector so it runs before other PB detectors;
+    # append the Phase W registry-fed detectors (milestones, club records).
     official_pb = OfficialPBDetector()
-    all_detectors = [official_pb] + detectors
+    all_detectors = [official_pb] + detectors + [MilestoneDetector(), ClubRecordDetector()]
 
     register_sport(
         "swimming",

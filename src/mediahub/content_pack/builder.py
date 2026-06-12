@@ -44,6 +44,15 @@ _TYPE_TO_ANGLE = {
     "relay_medal_silver": "relay_highlight",
     "relay_medal_bronze": "relay_highlight",
     "relay_strong": "relay_highlight",
+    # Phase W — club history angles
+    "club_record": "club_record",
+    "club_debut": "milestone",
+    "race_milestone_25": "milestone",
+    "race_milestone_50": "milestone",
+    "race_milestone_100": "milestone",
+    "race_milestone_250": "milestone",
+    "race_milestone_500": "milestone",
+    "first_event_swim": "milestone",
 }
 
 # Recommender override map: when a swimmer has medal + official_pb, override angle
