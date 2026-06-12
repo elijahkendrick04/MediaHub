@@ -41,7 +41,6 @@ def client(app):
 # ---- disabled when no key configured -----------------------------------
 
 
-
 def _csrf(client) -> dict:
     """This suite runs with TESTING unset, so CSRF enforcement is live
     (security/web-hardening) — mint a session token and carry it."""
@@ -55,7 +54,9 @@ def test_route_404s_when_key_unset(client, monkeypatch):
     monkeypatch.delenv("MEDIAHUB_DEV_KEY", raising=False)
     monkeypatch.delenv("MEDIAHUB_DEV_OPEN", raising=False)
     assert client.get("/developer").status_code == 404
-    assert client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
+    assert (
+        client.post("/developer", data={"dev_key": "anything", **_csrf(client)}).status_code == 404
+    )
 
 
 def test_no_button_when_key_unset(client, monkeypatch):
