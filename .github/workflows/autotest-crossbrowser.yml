@@ -73,7 +73,7 @@ jobs:
         run: python -m autotest.run || echo "::notice::cross-browser finder reported issues"
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crossbrowser-${{ matrix.label }}
           path: |
