@@ -52,7 +52,7 @@ will not fix itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `4156143eb` · Merge pull request #384: PC.9 + PC.11–PC.14 — sell-gate code remainders + in-product referral engine
+**Last updated:** 2026-06-12 · `889847d16` · Merge pull request #385 from elijahkendrick04/claude/hopeful-cray-aip3j7
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -375,6 +375,8 @@ list and the auto table below, not here.
 | Date | Commit | Summary |
 |---|---|---|
 | 2026-06-12 | `b37e1ff37` | gitleaks: allowlist synthetic test placeholders + docstring false positive |
+| 2026-06-12 | `8129ca971` | Apply CI-pinned ruff format to test_dev_login.py |
+| 2026-06-12 | `d11cf8c38` | Add opt-in passwordless developer sign-in + home-page footer link |
 | 2026-06-12 | `b58c21fcd` | Disclose log-sentinel providers in the register (guard catch #4 and #5) |
 | 2026-06-12 | `aae3242f3` | Align the DSR erasure test with the canonical discovered-cache root |
 | 2026-06-12 | `ef5e3112c` | Fix the PB auditor in the meet-recap pipeline: real decisions, honest lookups, run guards |
@@ -384,8 +386,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `636d1df01` | fix: unconfigured GET /password/forgot answers 200, POST stays 503 |
 | 2026-06-12 | `27f27cb63` | docs: package READMEs for backup/, privacy org lifecycle, referrals |
 | 2026-06-12 | `32ff4edba` | docs: mark compliance-handover items 11+12 resolved (PC.11/PC.12) |
-| 2026-06-12 | `6c08bf6c6` | docs(roadmap): record PC.9 + PC.11-PC.14 code halves shipped; ruff hygiene |
-| 2026-06-12 | `1801a577e` | Regenerate inventories with main's full dep set (fixes inventory-freshness test) |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
