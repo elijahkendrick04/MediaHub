@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `2380b439c` · Merge pull request #414 from elijahkendrick04/revert-412-claude/brave-ptolemy-65ahf4
+**Last updated:** 2026-06-12 · `227b8207e` · Reapply: visible home-page developer-login link (#416)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -692,6 +692,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `22224083a` | Revert "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `1c0dd8c48` | Declare MEDIAHUB_DEV_KEY in render.yaml so it surfaces in the Render dashboard |
 | 2026-06-12 | `0c85734c3` | Make the home-page developer-login footer link clearly visible |
@@ -699,8 +700,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `24191c7a0` | fix: a11y: Documents must have <title> element to aid in navigati (#407) |
 | 2026-06-12 | `cfffa6c81` | docs(roadmap): add F.13 — the process to take the GitHub repo private again |
 | 2026-06-12 | `2e72597c4` | Roadmap bot: sweep completed items off the to-do lists automatically |
-| 2026-06-12 | `42cef9cba` | docs(roadmap): prioritise business identity, domain & cheaper hosting |
-| 2026-06-12 | `b90133039` | Resolve leftover merge-conflict markers in .env.example |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
