@@ -153,10 +153,10 @@ except ImportError:
     _save_voice_profile = None
 
 # V9: "Why this card?" explainer.
-# The legacy rule-based explainer (recognition/explainer.py) is no longer
-# called — _build_card_explanation now requires an AI provider and surfaces
-# an honest "AI unavailable: configure a provider" message when none is
-# configured, instead of falling back to a hardcoded type-phrase template.
+# _build_card_explanation requires an AI provider and surfaces an honest
+# "AI unavailable: configure a provider" message when none is configured —
+# never a hardcoded type-phrase template. (The old rule-based explainer
+# module was deleted once the AI surface replaced it.)
 
 
 # LLM-derived performance-context sentence, keyed by

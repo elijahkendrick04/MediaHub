@@ -52,7 +52,6 @@ publishes JSON status to `/api/runs/<id>/status`).
 | `mediahub.venue_search` | Pool venue image search | `venue_search.search.search` |
 | `mediahub.web_research` | Generic web research client (used by context_engine) | `web_research.search.WebResearcher` |
 | `mediahub.inspiration` | Pattern library + exemplar analyser for content angles | `inspiration.pattern_library.PATTERNS` |
-| `mediahub.history` | Swimmer historical results provider | `history.provider.HistoryProvider` |
 
 ## Data flow (one upload)
 

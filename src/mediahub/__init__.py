@@ -47,7 +47,6 @@ _LEGACY_ALIASES = (
     "content_pack",
     "content_pack_visual",
     "web_research",
-    "history",
 )
 
 for _name in _LEGACY_ALIASES:

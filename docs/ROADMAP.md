@@ -1607,8 +1607,9 @@ provider seam — the P0.4 guard fails the build on any unslotted ASR import.
 ### P5.4 — Satori graphics fast-path · ❌ **NOT STARTED**
 Lighter card rendering (~100× lighter than headless Chromium). A *performance*
 play, not a licensing one — P0.1's shipped ffmpeg engine already removed the
-Remotion requirement; this slots into the same `MEDIAHUB_REEL_ENGINE` seam
-(the `satori` engine name is registered and honest-errors until it ships).
+Remotion requirement; this would slot into the same `MEDIAHUB_REEL_ENGINE` seam.
+(The placeholder `satori` engine name was removed in the dormant-features
+audit — register it again when the engine actually ships.)
 
 ### P5.5 — rembg / MODNet cutout · ✅ **DONE**
 Already the shipped default (rembg). MODNet is an optional higher-quality matting

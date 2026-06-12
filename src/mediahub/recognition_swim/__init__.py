@@ -26,7 +26,7 @@ def init():
         "swimming",
         display_name="Swimming",
         detectors=all_detectors,
-        history_provider=None,  # set later when swim_content_pb is wired
+        history_provider=None,  # history flows via the V5 SwimmerHistory wrapper
         default_voice_templates={
             "pb_confirmed": "{name} goes {time} in {event} — a new personal best!",
             "medal_gold": "{name} wins gold in {event} at {meet}!",
