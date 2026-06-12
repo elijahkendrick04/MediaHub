@@ -8536,6 +8536,14 @@ def create_app() -> Flask:
         if ep in _SETUP_EXEMPT_ENDPOINTS:
             return None
         path = request.path or ""
+        # Any /static/ asset (fonts.css, woff2, theme CSS, …) must load for
+        # everyone, even before an org is set up. The endpoint-name exemption
+        # ("static") above misses CUSTOM routes registered under /static/
+        # (e.g. static_fonts_css), which would otherwise be redirected to
+        # /sign-in and silently break the first-party fonts site-wide. Guard
+        # by path so that class of break can't recur.
+        if path.startswith("/static/"):
+            return None
         # JSON-style endpoints get a 409 instead of a redirect so the
         # browser fetch() call can show a friendly inline error.
         is_api = path.startswith("/api/")
@@ -8607,6 +8615,11 @@ def create_app() -> Flask:
             return None
         ep = request.endpoint or ""
         if ep in _TERMS_GATE_EXEMPT:
+            return None
+        # Static assets are never gated (mirrors _gate_until_org_ready) — a
+        # custom route under /static/ must not be caught by endpoint-name-only
+        # exemption.
+        if (request.path or "").startswith("/static/"):
             return None
         email = _auth.current_user_email()
         if not email:
@@ -21238,38 +21251,50 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             return ""
         return t
 
-    # ---- /developer (operator unrestricted sign-in) -------------------
-    # Public and passwordless: the route always exists and one click grants an
-    # unrestricted (Owner-plan) session that bypasses every paywall gate. There
-    # is no key — anyone who reaches this page can enter (owner decision, see
-    # docs/adr/0018-public-passwordless-operator-signin.md).
-    def _developer_login_page() -> str:
-        note_html = (
-            '<div class="mh-flash" role="alert" style="'
-            "margin:0 0 var(--sp-5);padding:14px 18px;"
-            "border:1px solid rgba(245,193,91,0.35);"
-            "border-left:3px solid var(--warn);"
-            "background:rgba(245,193,91,0.06);color:var(--ink);"
-            "border-radius:var(--radius-sm);font-family:var(--font-mono);"
-            'font-size:12px;letter-spacing:0.05em;line-height:1.5">'
-            "[ OPEN ] Unrestricted operator access &mdash; this sign-in needs no "
-            "password, so anyone who reaches this page can enter.</div>"
-        )
+    # ---- /developer (operator sign-in) --------------------------------
+    # Username + password operator sign-in. Credentials are verified against an
+    # argon2id hash (constant-time) and the endpoint is rate-limited; a correct
+    # pair grants an unrestricted (Owner-plan) session that bypasses every
+    # paywall gate. The password is never stored in plaintext, never logged, and
+    # never rendered back. See docs/adr/0019-password-protect-operator-signin.md.
+    def _developer_login_page(error: str = "") -> str:
+        err_html = ""
+        if error:
+            err_html = (
+                '<div class="mh-flash error" role="alert" style="'
+                "margin:0 0 var(--sp-5);padding:14px 18px;"
+                "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
+                "background:var(--bad-bg,rgba(255,107,107,0.06));color:var(--ink);"
+                "border-radius:var(--radius-sm);font-family:var(--font-mono);"
+                'font-size:12px;letter-spacing:0.06em;text-transform:uppercase">'
+                f"[ ERROR ] {_h(error)}</div>"
+            )
         body = (
             '<section class="mh-hero" style="padding-top:var(--sp-7);'
             'padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Operator</span>'
             '<h1>Developer <em class="editorial">sign-in</em>.</h1>'
             '<p class="lede">Unrestricted, paywall-free access for the operator '
-            "running this deployment. No key required &mdash; one click to "
-            "enter.</p>"
+            "running this deployment. Enter your operator username and "
+            "password.</p>"
             "</section>"
-            f"{note_html}"
+            f"{err_html}"
             '<div class="card" style="padding:24px 28px;max-width:440px">'
             f'<form method="post" action="{url_for("developer_login_post")}" '
             'data-loader-text="Signing in&hellip;">'
-            '<button type="submit" class="btn" style="width:100%">'
-            "Enter unrestricted</button>"
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+            "Username</label>"
+            '<input type="text" name="dev_user" autocomplete="username" required '
+            'autofocus style="width:100%;margin-bottom:16px" />'
+            '<label style="display:block;font-size:12px;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:var(--ink-muted);margin-bottom:6px">'
+            "Password</label>"
+            '<input type="password" name="dev_password" autocomplete="current-password" '
+            'required style="width:100%" '
+            'placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" />'
+            '<button type="submit" class="btn" style="margin-top:20px;width:100%">'
+            "Sign in</button>"
             "</form>"
             '<div class="dim" style="font-size:13px;margin-top:18px;'
             'text-align:center">'
@@ -21290,10 +21315,13 @@ function copySpotlightCaption(btn, cardIdSafe) {{
     def developer_login_post():
         if _auth_rate_limited("developer"):
             return _auth_rate_limit_response()
-        # Public, passwordless operator sign-in — one click grants the session.
-        _auth.login_dev_operator()
-        nxt = _safe_next(request.args.get("next") or request.form.get("next"))
-        return redirect(nxt or url_for("make_page"))
+        if _auth.verify_dev_credentials(
+            request.form.get("dev_user"), request.form.get("dev_password")
+        ):
+            _auth.login_dev_operator()
+            nxt = _safe_next(request.args.get("next") or request.form.get("next"))
+            return redirect(nxt or url_for("make_page"))
+        return _developer_login_page(error="Invalid username or password."), 401
 
     # ---- /operator/commercial — Phase C sell-side console (PC.4 + PC.6) ----
     # Operator-only, exactly like /developer: non-operator sessions are sent to

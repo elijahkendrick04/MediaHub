@@ -479,21 +479,49 @@ def _users_path() -> Path:
 _SESSION_KEY = "user_email"
 
 # ---- Operator / developer access ---------------------------------------
-# A public, passwordless, no-paywall sign-in for the operator running the
-# deployment. The "Developer access" link sits in the home-page footer (and on
-# the /login and /developer pages); one click grants an unrestricted
-# (Owner-plan) session with no key.
+# A username + password sign-in for the operator running the deployment. The
+# "Developer access" link sits in the home-page footer (and on the /login and
+# /developer pages); entering the operator credentials grants an unrestricted
+# (Owner-plan) session.
 #
-# This is deliberately OPEN — there is no key or env gate. The product owner
-# accepted that anyone who reaches /developer can take an unrestricted operator
-# session (see docs/adr/0018-public-passwordless-operator-signin.md). Closing
-# the door again is a code change, not an env tweak.
+# The username is not secret. The password is stored ONLY as an argon2id hash
+# (never plaintext — the repo-secret rule), verified constant-time and
+# rate-limited online. The baked-in default credential lets the sign-in work
+# with zero deployment config; set MEDIAHUB_DEV_USER / MEDIAHUB_DEV_PASSWORD_HASH
+# to rotate without a code change. See
+# docs/adr/0019-password-protect-operator-signin.md.
 _DEV_SESSION_KEY = "dev_operator"
+
+# Operator credential. The hash is an argon2id digest of the password — NOT the
+# plaintext — so the repo never carries the secret. Override via env to rotate.
+_DEV_USERNAME_DEFAULT = "ekandani"
+_DEV_PASSWORD_HASH_DEFAULT = "$argon2id$v=19$m=65536,t=3,p=4$HjeXdWZx1uYcUxNtTxXtLA$DNRsBGz79R7ZKydqu1GeANyn0bM6gdMOD7VyC+H31iw"
 
 
 def _dev_operator_email() -> str:
     """The synthetic operator identity's email (configurable, never logged)."""
     return normalize_email(os.environ.get("MEDIAHUB_DEV_EMAIL") or "developer@mediahub.local")
+
+
+def _dev_username() -> str:
+    return (os.environ.get("MEDIAHUB_DEV_USER") or _DEV_USERNAME_DEFAULT).strip()
+
+
+def _dev_password_hash() -> str:
+    return (os.environ.get("MEDIAHUB_DEV_PASSWORD_HASH") or _DEV_PASSWORD_HASH_DEFAULT).strip()
+
+
+def verify_dev_credentials(username: object, password: object) -> bool:
+    """Constant-time check of submitted operator username + password.
+
+    The username is compared with ``hmac.compare_digest`` and the password
+    verified against the stored argon2id hash. Both are evaluated before being
+    combined so a wrong username can't short-circuit (and time-leak) the slow
+    password check.
+    """
+    user_ok = hmac.compare_digest(_dev_username(), str(username or "").strip())
+    pass_ok = verify_password(str(password or ""), _dev_password_hash())
+    return bool(user_ok and pass_ok)
 
 
 def login_dev_operator() -> None:

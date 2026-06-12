@@ -28,6 +28,25 @@ MIN_TEST_FILES = 150
 MIN_TEST_FUNCTIONS = 2000
 
 
+# --- no-auto-merge policy (2026-06-12 incident) -----------------------------
+def test_autotest_workflow_does_not_auto_merge():
+    """The autotest loop must open PRs for HUMAN approval, never auto-merge to
+    production. Incident 2026-06-12: an auto-merged ``src/mediahub/web`` change
+    (a custom fonts.css route) broke production fonts site-wide. Re-arming
+    auto-merge (``AUTOTEST_BUILD_MERGE: "1"``) requires a deliberate human change
+    to BOTH the workflow and this self-governance test. See
+    docs/adr/0020-no-autotest-automerge.md.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "autotest.yml").read_text()
+    assert 'AUTOTEST_BUILD_MERGE: "1"' not in wf, (
+        "autotest auto-merge has been re-armed — the loop must open PRs for "
+        "human approval (AUTOTEST_BUILD_MERGE must be \"0\"). See ADR-0020."
+    )
+    assert 'AUTOTEST_BUILD_MERGE: "0"' in wf, (
+        "expected AUTOTEST_BUILD_MERGE to be explicitly disabled in autotest.yml"
+    )
+
+
 # --- kill switch -------------------------------------------------------------
 def test_kill_switch_is_wired():
     assert gitops.STOP_FILE.name == "STOP" and gitops.STOP_FILE.parent.name == "autotest"

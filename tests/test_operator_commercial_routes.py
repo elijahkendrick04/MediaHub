@@ -38,9 +38,10 @@ def _make_app(monkeypatch, tmp_path, *, dev_key: str | None = DEV_KEY, stripe: b
 
 
 def _login_operator(client):
-    # Public, passwordless operator sign-in — one POST grants the session.
-    r = client.post("/developer", data={})
-    assert r.status_code in (302, 303)
+    # Grant the operator session directly; the /developer credential flow is
+    # covered by test_dev_login.py.
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
 
 
 def test_console_redirects_anonymous_to_developer_signin(monkeypatch, tmp_path):

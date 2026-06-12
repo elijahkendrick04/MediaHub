@@ -252,8 +252,10 @@ def _login(client, email, password=PASSWORD):
 
 
 def _login_operator(client):
-    r = client.post("/developer", data={"dev_key": DEV_KEY})
-    assert r.status_code in (302, 303), r.status_code
+    # Grant the operator session directly; the /developer credential flow is
+    # covered by test_dev_login.py.
+    with client.session_transaction() as s:
+        s["dev_operator"] = True
 
 
 def _pin(client, profile_id):
