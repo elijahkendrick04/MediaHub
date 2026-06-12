@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `227b8207e` · Reapply: visible home-page developer-login link (#416)
+**Last updated:** 2026-06-12 · `538a906f9` · Make operator developer sign-in public and passwordless (#418)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -692,6 +692,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
 | 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `22224083a` | Revert "Make the home-page developer-login link clearly visible" |
 | 2026-06-12 | `1c0dd8c48` | Declare MEDIAHUB_DEV_KEY in render.yaml so it surfaces in the Render dashboard |
