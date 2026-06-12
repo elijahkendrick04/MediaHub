@@ -154,8 +154,18 @@ jobs:
           fi
           # Soft wall (45 min) BELOW the job timeout so a long fix stops CLEANLY and
           # the run stays green — the bug simply carries over to the next tick.
-          timeout 2700 python -m autotest.fix_loop | tee /tmp/fix-results.json \
-            || echo "::notice::fix pass stopped at its time budget; continues next tick"
+          # pipefail matters: without it the pipeline's exit code is tee's (always
+          # 0), so the old `|| echo` time-budget notice was dead code and a CRASHED
+          # fix pass was indistinguishable from a clean one (green run, no warning
+          # — how the 2026-06-12 stranded-branch breakage stayed invisible).
+          set -o pipefail
+          rc=0
+          timeout 2700 python -m autotest.fix_loop | tee /tmp/fix-results.json || rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::notice::fix pass stopped at its 45-min time budget; continues next tick"
+          elif [ "$rc" -ne 0 ]; then
+            echo "::warning::fix pass CRASHED (exit $rc, not a timeout) — see the log above; the run stays green so the sweep's findings still persist"
+          fi
           if [ -s /tmp/fix-results.json ]; then
             {
               echo "### 🔧 Fix pass"

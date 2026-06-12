@@ -57,6 +57,22 @@ def test_open_pr_denied_surfaces_actionable_error(monkeypatch, gh_present):
     assert "create and approve pull requests" in err.lower()
 
 
+def test_open_pr_empty_branch_not_misread_as_permissions(monkeypatch, gh_present):
+    """Every GraphQL createPullRequest failure mentions "createPullRequest" — an
+    empty pushed branch ("No commits between ...") must be reported as exactly
+    that, NOT as the Actions PR-permission block, which sent the operator to
+    repo settings that were already correct (2026-06-12 incident)."""
+    stderr = ("pull request create failed: GraphQL: No commits between main and "
+              "autotest/fix-6df9d960412d (createPullRequest)")
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda *a, **k: _completed(1, stdout="", stderr=stderr))
+    got, err = gitops._open_pr("autotest/fix-6df9d960412d", "fix: x", "body")
+    assert got == ""
+    assert "no commits" in err.lower()
+    assert "AUTOTEST_GH_PAT" not in err
+    assert "not permitted" not in err.lower()
+
+
 def test_open_pr_already_exists_recovers_url(monkeypatch, gh_present):
     """A re-run on the same branch must read as success by recovering the PR."""
     existing = "https://github.com/acme/repo/pull/7"
@@ -121,3 +137,94 @@ def test_merge_armed_with_pr_reports_gh_failure(monkeypatch, gh_present):
     msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
     assert "NOT armed" in msg
     assert "required checks missing" in msg
+
+
+# --------------------------------------------------------------------------- #
+# The "clean status" fallthrough must verify CI, not trust mergeability.
+# GitHub reports a PR "clean" not only when required checks passed but ALSO
+# when main has NO required checks configured — a just-opened PR then reads
+# mergeable before its CI starts (PR #332 merged 3s after creation that way).
+# --------------------------------------------------------------------------- #
+def _rollup(items):
+    import json
+    return _completed(0, stdout=json.dumps({"statusCheckRollup": items}))
+
+
+def _clean_status_run(rollup_resp, merge_results):
+    """A subprocess.run stub: --auto merge fails 'clean status', `gh pr view`
+    serves the rollup, a direct merge records itself and succeeds."""
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "merge"] and "--auto" in cmd:
+            return _completed(1, stderr="Pull request is in clean status")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return merge_results
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return rollup_resp
+        return _completed(0)
+
+    return fake_run, calls
+
+
+def test_merge_clean_fallthrough_refuses_unstarted_ci(monkeypatch, gh_present):
+    """No checks reported yet (the PR #332 scenario) → NOT merged, honest why."""
+    monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
+    monkeypatch.setenv("AUTOTEST_MERGE_CHECKS_WAIT", "0")
+    fake_run, calls = _clean_status_run(_rollup([]), _completed(0))
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
+    assert "NOT armed" in msg and "NOT merged" in msg
+    assert not any(c[:3] == ["gh", "pr", "merge"] and "--auto" not in c for c in calls), \
+        "must not direct-merge before any check exists"
+
+
+def test_merge_clean_fallthrough_refuses_red_ci(monkeypatch, gh_present):
+    monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
+    monkeypatch.setenv("AUTOTEST_MERGE_CHECKS_WAIT", "0")
+    fake_run, calls = _clean_status_run(
+        _rollup([{"name": "Hygiene hooks (pre-commit)",
+                  "status": "COMPLETED", "conclusion": "FAILURE"}]), _completed(0))
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
+    assert "NOT merged" in msg
+    assert "Hygiene hooks" in msg
+    assert not any(c[:3] == ["gh", "pr", "merge"] and "--auto" not in c for c in calls)
+
+
+def test_merge_clean_fallthrough_merges_on_verified_green(monkeypatch, gh_present):
+    """All rollup entries green (both CheckRun and StatusContext shapes) → the
+    direct merge proceeds, as before the gate."""
+    monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
+    monkeypatch.setenv("AUTOTEST_MERGE_CHECKS_WAIT", "0")
+    fake_run, calls = _clean_status_run(
+        _rollup([{"name": "Responsive contract (pytest)",
+                  "status": "COMPLETED", "conclusion": "SUCCESS"},
+                 {"context": "deploy/render", "state": "SUCCESS"}]), _completed(0))
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
+    assert "merged directly" in msg
+    assert any(c[:3] == ["gh", "pr", "merge"] and "--auto" not in c for c in calls)
+
+
+def test_merge_clean_fallthrough_fails_closed_on_unreadable_ci(monkeypatch, gh_present):
+    """A failed rollup lookup must refuse the merge, never assume green."""
+    monkeypatch.setenv("AUTOTEST_BUILD_MERGE", "1")
+    monkeypatch.setenv("AUTOTEST_MERGE_CHECKS_WAIT", "0")
+    fake_run, calls = _clean_status_run(_completed(1, stderr="boom"), _completed(0))
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    msg = gitops._merge_to_main("b", has_pr=True, files=["src/mediahub/web/web.py"])
+    assert "NOT merged" in msg
+    assert "could not read CI state" in msg
+
+
+def test_pr_checks_state_action_required_is_pending(monkeypatch):
+    """A run held for workflow approval is unresolved — pending, not red."""
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda *a, **k: _rollup([{"name": "API contract (Schemathesis)",
+                                                  "status": "COMPLETED",
+                                                  "conclusion": "ACTION_REQUIRED"}]))
+    state, detail = gitops._pr_checks_state("b")
+    assert state == "pending"
+    assert "API contract" in detail
