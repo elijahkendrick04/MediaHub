@@ -59,6 +59,16 @@ ai = [
   "anthropic>=0.30",
   "replicate>=0.25",
 ]
+# W.10 OCR fallback for scanned/photographed result sheets (interpreter/ocr.py).
+# Optional everywhere — with no engine the interpreter keeps the honest
+# "image-needs-ocr" review flag. pytesseract drives the system `tesseract`
+# binary (apt tesseract-ocr in the Dockerfile); pypdfium2 rasterises
+# image-only PDF pages for OCR. Pure-pip alternative engine:
+# rapidocr-onnxruntime (heavier wheel; onnxruntime already ships for rembg).
+ocr = [
+  "pytesseract>=0.3.10",
+  "pypdfium2>=4",
+]
 render = [
   # Playwright pin: the bundled Chromium revision must match what the
   # Dockerfile downloads at build time. Phase 1.5 audit pinned this to

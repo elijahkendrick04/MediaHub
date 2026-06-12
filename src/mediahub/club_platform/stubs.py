@@ -209,8 +209,8 @@ class WeekendPreviewStub(_StubContentType):
   <form method="POST" enctype="multipart/form-data" data-loader-text="Reading the event"
         data-loader-sub="Fetching links, reading the pack, picking the ones to watch…" style="margin-top:16px">
     <div style="margin-bottom:14px">
-      <label>Event name</label>
-      <input type="text" name="meet_name" placeholder="e.g. County Championships" required/>
+      <label>Event name <span class="muted" style="font-size:11px">(optional if you attach the entry file — it names the meet)</span></label>
+      <input type="text" name="meet_name" placeholder="e.g. County Championships"/>
     </div>
     <div style="margin-bottom:14px">
       <label>Event website link <span class="muted" style="font-size:11px">(optional)</span></label>
@@ -235,8 +235,8 @@ class WeekendPreviewStub(_StubContentType):
       <div id="pv-watch-ai">
         <label>Link to the entries / psych sheet <span class="muted" style="font-size:11px">(optional)</span></label>
         <input type="url" name="entries_url" placeholder="https://… (accepted entries list)"/>
-        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — PDF, Word, CSV, text)</span></label>
-        <input type="file" name="entries_file" accept=".pdf,.docx,.txt,.csv,.md,.html,.htm"/>
+        <label style="margin-top:10px">Or upload an entries file <span class="muted" style="font-size:11px">(optional — the organiser&rsquo;s entry file (.lef / .lxf), PDF, Word, CSV, text)</span></label>
+        <input type="file" name="entries_file" accept=".lef,.lxf,.pdf,.docx,.txt,.csv,.md,.html,.htm"/>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0">The AI reads the entries and picks your club&rsquo;s
         ones to watch — name, events, and a factual one-line reason each. It only ever names athletes
         who actually appear in the entries.</p>
@@ -657,7 +657,7 @@ def render_cards_html(
   <div class="mh-card-confidence" title="Model confidence">{conf_pct}% conf{pill_html}</div>
   <div class="mh-card-platform">{_platform_icon(platform)} {_h(platform)}</div>
   <div class="mh-card-caption">{_h(caption)}</div>
-  {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ''}
+  {f'<div class="mh-card-tags">{tag_chips}</div>' if tag_chips else ""}
   {notes_html}
   <div class="mh-card-actions">
     <button type="button" class="primary" onclick='(function(b){{
@@ -716,12 +716,12 @@ def render_cards_html(
 """
 
     return (
-        f'<h1>{_h(title)}</h1>'
+        f"<h1>{_h(title)}</h1>"
         f'<p class="dim" style="margin-bottom:20px">{len(cards)} draft '
-        f'{"card" if len(cards) == 1 else "cards"} generated. Review, edit, approve, and post.</p>'
-        f'{cards_html}'
-        f'{pill_js}'
+        f"{'card' if len(cards) == 1 else 'cards'} generated. Review, edit, approve, and post.</p>"
+        f"{cards_html}"
+        f"{pill_js}"
         f'<div style="margin-top:24px;display:flex;gap:10px">'
         f'<a class="btn secondary" href="{_h(back_url)}">← Start over</a>'
-        f'</div>'
+        f"</div>"
     )

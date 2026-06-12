@@ -52,6 +52,13 @@ _MEET_LEVEL_SCORE = {
 }
 
 _TYPE_NARRATIVE_BONUS = {
+    "club_record": 0.9,        # old mark vs new mark is a ready-made story
+    "club_debut": 0.6,
+    "race_milestone_25": 0.5,
+    "race_milestone_50": 0.6,
+    "race_milestone_100": 0.7,
+    "race_milestone_250": 0.7,
+    "race_milestone_500": 0.7,
     "multi_pb_weekend": 1.0,
     "biggest_drop_candidate": 0.8,
     "return_to_form": 0.7,
@@ -61,6 +68,14 @@ _TYPE_NARRATIVE_BONUS = {
 }
 
 _TYPE_MAGNITUDE = {
+    "club_record": 1.1,   # W.3: the highest-emotion club moment — outranks every PB and gold
+    "club_debut": 0.65,
+    "race_milestone_25": 0.6,
+    "race_milestone_50": 0.75,
+    "race_milestone_100": 0.85,
+    "race_milestone_250": 0.9,
+    "race_milestone_500": 0.95,
+    "first_event_swim": 0.35,
     "medal_gold": 1.0,
     "medal_silver": 0.8,
     "medal_bronze": 0.6,

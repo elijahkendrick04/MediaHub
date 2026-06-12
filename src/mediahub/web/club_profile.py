@@ -40,6 +40,9 @@ class ClubProfile:
     country: str = ""
     notes: str = ""
 
+    # W.13: caption language — "en" | "cy" (Welsh) | "bilingual" (both)
+    language: str = "en"
+
     # ---- V7 extensions (all optional with defaults so old JSON still loads) ----
 
     # BrandKit dict (matches brand.kit.BrandKit.to_dict() schema)

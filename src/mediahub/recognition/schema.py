@@ -67,6 +67,10 @@ class PostAngle(str, Enum):
     ATHLETE_SPOTLIGHT = "athlete_spotlight"
     RECAP_MENTION = "recap_mention"
 
+    # Club history (Phase W)
+    CLUB_RECORD = "club_record"
+    MILESTONE = "milestone"
+
 
 POST_ANGLE_LABELS: dict[PostAngle, str] = {
     PostAngle.CONFIRMED_OFFICIAL_PB: "Official PB confirmed",
@@ -90,6 +94,8 @@ POST_ANGLE_LABELS: dict[PostAngle, str] = {
     PostAngle.WEEKEND_IN_NUMBERS: "Weekend in numbers",
     PostAngle.ATHLETE_SPOTLIGHT: "Athlete spotlight",
     PostAngle.RECAP_MENTION: "Recap mention",
+    PostAngle.CLUB_RECORD: "New club record",
+    PostAngle.MILESTONE: "Club milestone",
 }
 
 

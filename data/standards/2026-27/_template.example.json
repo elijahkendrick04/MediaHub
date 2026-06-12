@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "schema_notes": "Copy of the data/quals.json schema. Time format is seconds-as-string (e.g. '0:29.00', '2:25.00'). Course is LC or SC. Gender F/M. Files ending .example.json are never loaded — rename to <body>_<competition>.json after filling in REAL published times with their source PDF URL.",
+  "standards": [
+    {
+      "id": "BODY_COURSE_SEASON_COMP",
+      "competition": "Example County Championships 2027",
+      "body": "Example County ASA",
+      "level": "county",
+      "course": "LC",
+      "season": "2026-27",
+      "window_start": "2026-01-01",
+      "window_end": "2027-01-31",
+      "venue": "",
+      "event_dates": "",
+      "source_url": "REQUIRED — URL of the published qualifying-times PDF",
+      "retrieved_at": "REQUIRED — ISO date you transcribed the table",
+      "confidence": "high",
+      "importance_score": 60,
+      "relevance_clubs": ["*"],
+      "notes": "Transcribe exactly; omit unreadable cells and note them here.",
+      "times": [
+        {"event": "50_FR", "gender": "F", "ct": "0:32.00"},
+        {"event": "50_FR", "gender": "M", "ct": "0:29.50"}
+      ]
+    }
+  ]
+}

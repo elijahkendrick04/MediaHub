@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LENEX version="3.0">
+  <CONSTRUCTOR name="MediaHub Test Fixtures" registration="MediaHub" version="1.0">
+    <CONTACT email="fixtures@example.test"/>
+  </CONSTRUCTOR>
+  <MEETS>
+    <MEET name="Summer Sprint Gala 2026" city="Aberdeen" nation="GBR" course="LCM">
+      <SESSIONS>
+        <SESSION number="1" date="2026-05-16">
+          <EVENTS>
+            <EVENT eventid="1" number="1" gender="M">
+              <SWIMSTYLE distance="100" relaycount="1" stroke="FREE"/>
+            </EVENT>
+            <EVENT eventid="2" number="2" gender="F">
+              <SWIMSTYLE distance="50" relaycount="1" stroke="BREAST"/>
+            </EVENT>
+          </EVENTS>
+        </SESSION>
+      </SESSIONS>
+      <CLUBS>
+        <CLUB name="Aberdeen Dolphins" code="ABDN" nation="GBR">
+          <ATHLETES>
+            <ATHLETE athleteid="11" firstname="Calum" lastname="Reid" gender="M" birthdate="2008-03-14">
+              <ENTRIES>
+                <ENTRY eventid="1" entrytime="00:00:58.20"/>
+              </ENTRIES>
+            </ATHLETE>
+            <ATHLETE athleteid="12" firstname="Euan" lastname="Park" gender="M" birthdate="2009-07-02">
+              <ENTRIES>
+                <ENTRY eventid="1" entrytime="NT"/>
+              </ENTRIES>
+            </ATHLETE>
+          </ATHLETES>
+        </CLUB>
+        <CLUB name="Granite City SC" code="GCSC" nation="GBR">
+          <ATHLETES>
+            <ATHLETE athleteid="21" firstname="Mhairi" lastname="Watt" gender="F" birthdate="2010-11-25">
+              <ENTRIES>
+                <ENTRY eventid="2" entrytime="00:00:43.50"/>
+              </ENTRIES>
+            </ATHLETE>
+          </ATHLETES>
+        </CLUB>
+      </CLUBS>
+    </MEET>
+  </MEETS>
+</LENEX>

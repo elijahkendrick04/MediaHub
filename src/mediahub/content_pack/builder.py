@@ -44,6 +44,15 @@ _TYPE_TO_ANGLE = {
     "relay_medal_silver": "relay_highlight",
     "relay_medal_bronze": "relay_highlight",
     "relay_strong": "relay_highlight",
+    # Phase W — club history angles
+    "club_record": "club_record",
+    "club_debut": "milestone",
+    "race_milestone_25": "milestone",
+    "race_milestone_50": "milestone",
+    "race_milestone_100": "milestone",
+    "race_milestone_250": "milestone",
+    "race_milestone_500": "milestone",
+    "first_event_swim": "milestone",
 }
 
 # Recommender override map: when a swimmer has medal + official_pb, override angle
@@ -55,10 +64,28 @@ _OVERRIDE_RULES = [
 ]
 
 
-def _enrich_item(ra: dict, wf_states: dict = None) -> dict:
-    """Add copy text variants and post_angle to a RankedAchievement dict."""
+def _enrich_item(ra: dict, wf_states: dict = None, consent_policy=None) -> dict:
+    """Add copy text variants and post_angle to a RankedAchievement dict.
+
+    ``consent_policy`` (W.2, a ``safeguarding.ConsentPolicy``) is enforced
+    here — the single seam every downstream surface (captions, graphics,
+    exports, publish payloads) reads cards through: initials-only rewrites
+    the display name on the card copy; blocked athletes force
+    ``do_not_post`` with the reason shown in review.
+    """
     item = dict(ra)
     a = item.get("achievement", {}) or {}
+
+    if consent_policy is not None:
+        item["consent"] = consent_policy.to_dict()
+        if consent_policy.blocked:
+            item["consent_blocked"] = True
+            item["safe_to_post"] = {"level": "do_not_post", "reason": consent_policy.reason}
+        elif consent_policy.level == "initials_only":
+            # The card copy renders initials everywhere; the underlying run
+            # snapshot keeps the real name for provenance.
+            a = dict(a, swimmer_name=consent_policy.display_name)
+            item["achievement"] = a
 
     # Determine post angle
     atype = a.get("type", "")
@@ -168,6 +195,26 @@ def build_grouped_pack(
     rr = run_data.get("recognition_report") or {}
     ranked_achs = rr.get("ranked_achievements") or []
 
+    # W.2: resolve each swimmer's consent policy once. Permissive when the
+    # workspace runs no consent regime (or the module is unavailable).
+    consent_policies: dict[str, object] = {}
+    if profile_id:
+        try:
+            from mediahub.safeguarding import effective_policy, regime_active
+
+            if regime_active(profile_id):
+                names = {
+                    (ra.get("achievement") or {}).get("swimmer_name", "") for ra in ranked_achs
+                }
+                for name in names:
+                    if name:
+                        consent_policies[name] = effective_policy(profile_id, name)
+        except Exception:
+            consent_policies = {}
+
+    def _policy_for(a: dict):
+        return consent_policies.get((a or {}).get("swimmer_name", "") or "")
+
     # Get V4 cards
     cards = run_data.get("cards") or []
 
@@ -186,7 +233,7 @@ def build_grouped_pack(
         band = ra.get("quality_band", "nice")
         swimmer_id = a.get("swimmer_id", "")
 
-        item = _enrich_item(ra, wf_states)
+        item = _enrich_item(ra, wf_states, consent_policy=_policy_for(a))
         s2p = item.get("safe_to_post", {})
         s2p_level = s2p.get("level", "needs_review") if isinstance(s2p, dict) else "needs_review"
         wf_status = item.get("wf_status", "queue")
@@ -212,8 +259,9 @@ def build_grouped_pack(
         else:
             needs_review.append(item)
 
-        # Track per-swimmer for spotlights
-        if swimmer_id:
+        # Track per-swimmer for spotlights (never spotlight a consent-blocked
+        # athlete — W.2).
+        if swimmer_id and not item.get("consent_blocked"):
             swimmer_achievements[swimmer_id].append(item)
 
     # Athlete spotlights: swimmers with >= 3 achievements

@@ -177,6 +177,7 @@ def schedule_post(
     text: str,
     media_urls: Optional[list[str]] = None,
     scheduled_at: Optional[datetime] = None,
+    alt_text: str = "",
 ) -> dict:
     """Create a Buffer update on `channel_id`.
 
@@ -236,6 +237,10 @@ def schedule_post(
         if first:
             payload.append(("media[link]", str(first).strip()))
             payload.append(("media[photo]", str(first).strip()))
+            # W.11: result-grounded alt text rides every publish payload
+            # that carries media (Buffer's media description field).
+            if alt_text and alt_text.strip():
+                payload.append(("media[description]", alt_text.strip()[:500]))
 
     url = f"{BUFFER_API_BASE}/1/updates/create.json"
     try:
