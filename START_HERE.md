@@ -27,7 +27,7 @@ Think of the project as a building. Here's what's in each room (folder):
 | `scripts/` | Small helper programs the team runs by hand (build steps, reports). |
 | `autotest/` | A robot that tests the whole app by itself in the cloud and reports bugs. |
 | `.github/`, `.claude/` | Settings for the automatic cloud checks and for the AI assistant. |
-| `vendor/` | **Downloaded toolkits — NOT part of MediaHub.** Reference kits (Claude skill "marketplaces") kept for ideas, tucked away in one folder. You can ignore this whole folder. |
+| `vendor/` | **Downloaded toolkits — NOT part of MediaHub.** Reference kits (Claude skill "marketplaces") kept for ideas, tucked away in one folder. One kit (`claude-seo-main/`) is plugged into the AI assistant so it can check how easy our web pages are for Google to find (called "SEO"). Otherwise you can ignore this whole folder. |
 
 > Each important folder has its own `README.md` with one or two plain sentences.
 > Open it to learn what that folder does.

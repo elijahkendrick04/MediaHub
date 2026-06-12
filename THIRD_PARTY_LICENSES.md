@@ -112,6 +112,7 @@ is not imported by the MediaHub runtime. Attribution status, audited
 | `matt-pocock-skills/` | MIT | OK |
 | `taste-skill-main/` | MIT | OK |
 | `ui-ux-pro-max-skill-main/` | MIT | OK |
+| `claude-seo-main/` | MIT | OK — © Agrici Daniel (v2.0.0, added 2026-06-12); its 25 skills + 18 agents are symlinked into `.claude/` as dev tooling, never imported by the MediaHub runtime |
 
 **Resolved 2026-06-12 (PC.11):** `agent-skills-main/` and
 `bencium-marketplace-main/` carried no upstream licence file, so MediaHub had

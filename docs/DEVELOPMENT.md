@@ -67,6 +67,35 @@ Both endpoints serve the rendered MP4 directly with `Content-Type: video/mp4`.
 Cache hits return the existing file (< 30s wall-clock); cold renders take
 30–90s depending on the host's CPU.
 
+## SEO toolkit (`/seo` commands in Claude Code)
+
+The [claude-seo](https://github.com/AgriciDaniel/claude-seo) plugin (MIT, v2.0.0)
+is vendored verbatim at `vendor/claude-seo-main/` and wired into Claude Code at
+repo level: all 25 skills are symlinked into `.claude/skills/` and the 18
+specialist agents into `.claude/agents/`. In any Claude Code session on this
+repo you can run e.g. `/seo audit <url>`, `/seo page <url>`, `/seo schema <url>`
+against MediaHub's public pages (deployed or `make run` + a tunnel). It is dev
+tooling only — nothing under `vendor/` is imported by the MediaHub runtime, and
+the usual hands-off rule for `vendor/` applies.
+
+Notes:
+
+- **Python deps** — the skills' helper scripts need extras MediaHub doesn't ship
+  (trafilatura, htmldate, weasyprint, matplotlib, google-api-python-client…).
+  Install on demand: `pip install -r vendor/claude-seo-main/requirements.txt`.
+  Skills that need a missing dep say so; nothing breaks without them.
+- **Deliberately not wired** — the 8 optional MCP extensions under
+  `vendor/claude-seo-main/extensions/` (DataForSEO, Firecrawl, Banana, Ahrefs,
+  SE Ranking, Profound, Bing Webmaster, Unlighthouse) need external accounts /
+  MCP servers; run their `install.sh` yourself if you want one. The upstream
+  PostToolUse schema-validation hook (`hooks/hooks.json`) is also unwired: it
+  relies on `${CLAUDE_PLUGIN_ROOT}` / `$FILE_PATH`, which only exist for
+  plugin-manager installs, so wiring it at repo level would spawn a dead
+  subprocess on every edit.
+- **Conduct** — audits are read-only crawls of public pages, but the standing
+  rule in `CLAUDE.md` still applies: don't hammer the production Render
+  deployment; prefer auditing a dev instance or keep crawl budgets small.
+
 ## API keys for dev
 
 The codebase no longer ships heuristic fallbacks for AI-driven features. To

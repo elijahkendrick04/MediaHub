@@ -57,7 +57,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MAX_KB: "1500"               # matches check-added-large-files
-          MAX_NEW_FILES: "300"         # vendor/ is pre-existing; renames/moves don't count
+          MAX_NEW_FILES: "450"         # raised 300→450 for the intentional vendor/claude-seo-main
+                                       # drop (2026-06-12, ~405 files incl. .claude symlinks); safe
+                                       # to lower back to 300 once that PR has merged.
         run: |
           # Only files this PR ADDS (status=A) versus the base — never pre-existing files.
           # Rename detection is forced on (with a high limit) so moving a big folder
