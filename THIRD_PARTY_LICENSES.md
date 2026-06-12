@@ -112,8 +112,13 @@ is not imported by the MediaHub runtime. Attribution status, audited
 | `matt-pocock-skills/` | MIT | OK |
 | `taste-skill-main/` | MIT | OK |
 | `ui-ux-pro-max-skill-main/` | MIT | OK |
-| `agent-skills-main/` | **none found** | ⚠ UNRESOLVED — do not redistribute or derive product code from this directory until its upstream licence is confirmed (or remove it) |
-| `bencium-marketplace-main/` | **none found** | ⚠ UNRESOLVED — same constraint |
+
+**Resolved 2026-06-12 (PC.11):** `agent-skills-main/` and
+`bencium-marketplace-main/` carried no upstream licence file, so MediaHub had
+no verifiable right to redistribute them. Both directories were **removed**
+from the repository (nothing in `src/`, `tests/`, `scripts/` or `.claude/`
+referenced them). `tests/test_vendor_licences.py` now fails the build if a
+vendored directory ever lands without a licence or third-party notice file.
 
 ## Scraper conduct (results fetching & PB verification)
 

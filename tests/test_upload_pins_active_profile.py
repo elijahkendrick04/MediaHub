@@ -57,7 +57,7 @@ class TestRunPinsActiveProfile:
         """The configure POST must persist the active profile_id into
         the runs row so the run shows on /activity."""
         c, _, tmp_path = gated_client
-        sample = Path(__file__).resolve().parents[1] / "samples" / "MISM-2024-Results.pdf"
+        sample = Path(__file__).resolve().parents[1] / "sample_data" / "MISM-2024-Results.pdf"
         if not sample.exists():
             pytest.skip(f"sample missing: {sample}")
 
@@ -113,7 +113,7 @@ class TestRunPinsActiveProfile:
         /activity. Without the profile_id fix, the activity page is
         empty even when the DB has the row."""
         c, _, _ = gated_client
-        sample = Path(__file__).resolve().parents[1] / "samples" / "MISM-2024-Results.pdf"
+        sample = Path(__file__).resolve().parents[1] / "sample_data" / "MISM-2024-Results.pdf"
         if not sample.exists():
             pytest.skip(f"sample missing: {sample}")
 

@@ -37,6 +37,30 @@ or memory warnings (check `/healthz/memory`), set `MEDIAHUB_RUN_SEARXNG = 0` in
 Render and redeploy — that turns SearXNG off and frees the memory immediately,
 with no other effect (MediaHub goes back to DuckDuckGo).
 
+## Troubleshooting: "SearXNG unavailable" in the logs
+
+Quick check: open `/healthz/search`. It tells you which engine is really in
+use, whether SearXNG answered a live probe, and whether the circuit breaker is
+open.
+
+How the pieces fail safe (hardened after the June 2026 incident, where the
+image silently shipped without SearXNG and every research query warned about
+it):
+
+- **Install** — SearXNG's `setup.py` imports its own package, so the Dockerfile
+  installs SearXNG's pinned `requirements.txt` first and then installs with
+  `--no-build-isolation`, pinned to a verified commit (`SEARXNG_REF`). The
+  build log prints `searxng OK` on success and a WARN line on failure (the
+  image still builds — MediaHub just uses DuckDuckGo).
+- **Boot** — the entrypoint waits (up to 20s) for SearXNG to actually answer on
+  127.0.0.1:8888. If it doesn't, it prints the tail of `/tmp/searxng.log` into
+  the deploy log and **unsets `MEDIAHUB_SEARCH_ENDPOINT`** so the app is
+  honestly on DuckDuckGo instead of probing a dead port on every query.
+- **Runtime** — if SearXNG dies later, the first failed query logs ONE warning
+  and opens a circuit breaker (`MEDIAHUB_SEARCH_BREAKER_COOLDOWN`, default 5
+  minutes of silent DuckDuckGo); a `/healthz/search` probe that succeeds closes
+  it immediately. No more one-warning-per-query spam.
+
 ## Licensing note
 
 SearXNG is AGPL-3.0 and is run **stock and unmodified** — MediaHub only sends it
