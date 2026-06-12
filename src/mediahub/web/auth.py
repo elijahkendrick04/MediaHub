@@ -495,9 +495,7 @@ _DEV_SESSION_KEY = "dev_operator"
 # Operator credential. The hash is an argon2id digest of the password — NOT the
 # plaintext — so the repo never carries the secret. Override via env to rotate.
 _DEV_USERNAME_DEFAULT = "ekandani"
-_DEV_PASSWORD_HASH_DEFAULT = (
-    "$argon2id$v=19$m=65536,t=3,p=4$HjeXdWZx1uYcUxNtTxXtLA$DNRsBGz79R7ZKydqu1GeANyn0bM6gdMOD7VyC+H31iw"
-)
+_DEV_PASSWORD_HASH_DEFAULT = "$argon2id$v=19$m=65536,t=3,p=4$HjeXdWZx1uYcUxNtTxXtLA$DNRsBGz79R7ZKydqu1GeANyn0bM6gdMOD7VyC+H31iw"
 
 
 def _dev_operator_email() -> str:

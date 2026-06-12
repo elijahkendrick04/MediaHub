@@ -4,7 +4,10 @@ requests>=2.34.2
 beautifulsoup4>=4.15.0
 lxml>=6.1.1
 pypdf>=6.13.2
-pdfminer.six>=20260107
+# Floor must stay <= the exact pdfminer.six that pdfplumber pins (0.11.9 pins
+# ==20251230); dependabot's >=20260107 bump made the pair unresolvable and
+# broke pip-audit (ResolutionImpossible).
+pdfminer.six>=20251230
 pdfplumber>=0.11.9
 # Spreadsheet ingestion (interpreter/ingest.py _extract_xlsx). Leagues and meets
 # publish results as .xlsx; openpyxl reads them deterministically (read-only).
