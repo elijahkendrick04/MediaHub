@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `073d274dc` · Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455)
+**Last updated:** 2026-06-13 · `fa475f5fc` · Move Pricing into Settings when signed into a club profile (#459)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1310,6 +1310,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
 | 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
 | 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
 | 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
@@ -1319,5 +1320,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `5c55c9bdc` | docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render] |
 | 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
 | 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
-| 2026-06-13 | `874379a4b` | Apply ruff-format (pre-commit hygiene) to changed files |
 <!-- /ROADMAP:ACTIVITY -->
