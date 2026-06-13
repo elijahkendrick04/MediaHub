@@ -3982,21 +3982,38 @@ def _stage_results_zip(zip_bytes: bytes, source_url: str, profile_id: Optional[s
 def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None:
     """Crawl → (AI-read) → package → stage. Updates the job's status dict so the
     upload page can poll tier-aware progress. Honest errors, never a 500."""
-    _url_job_set(job_id, status="running", phase="fetching", progress="Reading the site…")
+    _url_job_set(
+        job_id, status="running", phase="fetching", progress="Reading the site…", percent=8
+    )
     try:
         from mediahub.media_ai.llm import ClaudeUnavailableError
         from mediahub.results_fetch.ai_read import ai_read_candidates
         from mediahub.results_fetch.crawl import crawl_results_site
         from mediahub.results_fetch.package import package_mirror
 
-        crawl = crawl_results_site(url)
+        def _on_progress(pages: int, kept: int, total_bytes: int) -> None:
+            # Coarse, honest progress: the crawl has no fixed total (frontier +
+            # budgets), so the bar creeps with pages fetched and caps at 70%
+            # before the read/package phases take it home. The text carries the
+            # real live counters.
+            _url_job_set(
+                job_id,
+                phase="fetching",
+                progress=(
+                    f"Fetched {pages} page{'s' if pages != 1 else ''} · "
+                    f"{kept} kept · {total_bytes // 1024} KB"
+                ),
+                percent=min(70, 10 + pages),
+            )
+
+        crawl = crawl_results_site(url, progress_cb=_on_progress)
         summary = (
             f"Fetched {crawl.pages_visited} pages · {crawl.kept} kept · "
             f"{crawl.total_bytes // 1024} KB"
         )
         if crawl.render_budget_hit:
             summary += " · render budget reached"
-        _url_job_set(job_id, phase="reading", progress=summary)
+        _url_job_set(job_id, phase="reading", progress=summary, percent=75)
 
         # "No results" = nothing the engine could keep. The entry landing page is
         # always recorded for provenance, so ``is_empty`` can be False even when
@@ -4005,6 +4022,12 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
 
         ai_extractions: list = []
         if crawl.ai_candidates:
+            _url_job_set(
+                job_id,
+                phase="reading",
+                progress=summary + f" · reading {len(crawl.ai_candidates)} page(s) with AI",
+                percent=82,
+            )
             try:
                 ai_extractions = ai_read_candidates(crawl.ai_candidates)
             except ClaudeUnavailableError:
@@ -4042,10 +4065,10 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
             )
             return
 
-        _url_job_set(job_id, phase="packaging", progress=summary + " · packaging")
+        _url_job_set(job_id, phase="packaging", progress=summary + " · packaging", percent=92)
         zip_bytes = package_mirror(crawl, ai_extractions)
         temp_run_id = _stage_results_zip(zip_bytes, url, profile_id)
-        _url_job_set(job_id, status="done", run_id=temp_run_id, progress=summary)
+        _url_job_set(job_id, status="done", run_id=temp_run_id, progress=summary, percent=100)
     except Exception as e:  # noqa: BLE001 — surface as an honest job error, not a 500
         import traceback
 
@@ -4055,7 +4078,9 @@ def _run_url_fetch_job(job_id: str, url: str, profile_id: Optional[str]) -> None
 
 def _start_url_fetch_job(url: str, profile_id: Optional[str]) -> str:
     job_id = uuid.uuid4().hex[:12]
-    _url_job_set(job_id, status="queued", phase="queued", progress="Queued", source_url=url)
+    _url_job_set(
+        job_id, status="queued", phase="queued", progress="Queued", source_url=url, percent=3
+    )
     t = threading.Thread(target=_run_url_fetch_job, args=(job_id, url, profile_id), daemon=True)
     t.start()
     return job_id
@@ -9684,6 +9709,11 @@ def create_app() -> Flask:
     <input id="mh-url-input" type="url" inputmode="url" autocomplete="off" placeholder="https://results.example.org/championships/2026/" aria-label="Results page URL" style="flex:1;min-width:260px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box" />
     <button id="mh-url-fetch" class="btn" type="button">Fetch results &rarr;</button>
   </div>
+  <div id="mh-url-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Fetch progress" style="margin-top:var(--sp-3)">
+    <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden">
+      <div id="mh-url-progress-fill" style="height:100%;width:0%;border-radius:999px;background:var(--accent);transition:width 0.45s ease"></div>
+    </div>
+  </div>
   <div id="mh-url-status" role="status" aria-live="polite" hidden style="margin-top:var(--sp-3);padding:10px 12px;border-radius:8px;background:rgba(212,255,58,0.06);border:1px solid rgba(212,255,58,0.22);font-family:var(--font-mono);font-size:13px;color:var(--ink-muted)"></div>
   <div id="mh-url-error" class="mh-field-error" role="alert" hidden style="margin-top:var(--sp-3)"></div>
 </div>
@@ -9693,14 +9723,26 @@ def create_app() -> Flask:
   var input = document.getElementById('mh-url-input');
   var statusEl = document.getElementById('mh-url-status');
   var errEl = document.getElementById('mh-url-error');
+  var barWrap = document.getElementById('mh-url-progress');
+  var barFill = document.getElementById('mh-url-progress-fill');
   if (!btn || !input) return;
   function show(el, msg){ el.textContent = msg; el.hidden = false; }
   function hide(el){ el.hidden = true; }
+  var lastPct = 0;
+  function setPct(p){
+    if (typeof p !== 'number' || isNaN(p)) return;
+    // Monotonic: never let the bar jump backwards on a stale poll.
+    if (p < lastPct) p = lastPct;
+    lastPct = p;
+    if (barWrap) { barWrap.hidden = false; barWrap.setAttribute('aria-valuenow', String(p)); }
+    if (barFill) barFill.style.width = p + '%';
+  }
   function go(){
     var url = (input.value || '').trim();
     hide(errEl);
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
+    lastPct = 0; setPct(3);
     var fd = new FormData(); fd.append('url', url);
     fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
       .then(function(r){ return r.text().then(function(t){ var j=null; try { j=JSON.parse(t); } catch(e){} return { ok: r.ok, status: r.status, j: j }; }); })
@@ -9709,14 +9751,15 @@ def create_app() -> Flask:
         if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
-      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); show(errEl, e.message); });
+      .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, e.message); });
   }
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
       fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
-        if (j.status === 'done' && j.redirect) { show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
-        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); show(errEl, j.error || 'The fetch failed.'); return; }
+        if (typeof j.percent === 'number') setPct(j.percent);
+        if (j.status === 'done' && j.redirect) { setPct(100); show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
+        if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); hide(barWrap); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
         setTimeout(tick, 1500);
       }).catch(function(){ setTimeout(tick, 2500); });
@@ -10251,6 +10294,7 @@ def create_app() -> Flask:
             "status": entry.get("status", "unknown"),
             "phase": entry.get("phase", ""),
             "progress": entry.get("progress", ""),
+            "percent": entry.get("percent", 0),
         }
         if entry.get("status") == "done" and entry.get("run_id"):
             payload["redirect"] = url_for("upload_configure", run_id=entry["run_id"])

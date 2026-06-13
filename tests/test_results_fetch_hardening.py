@@ -343,6 +343,22 @@ def test_from_url_returns_json_409_when_org_not_ready(app_mod):
     assert html.status_code in (301, 302)
 
 
+def test_status_endpoint_reports_percent(app_mod):
+    """The poll payload carries a numeric percent so the upload page can drive
+    its live progress bar."""
+    app, wm = app_mod
+    job_id = "abcdef012345"
+    wm._url_job_set(
+        job_id, status="running", phase="fetching", progress="Fetched 5 pages", percent=15
+    )
+    c = app.test_client()
+    r = c.get(f"/api/upload/from-url/{job_id}/status")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["percent"] == 15
+    assert body["status"] == "running"
+
+
 def test_refetch_route_rejects_non_link_run(app_mod):
     app, wm = app_mod
     rid = "nolink000001"
