@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `fa475f5fc` · Move Pricing into Settings when signed into a club profile (#459)
+**Last updated:** 2026-06-13 · `394e9ea61` · Merge pull request #462 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1310,6 +1310,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
+| 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
 | 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
 | 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
 | 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
@@ -1318,6 +1320,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
 | 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
 | 2026-06-13 | `5c55c9bdc` | docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render] |
-| 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
-| 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
 <!-- /ROADMAP:ACTIVITY -->
