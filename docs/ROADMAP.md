@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `ce271d4fd` · Make the signed-in logo wall versatile for any logo / any colour (#454)
+**Last updated:** 2026-06-13 · `073d274dc` · Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -125,7 +125,6 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
-- **U.1** · Phase 1 (Product polish) — Core-flow polish: Home, Add Input, the content-pack review, and Settings → Autonomy raised to a credible sport-editorial standard — strong hierarchy, one obvious primary action per screen, dark-first on the existing `--bg`/`--accent`/`--ink`/`--panel` CSS variables · ❌ **NOT STARTED**
 - **U.2** · Phase 1 (Product polish) — Every state designed across the primary flow (empty / loading / error / success), including the honest AI-unavailable error and the parse-uncertainty / flag-for-review surfaces · ❌ **NOT STARTED**
 - **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI · ❌ **NOT STARTED**
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
@@ -1311,6 +1310,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
+| 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
 | 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
 | 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
 | 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
@@ -1319,7 +1320,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
 | 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
 | 2026-06-13 | `874379a4b` | Apply ruff-format (pre-commit hygiene) to changed files |
-| 2026-06-13 | `4b6971191` | Settings polish: drop redundant Activity sub-heading; keep Clear cache on its page |
-| 2026-06-13 | `0f438e2bc` | Signed-in pages: faint background watermark of the org's logo(s) (bullet 11) |
-| 2026-06-13 | `ac7a4c4e5` | Free Text: single prompt -> branded graphic, with photos (bullet 13) |
 <!-- /ROADMAP:ACTIVITY -->
