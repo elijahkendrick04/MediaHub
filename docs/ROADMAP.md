@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `a0d315a64` · Design every primary-flow state (U.2): honest AI error, pipeline failure, parse notes, success toast
+**Last updated:** 2026-06-13 · `8c1b2e952` · Merge pull request #467 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1309,6 +1309,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
 | 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
 | 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
 | 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
@@ -1318,5 +1319,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
 | 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
 | 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
-| 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
 <!-- /ROADMAP:ACTIVITY -->
