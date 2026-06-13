@@ -7314,7 +7314,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('home') }}" class="{{ 'active' if active=='home' else '' }}">Home</a>
     <a href="{{ url_for('plan_page') }}" class="{{ 'active' if active=='plan' else '' }}">Plan</a>
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
-    <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
@@ -13750,7 +13749,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
-                active="organisation",
+                active="settings",
             ), 404
         from mediahub.compliance.consent import ConsentRegistry
 
@@ -13877,7 +13876,7 @@ Relay team broke club record"></textarea>
   <p class="muted">Records are append-only: every change keeps its history (accountability). Revoking consent takes effect immediately for all future approvals, packs and publishes; already-published posts must be handled on the platform itself.</p>
 </div>
 """
-        return _layout("Consent & lawful basis", body, active="organisation")
+        return _layout("Consent & lawful basis", body, active="settings")
 
     @app.route("/organisation/consent/settings", methods=["POST"])
     def org_consent_settings():
@@ -13946,7 +13945,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Consent",
                 '<div class="card"><p class="tag bad">Athlete name and a valid decision are required.</p></div>',
-                active="organisation",
+                active="settings",
             ), 400
         recorded_by = ""
         try:
@@ -13976,7 +13975,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Athlete rights",
                 '<div class="card"><p class="tag bad">Set up your organisation first.</p></div>',
-                active="organisation",
+                active="settings",
             ), 404
         from mediahub.compliance.dsr import DsrRequestLog
 
@@ -14059,7 +14058,7 @@ Relay team broke club record"></textarea>
 <div class="card"><h2>Requests</h2>{table}
 <p class="muted">"Run export" downloads a machine-readable JSON of everything held about the athlete. "Run erasure" removes them from runs, rendered cards, caches, the media library and caption memory, keeps a suppression record so they can't reappear, and reports anything it could not reach — honestly.</p></div>
 """
-        return _layout("Athlete rights", body, active="organisation")
+        return _layout("Athlete rights", body, active="settings")
 
     @app.route("/organisation/athlete-rights/open", methods=["POST"])
     def org_dsr_open():
@@ -14074,7 +14073,7 @@ Relay team broke club record"></textarea>
             return _layout(
                 "Athlete rights",
                 '<div class="card"><p class="tag bad">Athlete name and a valid request type are required.</p></div>',
-                active="organisation",
+                active="settings",
             ), 400
         DsrRequestLog().open(
             profile_id=pid,
@@ -14121,7 +14120,7 @@ Relay team broke club record"></textarea>
                 + _h(json.dumps(report, indent=2))
                 + f'</pre><p><a href="{url_for("org_athlete_rights")}">Back to athlete rights</a></p></div>'
             )
-            return _layout("Erasure report", body, active="organisation")
+            return _layout("Erasure report", body, active="settings")
         if req.request_type == "restriction":
             ConsentRegistry(pid).set_restricted(req.athlete_name, True, recorded_by=recorded_by)
             log_store.complete(request_id, note="restriction applied")
@@ -21158,7 +21157,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             style="border-color:rgba(255,107,107,0.4)">Delete organisation</button>
   </form>
 </div>"""
-        return _layout("Organisation", body, active="organisation")
+        return _layout("Organisation", body, active="settings")
 
     # ---- /organisation/setup &mdash; first-run AI brand-DNA flow -----------
     #
@@ -23679,7 +23678,7 @@ what you're doing, what they should do.</p>
             + f'<p style="margin-top:18px"><a class="btn secondary" '
             f'href="{url_for("organisation_page")}">&larr; Back to organisation</a></p>'
         )
-        return _layout("Workspace members", body, active="organisation")
+        return _layout("Workspace members", body, active="settings")
 
     # ---- PC.13 — whole-org takeout + deletion (UK GDPR Arts. 15/17/20) ----
 
@@ -23739,7 +23738,7 @@ what you're doing, what they should do.</p>
                 "Export failed",
                 '<div class="card"><p class="tag bad">The takeout export failed — '
                 "try again, and contact support if it persists.</p></div>",
-                active="organisation",
+                active="settings",
             ), 500
 
         @after_this_request
@@ -23775,7 +23774,7 @@ what you're doing, what they should do.</p>
                 "match — nothing was deleted.</p>"
                 f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
                 "&larr; Back</a></p></div>",
-                active="organisation",
+                active="settings",
             ), 400
         email = _auth.current_user_email()
         if email and not _auth.is_dev_operator():
@@ -23788,7 +23787,7 @@ what you're doing, what they should do.</p>
                     "&mdash; organisation NOT deleted.</p>"
                     f'<p><a class="btn secondary" href="{url_for("organisation_page")}">'
                     "&larr; Back</a></p></div>",
-                    active="organisation",
+                    active="settings",
                 ), 403
         from mediahub.privacy import delete_org
 
@@ -25179,7 +25178,7 @@ function mhSetupMode(mode) {{
 }})();
 </script>
 """
-        return _layout("Set up your organisation", body, active="organisation")
+        return _layout("Set up your organisation", body, active="settings")
 
     @app.route("/organisation/setup/capture", methods=["POST"])
     def organisation_setup_capture():
