@@ -486,3 +486,51 @@ def test_fonts_css_wildcard_accept_returns_css(client):
     assert r.status_code == 200
     # Should be CSS or at minimum not HTML
     assert not r.content_type.startswith("text/html")
+
+
+# /sw.js — document-title (axe-core WCAG 2.4.2)
+# ---------------------------------------------------------------------------
+
+
+def test_sw_js_browser_nav_has_title(client):
+    """Direct browser navigation to /sw.js must return an HTML document with a
+    <title> element — regression for axe-core document-title (WCAG 2.4.2).
+    A real browser navigation ranks text/html strictly above */*;q=0.8."""
+    r = client.get(
+        "/sw.js",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub" in body
+
+
+def test_sw_js_sec_fetch_dest_document_has_title(client):
+    """Sec-Fetch-Dest: document (Chromium/Firefox page.goto) must trigger the
+    HTML path for /sw.js even when Accept is absent."""
+    r = client.get("/sw.js", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
+
+
+def test_sw_js_service_worker_load_returns_js(client):
+    """Service-worker script loads (Sec-Fetch-Dest: serviceworker) must receive
+    the real JavaScript — the HTML intercept must not break SW registration."""
+    r = client.get("/sw.js", headers={"Sec-Fetch-Dest": "serviceworker"})
+    assert r.status_code == 200
+    assert "javascript" in r.content_type
+    body = r.data.decode()
+    assert "addEventListener('install'" in body
+
+
+def test_sw_js_wildcard_accept_returns_js(client):
+    """Accept: */* (fetch() default, browser SW registration) must return the
+    JavaScript, not HTML, so the service worker registers correctly."""
+    r = client.get("/sw.js", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert not r.content_type.startswith("text/html")

@@ -14313,6 +14313,25 @@ Relay team broke club record"></textarea>
     def service_worker():
         """Serve the service worker from the app root so it can control the whole
         scope (via Service-Worker-Allowed)."""
+        # Browser navigations (direct URL, axe-core page.goto) get a minimal
+        # HTML document with a valid <title> so axe-core's document-title rule
+        # (WCAG 2.4.2) is satisfied.  Service-worker script loads receive the
+        # real JavaScript — the browser sends Sec-Fetch-Dest: serviceworker,
+        # not document, so _wants_html_health() returns False for them.
+        if _wants_html_health():
+            return Response(
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub — Service Worker</title>"
+                "</head>"
+                "<body></body>"
+                "</html>",
+                status=200,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
         resp = app.response_class(_SERVICE_WORKER_JS, mimetype="application/javascript")
         resp.headers["Service-Worker-Allowed"] = url_for("home")
         resp.headers["Cache-Control"] = "no-cache"
