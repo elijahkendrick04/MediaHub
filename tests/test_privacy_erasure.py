@@ -176,6 +176,25 @@ def test_run_deletion_cascade_clears_per_run_stores(data_dir):
     assert rows and all((r["caption_excerpt"] or "") == "" for r in rows)
 
 
+def test_run_deletion_cascade_purges_athlete_swims(data_dir):
+    # A deleted run must not leave its swims behind in the milestone log —
+    # otherwise athlete race counts and history survive across the site.
+    from mediahub.athletes.registry import list_athletes, milestone_context, record_run_swims
+    from mediahub.privacy import run_deletion_cascade
+
+    record_run_swims(
+        "sharks", "run1", [{"name": "Maya Patel", "event": "100FRLC", "time_cs": 6500}]
+    )
+    record_run_swims(
+        "sharks", "run2", [{"name": "Maya Patel", "event": "50FRLC", "time_cs": 3000}]
+    )
+    report = run_deletion_cascade("run1", "sharks")
+    assert report["athlete_swims"] == 1
+    # Only run2's swim remains in the active history.
+    assert milestone_context("sharks")["maya patel"]["prior_events"] == ["50FRLC"]
+    assert [a.race_count for a in list_athletes("sharks")] == [1]
+
+
 # ---- account erasure + export ----------------------------------------------
 
 

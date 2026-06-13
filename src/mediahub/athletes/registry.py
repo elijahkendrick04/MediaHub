@@ -329,6 +329,58 @@ def record_run_swims(
     return {"athletes": n_athletes, "swims": n_swims}
 
 
+def purge_run(
+    profile_id: str,
+    run_id: str,
+    db_path: Optional[Path] = None,
+) -> dict:
+    """Erase every logged swim for one run; deactivate athletes left empty.
+
+    The inverse of :func:`record_run_swims`, called from the run-deletion
+    cascade. Without it a deleted meet's swims survive in ``athlete_swims``,
+    so race counts and athlete history would leak back into milestone context
+    and the athlete spotlight after the user thought the run was gone.
+    Returns ``{"swims": removed, "athletes_deactivated": n}``.
+    """
+    if not profile_id or not run_id:
+        return {"swims": 0, "athletes_deactivated": 0}
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        touched = [
+            r["athlete_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT athlete_id FROM athlete_swims"
+                " WHERE profile_id = ? AND run_id = ?",
+                (profile_id, run_id),
+            ).fetchall()
+        ]
+        cur = conn.execute(
+            "DELETE FROM athlete_swims WHERE profile_id = ? AND run_id = ?",
+            (profile_id, run_id),
+        )
+        removed = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        deactivated = 0
+        now = _now()
+        for aid in touched:
+            left = conn.execute(
+                "SELECT COUNT(*) AS c FROM athlete_swims"
+                " WHERE profile_id = ? AND athlete_id = ?",
+                (profile_id, aid),
+            ).fetchone()["c"]
+            if not left:
+                conn.execute(
+                    "UPDATE athletes SET active = 0, updated_at = ?"
+                    " WHERE id = ? AND profile_id = ?",
+                    (now, aid, profile_id),
+                )
+                deactivated += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"swims": removed, "athletes_deactivated": deactivated}
+
+
 def _swims_from_run_payload(
     payload: dict, is_ours: Optional[Callable[[Optional[str]], bool]] = None
 ) -> list[dict]:

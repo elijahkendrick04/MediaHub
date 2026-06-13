@@ -13240,7 +13240,15 @@ Relay team broke club record"></textarea>
                 active="privacy",
             ), 404
         _delete_run(run_id)
-        return redirect(url_for("home"))
+        # Stay where the delete was triggered. The settings activity table
+        # posts via fetch() and just drops the row in place (the "delete there
+        # and then, stay on the page" ask); a plain form post returns to the
+        # page named in ``next`` (same-site validated), falling back to the
+        # settings page rather than bouncing the user home.
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": True, "deleted": run_id})
+        nxt = _safe_next(request.form.get("next") or request.args.get("next"))
+        return redirect(nxt or url_for("settings_page"))
 
     @app.route("/privacy/cache/clear", methods=["POST"])
     def privacy_cache_clear():
@@ -15301,14 +15309,16 @@ Relay team broke club record"></textarea>
             started = (r["created_at"] or "")[:19]
             started_iso = started.replace(" ", "T") + "Z" if started else ""
             rows_html += (
-                f'<tr><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
+                f'<tr data-run-row="{_h(r["id"])}"><td data-label="Input"><a href="{review_href}">{_h(r["meet_name"] or r["file_name"] or r["id"])}</a></td>'
                 f'<td data-label="Status"><span class="tag {badge}">{_h(r["status"])}</span></td>'
                 f'<td data-label="Matched">{_h(r["our_swims"] or 0)}</td>'
                 f'<td data-label="Queue / Total">{_h(r["n_queue"] or 0)} / {_h(r["n_cards"] or 0)}</td>'
                 f'<td data-label="Schedule">{_schedule_summary_html(r["id"])}</td>'
                 f'<td data-label="Started"><time class="mh-rel" datetime="{_h(started_iso)}">{_h(started)}</time></td>'
                 f'<td><form method="post" action="{delete_href}" '
-                f'style="display:inline" data-no-loader="1" onsubmit="return confirm(\'Delete this run? This cannot be undone.\')">'
+                f'class="mh-run-delete" data-run-id="{_h(r["id"])}" '
+                f'style="display:inline" data-no-loader="1">'
+                f'<input type="hidden" name="next" value="{_h(request.path)}">'
                 f'<button class="btn danger" type="submit" '
                 f'style="font-size:11px;padding:4px 10px">Delete</button>'
                 f"</form></td></tr>"
@@ -15318,7 +15328,7 @@ Relay team broke club record"></textarea>
                 err_text = str(r["error"])
                 truncated = err_text[:600] + ("…" if len(err_text) > 600 else "")
                 rows_html += (
-                    '<tr class="run-error-row">'
+                    f'<tr class="run-error-row" data-run-err="{_h(r["id"])}">'
                     '<td colspan="7" style="padding:6px 14px 14px 14px;'
                     'background:rgba(255,93,108,0.06);border-left:3px solid var(--mh-prim-error-500)">'
                     "<details>"
@@ -15378,6 +15388,40 @@ Relay team broke club record"></textarea>
                 "</table></div>"
             )
 
+        # Delete in place: a run row's Delete posts via fetch() and is removed
+        # from the DOM on success, so the user "deletes there and then and stays
+        # on the page" instead of being bounced home. Bound once, delegated, so
+        # it covers every current and future row. No-JS falls back to the form's
+        # ``next`` (this page).
+        run_delete_js = """
+<script>
+(function(){
+  if (window.__mhRunDeleteBound) return; window.__mhRunDeleteBound = true;
+  function esc(v){ return (window.CSS && CSS.escape) ? CSS.escape(v) : String(v).replace(/["\\\\]/g,'\\\\$&'); }
+  document.addEventListener('submit', function(e){
+    var form = e.target;
+    if (!form || !form.classList || !form.classList.contains('mh-run-delete')) return;
+    e.preventDefault();
+    if (!window.confirm('Delete this run? This cannot be undone.')) return;
+    var rid = form.getAttribute('data-run-id');
+    var btn = form.querySelector('button');
+    if (btn) btn.disabled = true;
+    fetch(form.action, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){ return r.json().catch(function(){ return {}; }); })
+      .then(function(j){
+        if (j && j.ok) {
+          var row = document.querySelector('[data-run-row="'+esc(rid)+'"]');
+          var err = document.querySelector('[data-run-err="'+esc(rid)+'"]');
+          if (err && err.parentNode) err.parentNode.removeChild(err);
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+          if (window.MH && MH.toast) MH.toast('Run deleted.', 'success');
+        } else if (btn) { btn.disabled = false; }
+      })
+      .catch(function(){ if (btn) btn.disabled = false; });
+  }, false);
+})();
+</script>"""
+
         return (
             f"{section_header}"
             f"{section_intro}"
@@ -15389,6 +15433,7 @@ Relay team broke club record"></textarea>
             f"<tbody>{rows_html}</tbody>"
             "</table></div>"
             f"{posting_panel_html}"
+            f"{run_delete_js}"
         )
 
     def _render_settings_status_section() -> str:
@@ -17587,24 +17632,33 @@ function mhPlanGenerate(btn) {{
         _active_pid = _active_profile_id()
         recent_runs: list = []
         db_failed = False
+        # Spotlight is a *fresh-moments* surface: it only offers meets from the
+        # last month of runs. created_at is a tz-aware isoformat() string, so the
+        # cutoff is computed the same way and compared lexically (ISO-8601 sorts
+        # lexically for a fixed shape) — never SQLite datetime(), whose space/no-
+        # offset format wouldn't compare cleanly against the stored "T…+00:00".
+        from datetime import timedelta as _td
+
+        _spot_cutoff = (datetime.now(timezone.utc) - _td(days=31)).isoformat()
         try:
             conn = _db()
             try:
                 if _active_pid:
                     recent_runs = conn.execute(
                         "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' AND "
+                        "WHERE status='done' AND created_at >= ? AND "
                         "(profile_id = ? OR profile_id IS NULL OR profile_id = '') "
                         "ORDER BY created_at DESC LIMIT 20",
-                        (_active_pid,),
+                        (_spot_cutoff, _active_pid),
                     ).fetchall()
                 else:
                     # No active org (pre-onboarding sandbox / tests):
-                    # nothing to isolate against, so list everything as
-                    # before.
+                    # nothing to isolate against, so list everything in-window.
                     recent_runs = conn.execute(
                         "SELECT id, meet_name, file_name, created_at FROM runs "
-                        "WHERE status='done' ORDER BY created_at DESC LIMIT 20"
+                        "WHERE status='done' AND created_at >= ? "
+                        "ORDER BY created_at DESC LIMIT 20",
+                        (_spot_cutoff,),
                     ).fetchall()
             finally:
                 conn.close()
@@ -17723,6 +17777,7 @@ function mhPlanGenerate(btn) {{
 
 <div class="card">
   <h2>Choose a meet</h2>
+  <p class="muted" style="margin-top:0;font-size:13px">Showing meets from the last month. Older runs roll off automatically, and a run deleted in Settings disappears from here too.</p>
   <form method="get" action="{url_for("spotlight_landing")}">
     <select name="run_id" onchange="this.form.submit()" style="max-width:480px">
       {runs_opts}
@@ -22565,17 +22620,47 @@ what you're doing, what they should do.</p>
         for p in profiles:
             is_current = p.profile_id == current_id
             logo_html = ""
-            logo_url = (getattr(p, "brand_logo_url", "") or "").strip()
-            if logo_url and (logo_url.startswith("http://") or logo_url.startswith("https://")):
+            # Prefer an uploaded logo served first-party from our own server —
+            # the website-scraped ``brand_logo_url`` is an external link that
+            # often 403s, hot-link-blocks or 404s, which is exactly why "the
+            # logos don't load on the sign-in cards". Fall back to the scraped
+            # URL, then to initials.
+            logo_src = ""
+            _dom_hex = None
+            _uploaded = getattr(p, "brand_logos", None) or []
+            _first = next(
+                (
+                    e
+                    for e in _uploaded
+                    if isinstance(e, dict)
+                    and e.get("logo_id")
+                    and str(e.get("mime", "")).startswith("image/")
+                ),
+                None,
+            )
+            if _first:
+                logo_src = url_for(
+                    "organisation_logo_serve",
+                    profile_id=p.profile_id,
+                    logo_id=_first.get("logo_id"),
+                )
+                _dom = (_first.get("ai_dominant_colours") or [None])[0]
+                _dom_hex = _dom if isinstance(_dom, str) and _dom.startswith("#") else None
+            else:
+                _cap = (getattr(p, "brand_logo_url", "") or "").strip()
+                if _cap.startswith("http://") or _cap.startswith("https://"):
+                    logo_src = _cap
+            if logo_src:
                 # Phase 1.6 Stage F: profile-card logos are tiny
                 # uniform tiles inside a fixed .logo container; force
                 # chip mode for visual consistency across the grid
                 # (sign-in page renders many orgs side-by-side and
                 # one bare logo amid chipped ones reads as a glitch).
                 logo_html = _logo_chip_html(
-                    logo_url,
+                    logo_src,
                     alt="",
                     height=48,
+                    dominant_hex=_dom_hex,
                     force_chip=True,
                 )
             else:
@@ -25146,6 +25231,27 @@ function mhSetupMode(mode) {{
             return ("", 404)
         # send_from_directory is the safe primitive — it refuses path
         # traversal automatically.
+        return send_from_directory(path.parent, path.name)
+
+    @app.route("/organisation/<profile_id>/logo/<logo_id>", methods=["GET"])
+    def organisation_logo_serve(profile_id, logo_id):
+        """Serve any *session-permitted* org's uploaded logo by id.
+
+        The active-profile route above can only serve the org you're already
+        signed into — useless on the sign-in picker, which renders the logos
+        of every org you may enter *before* one is active. Gating on
+        ``_session_can_use_profile`` keeps the IDOR guard (you only ever see
+        logos for orgs this session is allowed to use) while letting the
+        picker show real, first-party-served logos instead of broken external
+        ones.
+        """
+        if not _session_can_use_profile(profile_id):
+            return ("", 404)
+        from mediahub.brand.logos import resolve_logo_path
+
+        path = resolve_logo_path(profile_id, logo_id)
+        if not path:
+            return ("", 404)
         return send_from_directory(path.parent, path.name)
 
     @app.route("/organisation/setup/reread/<platform>", methods=["POST"])
