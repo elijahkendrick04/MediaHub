@@ -27,6 +27,18 @@ product's usability is pulled forward, and the **last three things, in this
 order, are (1) rebrand, (2) add a second sport, (3) go to market.** Everything
 those three depend on is sequenced with them, last.
 
+**Two hard rules were added on 2026-06-13.** First, **everything is built
+in-house:** every capability is MediaHub's own first-party code, and every AI
+call has a zero-cost local path (Phase 4). An outside service is used only as an
+optional, swappable adapter for the one *unavoidable* final hop to someone
+else's network — posting to a social platform a club already uses, taking a card
+payment, or sending to a physical printer — never for the intelligence, the
+content, the data, or the branding (rule 11). Second, **the second sport
+(Phase 6) and going to market (Phase 7) do not start until every phase above
+them is finished** — Phases 1–5: product polish, direct publishing, the creative
+suite, zero-cost local AI, and the rebrand (rule 12). Those two phases are marked
+🔒 throughout.
+
 **The phases, in priority order:**
 
 - **Phase 1 — Product polish & usability** · make the core flow excellent (Home,
@@ -43,10 +55,11 @@ those three depend on is sequenced with them, last.
   phases).
 - **Phase 5 — Rebrand & identity** · pick the real company name, register it,
   buy the domain, and sweep the new brand through every surface.
-- **Phase 6 — Second sport** · prove the engine beyond swimming end-to-end.
-- **Phase 7 — Go to market** · pricing discovery, the first paying clubs, and
-  the lawful-to-sell / payments / hosting groundwork — deliberately the **last**
-  thing we do.
+- **Phase 6 — Second sport** · 🔒 *gated on Phases 1–5* · prove the engine
+  beyond swimming end-to-end.
+- **Phase 7 — Go to market** · 🔒 *gated on Phases 1–5* · pricing discovery, the
+  first paying clubs, and the lawful-to-sell / payments / hosting groundwork —
+  deliberately the **last** thing we do.
 
 Phases are renumbered into this priority order. **Item IDs are kept stable as
 identifiers** (`U.*` the new polish work; `P4.*` publishing, `P6.*` creative
@@ -106,7 +119,10 @@ Ask in any session ("build P4.1"). In priority order: **Phase 1** product polish
 actually post; **Phase 3** creative-suite breadth (P6.*) makes MediaHub do far
 more; **Phase 4** local-AI (P5.*) is operator-margin work. Then the
 deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
-(P3.*), **Phase 7** go-to-market ops (PC.16).
+(P3.*), **Phase 7** go-to-market ops (PC.16). Every item is first-party/in-house
+— an external service only ever sits behind a swappable seam for the unavoidable
+final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
+begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
 - **U.1** · Phase 1 (Product polish) — Core-flow polish: Home, Add Input, the content-pack review, and Settings → Autonomy raised to a credible sport-editorial standard — strong hierarchy, one obvious primary action per screen, dark-first on the existing `--bg`/`--accent`/`--ink`/`--panel` CSS variables · ❌ **NOT STARTED**
@@ -114,14 +130,14 @@ deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
 - **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI · ❌ **NOT STARTED**
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
-- **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe, Resend-seamed) · ❌ **NOT STARTED**
+- **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
 - **P4.6** · Phase 2 (Direct publishing) — Telegram channel publishing (free Bot API; native PNG+MP4) + a WhatsApp share stopgap · ❌ **NOT STARTED**
 - **P4.2** · Phase 2 (Direct publishing) — Instagram Graph / Facebook / TikTok / YouTube adapters, least-privilege, human-connected · ❌ **NOT STARTED**
 - **P4.3** · Phase 2 (Direct publishing) — X adapter as a paid, optional target (pay-per-use API) · ❌ **NOT STARTED**
 - **P4.4** · Phase 2 (Direct publishing) — Demote Buffer to optional; remove it from the critical path · ❌ **NOT STARTED**
 - **P6.1** · Phase 3 (Creative suite) — Smart format catalogue + format transformer: every Canva/Adobe-class design type as a data-driven club `FormatSpec` (certificates, posters, programmes, yearbooks, per-channel sizes); `turn_into` v2 re-targets any approved design · ❌ **NOT STARTED**
 - **P6.2** · Phase 3 (Creative suite) — Conversational creative assistant: agentic spec-patch editing on `ai_core.ask_with_tools`, Magic-Write-class text tools, org assistant memory, voice input via the ASR seam · ❌ **NOT STARTED**
-- **P6.3** · Phase 3 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam: generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
+- **P6.3** · Phase 3 (Creative suite) — Generative imagery suite behind our own `media_ai` provider seam, with an **in-house local-model backend the default** (a licence-clean self-hosted diffusion model — the P5.6 path; cloud generators optional on the same seam): generate / edit / fill / expand / remove / subject-lift / upscale / style-match / mockups, provenance-stamped · ❌ **NOT STARTED**
 - **P6.4** · Phase 3 (Creative suite) — Photo editor: deterministic non-destructive edit recipes (filters, adjustments, crop/perspective, collages, blur brush, HEIC) on `media_library` assets · ❌ **NOT STARTED**
 - **P6.5** · Phase 3 (Creative suite) — Video suite: footage path + EDL timeline over the shipped reel engines, ASR captions, Clip-Maker-for-sport, saliency reframe, browser recorders, opt-in disclosed avatars · ❌ **NOT STARTED**
 - **P6.6** · Phase 3 (Creative suite) — Audio engine: own licence-clean music/SFX pools + rights ledger, voice layer on the TTS seam (catalogue, params, name-pronunciation lexicon), denoise/levelling, consent-gated voice features · ❌ **NOT STARTED**
@@ -138,7 +154,7 @@ deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
 - **P6.17** · Phase 3 (Creative suite) — Collaboration & review: anchored comments/mentions/tasks, version diff + restore, element locks, roles, group approvers, expiring share tokens · ❌ **NOT STARTED**
 - **P6.18** · Phase 3 (Creative suite) — Export & conversion engine: SVG/GIF/PPTX/DOCX/WAV/print-PDF additions, quality/transparency options, bulk export jobs, media-library quick-action utilities · ❌ **NOT STARTED**
 - **P6.19** · Phase 3 (Creative suite) — Print & merch pipeline: physical-dimension FormatSpecs, CMYK PDF/X export, deterministic preflight with explanations, mockups; optional flag-gated fulfilment slot later · ❌ **NOT STARTED**
-- **P6.20** · Phase 3 (Creative suite) — MediaHub platform surface: versioned public API + signed webhooks + MCP server (drive MediaHub from Claude/ChatGPT/Gemini-class agents), first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
+- **P6.20** · Phase 3 (Creative suite) — MediaHub platform surface: versioned public API + signed webhooks + a **first-party MCP server MediaHub *exposes*** so external agents (Claude/ChatGPT/Gemini-class) can optionally drive it — MediaHub itself depends on no external MCP — plus first-party file interop (SVG/PSD/palettes); GWS stays excluded · ❌ **NOT STARTED**
 - **P6.21** · Phase 3 (Creative suite) — Mobile PWA: installable share-target capture to media library, offline-tolerant approval queue, mobile-first review/caption/crop; hosted-only stands · ❌ **NOT STARTED**
 - **P6.22** · Phase 3 (Creative suite) — AI governance: per-org/per-feature quota ledger on `observability/`, generative moderation, provenance manifests on AI media, role-based feature permissions · ❌ **NOT STARTED**
 - **P6.23** · Phase 3 (Creative suite) — Localisation: glossary-protected translation with layout-aware re-render, bilingual approval pairs (Welsh-first), bulk per-language variants, AI-dub pipeline, UI i18n · ❌ **NOT STARTED**
@@ -147,12 +163,13 @@ deliberately-last trio: **Phase 5** rebrand (PC.15), **Phase 6** second sport
 - **P5.2** · Phase 4 (Local AI) — Piper local TTS replaces edge-tts · ❌ **NOT STARTED**
 - **P5.3** · Phase 4 (Local AI) — whisper.cpp / faster-whisper local ASR for reel captions · ❌ **NOT STARTED**
 - **P5.4** · Phase 4 (Local AI) — Satori graphics fast-path (~100× lighter than headless Chromium; rides the reel-engine seam P0.1 shipped) · ❌ **NOT STARTED**
+- **P5.6** · Phase 4 (Local AI) — Local generative-image backend behind the `media_ai` seam (a licence-clean self-hosted diffusion model, e.g. FLUX.1-schnell, Apache-2.0): gives P6.3's imagery suite a zero-cost in-house path so generate/edit/fill/expand run with no cloud key; cloud generators stay optional on the same seam · ❌ **NOT STARTED**
 - **PC.15** · Phase 5 (Rebrand) — Rebrand sweep, waits on F.9's name: one product-name source of truth threaded through every customer-facing surface (UI chrome, legal pages, wall badge + embeds, email from-name, `/try`, README) plus the F.11 canonical-host redirect; `mediahub` package/env names stay internal · ❌ **NOT STARTED**
-- **P3.1** · Phase 6 (Second sport) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
-- **P3.2** · Phase 6 (Second sport) — Sports-data API spokes (`nba_api`, openfootball, fixture generators) normalised to `canonical.*` · ❌ **NOT STARTED**
-- **P3.3** · Phase 6 (Second sport) — Running/athletics parsers (chip-timing CSV, client-side FIT) · ❌ **NOT STARTED**
-- **P3.4** · Phase 6 (Second sport) — Normalise all spokes to the canonical schema; flag ambiguous rows for review · ❌ **NOT STARTED**
-- **PC.16** · Phase 7 (Go to market) — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
+- **P3.1** · Phase 6 (Second sport · 🔒 gated: Phases 1–5 first) — Second-sport engine adapter: `recognition_football`/`_basketball` + `register_sport(...)` · ❌ **NOT STARTED**
+- **P3.2** · Phase 6 (Second sport · 🔒 gated: Phases 1–5 first) — Sports-data spokes, in-house first: vendor the public-domain/open datasets (openfootball, MIT fixture generators) into the repo as curated, versioned, provenance-stamped data like the qualifying-time packs; a live external sports API (`nba_api`) is an optional flag-gated spoke behind a seam, never required; all normalised to `canonical.*` · ❌ **NOT STARTED**
+- **P3.3** · Phase 6 (Second sport · 🔒 gated: Phases 1–5 first) — Running/athletics parsers (chip-timing CSV, client-side FIT) — first-party, no external API · ❌ **NOT STARTED**
+- **P3.4** · Phase 6 (Second sport · 🔒 gated: Phases 1–5 first) — Normalise all spokes to the canonical schema; flag ambiguous rows for review · ❌ **NOT STARTED**
+- **PC.16** · Phase 7 (Go to market · 🔒 gated: Phases 1–5 first) — Hosting-cutover code half, waits on F.12's go decision: VPS deploy template (compose + reverse-proxy TLS on the same Dockerfile), off-site backup-target preflight, log-sentinel log-source seam (Render-API-free), staged subprocessor-register + privacy-notice hosting/region update, written cutover runbook · ❌ **NOT STARTED**
 <!-- /ROADMAP:TODO -->
 
 ## To do — things only you can do (the rebrand + go-to-market motion — last)
@@ -179,9 +196,9 @@ selling motion itself (PC.4 pricing, PC.6 the first ~10 clubs).
 - **F.7** · Each season: refresh the qualifying-time tables (recurring; runbook in `data/standards/README.md`) · ❌ **NOT STARTED**
 - **F.8** · When direct Instagram/Facebook posting nears (P4.2): start the Meta Business Verification + App Review paperwork early · ❌ **NOT STARTED**
 - **F.13** · Take the GitHub repo private again (public today; the children's-data fixtures' lawful-basis note assumes a private repo): pre-flight sweep, CI-minutes plan, the Settings flip, integration re-checks — at the latest before the first club pays · ❌ **NOT STARTED**
-- **F.12** · Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
-- **PC.4** · Phase 7 (Go to market) — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling) · 🔵 **IN PROGRESS**
-- **PC.6** · Phase 7 (Go to market) — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling) · 🔵 **IN PROGRESS**
+- **F.12** · 🔒 Gated (Phases 1–5 first) — Decide and execute the cheaper-hosting move off Render (≈£20/mo → ≈£4–8/mo VPS) via the rehearsed backup-restore cutover — after F.11, never ahead of selling · ❌ **NOT STARTED**
+- **PC.4** · Phase 7 (Go to market · 🔒 gated: Phases 1–5 first) — Quote real annual prices to the first clubs and record what clears; the public price unlocks itself once ≥5 clubs have paid annual at a tested price (build side shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–5 land) · 🔵 **IN PROGRESS**
+- **PC.6** · Phase 7 (Go to market · 🔒 gated: Phases 1–5 first) — Win the first ~10 paying clubs: warm-first hand-sell from the Swansea/South-Wales base + referrals, cold capped (tooling shipped — this is selling; warm groundwork may continue, but the gate holds full GTM until Phases 1–5 land) · 🔵 **IN PROGRESS**
 <!-- /ROADMAP:TODO_FOUNDER -->
 
 ### Step-by-step guides (one per item above)
@@ -726,6 +743,18 @@ prioritising the genuinely-free targets.
 a genuinely-free one** (Bluesky and/or Mastodon), with Buffer demoted to
 optional.
 
+**In-house first (rule 11).** Publishing is the one place a third party's own
+network is the *unavoidable* final hop — you cannot post to a platform without
+its API. So the in-house-first destinations come first: MediaHub's **own
+surfaces** (the shipped public wall / website embed / RSS — PC.10 — and the
+planned microsites, P6.13) are fully first-party and need no external account at
+all; the **open, self-hostable protocols** (Bluesky/AT Protocol,
+Mastodon/ActivityPub, email over an in-house SMTP relay) come next; the
+**proprietary platforms** (Meta, X, TikTok, YouTube, Telegram) are optional,
+thin, swappable adapters for the final hop to a network the club already uses.
+Everything upstream of that hop — the content, the intelligence, the branding,
+the gate and the audit — is in-house.
+
 #### P4.1 — Bluesky (AT Protocol) + Mastodon adapters · ❌
 
 The free/open posting targets — build these first. **Build detail (June 2026
@@ -774,10 +803,14 @@ error the day it stops.
 
 The v7.3 grouped newsletter already builds
 (`/api/runs/<run_id>/newsletter`, `content_pack/builder.py`) — nothing can
-send it. Email needs no platform review, clubs already run parent lists, and
-costs are trivial (Resend: free to 3k emails/mo). **Build:**
-`publishing/email.py` behind a provider seam (Resend first; honest-error
-unkeyed); a per-workspace member list (CSV import with consent capture,
+send it. Email needs no platform review, and clubs already run parent lists.
+**Build:** `publishing/email.py` behind a provider seam with an **in-house SMTP
+relay the default** (the operator's own mail server; the digest, list and
+unsubscribe logic is all first-party) — a managed relay (Resend, free to 3k
+emails/mo) is an optional deliverability upgrade on the same seam, and an unkeyed
+deployment with no relay configured honest-errors rather than dropping mail
+silently; deliverability is the operator's SPF/DKIM/DMARC homework either way;
+a per-workspace member list (CSV import with consent capture,
 one-click unsubscribe + suppression list — unsubscribes honoured before any
 send); a weekly `scheduler/` job assembling approved-card digests; the PC.8
 sponsor slot and W.11 alt text in the template; W.9 approval links ride the
@@ -797,10 +830,12 @@ caption, download media, open `wa.me`). **Exit:** an approved card *and* a
 reel both land in a connected Telegram channel through the gate with full
 audit; the WhatsApp button works on mobile.
 
-**Building blocks.** Bluesky / Mastodon (free/open) first; the Telegram Bot
-API and a Resend-seamed email channel join the genuinely-free tier; Postiz
-adapters as *reference only* (**AGPL** — read the patterns or call over its
-API; never embed).
+**Building blocks.** MediaHub's own wall / embed / RSS (PC.10, shipped) as the
+zero-dependency in-house target; Bluesky / Mastodon (free/open protocols) next;
+an **in-house SMTP relay** as the default email channel (a managed relay like
+Resend optional on the same seam) and the free Telegram Bot API alongside;
+Postiz adapters as *reference only* (**AGPL** — read the patterns or call over
+its API; never embed).
 
 **Dependencies.** Needs **P2** (autonomy + guardrails govern what may
 auto-publish) and **P0** (Buffer is a flagged, optional paid path).
@@ -827,10 +862,16 @@ phase, order is **pull-driven** — build what paying clubs ask for first; the
 numbering is a default sequence, not a promise. Standing rules hold
 everywhere: hosted-only, approval-first publishing + the P2.3 gate, the
 deterministic-engine boundary, Gemini→Anthropic honest-error AI, self-hosted
-fonts, and the GWS / 9router exclusions. External services appear only as
-optional flag-gated provider slots behind our own interfaces where
-first-party is impossible (model hosting, platform APIs, print fulfilment,
-music rights).
+fonts, and the GWS / 9router exclusions. **In-house first (rule 11):** every
+capability here is MediaHub's own first-party code; an external service appears
+only as an optional, flag-gated, swappable slot behind our own interface, and
+only for a genuinely-unavoidable final hop — never for the intelligence or the
+data. That includes generative imagery (P6.3), whose **default backend is a
+licence-clean local diffusion model** filled by the Phase-4 **P5.6** path, and
+the platform surface (P6.20), whose MCP server is one MediaHub *exposes*, not one
+it depends on. The narrow set of unavoidable externals: model hosting (with the
+in-house local path the default), platform-publish APIs, print fulfilment, and
+music rights.
 
 **Exit criterion.** A club can run its **entire content life inside
 MediaHub** — social, print, email, microsite, video, documents — without
@@ -859,8 +900,9 @@ cloud provider on the same seam). Feeds back into **PC.4** packaging
 no-hidden-fees discipline for the hosted deployment's margins.
 
 **Exit criterion.** With **no cloud keys configured**, the full pipeline
-(caption, cutout, voice, graphics, reels) runs **locally end-to-end** —
-honest-erroring only where a local model is genuinely unavailable.
+(caption, cutout, voice, graphics, reels, **and generative imagery**) runs
+**locally end-to-end** — honest-erroring only where a local model is genuinely
+unavailable.
 
 - **P5.1 — Ollama LLM provider.** Both wrappers already accept a keyless
   OpenAI-compatible endpoint (`MEDIAHUB_LLM_ENDPOINTS=http://localhost:11434/v1`
@@ -878,10 +920,19 @@ honest-erroring only where a local model is genuinely unavailable.
   `MEDIAHUB_REEL_ENGINE` seam. (The placeholder `satori` engine name was
   removed in the dormant-features audit — register it again when the engine
   actually ships.)
+- **P5.6 — Local generative-image backend.** Fills the `media_ai` image seam
+  P6.3 builds against with a **licence-clean self-hosted diffusion model**
+  (e.g. FLUX.1-schnell, Apache-2.0), so generate / edit / fill / expand / remove
+  run with **no cloud key**. Cloud generators (Imagen/etc.) stay optional on the
+  same seam; provenance manifests (P6.22) stamp every output regardless of
+  backend. Licence-vetted per `DEPENDENCY_LICENSING.md` — avoid OpenRAIL /
+  non-commercial weights, prefer an Apache-2.0/MIT model.
 
 **Building blocks.** All **ADOPT-NOW** licences: Ollama (MIT), Piper (MIT),
-whisper.cpp / faster-whisper (MIT), Satori (MPL-2.0). ⚠️ Avoid Coqui XTTS
-weights commercially (CPML, non-commercial) — Piper instead.
+whisper.cpp / faster-whisper (MIT), Satori (MPL-2.0), and a permissively-licenced
+local image model for P5.6 (FLUX.1-schnell, Apache-2.0). ⚠️ Avoid Coqui XTTS
+weights commercially (CPML, non-commercial) — Piper instead; and avoid OpenRAIL /
+non-commercial image weights — pick an Apache-2.0/MIT model.
 
 **Dependencies.** Set up by **P0** (the local-capable interfaces all
 exist — P0.4). Note P5.5 (cutout) shipped long ago — rembg is already the
@@ -953,7 +1004,7 @@ Why this workstream jumped to the head of the founder list:
 
 ---
 
-### Phase 6 — Second sport (broaden ingestion spokes) · P3 · ❌ **NOT STARTED**
+### Phase 6 — Second sport (broaden ingestion spokes) · P3 · 🔒 gated on Phases 1–5 · ❌ **NOT STARTED**
 
 **Goal.** Ingest beyond swimming and normalise every spoke to the canonical
 schema, so a second sport produces real content end-to-end.
@@ -967,28 +1018,36 @@ profile wired in.
   `recognition_basketball` + `register_sport(...)` (the seam exists —
   [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md)). Bind `engine_sport` in the
   profile.
-- **P3.2 — Sports-data API spokes.** `nba_api`, `openfootball`, fixture
-  generators; each normalised to `canonical.*`.
+- **P3.2 — Sports-data spokes (in-house first).** Vendor the public-domain /
+  open datasets — `openfootball` (public domain), MIT fixture generators — into
+  the repo as curated, versioned, provenance-stamped data, exactly like the
+  qualifying-time packs (W.4) and the open-collection stock pools (P6.8). A live
+  external sports API (`nba_api` → stats.nba.com) is an **optional, flag-gated
+  spoke behind a seam, never required**; each spoke normalises to `canonical.*`.
 - **P3.3 — Running/athletics parsers.** Chip-timing CSV + client-side Garmin
   `FIT` parsing. This sport needs custom parsers — open-source coverage is
   sparse.
 - **P3.4 — Normalise all spokes to the canonical schema.** Separate raw
   extraction from cleaned canonical data; flag ambiguous rows for review.
 
-**Building blocks.** `swar/nba_api` (open, keyless — *verify*), `openfootball`
-(**public domain**), `ndPPPhz/Fixture-Generator` (MIT). ⚠️ `statsbomb/open-data`
-is a **non-OSS data agreement** — use openfootball as the free default.
+**Building blocks.** `openfootball` (**public domain**) and
+`ndPPPhz/Fixture-Generator` (MIT) — both **vendored into the repo as in-house
+data/code**, the default path; `swar/nba_api` (open, keyless — *verify*) only as
+the optional live external spoke. ⚠️ `statsbomb/open-data` is a **non-OSS data
+agreement** — use openfootball as the free default.
 ([`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md))
 
-**Dependencies.** Needs **P1** (sport profiles + taxonomy). Pairs with
-**P4** (new sports → new audiences → more publishing targets). Note:
-`results_fetch/` already does sport-agnostic *ingestion* from a URL; P3 adds
-the per-sport *detector* quality.
+**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–5 are
+complete** — product polish, direct publishing, the creative suite, zero-cost
+local AI, and the rebrand all land first (founder directive 2026-06-13). Also
+needs **P1** (sport profiles + taxonomy). Pairs with **P4** (new sports → new
+audiences → more publishing targets). Note: `results_fetch/` already does
+sport-agnostic *ingestion* from a URL; P3 adds the per-sport *detector* quality.
 
 
 ---
 
-### Phase 7 — Go to market · PC.4 / PC.6 + F.1–F.8 / F.13 / F.12 + PC.16 · ❌ **NOT STARTED**
+### Phase 7 — Go to market · PC.4 / PC.6 + F.1–F.8 / F.13 / F.12 + PC.16 · 🔒 gated on Phases 1–5 · ❌ **NOT STARTED**
 
 **Goal.** Commercialise — lawfully and without the founder in the loop — once the
 product is excellent, rebranded and proven on a second sport. **The last thing we
@@ -1005,8 +1064,13 @@ product gaps" remains the standing caution this phase exists to answer.
 `PC.*` item IDs keep the "C", and the founder guides above still refer to it
 by that name — they mean this phase.)
 
-**The three gates that define "ready to sell"** (they no longer gate the earlier
-build phases — those ship first regardless):
+**Upstream of all three: the product-completion gate (rule 12).** This whole
+phase is 🔒 hard-gated — it does not begin until **Phases 1–5 are complete**
+(product polish, direct publishing, the creative suite, zero-cost local AI, the
+rebrand) and the second sport (Phase 6) has landed. Warm groundwork (PC.4
+quotes, PC.6 funnel) may keep moving, but the full go-to-market push waits. The
+three gates below then define "ready to sell" within this phase (they no longer
+gate the earlier build phases — those ship first regardless):
 
 **Exit criteria (three hard gates).**
 
@@ -1102,8 +1166,15 @@ network boundary (never embed AGPL —
 [`DEPENDENCY_LICENSING.md`](DEPENDENCY_LICENSING.md)).
 
 
-**Dependencies.** Sequenced **after** Phases 1–6 — the product, the rebrand and
-the second sport land first.
+**Dependencies.** 🔒 **Hard-gated (rule 12): does not start until Phases 1–5 are
+complete** (product polish, direct publishing, the creative suite, zero-cost
+local AI, the rebrand), and still sequenced **after** Phase 6 — the second sport
+lands before the go-to-market push too. As with the compliance gate, warm
+relationships and groundwork (PC.4 quotes, PC.6 funnel) may keep moving, but no
+full GTM push and no paid conversion proceed until the product is complete. The
+selling, payments, legal sign-off, ops, repo-private and hosting tasks
+(F.1–F.8, F.13, F.12) and the PC.16 hosting-cutover half all sit behind this
+gate.
 
 ## The rules we build by
 
@@ -1174,6 +1245,30 @@ short note of a decision and why, kept in [`docs/adr/`](adr/).)
     incumbent ingests a result file and emits branded ranked content — but
     that is a *time advantage, not a moat*. Watch item: Gipper adding
     result-file ingestion would close it.
+11. **In-house first; external only for the unavoidable final hop**
+    *(added 2026-06-13, founder directive).* Every roadmap capability is
+    MediaHub's own first-party code, and every AI call has a zero-cost local
+    path (Phase 4 — caption, cutout, voice, graphics, reels, and generative
+    imagery via P5.6). An outside service is allowed **only** as an optional,
+    flag-gated, swappable adapter behind a first-party seam, and **only** for a
+    genuinely-unavoidable final hop to a third party's own network: posting to a
+    social platform a club already uses, processing a card payment (Stripe — one
+    cannot lawfully be one's own card processor), or sending to a physical
+    printer. The intelligence, content, data, branding, scheduling, gating and
+    audit are always in-house; data we can hold (openfootball, fixtures, stock,
+    fonts, music) is **vendored**, not called. MediaHub **depends on no external
+    MCP** — it may *expose* a first-party MCP server (P6.20) for outside agents
+    to drive. This hardens the standing "external services only behind our own
+    interfaces" convention into a rule. (See [`../CLAUDE.md`](../CLAUDE.md).)
+12. **Second sport + go-to-market are hard-gated on a complete product**
+    *(added 2026-06-13, founder directive).* Phase 6 (second sport, P3.*) and
+    Phase 7 (go-to-market, PC.4 / PC.6 / PC.16 + F.1–F.8 / F.12 / F.13) do
+    **not** begin until **Phases 1–5 are complete** — product polish, direct
+    publishing, the creative suite, zero-cost local AI, and the rebrand — and
+    Phase 7 still follows Phase 6. Warm groundwork may continue, but no full GTM
+    push or paid conversion proceeds ahead of the gate. This formalises the
+    build-first ordering of rules 2 & 4 into a hard gate on the last two phases;
+    the gated items are marked 🔒 throughout.
 
 **Companion docs:** [POST_TYPE_TAXONOMY](POST_TYPE_TAXONOMY.md) ·
 [CONTENT_PLANNER](CONTENT_PLANNER.md) · [AUTONOMY_MODEL](AUTONOMY_MODEL.md) ·
@@ -1198,6 +1293,7 @@ list and the auto table below, not here.
 
 | Date | Change | Read more |
 |---|---|---|
+| 2026-06-13 | **In-house-first hardened + second-sport/GTM hard-gated (founder directive):** every roadmap idea is now explicitly first-party — an external service is allowed only as an optional swappable adapter for the unavoidable final hop (social-platform publishing, Stripe card rails, physical print), never for intelligence / content / data. Concrete closes: generative imagery (P6.3) gains an in-house local-diffusion backend (**new P5.6**, FLUX.1-schnell-class, Apache-2.0); email (P4.5) defaults to an in-house SMTP relay (managed relay optional); second-sport data (P3.2) is vendored public-domain / open data with live APIs optional; the P6.20 MCP server is clarified as one MediaHub *exposes* (it depends on no external MCP). New **rule 11** (in-house first) + **rule 12** (Phase 6 second sport & Phase 7 go-to-market 🔒 gated until Phases 1–5 complete). | Rules 11 & 12 · P5.6 · P6.3 |
 | 2026-06-13 | **Roadmap reordered — build-first, market-last (founder directive):** usability + capability work pulled to the front (Phase 1 product polish · 2 direct publishing · 3 creative-suite breadth · 4 zero-cost local AI); the three deliberately-last things sequenced at the end, in order — **5 rebrand · 6 second sport · 7 go to market.** Phases renumbered into priority order (item IDs kept stable); the gating that made P3–P6 wait on paying clubs is lifted. Everything already shipped moved out of this file into [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md), so no completed items / no ✅ ticks remain on the roadmap. Reverses the commercialise-first *ordering* of rules 2/4 + ADR-0011/0015 — the prior decision's evidence stands. | Rules 2 & 4 · [`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) |
 | 2026-06-12 | **Daily scan — Swim England platform move (material):** Swim England announced (4 Mar 2026) a Sport:80-built membership platform launching Autumn 2026, with a new **Rankings API** for verified swim times and a swimmingresults.org integration underway, and a SportsEngine integration announcement expected later in 2026. F.5’s application route should be re-verified against this programme before submitting (dated note added to the F.5 guide); the Swim England↔SportsEngine tie-up is also a fresh input to the queued Route C go/no-go. Competitor watch otherwise quiet (Gipper/SwimTopia/TeamUnify/Swimcloud: no results-ingestion or auto-graphics move); IG Graph API and TikTok Content Posting API policies stable. ⚠️ *Flagged for founder review (not adopted):* PR #418’s public passwordless operator sign-in is an owner-decided demo convenience, but it exposes every tenant’s data and the operator consoles — re-lock it at the latest alongside F.13, before the first club pays (ADR-0015 gate 3). | [Sport:80 announcement](https://www.swimming.org/swimengland/sport80-membership-platform/) · F.5 guide |
 | 2026-06-12 | **Repo privacy queued as founder work (F.13):** the GitHub repo is public today and must return to private — at the latest before the first club pays, because the lawful-basis note for the real-children's-data parser fixtures (OPEN_LEGAL_QUESTIONS Q13 / DATA_MAP §6) assumes a private repo, and ADR-0011's hosted-only stance treats the source as the product. The new guide covers the one real cost (private-repo Actions minutes — trim the CI schedules or GitHub Pro), the visibility flip, integration re-verification (Render, Claude Code, CI, Dependabot), and recording the public window honestly in the compliance docs. | Founder guide F.13 · [Q13](compliance/OPEN_LEGAL_QUESTIONS.md) |
