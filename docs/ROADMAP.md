@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `394e9ea61` · Merge pull request #462 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-13 · `015b0a4f8` · Switch to merge commits (drop squash) across the self-merging bots (#464) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1310,6 +1310,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
 | 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
 | 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
 | 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
@@ -1319,5 +1320,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
 | 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
 | 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
-| 2026-06-13 | `5c55c9bdc` | docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render] |
 <!-- /ROADMAP:ACTIVITY -->
