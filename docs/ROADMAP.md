@@ -125,6 +125,18 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
+- **U.5** · Phase 1 (Product polish) — Scroll-driven progressive reveal (inspired by Opal): landing sections reveal line-by-line on scroll; dark editorial theme throughout · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.6** · Phase 1 (Product polish) — Branded render/generation loading state (inspired by Lusion): large editorial %-counter + minimal progress bar for real render waits; reuses the giant-numeral motif (supports U.2) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.7** · Phase 1 (Product polish) — "Focus the facts" caption/explainability highlight (inspired by Pedro Duarte): in captions + the why-this-card review UI, source-grounded entities (athlete/time/event/PB) are sharp + pill-highlighted; filler de-emphasised (supports U.3) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.8** · Phase 1 (Product polish) — Animated how-it-works pipeline diagram (inspired by AuthKit): glowing nodes + traces on the landing showing reads (club site / socials / brand kit) → writes (captions / graphics / reels); reuses the blueprint grid · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.9** · Phase 1 (Product polish) — Cycling hero accent word (inspired by Spring/Summer): gold italic accent word animates through content types (stories / reels / graphics / captions) with crossfade + optional swapping icon · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.10** · Phase 1 (Product polish) — Framed in-app product demo in hero (inspired by Reflect): short looping screen-capture or interactive preview of generate → review → approve, plus a subtle ambient hero glow · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.11** · Phase 1 (Product polish) — Outputs inside real platform frames (inspired by AndAgain): sample outputs presented inside Instagram Story/feed/Reel phone mockups with a subtle autoplay carousel · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.12** · Phase 1 (Product polish) — Animated count-up stat numerals (inspired by Max Yinger): odometer count-up for Organisations / Total runs etc. triggers on load + scroll-into-view · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.13** · Phase 1 (Product polish) — Floating mobile action dock (inspired by Duties): bottom-centre thumb-reachable capsule (Create / Library / Approve) for mobile review/approve (supports U.4) · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.14** · Phase 1 (Product polish) — Cursor-following hover preview (inspired by Christopher Ireland + SuperHi): hovering an item in Media Library / CREATE list shows a floating cross-dissolve thumbnail near the cursor · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.15** · Phase 1 (Product polish) — Before/after reveal slider (inspired by Lovi): drag-to-wipe between a raw results sheet (input) and the finished branded graphic (output) on the landing · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
+- **U.16** · Phase 1 (Product polish) — Subtle 3D tilt on output cards (inspired by Atlas): premium parallax/tilt-on-hover for the sample output cards · ❌ **NOT STARTED** · ANY ORDER (independent — not tied to the existing to-do sequence)
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
@@ -722,6 +734,51 @@ designed and every recognition decision explained.
 - **U.4 — Onboarding & mobile review.** A fast, obvious first run: brand-kit
   setup and a sample-to-first-content-pack path; mobile-aware review/approve
   (desktop-primary) so a volunteer can approve from a phone.
+- **U.5 — Scroll-driven progressive reveal.** Landing sections reveal
+  line-by-line on scroll; dark editorial theme throughout. Pure CSS
+  IntersectionObserver, no new deps. *Inspired by Opal (op.al).*
+- **U.6 — Branded render/generation loading state.** Large editorial %-counter +
+  minimal progress bar for real render waits; reuses the giant-numeral motif.
+  Replaces the generic spinner on long card/reel renders. *Inspired by Lusion
+  (lusion.co). Supports U.2.*
+- **U.7 — "Focus the facts" caption/explainability highlight.** In captions and
+  the why-this-card review UI, source-grounded entities (athlete / time / event /
+  PB) are sharp + pill-highlighted; surrounding filler copy is de-emphasised.
+  Server-side span injection — no client JS required. *Inspired by Pedro Duarte
+  (ped.ro). Supports U.3.*
+- **U.8 — Animated how-it-works pipeline diagram.** Glowing nodes + connecting
+  traces on the landing page showing reads (club site / socials / brand kit) →
+  writes (captions / graphics / reels); reuses the blueprint grid motif. SVG +
+  CSS keyframes. *Inspired by AuthKit (authkit.com).*
+- **U.9 — Cycling hero accent word.** The gold italic accent word in the landing
+  hero cycles through content types (stories / reels / graphics / captions) with
+  a CSS crossfade; optionally swaps a matching icon. *Inspired by Spring/Summer
+  (springsummer.dk).*
+- **U.10 — Framed in-app product demo in hero.** Short looping screen-capture or
+  interactive inline preview of generate → review → approve sits inside a framed
+  browser/device mockup; subtle ambient glow behind it. *Inspired by Reflect
+  (reflect.app).*
+- **U.11 — Outputs inside real platform frames.** Sample outputs (cards, reels)
+  presented inside Instagram Story/feed/Reel phone mockups with a subtle CSS
+  autoplay carousel. Pure HTML/CSS — no JS framework. *Inspired by AndAgain
+  (andagain.uk).*
+- **U.12 — Animated count-up stat numerals.** Organisations / total runs / cards
+  generated numerals odometer-count upward on page load + on scroll-into-view.
+  Vanilla JS counter. *Inspired by Max Yinger (yinger.dev).*
+- **U.13 — Floating mobile action dock.** Fixed bottom-centre thumb-reachable
+  capsule (Create / Library / Approve) visible on mobile viewports during
+  review/approve; hidden on desktop. *Inspired by Duties (duties.xyz). Supports
+  U.4.*
+- **U.14 — Cursor-following hover preview.** Hovering an item in Media Library
+  or the CREATE list spawns a floating cross-dissolve thumbnail that tracks the
+  cursor. JS + absolute positioning; no external dep. *Inspired by Christopher
+  Ireland + SuperHi.*
+- **U.15 — Before/after reveal slider.** Drag-to-wipe between a raw results
+  sheet (input) and the finished branded graphic (output) on the landing page.
+  Single vanilla JS slider, no library. *Inspired by Lovi (lovi.care).*
+- **U.16 — Subtle 3D tilt on output cards.** Premium parallax/tilt-on-hover for
+  sample output cards; uses CSS perspective + JS pointer-tracking; respects
+  `prefers-reduced-motion`. *Inspired by Atlas (atlascard.com).*
 
 **Building blocks.** All shipped: the primary flow, the design-spec director +
 12-archetype catalog, the Adaptive Theming Engine, magic-link mobile approvals,
