@@ -486,3 +486,66 @@ def test_fonts_css_wildcard_accept_returns_css(client):
     assert r.status_code == 200
     # Should be CSS or at minimum not HTML
     assert not r.content_type.startswith("text/html")
+
+
+# ---------------------------------------------------------------------------
+# /healthz/search — same content-negotiation contract (axe document-title)
+# ---------------------------------------------------------------------------
+
+
+def test_healthz_search_html_has_title(client):
+    """Browser requests to /healthz/search must receive an HTML page with a
+    <title> element — regression for axe-core document-title (WCAG 2.4.2)."""
+    r = client.get("/healthz/search", headers={"Accept": "text/html"})
+    assert r.status_code in (200, 500)
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_search_json_by_default(client):
+    """Clients that send no Accept header must receive JSON from /healthz/search
+    — the HTML path must not break the existing monitoring contract."""
+    r = client.get("/healthz/search")
+    assert r.status_code in (200, 500)
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert "ok" in payload
+
+
+def test_healthz_search_wildcard_accept_returns_json(client):
+    """Accept: */* (curl/fetch default) must return JSON from /healthz/search
+    — the same tie-break as the other /healthz/* siblings."""
+    r = client.get("/healthz/search", headers={"Accept": "*/*"})
+    assert r.status_code in (200, 500)
+    assert r.content_type.startswith("application/json")
+    payload = r.get_json()
+    assert payload is not None
+    assert "ok" in payload
+
+
+def test_healthz_search_sec_fetch_dest_document_returns_html(client):
+    """Sec-Fetch-Dest: document must trigger HTML from /healthz/search even
+    when Accept is absent — guards against proxies stripping Accept."""
+    r = client.get("/healthz/search", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code in (200, 500)
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub Health" in body
+
+
+def test_healthz_search_browser_accept_returns_html(client):
+    """A real browser navigation Accept header must get the HTML page from
+    /healthz/search (axe-core document-title, WCAG 2.4.2)."""
+    r = client.get(
+        "/healthz/search",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code in (200, 500)
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()

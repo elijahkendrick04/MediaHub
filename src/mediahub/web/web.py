@@ -14900,9 +14900,33 @@ Relay team broke club record"></textarea>
         try:
             from mediahub.web_research import searxng_client
 
-            return jsonify({"ok": True, **searxng_client.health()})
+            payload = {"ok": True, **searxng_client.health()}
+            status = 200
         except Exception as e:
-            return jsonify({"ok": False, "error": f"search_health_unavailable: {e}"}), 500
+            payload = {"ok": False, "error": f"search_health_unavailable: {e}"}
+            status = 500
+        if _wants_html_health():
+            body = _h(json.dumps(payload, indent=2))
+            html = (
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub Health — Search</title>"
+                "</head>"
+                f"<body><pre>{body}</pre></body>"
+                "</html>"
+            )
+            return Response(
+                html,
+                status=status,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
+        resp = jsonify(payload)
+        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
+        resp.status_code = status
+        return resp
 
     @app.route("/healthz/sentinel")
     def healthz_sentinel():
