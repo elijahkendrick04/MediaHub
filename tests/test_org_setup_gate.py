@@ -112,20 +112,18 @@ class TestExemptRoutesReachable:
         assert resp.status_code == 200
 
     def test_settings_renders_without_org(self, gated_client):
-        """The Settings page consolidates Activity / Status / Privacy /
-        Deployment status into one Operations surface. It must render
-        even when no organisation is pinned — the user needs to be
-        able to audit deployment health and clear caches before
-        completing first-run setup. (The Activity section gracefully
-        renders an empty 'Sign in to see runs' panel when no org.)"""
+        """The Settings page is a card grid of headings (Activity, Auto
+        scheduling, Privacy & data, System status, …), each opening its own
+        detail page. It must render even when no organisation is pinned —
+        the user needs to reach settings before completing first-run setup."""
         c, _ = gated_client
         resp = c.get("/settings", follow_redirects=False)
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
         assert "Activity" in body
-        assert "Status" in body
-        assert "Privacy" in body
-        assert "Deployment status" in body
+        assert "System status" in body
+        assert "Privacy &amp; data" in body or "Privacy & data" in body
+        assert "mh-template" in body
 
     def test_healthz_loads(self, gated_client):
         c, _ = gated_client

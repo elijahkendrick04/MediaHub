@@ -69,7 +69,7 @@ def secrets_path() -> Path:
 _SECRET_ENV_NAMES: dict[str, tuple[str, ...]] = {
     "anthropic_api_key": ("ANTHROPIC_API_KEY",),
     "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "buffer_access_token": ("BUFFER_ACCESS_TOKEN",),
+    "scheduler_access_token": ("SCHEDULER_ACCESS_TOKEN",),
     "photoroom_api_key": ("PHOTOROOM_API_KEY",),
     "replicate_api_token": ("REPLICATE_API_TOKEN",),
     "mediahub_cutout_provider": ("MEDIAHUB_CUTOUT_PROVIDER",),
@@ -189,17 +189,17 @@ def has_anthropic_key() -> bool:
     return bool(get_anthropic_key())
 
 
-def get_buffer_access_token() -> Optional[str]:
-    return get_secret("buffer_access_token")
+def get_scheduler_access_token() -> Optional[str]:
+    return get_secret("scheduler_access_token")
 
 
-def has_buffer_access_token() -> bool:
-    return bool(get_buffer_access_token())
+def has_scheduler_access_token() -> bool:
+    return bool(get_scheduler_access_token())
 
 
-def set_buffer_access_token(token: Optional[str]) -> None:
+def set_scheduler_access_token(token: Optional[str]) -> None:
     """NO-OP. See set_secret docstring."""
-    set_secret("buffer_access_token", token)
+    set_secret("scheduler_access_token", token)
 
 
 __all__ = [
@@ -208,8 +208,8 @@ __all__ = [
     "set_secret",
     "get_anthropic_key",
     "has_anthropic_key",
-    "get_buffer_access_token",
-    "has_buffer_access_token",
-    "set_buffer_access_token",
+    "get_scheduler_access_token",
+    "has_scheduler_access_token",
+    "set_scheduler_access_token",
     "secrets_path",
 ]

@@ -81,6 +81,99 @@ _TOOLS = [
 ]
 
 
+_ONESHOT_SYSTEM = """\
+You are MediaHub's brief builder. Turn ONE free-text request from a sports
+club or society into a single, ready-to-design content brief for a branded
+social graphic. Interpret the request — however short or detailed — and
+decide the strongest post.
+
+Return STRICT JSON ONLY (no prose, no markdown fences) with this shape:
+{
+  "headline": "<short punchy display line, <= 60 chars>",
+  "body": "<caption body, 1-3 sentences, human and on-voice>",
+  "hashtags": ["<word without #>", ...],
+  "platform": "Instagram",
+  "visual_concept": "<one line describing the graphic's look/subject>",
+  "tone": "<e.g. celebratory, warm, hype, informative>",
+  "wants_reel": false,
+  "title": "<3-6 word internal label for this draft>"
+}
+
+Rules:
+- Do NOT invent specific facts about real people, clubs, results, dates or
+  scores the user didn't give you. If the request is vague, keep the copy
+  general and evocative rather than fabricating details.
+- Honour the club's brand voice when provided.
+- platform is one of Instagram, Facebook, X, TikTok, LinkedIn.
+- wants_reel is true ONLY if the user explicitly asks for a video / reel /
+  animation; otherwise false (a still graphic).
+"""
+
+
+def _parse_brief_json(raw: str) -> dict:
+    """Tolerant strict-JSON parse of a one-shot brief. Raises ProviderError
+    (never returns a fabricated brief) when the model didn't return usable
+    JSON — an honest error beats a fake post."""
+    from mediahub.ai_core import ProviderError
+
+    s = (raw or "").strip()
+    if s.startswith("```"):
+        # ```json … ``` or ``` … ```
+        inner = s.split("```")
+        if len(inner) >= 2:
+            s = inner[1]
+        if s.lstrip().lower().startswith("json"):
+            s = s.lstrip()[4:]
+    a, b = s.find("{"), s.rfind("}")
+    if a != -1 and b != -1 and b > a:
+        s = s[a : b + 1]
+    try:
+        data = json.loads(s)
+    except Exception as e:
+        raise ProviderError(f"The brief wasn't valid JSON: {str(e)[:120]}") from e
+    if not isinstance(data, dict):
+        raise ProviderError("The brief wasn't a JSON object.")
+    out = {
+        "headline": str(data.get("headline") or "").strip()[:120],
+        "body": str(data.get("body") or "").strip(),
+        "hashtags": [
+            str(h).lstrip("#").strip() for h in (data.get("hashtags") or []) if str(h).strip()
+        ][:8],
+        "platform": (str(data.get("platform") or "Instagram").strip() or "Instagram"),
+        "visual_concept": str(data.get("visual_concept") or "").strip(),
+        "tone": str(data.get("tone") or "").strip(),
+        "wants_reel": bool(data.get("wants_reel")),
+        "title": str(data.get("title") or "").strip()[:80],
+    }
+    if not (out["headline"] or out["body"]):
+        raise ProviderError("The brief had no usable copy.")
+    return out
+
+
+def build_brief_from_prompt(prompt: str, *, club_brand: Optional[dict] = None) -> dict:
+    """One-shot: a single free-text prompt → a complete content brief.
+
+    Pure AI via ``ai_core.ask`` — interprets whatever the user asked for and
+    returns a brief the graphic pipeline can render. Raises
+    ``ProviderNotConfigured`` / ``ProviderError`` (no heuristic/templated
+    fallback) so an unavailable provider is an honest error, never a fake post.
+    """
+    from mediahub.ai_core import ask, ProviderError
+
+    text = (prompt or "").strip()
+    if not text:
+        raise ProviderError("Empty prompt — nothing to brief.")
+    system = _ONESHOT_SYSTEM
+    if club_brand:
+        from mediahub.ai_core import narrate_brand
+
+        brand_prose = narrate_brand(club_brand)
+        if brand_prose:
+            system = system + "\n\nBrand voice:\n" + brand_prose
+    raw = ask(system, text, max_tokens=900)
+    return _parse_brief_json(raw)
+
+
 def _render_history_as_prose(session: ChatSession) -> str:
     """Flatten the chat into a single prose transcript for the user message.
 

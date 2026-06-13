@@ -129,7 +129,7 @@ def _enrich_item(ra: dict, wf_states: dict = None, consent_policy=None) -> dict:
             item["schedule_status"] = (
                 sched.value if sched is not None and hasattr(sched, "value") else "queued"
             )
-            item["buffer_update_id"] = getattr(wf, "buffer_update_id", None)
+            item["scheduler_update_id"] = getattr(wf, "scheduler_update_id", None)
         else:
             item["wf_status"] = "queue"
             item["schedule_status"] = "queued"
@@ -160,7 +160,7 @@ def build_grouped_pack(
       "rejected": [...],              # NOT_WORTHY or workflow REJECTED
     }
 
-    Workflow state (status + schedule_status + buffer_update_id) is read
+    Workflow state (status + schedule_status + scheduler_update_id) is read
     from the sidecar JSON in ``runs_dir`` so the pill the pack template
     paints on reload reflects what the schedule endpoint actually wrote.
     ``runs_dir`` falls back to the web layer's RUNS_DIR (DATA_DIR-derived)

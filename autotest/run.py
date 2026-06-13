@@ -88,6 +88,22 @@ def _is_ai_unconfigured(text: str) -> bool:
     return any(sig in low for sig in AI_SIGNATURES)
 
 
+def _is_html_content_type(content_type: str) -> bool:
+    """True when an HTTP Content-Type denotes an HTML document axe-core should audit.
+
+    axe-core audits HTML. A non-HTML response — a service worker (`/sw.js`,
+    JavaScript), a PWA manifest (`/manifest.webmanifest`, JSON), a JSON API
+    (`/api/status`), a stylesheet (`/fonts.css`) — is shown by Chromium inside a
+    synthetic viewer document with no ``<title>``/``<html lang>``, so running axe
+    over it yields FALSE ``document-title`` (and similar) violations: one per
+    non-HTML route, each a distinct fingerprint that never dedupes, flooding the
+    fixer with identically-titled "missing <title>" PRs. So we only audit genuine
+    HTML. An empty/unknown type fails open (a real page always sends ``text/html``),
+    so this never silences a true a11y finding."""
+    ctype = (content_type or "").split(";", 1)[0].strip().lower()
+    return ctype in ("", "text/html", "application/xhtml+xml")
+
+
 def _judge_inputs_digest(artifacts: dict) -> str:
     """Stable digest of EVERYTHING the AI judges would see this sweep — the
     judge-facing text artifacts (volatile run ids/timestamps stripped, real
@@ -652,9 +668,12 @@ class Tester:
         log_pos = self.server.log_size() if self.server else 0
         status: int | None = None
         html = ""
+        content_type = ""
         try:
             resp = self.page.goto(url, wait_until="domcontentloaded", timeout=25000)
             status = resp.status if resp else None
+            if resp:
+                content_type = resp.headers.get("content-type", "")
             try:
                 self.page.wait_for_load_state("networkidle", timeout=4000)
             except Exception:
@@ -672,7 +691,7 @@ class Tester:
         new_log = self.server.log_since(log_pos) if self.server else ""
         self._evaluate(route, url, label, status, html, new_log, from_link)
         if status and status < 400:
-            self._run_a11y(route)   # B2: deterministic axe-core pass on the rendered DOM
+            self._run_a11y(route, content_type)   # B2: axe-core on HTML responses only
         self.visited.append({"route": route, "status": status})
         links = self._extract_links(html) if status and status < 400 else []
         return status, html, links
@@ -754,11 +773,18 @@ class Tester:
                 actual=f"{fr.get('type')} → {st}: {fr.get('url')}",
                 evidence=json.dumps(fr, indent=2), repro=[f"Open {url}"]), shoot=False)
 
-    def _run_a11y(self, route: str) -> None:
+    def _run_a11y(self, route: str, content_type: str = "") -> None:
         """B2: run axe-core against the just-rendered page and record WCAG violations
-        as DETERMINISTIC ``a11y`` findings. Honest-skips when axe isn't available (no
-        crash, no invented findings) — exactly like the AI judges with no key."""
+        as DETERMINISTIC ``a11y`` findings. Only audits genuine HTML responses — a
+        non-HTML route (service-worker JS, JSON manifest/API, CSS) is shown by
+        Chromium in a synthetic viewer with no ``<title>``, which axe would falsely
+        flag as a ``document-title`` violation (one per route, never deduped — the
+        cause of the duplicate "missing <title>" fix PRs). Honest-skips when axe
+        isn't available (no crash, no invented findings) — like the AI judges with
+        no key."""
         if os.environ.get("AUTOTEST_A11Y", "1") == "0":
+            return
+        if not _is_html_content_type(content_type):
             return
         try:
             from autotest import a11y

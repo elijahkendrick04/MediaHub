@@ -1,10 +1,10 @@
-"""Buffer publishing client — schedule approved cards via Buffer's API v1.
+"""the scheduler publishing client — schedule approved cards via the scheduler's API v1.
 
 Endpoints used (https://api.bufferapp.com):
 
     GET  /1/profiles.json
         Returns the list of social channels ("profiles") connected to
-        the authenticated Buffer account. We surface each profile's id,
+        the authenticated the scheduler account. We surface each profile's id,
         service (instagram / twitter / facebook / linkedin / etc.),
         formatted_username, and avatar so the UI can render checkboxes.
 
@@ -16,18 +16,18 @@ Endpoints used (https://api.bufferapp.com):
                                omitted means the update goes to the top of
                                the channel's queue at its next slot
             media[link]      — single media URL (image), optional
-        On success, Buffer returns either a single `update` dict or an
+        On success, the scheduler returns either a single `update` dict or an
         `updates` list (one per profile_id). We normalise to a list.
 
-Authentication: Buffer API v1 accepts the access_token either as a query
+Authentication: the scheduler API v1 accepts the access_token either as a query
 parameter or in the POST body — we send it as `access_token=...` on the
 POST body / GET query string. Authentication is operator-controlled
-via the BUFFER_ACCESS_TOKEN environment variable.
+via the SCHEDULER_ACCESS_TOKEN environment variable.
 
 All HTTP calls flow through `requests` (already a project dependency).
-A missing or blank token raises `BufferAuthError` rather than silently
+A missing or blank token raises `SchedulerAuthError` rather than silently
 calling the API and getting back an opaque 4xx. Network/HTTP failures
-raise `BufferAPIError` with a message safe to surface in the UI.
+raise `SchedulerAPIError` with a message safe to surface in the UI.
 """
 
 from __future__ import annotations
@@ -40,27 +40,27 @@ import requests
 
 from mediahub.publishing.kill_switch import assert_publishing_allowed
 
-BUFFER_API_BASE = "https://api.bufferapp.com"
+SCHEDULER_API_BASE = "https://api.bufferapp.com"
 _DEFAULT_TIMEOUT = 15  # seconds
 
 
-class BufferError(Exception):
-    """Base class for Buffer client errors."""
+class SchedulerError(Exception):
+    """Base class for the scheduler client errors."""
 
 
-class BufferAuthError(BufferError):
-    """No Buffer access token configured, or Buffer returned 401/403."""
+class SchedulerAuthError(SchedulerError):
+    """No the scheduler access token configured, or the scheduler returned 401/403."""
 
 
-class BufferAPIError(BufferError):
-    """Buffer returned a non-2xx HTTP response or a transport error.
+class SchedulerAPIError(SchedulerError):
+    """the scheduler returned a non-2xx HTTP response or a transport error.
 
     The string form is intended to be safe for direct display to the user.
     """
 
 
-class BufferRateLimitError(BufferAPIError):
-    """Buffer returned HTTP 429 — rate limited.
+class SchedulerRateLimitError(SchedulerAPIError):
+    """The scheduler returned HTTP 429 — rate limited.
 
     Carries an optional ``retry_after`` seconds value parsed from the
     Retry-After response header so callers can tell the user when to
@@ -80,7 +80,7 @@ def _parse_retry_after(resp: "requests.Response") -> Optional[int]:
     try:
         return max(1, int(float(raw)))
     except (TypeError, ValueError):
-        # Buffer occasionally returns an HTTP-date; we don't bother
+        # the scheduler occasionally returns an HTTP-date; we don't bother
         # parsing it — just signal "rate limited, no specific wait".
         return None
 
@@ -92,19 +92,19 @@ class _PreparedToken:
     @classmethod
     def require(cls, token: Optional[str]) -> "_PreparedToken":
         if not token or not str(token).strip():
-            raise BufferAuthError(
-                "Buffer is not configured on this deployment. Contact your administrator."
+            raise SchedulerAuthError(
+                "Auto scheduling is not configured on this deployment. Contact your administrator."
             )
         return cls(token=str(token).strip())
 
 
 def list_channels(token: str) -> list[dict]:
-    """Return the user's connected Buffer profiles ("channels").
+    """Return the user's connected the scheduler profiles ("channels").
 
     Each item has the shape::
 
         {
-            "id":                  "<buffer profile id>",
+            "id":                  "<scheduler profile id>",
             "service":             "instagram" | "twitter" | "facebook" | ...,
             "service_username":    "@your_club_handle",
             "formatted_username":  "Your Club Handle",
@@ -114,13 +114,13 @@ def list_channels(token: str) -> list[dict]:
 
     Raises
     ------
-    BufferAuthError
-        Token missing/blank or rejected by Buffer (401/403).
-    BufferAPIError
+    SchedulerAuthError
+        Token missing/blank or rejected by the scheduler (401/403).
+    SchedulerAPIError
         Any other HTTP / network failure.
     """
     prepared = _PreparedToken.require(token)
-    url = f"{BUFFER_API_BASE}/1/profiles.json"
+    url = f"{SCHEDULER_API_BASE}/1/profiles.json"
     try:
         resp = requests.get(
             url,
@@ -128,30 +128,30 @@ def list_channels(token: str) -> list[dict]:
             timeout=_DEFAULT_TIMEOUT,
         )
     except requests.RequestException as exc:
-        raise BufferAPIError(f"Could not reach Buffer: {exc}") from exc
+        raise SchedulerAPIError(f"Could not reach the scheduler: {exc}") from exc
 
     if resp.status_code in (401, 403):
-        raise BufferAuthError(
-            "Buffer rejected the access token on this deployment. Contact your administrator to rotate it."
+        raise SchedulerAuthError(
+            "Auto scheduling rejected the access token on this deployment. Contact your administrator to rotate it."
         )
     if resp.status_code == 429:
         retry = _parse_retry_after(resp)
         suffix = f" Retry in {retry}s." if retry else " Try again shortly."
-        raise BufferRateLimitError(
-            "Buffer rate-limit reached." + suffix,
+        raise SchedulerRateLimitError(
+            "Auto scheduling rate-limit reached." + suffix,
             retry_after=retry,
         )
     if not resp.ok:
-        raise BufferAPIError(_summarise_error(resp))
+        raise SchedulerAPIError(_summarise_error(resp))
 
     try:
         data = resp.json()
     except ValueError as exc:
-        raise BufferAPIError("Buffer returned an unreadable response.") from exc
+        raise SchedulerAPIError("The scheduler returned an unreadable response.") from exc
 
     if not isinstance(data, list):
-        # Buffer error payloads come back as a dict with 'error' or 'message'.
-        raise BufferAPIError(_summarise_error_dict(data))
+        # the scheduler error payloads come back as a dict with 'error' or 'message'.
+        raise SchedulerAPIError(_summarise_error_dict(data))
 
     channels: list[dict] = []
     for raw in data:
@@ -179,22 +179,22 @@ def schedule_post(
     scheduled_at: Optional[datetime] = None,
     alt_text: str = "",
 ) -> dict:
-    """Create a Buffer update on `channel_id`.
+    """Create a the scheduler update on `channel_id`.
 
     Parameters
     ----------
     token : str
-        Buffer access token (raises BufferAuthError if blank).
+        the scheduler access token (raises SchedulerAuthError if blank).
     channel_id : str
-        Buffer profile id from list_channels()[i]["id"].
+        the scheduler profile id from list_channels()[i]["id"].
     text : str
-        Caption body. Required by Buffer's API — empty strings are rejected.
+        Caption body. Required by the scheduler's API — empty strings are rejected.
     media_urls : list[str] | None
-        Optional list of media URLs. Buffer v1 accepts a single primary
+        Optional list of media URLs. the scheduler v1 accepts a single primary
         image via `media[link]`; if multiple URLs are passed we use the
         first and ignore the rest (a richer media payload is a follow-up).
     scheduled_at : datetime | None
-        UTC datetime to schedule at. If None, Buffer adds the update to
+        UTC datetime to schedule at. If None, the scheduler adds the update to
         the channel's next available queue slot.
 
     Returns
@@ -204,24 +204,24 @@ def schedule_post(
 
             {
                 "ok":          True,
-                "update_id":   "<buffer update id>",
+                "update_id":   "<scheduler update id>",
                 "channel_id":  "<echoed profile id>",
                 "raw":         <original payload>,
             }
 
     Raises
     ------
-    BufferAuthError
-        Token missing/blank or rejected by Buffer.
-    BufferAPIError
+    SchedulerAuthError
+        Token missing/blank or rejected by the scheduler.
+    SchedulerAPIError
         Any non-2xx response or transport failure.
     """
     assert_publishing_allowed()
     prepared = _PreparedToken.require(token)
     if not channel_id or not str(channel_id).strip():
-        raise BufferAPIError("A Buffer channel id is required.")
+        raise SchedulerAPIError("A scheduling channel id is required.")
     if not text or not str(text).strip():
-        raise BufferAPIError("Caption text is required.")
+        raise SchedulerAPIError("Caption text is required.")
 
     payload: list[tuple[str, str]] = [
         ("access_token", prepared.token),
@@ -238,42 +238,42 @@ def schedule_post(
             payload.append(("media[link]", str(first).strip()))
             payload.append(("media[photo]", str(first).strip()))
             # W.11: result-grounded alt text rides every publish payload
-            # that carries media (Buffer's media description field).
+            # that carries media (the scheduler's media description field).
             if alt_text and alt_text.strip():
                 payload.append(("media[description]", alt_text.strip()[:500]))
 
-    url = f"{BUFFER_API_BASE}/1/updates/create.json"
+    url = f"{SCHEDULER_API_BASE}/1/updates/create.json"
     try:
         resp = requests.post(url, data=payload, timeout=_DEFAULT_TIMEOUT)
     except requests.RequestException as exc:
-        raise BufferAPIError(f"Could not reach Buffer: {exc}") from exc
+        raise SchedulerAPIError(f"Could not reach the scheduler: {exc}") from exc
 
     if resp.status_code in (401, 403):
-        raise BufferAuthError(
-            "Buffer rejected the access token on this deployment. Contact your administrator to rotate it."
+        raise SchedulerAuthError(
+            "Auto scheduling rejected the access token on this deployment. Contact your administrator to rotate it."
         )
     if resp.status_code == 429:
         retry = _parse_retry_after(resp)
         suffix = f" Retry in {retry}s." if retry else " Try again shortly."
-        raise BufferRateLimitError(
-            "Buffer rate-limit reached." + suffix,
+        raise SchedulerRateLimitError(
+            "Auto scheduling rate-limit reached." + suffix,
             retry_after=retry,
         )
     if not resp.ok:
-        raise BufferAPIError(_summarise_error(resp))
+        raise SchedulerAPIError(_summarise_error(resp))
 
     try:
         data = resp.json()
     except ValueError as exc:
-        raise BufferAPIError("Buffer returned an unreadable response.") from exc
+        raise SchedulerAPIError("The scheduler returned an unreadable response.") from exc
 
-    # Buffer's v1 success flag is *usually* boolean True but the API has
+    # the scheduler's v1 success flag is *usually* boolean True but the API has
     # been observed to return truthy non-bool values (1, "true") for some
     # update kinds. Use a permissive truthy check so legitimate posts
     # aren't falsely flagged as failures. Missing key defaults to True
     # (the response shape is success-implied).
     if not isinstance(data, dict) or not bool(data.get("success", True)):
-        raise BufferAPIError(_summarise_error_dict(data if isinstance(data, dict) else {}))
+        raise SchedulerAPIError(_summarise_error_dict(data if isinstance(data, dict) else {}))
 
     update_id = ""
     updates = data.get("updates") if isinstance(data, dict) else None
@@ -287,7 +287,9 @@ def schedule_post(
             update_id = str(single.get("id", ""))
 
     if not update_id:
-        raise BufferAPIError("Buffer accepted the request but did not return an update id.")
+        raise SchedulerAPIError(
+            "Auto scheduling accepted the request but did not return an update id."
+        )
 
     return {
         "ok": True,
@@ -303,28 +305,28 @@ def _summarise_error(resp: "requests.Response") -> str:
         payload = resp.json()
         msg = _summarise_error_dict(payload if isinstance(payload, dict) else {})
         if msg:
-            return f"Buffer error ({resp.status_code}): {msg}"
+            return f"Scheduling error ({resp.status_code}): {msg}"
     except Exception:
         pass
-    return f"Buffer returned HTTP {resp.status_code}."
+    return f"The scheduler returned HTTP {resp.status_code}."
 
 
 def _summarise_error_dict(data: dict) -> str:
     if not isinstance(data, dict):
-        return "Unexpected Buffer response."
+        return "Unexpected scheduling response."
     for key in ("message", "error", "description"):
         val = data.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
-    return "Buffer returned an error."
+    return "The scheduler returned an error."
 
 
 __all__ = [
-    "BUFFER_API_BASE",
-    "BufferError",
-    "BufferAuthError",
-    "BufferAPIError",
-    "BufferRateLimitError",
+    "SCHEDULER_API_BASE",
+    "SchedulerError",
+    "SchedulerAuthError",
+    "SchedulerAPIError",
+    "SchedulerRateLimitError",
     "list_channels",
     "schedule_post",
 ]

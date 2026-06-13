@@ -11,7 +11,7 @@ autonomy policy (P2.4):
 * ``fully_autonomous`` — the card **skips the human wait** only if the full
   publish gate (``publishing.publish_gate``, P2.3) passes for the exact
   caption that would be posted; it is then auto-APPROVED and, when the org
-  has chosen autonomous channels, published through the same Buffer path a
+  has chosen autonomous channels, published through the same the scheduler path a
   human click uses. Any guardrail failure leaves the card in the queue for
   a human — autonomy degrades to approval, never the other way round.
 
@@ -160,13 +160,13 @@ def _caption_for_card(run_data: dict, ra: dict, wf_state, profile_id: str) -> st
     return "\n\n".join(part.strip() for part in ordered if part.strip())
 
 
-def _resolve_buffer_token(profile) -> str:
-    """Per-profile Buffer token first, env fallback — the same resolution
+def _resolve_scheduler_token(profile) -> str:
+    """Per-profile the scheduler token first, env fallback — the same resolution
     order as the human schedule route."""
-    tok = (getattr(profile, "buffer_access_token", "") or "").strip()
+    tok = (getattr(profile, "scheduler_access_token", "") or "").strip()
     if tok:
         return tok
-    return (os.environ.get("BUFFER_ACCESS_TOKEN") or "").strip()
+    return (os.environ.get("SCHEDULER_ACCESS_TOKEN") or "").strip()
 
 
 def _publish_card(
@@ -181,17 +181,17 @@ def _publish_card(
     audit: AuditLog,
     session_id: str,
 ) -> tuple[bool, str]:
-    """Publish one auto-approved card through the same Buffer path a human
+    """Publish one auto-approved card through the same the scheduler path a human
     click uses. Returns (published, detail). Honest failures: no token, no
-    channels, or Buffer errors leave the card APPROVED for a human."""
+    channels, or the scheduler errors leave the card APPROVED for a human."""
     if not channels:
         return False, "no autonomous channels configured — approved for human scheduling"
-    token = _resolve_buffer_token(profile)
+    token = _resolve_scheduler_token(profile)
     if not token:
-        return False, "no Buffer token for this org — approved for human scheduling"
+        return False, "no the scheduler token for this org — approved for human scheduling"
 
     from mediahub.publishing import posting_log
-    from mediahub.publishing.buffer import BufferError, schedule_post
+    from mediahub.publishing.scheduler import SchedulerError, schedule_post
     from mediahub.publishing.kill_switch import PublishingHalted
 
     ok_ids: list[str] = []
@@ -207,7 +207,7 @@ def _publish_card(
                 run_id=run_id,
                 card_id=card_id,
                 channel_id=str(channel_id),
-                service="buffer",
+                service="scheduler",
                 status="ok",
                 update_id=str(res.get("update_id") or ""),
                 caption=caption,
@@ -221,7 +221,7 @@ def _publish_card(
                 run_id=run_id,
                 card_id=card_id,
                 channel_id=str(channel_id),
-                service="buffer",
+                service="scheduler",
                 status="failed",
                 error_kind="PublishingHalted",
                 error_message=str(e)[:300],
@@ -231,19 +231,19 @@ def _publish_card(
                 org_id,
                 session_id,
                 "blocked",
-                tool="buffer.schedule_post",
+                tool="scheduler.schedule_post",
                 args={"run_id": run_id, "card_id": card_id},
                 result="kill switch engaged mid-cycle — publishing halted",
             )
             break
-        except BufferError as e:
+        except SchedulerError as e:
             failures.append(f"{channel_id}: {e}")
             posting_log.record_attempt(
                 profile_id=org_id,
                 run_id=run_id,
                 card_id=card_id,
                 channel_id=str(channel_id),
-                service="buffer",
+                service="scheduler",
                 status="failed",
                 error_kind=type(e).__name__,
                 error_message=str(e)[:300],
@@ -254,7 +254,7 @@ def _publish_card(
             run_id,
             card_id,
             ScheduleStatus.SCHEDULED,
-            buffer_update_id=";".join(i for i in ok_ids if i) or None,
+            scheduler_update_id=";".join(i for i in ok_ids if i) or None,
             schedule_error="; ".join(failures)[:500] or None,
         )
         detail = f"scheduled on {len(ok_ids)} channel(s)" + (
@@ -264,7 +264,7 @@ def _publish_card(
             org_id,
             session_id,
             "auto_publish",
-            tool="buffer.schedule_post",
+            tool="scheduler.schedule_post",
             args={"run_id": run_id, "card_id": card_id, "channels": list(channels)},
             result=detail,
         )
@@ -280,7 +280,7 @@ def _publish_card(
         org_id,
         session_id,
         "auto_publish",
-        tool="buffer.schedule_post",
+        tool="scheduler.schedule_post",
         args={"run_id": run_id, "card_id": card_id, "channels": list(channels)},
         result=detail,
     )

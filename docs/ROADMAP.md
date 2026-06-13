@@ -64,7 +64,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `12cf95ffe` · Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4
+**Last updated:** 2026-06-13 · `9c5d5cc26` · refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,13 +1215,16 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
+| 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
+| 2026-06-13 | `874379a4b` | Apply ruff-format (pre-commit hygiene) to changed files |
+| 2026-06-13 | `4b6971191` | Settings polish: drop redundant Activity sub-heading; keep Clear cache on its page |
+| 2026-06-13 | `0f438e2bc` | Signed-in pages: faint background watermark of the org's logo(s) (bullet 11) |
+| 2026-06-13 | `ac7a4c4e5` | Free Text: single prompt -> branded graphic, with photos (bullet 13) |
+| 2026-06-13 | `ff783cbe0` | Update settings/status tests for the new card grid + public status view |
 | 2026-06-13 | `12cf95ffe` | Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4 |
+| 2026-06-13 | `be612a31b` | Rename Buffer -> "auto scheduling" everywhere; restructure Settings into card grid |
 | 2026-06-13 | `b7052ff57` | skills: add motion-craft + graphic-craft from HyperFrames (#437) |
+| 2026-06-13 | `e4fa8e4e2` | Run delete stays in place; spotlight last-month; purge athlete_swims on delete; 90% autopublish; sig |
 | 2026-06-12 | `3474910ad` | Remove claude-flow-dependent coding skills (no MCP/CLI access) |
-| 2026-06-12 | `73f198afb` | Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4 |
-| 2026-06-12 | `46d3616e7` | fix: a11y: Documents must have <title> element to aid in navigati (#424) |
-| 2026-06-12 | `548096e9e` | fix: a11y: Select element must have an accessible name (select-na (#422) |
-| 2026-06-12 | `49db59170` | docs(roadmap): 2026-06-12 daily scan — Swim England Sport:80/Rankings API note + changelog row |
-| 2026-06-12 | `31785c89e` | build(deps): bump the python-deps group with 36 updates |
-| 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
 <!-- /ROADMAP:ACTIVITY -->

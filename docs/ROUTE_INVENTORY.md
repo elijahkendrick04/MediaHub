@@ -18,7 +18,6 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_autonomy_policy_load` | `GET` | `/api/autonomy/policy` |
 | `api_autonomy_policy_save` | `POST` | `/api/autonomy/policy` |
 | `api_autonomy_sweep` | `POST` | `/api/autonomy/sweep` |
-| `api_buffer_channels` | `GET` | `/api/buffer/channels` |
 | `api_stub_pack_create_graphic` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/create-graphic` |
 | `api_stub_pack_card_status` | `POST` | `/api/drafts/<pack_id>/card/<int:card_idx>/status` |
 | `api_stub_pack_regenerate` | `POST` | `/api/drafts/<pack_id>/regenerate` |
@@ -28,8 +27,8 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_media_library_file` | `GET` | `/api/media-library/file/<asset_id>` |
 | `api_media_library_list_json` | `GET` | `/api/media-library/list.json` |
 | `organisation_set_active` | `GET,POST` | `/api/organisation/active` |
-| `api_connect_buffer` | `POST` | `/api/organisation/connect-buffer` |
-| `api_disconnect_buffer` | `POST` | `/api/organisation/disconnect-buffer` |
+| `api_connect_scheduler` | `POST` | `/api/organisation/connect-scheduler` |
+| `api_disconnect_scheduler` | `POST` | `/api/organisation/disconnect-scheduler` |
 | `organisation_finalise` | `POST` | `/api/organisation/finalise` |
 | `api_plan_generate` | `POST` | `/api/plan/generate` |
 | `api_plan_inputs` | `GET,POST` | `/api/plan/inputs` |
@@ -65,6 +64,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `api_venue_import` | `POST` | `/api/runs/<run_id>/venue-import` |
 | `api_venue_search` | `GET` | `/api/runs/<run_id>/venue-search` |
 | `api_why_card` | `GET` | `/api/runs/<run_id>/why/<int:ach_index>` |
+| `api_scheduler_channels` | `GET` | `/api/scheduler/channels` |
 | `api_llm_status` | `GET` | `/api/settings/llm-status` |
 | `api_status_json` | `GET` | `/api/status` |
 | `upload_from_url_status` | `GET` | `/api/upload/from-url/<job_id>/status` |
@@ -140,6 +140,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `operator_commercial_quote_update` | `POST` | `/operator/commercial/quotes/update` |
 | `operator_notify_users` | `GET,POST` | `/operator/notify-users` |
 | `organisation_page` | `GET,POST` | `/organisation` |
+| `organisation_logo_serve` | `GET` | `/organisation/<profile_id>/logo/<logo_id>` |
 | `org_athlete_rights` | `GET` | `/organisation/athlete-rights` |
 | `org_dsr_clock` | `POST` | `/organisation/athlete-rights/<request_id>/clock` |
 | `org_dsr_action` | `POST` | `/organisation/athlete-rights/<request_id>/run` |
@@ -202,6 +203,7 @@ _Auto-generated from `app.url_map` by `scripts/build_inventories.py`._
 | `spotlight_view` | `GET` | `/spotlight/<run_id>/<path:swimmer_key>` |
 | `spotlight_build` | `POST` | `/spotlight/<run_id>/<path:swimmer_key>/build` |
 | `static` | `GET` | `/static/<path:filename>` |
+| `static_fonts_css` | `GET` | `/static/theme/fonts.css` |
 | `status_page` | `GET` | `/status` |
 | `service_worker` | `GET` | `/sw.js` |
 | `terms_page` | `GET` | `/terms` |

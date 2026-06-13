@@ -60,15 +60,17 @@ class TestStatusPageReachableWithoutOrg:
         assert "Status" in body
         assert "Backend" in body
 
-    def test_status_page_says_no_data_yet_when_log_empty(self, fresh_app):
+    def test_status_page_is_simple_operational_or_down(self, fresh_app):
+        # The public status page is now the simple "Website operational" /
+        # "Website down" view — no uptime percentages are shown to the public.
+        # The detailed uptime/incident breakdown moved to operator-only
+        # Settings -> Developer.
         c, _ = fresh_app
         resp = c.get("/status")
         body = resp.get_data(as_text=True)
-        # Honest behaviour: with no heartbeats logged, the page must
-        # NOT claim 100% uptime — it shows em-dashes.
-        assert "100%" not in body or "&mdash;" in body
-        # And the pill should reflect "no data yet" / similar.
-        assert "no data yet" in body or "heartbeat" in body.lower()
+        # No uptime-percentage claims, and the reachable site reads operational.
+        assert "uptime" not in body.lower()
+        assert "Website operational" in body or "Website down" in body
 
 
 class TestApiStatusJsonShape:

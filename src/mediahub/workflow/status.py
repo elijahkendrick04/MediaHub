@@ -8,7 +8,7 @@ Workflow lifecycle:
   POSTED   — card has been posted; marked with timestamp
   EDITED   — card has user edits (caption overrides) but not yet approved
 
-ScheduleStatus tracks the external-publishing handoff (e.g. Buffer):
+ScheduleStatus tracks the external-publishing handoff (e.g. the scheduler):
   QUEUED    — default; not yet sent to an external scheduler
   SCHEDULED — accepted by the scheduler; awaiting its post-time
   PUBLISHED — scheduler has confirmed the post went live
@@ -48,7 +48,7 @@ class CardWorkflowState:
     # External-scheduler state. Defaults keep the field optional so existing
     # workflow sidecars that pre-date publishing still load cleanly.
     schedule_status: ScheduleStatus = ScheduleStatus.QUEUED
-    buffer_update_id: Optional[str] = None
+    scheduler_update_id: Optional[str] = None
     scheduled_at: Optional[str] = None  # ISO8601 UTC, when set
     schedule_error: Optional[str] = None  # last failure reason
 
@@ -78,7 +78,8 @@ class CardWorkflowState:
             posted_at=d.get("posted_at"),
             last_changed_at=d.get("last_changed_at", ""),
             schedule_status=sched,
-            buffer_update_id=d.get("buffer_update_id"),
+            # Back-compat: the id was historically persisted under "buffer_update_id".
+            scheduler_update_id=d.get("scheduler_update_id") or d.get("buffer_update_id"),
             scheduled_at=d.get("scheduled_at"),
             schedule_error=d.get("schedule_error"),
         )

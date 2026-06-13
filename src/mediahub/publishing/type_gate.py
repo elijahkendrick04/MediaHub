@@ -12,7 +12,7 @@ Design:
   AND the global kill switch must be disengaged.
 - ``approval_required`` and ``draft_only`` both raise ``TypeGated``.
 
-Callers in autonomous publishing paths (not in the human-approval Buffer path)
+Callers in autonomous publishing paths (not in the human-approval the scheduler path)
 call ``assert_type_publishing_allowed(org_id, content_type_str)`` before
 attempting to post.  ``TypeGated`` means "queue for human review" — the same
 state the system is in today for every type.

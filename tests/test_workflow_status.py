@@ -76,7 +76,7 @@ class TestCardWorkflowStateDefaults:
         assert s.notes is None
         assert s.posted_at is None
         assert s.last_changed_at == ""
-        assert s.buffer_update_id is None
+        assert s.scheduler_update_id is None
         assert s.scheduled_at is None
         assert s.schedule_error is None
 
@@ -113,7 +113,7 @@ class TestToDict:
             "posted_at",
             "last_changed_at",
             "schedule_status",
-            "buffer_update_id",
+            "scheduler_update_id",
             "scheduled_at",
             "schedule_error",
         }
@@ -140,7 +140,7 @@ class TestFromDict:
             posted_at="2024-05-01T12:00:00Z",
             last_changed_at="2024-04-30T10:00:00Z",
             schedule_status=ScheduleStatus.PUBLISHED,
-            buffer_update_id="buf-1",
+            scheduler_update_id="buf-1",
             scheduled_at="2024-05-01T11:30:00Z",
             schedule_error=None,
         )
@@ -167,7 +167,7 @@ class TestFromDict:
         loaded = CardWorkflowState.from_dict({"card_id": "x"})
         assert loaded.edited_captions is None
         assert loaded.notes is None
-        assert loaded.buffer_update_id is None
+        assert loaded.scheduler_update_id is None
         assert loaded.posted_at is None
         assert loaded.scheduled_at is None
         assert loaded.schedule_error is None

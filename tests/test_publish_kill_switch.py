@@ -26,8 +26,8 @@ from mediahub.publishing.kill_switch import (
     kill_switch_status,
     publish_kill_switch_engaged,
 )
-import mediahub.publishing.buffer as buffer_mod
-from mediahub.publishing.buffer import schedule_post
+import mediahub.publishing.scheduler as scheduler_mod
+from mediahub.publishing.scheduler import schedule_post
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ def test_status_shape_engaged(monkeypatch):
 def test_schedule_post_raises_and_no_requests_when_engaged(monkeypatch):
     monkeypatch.setenv(KILL_SWITCH_ENV, "1")
     fake_reqs = _fake_requests()  # .post raises AssertionError if called
-    monkeypatch.setattr(buffer_mod, "requests", fake_reqs)
+    monkeypatch.setattr(scheduler_mod, "requests", fake_reqs)
 
     with pytest.raises(PublishingHalted):
         schedule_post(token="tok", channel_id="ch1", text="hello world")
@@ -167,7 +167,7 @@ def test_schedule_post_proceeds_when_disengaged(monkeypatch):
         post=_fake_post,
         RequestException=Exception,
     )
-    monkeypatch.setattr(buffer_mod, "requests", fake_reqs)
+    monkeypatch.setattr(scheduler_mod, "requests", fake_reqs)
 
     result = schedule_post(token="tok", channel_id="ch1", text="hello world")
     assert result["ok"] is True
