@@ -64,7 +64,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `ab1613c10` · fix(ci): make roadmap auto-update conflict-proof (#453) [skip render]
+**Last updated:** 2026-06-13 · `ce271d4fd` · Make the signed-in logo wall versatile for any logo / any colour (#454)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
 | 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
 | 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
 | 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
@@ -1225,5 +1226,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `4b6971191` | Settings polish: drop redundant Activity sub-heading; keep Clear cache on its page |
 | 2026-06-13 | `0f438e2bc` | Signed-in pages: faint background watermark of the org's logo(s) (bullet 11) |
 | 2026-06-13 | `ac7a4c4e5` | Free Text: single prompt -> branded graphic, with photos (bullet 13) |
-| 2026-06-13 | `ff783cbe0` | Update settings/status tests for the new card grid + public status view |
 <!-- /ROADMAP:ACTIVITY -->
