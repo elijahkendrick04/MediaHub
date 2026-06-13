@@ -13334,7 +13334,10 @@ Relay team broke club record"></textarea>
                         f.unlink()
                     except Exception:
                         pass
-        return redirect(url_for("privacy_page"))
+        # Return to wherever the clear was triggered (Settings → Privacy or the
+        # standalone /privacy page), not unconditionally to /privacy.
+        nxt = _safe_next(request.form.get("next"))
+        return redirect(nxt or url_for("privacy_page"))
 
     # ---- DATA-PROTECTION COMPLAINTS (s.164A DPA 2018) -------------------
     # From 19 June 2026 controllers must facilitate data-protection
@@ -15333,11 +15336,10 @@ Relay team broke club record"></textarea>
 
         Mirrors the standalone /activity page but degrades gracefully
         when no profile is pinned (Settings is reachable pre-org-setup).
+        The settings sub-page supplies its own hero title, so this section
+        carries no big header of its own.
         """
-        section_header = (
-            '<h2 id="activity" style="margin:32px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Activity</h2>'
-        )
+        section_header = ""
         if prof is None:
             return (
                 f"{section_header}"
@@ -16212,6 +16214,7 @@ window.mhSchedulerDisconnect = function(btn) {
   <h3 style="margin-top:0">Clear cache</h3>
   <p class="dim" style="font-size:13px;margin-bottom:10px">Clear the local cache of public PB-lookup pages for this deployment. Safe to do any time — it just re-fetches on the next run.</p>
   <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the cache?')">
+    <input type="hidden" name="next" value="{url_for("settings_section", section="privacy")}">
     <button class="btn secondary" type="submit">Clear cache</button>
   </form>
 </div>
