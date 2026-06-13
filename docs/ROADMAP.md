@@ -64,7 +64,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `8e73d6d82` · Redesign signed-in logo background as a cohesive brand wall (#450)
+**Last updated:** 2026-06-13 · `ab1613c10` · fix(ci): make roadmap auto-update conflict-proof (#453) [skip render]
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,8 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
+| 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
 | 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
 | 2026-06-13 | `5c55c9bdc` | docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render] |
 | 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
@@ -1224,6 +1226,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `0f438e2bc` | Signed-in pages: faint background watermark of the org's logo(s) (bullet 11) |
 | 2026-06-13 | `ac7a4c4e5` | Free Text: single prompt -> branded graphic, with photos (bullet 13) |
 | 2026-06-13 | `ff783cbe0` | Update settings/status tests for the new card grid + public status view |
-| 2026-06-13 | `12cf95ffe` | Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4 |
-| 2026-06-13 | `be612a31b` | Rename Buffer -> "auto scheduling" everywhere; restructure Settings into card grid |
 <!-- /ROADMAP:ACTIVITY -->
