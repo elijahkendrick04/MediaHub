@@ -1,5 +1,5 @@
 """
-turn_into/templates.py — seven artefact builders.
+turn_into/templates.py — eight artefact builders.
 
 Each builder consumes:
   - ``meet_summary``: small dict {name, start_date, course, venue, profile_display}
@@ -72,6 +72,21 @@ _ARTEFACT_INTENTS: dict[str, str] = {
         "Write a parent-friendly newsletter paragraph (~200 words). Plain, "
         "warm, free of jargon. Mention 2-3 names at most. End with a "
         "single sentence about what is coming next if known."
+    ),
+    "newsletter_subject": (
+        "Write an email subject line (max 55 characters) and a preheader "
+        "line (max 90 characters) for this parent-newsletter update. "
+        "Specific and warm, never clickbait. No emoji in the subject."
+    ),
+    "club_report": (
+        "Write a long-form club website report of this meet — roughly "
+        "350-450 words across 4-6 short paragraphs. Open with the headline "
+        "story of the weekend, work through the standout swims with their "
+        "real names, events and times, give the wider squad a paragraph, "
+        "and close with a short look ahead. Plain prose in the club's "
+        "voice, third person — no markdown headings, no bullet lists. "
+        "Use ONLY the facts provided; never invent a swimmer, time, "
+        "placing or quote."
     ),
     "sponsor_thank_you": (
         "Write a single short post (~280 chars) thanking the sponsor by "
@@ -220,6 +235,25 @@ def _narrate_brief(payload: dict) -> str:
         if heads:
             s += " Headline swims to mention: " + "; ".join(heads) + "."
         return s
+    if kind == "club_report":
+        club = (payload.get("club") or "").strip()
+        course = (payload.get("course") or "").strip()
+        venue = (payload.get("venue") or "").strip()
+        dates = (payload.get("dates") or "").strip()
+        heads = _lines("headliners")
+        s = f"Write the club website report of {meet}"
+        if club:
+            s += f" for {club}"
+        bits = [b for b in (venue, course, dates) if b]
+        if bits:
+            s += f" ({', '.join(bits)})"
+        s += "."
+        if heads:
+            s += " The verified results to work from: " + "; ".join(heads) + "."
+        else:
+            s += " No individual standouts were flagged — write it about the squad as a whole."
+        s += " These are the only verified facts — the report must not go beyond them."
+        return s
     if kind == "sponsor_thank_you":
         sponsor = (payload.get("sponsor") or "").strip() or "our sponsor"
         guide = (payload.get("sponsor_guidelines") or "").strip()
@@ -312,6 +346,67 @@ def _gen_caption(
             club_profile=profile,
             brief_prose=brief_prose,
         )
+    except Exception:
+        return fallback_text
+    text = (text or "").strip()
+    return text or fallback_text
+
+
+def _gen_longform(
+    payload: dict,
+    club_brand: dict,
+    *,
+    tone: str,
+    intent_key: str,
+    deterministic: bool,
+    fallback_text: str,
+    profile=None,
+    max_tokens: int = 1400,
+) -> str:
+    """Generate one long-form artefact body via the cloud LLM, or fallback.
+
+    ``generate_caption_for_tone`` is capped at caption length (400 tokens),
+    so artefacts that need real word count (the club website report) go
+    straight to ``media_ai.generate`` with the same brand briefing the
+    caption path uses. Defensive like :func:`_gen_caption` — any failure
+    returns the deterministic fallback so the pack never crashes.
+    """
+    if deterministic:
+        return fallback_text
+    default_intent = _ARTEFACT_INTENTS.get(intent_key, "")
+    try:
+        from mediahub.brand.derived import artefact_intent_for
+
+        intent = artefact_intent_for(profile, intent_key, default_intent)
+    except Exception:
+        intent = default_intent
+
+    system_parts = [
+        "You write long-form editorial copy for a sports club, in the club's voice.",
+        intent,
+        f"Voice register: {tone}.",
+        "Use ONLY the facts in the brief. Never invent a swimmer, a time, a "
+        "placing or a quote. Output only the finished copy — no headings, "
+        "no markdown, no preamble.",
+    ]
+    if profile is not None:
+        try:
+            from mediahub.brand.context import brand_context_for_llm
+
+            brand_prose = brand_context_for_llm(profile)
+            if brand_prose:
+                system_parts.insert(0, brand_prose)
+        except Exception:
+            pass
+    sponsor = (club_brand.get("sponsor_name") or "").strip()
+    if sponsor:
+        system_parts.append(f"The club's sponsor is {sponsor} — a brief, natural mention is welcome.")
+
+    brief = _narrate_brief(payload) or fallback_text
+    try:
+        from mediahub.media_ai.llm import generate
+
+        text = generate(brief, system="\n\n".join(p for p in system_parts if p), max_tokens=max_tokens)
     except Exception:
         return fallback_text
     text = (text or "").strip()
@@ -695,15 +790,128 @@ def build_parent_newsletter(
         f"</section>"
     )
 
+    # Email-ready envelope: a subject line + preheader so the section can be
+    # sent as-is, not just pasted into a longer mail-out.
+    club_name = club_brand.get("club_name", "") or "Club"
+    fb_subject = _truncate(f"{club_name} at {meet_name} — meet update", 55)
+    fb_preheader = _truncate(plain.split(". ")[0].strip(), 90)
+    subject, preheader = fb_subject, fb_preheader
+    if not deterministic:
+        try:
+            from mediahub.media_ai.llm import generate_json
+
+            d = generate_json(
+                f"Newsletter text:\n{plain}\n\nMeet: {meet_name}. Club: {club_name}.",
+                system=_ARTEFACT_INTENTS["newsletter_subject"]
+                + ' Respond with JSON: {"subject": "...", "preheader": "..."}.',
+                max_tokens=120,
+            )
+            subject = _truncate(str(d.get("subject") or "").strip() or fb_subject, 60)
+            preheader = _truncate(str(d.get("preheader") or "").strip() or fb_preheader, 100)
+        except Exception:
+            subject, preheader = fb_subject, fb_preheader
+
     return {
         "type": "parent_newsletter",
         "title": f"Parent newsletter — {meet_name}",
-        "captions": {"default": plain, "plain_text": plain},
+        "captions": {
+            "subject": subject,
+            "preheader": preheader,
+            "default": plain,
+            "plain_text": plain,
+        },
         "cards": [{"swimmer": "", "event": "", "headline": meet_name, "body": plain}],
         "html": html,
         "notes": [
             f"Plain-text word count: ~{len(plain.split())} words.",
             f"Mentions {len(bullets)} headline swimmers.",
+            "Email-ready: subject (≤60 chars) and preheader (≤100 chars) included.",
+        ],
+    }
+
+
+# --- 4b. Club website report (long-form) ---------------------------------
+
+
+def build_club_report(
+    meet_summary: dict,
+    top_achievements: list[dict],
+    profile,
+    voice_profile,
+    brand_kit,
+    deterministic: bool = False,
+) -> dict:
+    """Long-form meet report for the club website or programme notes.
+
+    The long-form sibling of the feed recap: ~350-450 words of plain prose
+    grounded only in the ranked results, ready to paste into the club's
+    news page. Generated via :func:`_gen_longform` (the caption primitive
+    is capped at caption length).
+    """
+    tone = (voice_profile.tone if voice_profile else "") or "warm-club"
+    club_brand = _club_brand(meet_summary, brand_kit, profile, voice_profile)
+    meet_name = meet_summary.get("name", "the recent meet")
+    club_name = club_brand.get("club_name", "") or "The club"
+    venue = (meet_summary.get("venue") or "").strip()
+    start_date = (meet_summary.get("start_date") or "").strip()
+    end_date = (meet_summary.get("end_date") or "").strip()
+    dates = " to ".join(d for d in (start_date, end_date) if d) if end_date else start_date
+
+    headliners = top_achievements[:8]
+    facts = [ln for ln in (_ach_line(_ach_payload(ra)) for ra in headliners) if ln]
+
+    opening = f"{club_name} swimmers were in action at {meet_name}"
+    if venue:
+        opening += f" at {venue}"
+    if start_date:
+        opening += f" on {start_date}"
+    opening += "."
+    fallback_paras = [opening]
+    if facts:
+        fallback_paras.append("The standout swims: " + "; ".join(facts) + ".")
+    fallback_paras.append(
+        "Every swimmer who raced contributed to the meet — thank you to the "
+        "coaches, officials and families who made the weekend happen."
+    )
+    fallback_report = "\n\n".join(fallback_paras)
+
+    report = _gen_longform(
+        {
+            "kind": "club_report",
+            "meet": meet_name,
+            "club": club_brand.get("club_name", ""),
+            "course": meet_summary.get("course", ""),
+            "venue": venue,
+            "dates": dates,
+            "headliners": [_ach_payload(ra) for ra in headliners],
+        },
+        club_brand,
+        tone=tone,
+        intent_key="club_report",
+        deterministic=deterministic,
+        fallback_text=fallback_report,
+        profile=profile,
+    )
+
+    paras = [p.strip() for p in report.split("\n\n") if p.strip()]
+    html_body = "\n".join(f"<p>{_esc(p)}</p>" for p in paras)
+    html = (
+        f'<article class="mh-club-report">'
+        f"<h2>{_esc(meet_name)} — club report</h2>\n"
+        f"{html_body}\n"
+        f"</article>"
+    )
+
+    return {
+        "type": "club_report",
+        "title": f"Club website report — {meet_name}",
+        "captions": {"default": report},
+        "cards": [],
+        "html": html,
+        "notes": [
+            f"Word count: ~{len(report.split())} words.",
+            f"Grounded in {len(facts)} ranked results — no invented facts.",
+            "Long-form copy for the club website news page or programme notes.",
         ],
     }
 
@@ -954,6 +1162,7 @@ __all__ = [
     "build_swimmer_spotlights",
     "build_data_thread",
     "build_parent_newsletter",
+    "build_club_report",
     "build_sponsor_thank_you",
     "build_coach_quote",
     "build_next_meet_preview",

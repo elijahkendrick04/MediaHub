@@ -125,14 +125,14 @@ class TestTurnIntoStructure(unittest.TestCase):
         self.assertEqual(pack["run_id"], "test-run")
         self.assertEqual(pack["meet_name"], "Spring Open 2026")
 
-    def test_pack_with_no_sponsor_or_next_meet_produces_5_artefacts(self):
+    def test_pack_with_no_sponsor_or_next_meet_produces_6_artefacts(self):
         from mediahub.turn_into import turn_meet_into_pack
         pack = turn_meet_into_pack(_run_data(), _profile(), deterministic=True)
         types = [a["type"] for a in pack["artefacts"]]
-        # Always present: 1 + 2 + 3 + 4 + 6 = 5 artefacts (no sponsor, no next meet)
+        # Always present: 6 artefacts (no sponsor, no next meet)
         self.assertEqual(set(types), {
             "meet_recap", "swimmer_spotlight", "data_thread",
-            "parent_newsletter", "coach_quote",
+            "parent_newsletter", "club_report", "coach_quote",
         })
         skip_types = [s["type"] for s in pack["skipped"]]
         self.assertIn("sponsor_thank_you", skip_types)
@@ -162,30 +162,30 @@ class TestTurnIntoStructure(unittest.TestCase):
         nm = next(a for a in pack["artefacts"] if a["type"] == "next_meet_preview")
         self.assertIn("Nationals 2026", nm["captions"]["default"])
 
-    def test_full_profile_produces_all_seven(self):
+    def test_full_profile_produces_all_eight(self):
         from mediahub.turn_into import turn_meet_into_pack
         pack = turn_meet_into_pack(
             _run_data(),
             _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
             deterministic=True,
         )
-        self.assertEqual(len(pack["artefacts"]), 7)
+        self.assertEqual(len(pack["artefacts"]), 8)
         types = [a["type"] for a in pack["artefacts"]]
         self.assertEqual(set(types), {
             "meet_recap", "swimmer_spotlight", "data_thread",
-            "parent_newsletter", "sponsor_thank_you", "coach_quote",
-            "next_meet_preview",
+            "parent_newsletter", "club_report", "sponsor_thank_you",
+            "coach_quote", "next_meet_preview",
         })
         self.assertEqual(pack["skipped"], [])
 
-    def test_pack_never_exceeds_7_artefacts(self):
+    def test_pack_never_exceeds_8_artefacts(self):
         from mediahub.turn_into import turn_meet_into_pack
         pack = turn_meet_into_pack(
             _run_data(),
             _profile(sponsor="Acme Sports", notes="Next meet: Nationals — 2026-06-10"),
             deterministic=True,
         )
-        self.assertLessEqual(len(pack["artefacts"]), 7)
+        self.assertLessEqual(len(pack["artefacts"]), 8)
 
 
 class TestArtefactPlatformVariants(unittest.TestCase):
@@ -341,7 +341,7 @@ class TestWebRoutes(unittest.TestCase):
             self.assertEqual(r.status_code, 200)
             data = r.get_json()
             self.assertTrue(data["ok"])
-            self.assertEqual(data["n_artefacts"], 5)
+            self.assertEqual(data["n_artefacts"], 6)
             self.assertIn("sponsor_thank_you", data["skipped"])
             # View the rendered pack page
             r2 = client.get(data["pack_url"])
@@ -464,8 +464,17 @@ class TestArtefactsAreAIMade(unittest.TestCase):
                 captured.append(user)
                 return "AI-WRITTEN :: " + user.splitlines()[0][:40]
 
+            def fake_longform(prompt, *, system=None, max_tokens=1024, **kw):
+                captured.append(prompt)
+                return "AI-LONGFORM :: " + prompt.splitlines()[0][:40]
+
             with mock.patch("mediahub.web.ai_caption.call_claude",
-                            side_effect=fake_call):
+                            side_effect=fake_call), \
+                 mock.patch("mediahub.media_ai.llm.generate",
+                            side_effect=fake_longform), \
+                 mock.patch("mediahub.media_ai.llm.generate_json",
+                            return_value={"subject": "AI-SUBJECT line",
+                                          "preheader": "AI-PREHEADER line"}):
                 from mediahub.turn_into import turn_meet_into_pack
                 pack = turn_meet_into_pack(
                     _run_data(),
@@ -477,7 +486,15 @@ class TestArtefactsAreAIMade(unittest.TestCase):
             os.environ.pop("MEDIAHUB_TURNINTO_PARALLEL", None)
 
         by = {a["type"]: a for a in pack["artefacts"]}
-        self.assertEqual(len(pack["artefacts"]), 7)
+        self.assertEqual(len(pack["artefacts"]), 8)
+
+        # The long-form club report goes through media_ai.generate (the
+        # caption primitive is capped at caption length) — it must be
+        # AI-made too, and the newsletter's email envelope must carry the
+        # AI-written subject/preheader.
+        self.assertTrue(by["club_report"]["captions"]["default"].startswith("AI-LONGFORM"))
+        self.assertEqual(by["parent_newsletter"]["captions"]["subject"], "AI-SUBJECT line")
+        self.assertEqual(by["parent_newsletter"]["captions"]["preheader"], "AI-PREHEADER line")
 
         # Aggregate artefacts that previously fell back to heuristics.
         self.assertTrue(by["meet_recap"]["captions"]["default"].startswith("AI-WRITTEN"))
