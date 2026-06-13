@@ -315,6 +315,34 @@ def test_refetch_blocked_without_csrf_but_works_with_header(app_mod, monkeypatch
     assert re.fullmatch(r"[0-9a-f]{12}", ok.get_json()["job_id"])
 
 
+# ---------------------------------------------------------------------------
+# Org-ready gate must content-negotiate: a fetch() to the non-/api/ link
+# endpoints (Accept: application/json) gets a JSON 409, never an HTML sign-in
+# page (which the frontend would choke on with
+# "Unexpected token '<', "<!DOCTYPE "... is not valid JSON").
+# ---------------------------------------------------------------------------
+
+
+def test_from_url_returns_json_409_when_org_not_ready(app_mod):
+    app, wm = app_mod
+    app.config["ENFORCE_ORG_GATE"] = True  # production posture: gate is live
+    c = app.test_client()
+    # No ready org pinned. A browser navigation would be redirected to HTML,
+    # but a JSON Accept fetch must get a structured 409 it can render inline.
+    r = c.post(
+        "/upload/from-url",
+        data={"url": "https://results.swimming.org/x/"},
+        headers={"Accept": "application/json"},
+    )
+    assert r.status_code == 409
+    body = r.get_json()
+    assert body["error"] == "organisation_not_ready"
+    assert "setup_url" in body
+    # And a plain browser POST (HTML Accept) still redirects, unchanged.
+    html = c.post("/upload/from-url", data={"url": "https://results.swimming.org/x/"})
+    assert html.status_code in (301, 302)
+
+
 def test_refetch_route_rejects_non_link_run(app_mod):
     app, wm = app_mod
     rid = "nolink000001"

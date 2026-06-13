@@ -8652,15 +8652,19 @@ def create_app() -> Flask:
         # by path so that class of break can't recur.
         if path.startswith("/static/"):
             return None
-        # JSON-style endpoints get a 409 instead of a redirect so the
-        # browser fetch() call can show a friendly inline error.
+        # JSON-style callers get a 409 instead of a redirect so the browser
+        # fetch() call can show a friendly inline error. This is keyed on the
+        # /api/ prefix AND on a JSON Accept header, so fetch endpoints that
+        # live outside /api/ (e.g. /upload/from-url, /runs/<id>/refetch) get
+        # JSON too — never an HTML sign-in page dumped into a fetch().
         is_api = path.startswith("/api/")
         if is_api and any(path.startswith(p) for p in _SETUP_EXEMPT_API_PREFIXES):
             return None
+        wants_json = is_api or "application/json" in (request.headers.get("Accept") or "")
         prof = _active_profile()
         if prof is not None and prof.is_ready():
             return None
-        if is_api:
+        if wants_json:
             return (
                 jsonify(
                     {
@@ -8735,7 +8739,10 @@ def create_app() -> Flask:
         if session.get("terms_ok_version") == _legal.TERMS_VERSION:
             return None
         if _legal.AcceptanceStore().needs_terms_reacceptance(email):
-            if (request.path or "").startswith("/api/"):
+            wants_json = (request.path or "").startswith("/api/") or "application/json" in (
+                request.headers.get("Accept") or ""
+            )
+            if wants_json:
                 return (
                     jsonify(
                         {
@@ -9695,10 +9702,11 @@ def create_app() -> Flask:
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
     var fd = new FormData(); fd.append('url', url);
-    fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__' }, body: fd })
-      .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__', 'Accept': 'application/json' }, body: fd })
+      .then(function(r){ return r.text().then(function(t){ var j=null; try { j=JSON.parse(t); } catch(e){} return { ok: r.ok, status: r.status, j: j }; }); })
       .then(function(res){
-        if (!res.ok || res.j.error) { throw new Error(res.j.error || 'Could not start the fetch.'); }
+        if (!res.j) { throw new Error('The server returned an unexpected response (' + res.status + '). You may need to sign in again, or the deployment is briefly restarting \\u2014 reload the page and try again.'); }
+        if (!res.ok || res.j.error) { throw new Error(res.j.error || res.j.message || 'Could not start the fetch.'); }
         poll(res.j.job_id);
       })
       .catch(function(e){ btn.disabled = false; input.disabled = false; hide(statusEl); show(errEl, e.message); });
@@ -9706,7 +9714,7 @@ def create_app() -> Flask:
   function poll(jobId){
     var statusUrl = '__STATUS_BASE__'.replace('JOBID', jobId);
     var tick = function(){
-      fetch(statusUrl).then(function(r){ return r.json(); }).then(function(j){
+      fetch(statusUrl, { headers: { 'Accept': 'application/json' } }).then(function(r){ return r.json(); }).then(function(j){
         if (j.status === 'done' && j.redirect) { show(statusEl, 'Done \\u2014 opening configure\\u2026'); window.location.href = j.redirect; return; }
         if (j.status === 'error') { btn.disabled = false; input.disabled = false; hide(statusEl); show(errEl, j.error || 'The fetch failed.'); return; }
         show(statusEl, j.progress || 'Reading the site\\u2026');
@@ -10849,7 +10857,7 @@ def create_app() -> Flask:
   function poll(jobId){
     var u='__STATUS_BASE__'.replace('JOBID',jobId);
     (function tick(){
-      fetch(u).then(function(r){return r.json();}).then(function(j){
+      fetch(u,{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(j){
         if(j.status==='done'&&j.redirect){ show('Done - opening configure...'); window.location.href=j.redirect; return; }
         if(j.status==='error'){ b.disabled=false; show(j.error||'The re-fetch failed.'); return; }
         show(j.progress||'Reading the site...'); setTimeout(tick,1500);
@@ -10858,9 +10866,9 @@ def create_app() -> Flask:
   }
   b.addEventListener('click',function(){
     b.disabled=true; show('Starting...');
-    fetch('__REFETCH_URL__',{method:'POST',headers:{'X-CSRF-Token':'__CSRF__'}})
-      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
-      .then(function(res){ if(!res.ok||res.j.error){throw new Error(res.j.error||'Could not start the re-fetch.');} poll(res.j.job_id); })
+    fetch('__REFETCH_URL__',{method:'POST',headers:{'X-CSRF-Token':'__CSRF__','Accept':'application/json'}})
+      .then(function(r){return r.text().then(function(t){var j=null;try{j=JSON.parse(t);}catch(e){}return {ok:r.ok,status:r.status,j:j};});})
+      .then(function(res){ if(!res.j){throw new Error('The server returned an unexpected response ('+res.status+'). You may need to sign in again, or the deployment is briefly restarting - reload and try again.');} if(!res.ok||res.j.error){throw new Error(res.j.error||res.j.message||'Could not start the re-fetch.');} poll(res.j.job_id); })
       .catch(function(e){ b.disabled=false; show(e.message); });
   });
 })();
