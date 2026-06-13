@@ -5,6 +5,7 @@ table-row interpreter uses to coerce each column value. They have no
 external dependencies and are the deterministic, sport-agnostic core of
 the parsing layer per CLAUDE.md.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -200,3 +201,31 @@ class TestNormaliseClub:
         v, c = _normalise_club("   ")
         assert v is None
         assert c == 0.0
+
+    @pytest.mark.parametrize("raw", ["(04)", "(99)", "04", "(2004)", "2004", "  (10)  "])
+    def test_bare_year_of_birth_is_not_a_club(self, raw: str) -> None:
+        # British results print "Name (YoB) Club"; a column slip can drop the
+        # (YoB) into the club cell. A lone year of birth is never a club, so it
+        # must not surface in the club picker (was showing '(04)' etc).
+        v, _ = _normalise_club(raw)
+        assert v is None
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("(04) City of Sheffield", "City of Sheffield"),
+            ("(99) Loughborough", "Loughborough"),
+            ("2004 Bath Dolphins", "Bath Dolphins"),
+            ("04 Otter SC", "Otter SC"),
+        ],
+    )
+    def test_strips_leading_year_keeps_real_club(self, raw: str, expected: str) -> None:
+        v, c = _normalise_club(raw)
+        assert v == expected
+        assert c == pytest.approx(0.75)
+
+    @pytest.mark.parametrize("raw", ["100 Club", "1st City SC", "City of Sheffield", "Otter SC"])
+    def test_real_club_names_are_untouched(self, raw: str) -> None:
+        # Names that merely start with digits must not be truncated.
+        v, _ = _normalise_club(raw)
+        assert v == raw

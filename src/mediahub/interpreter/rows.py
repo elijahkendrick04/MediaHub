@@ -74,10 +74,26 @@ def _normalise_name(raw: str) -> tuple[str | None, float]:
     return None, 0.0
 
 
+# A leading year-of-birth token that has slipped into the club field. British
+# results print "Name (YoB) Club" (e.g. "Tom DAVIES (04) City of Sheffield"),
+# and a column slip or an AI extraction without a dedicated year column can push
+# the "(04)" into the club cell — either alone ("(04)") or as a prefix on the
+# real club ("(04) City of Sheffield"). The token is an optional-paren 2- or
+# 4-digit year, anchored so it only matches a whole leading token (so a real
+# name like "100 Club" or "1st City SC" is never truncated).
+_CLUB_YOB_PREFIX = re.compile(r"^\(?\s*(?:19|20)?\d{2}\s*\)?(?=\s|$)")
+
+
 def _normalise_club(raw: str) -> tuple[str | None, float]:
     s = raw.strip()
-    if s:
-        return s, 0.75
+    if not s:
+        return None, 0.0
+    # Strip a leading year-of-birth token if one slipped into the club cell.
+    cleaned = _CLUB_YOB_PREFIX.sub("", s).strip()
+    if cleaned and re.search(r"[A-Za-z]", cleaned):
+        return cleaned, 0.75
+    # Nothing club-like remains (the cell carried only a year-of-birth, e.g.
+    # "(04)") — not a club, so don't surface it in the club picker.
     return None, 0.0
 
 
