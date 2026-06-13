@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `3cae0dcab` · Merge pull request #441 from elijahkendrick04/claude/dreamy-cray-d6pyh4
+**Last updated:** 2026-06-13 · `3267dc9bc` · fix(autotest): only run axe-core a11y on HTML responses (#443)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -702,6 +702,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
 | 2026-06-13 | `874379a4b` | Apply ruff-format (pre-commit hygiene) to changed files |
 | 2026-06-13 | `4b6971191` | Settings polish: drop redundant Activity sub-heading; keep Clear cache on its page |
 | 2026-06-13 | `0f438e2bc` | Signed-in pages: faint background watermark of the org's logo(s) (bullet 11) |
