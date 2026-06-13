@@ -11425,12 +11425,12 @@ def create_app() -> Flask:
         # plain = story / context counts.
         rec_stats_html = "".join(
             [
-                f'<div class="stat medal"><div class="l">Elite</div><div class="v">{n_elite}</div></div>',
-                f'<div class="stat live"><div class="l">Strong</div><div class="v">{n_strong}</div></div>',
-                f'<div class="stat"><div class="l">Story</div><div class="v">{n_story}</div></div>',
-                f'<div class="stat"><div class="l">Total achievements</div><div class="v">{n_total}</div></div>',
-                f'<div class="stat"><div class="l">Swims analysed</div><div class="v">{n_analysed}</div></div>',
-                f'<div class="stat"><div class="l">Cards</div><div class="v">{n_cards}</div></div>',
+                f'<div class="stat medal"><div class="l">Elite</div><div class="v mh-countup" data-mh-to="{n_elite}">{n_elite}</div></div>',
+                f'<div class="stat live"><div class="l">Strong</div><div class="v mh-countup" data-mh-to="{n_strong}">{n_strong}</div></div>',
+                f'<div class="stat"><div class="l">Story</div><div class="v mh-countup" data-mh-to="{n_story}">{n_story}</div></div>',
+                f'<div class="stat"><div class="l">Total achievements</div><div class="v mh-countup" data-mh-to="{n_total}">{n_total}</div></div>',
+                f'<div class="stat"><div class="l">Swims analysed</div><div class="v mh-countup" data-mh-to="{n_analysed}">{n_analysed}</div></div>',
+                f'<div class="stat"><div class="l">Cards</div><div class="v mh-countup" data-mh-to="{n_cards}">{n_cards}</div></div>',
             ]
         )
 
@@ -11536,7 +11536,7 @@ def create_app() -> Flask:
         <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
         <span class="tag" style="font-size:10px">{post_type}</span>
         <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
+          <div class="mh-bar-fill" style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
         </div>
         <span class="muted" style="font-size:11px">{prio:.2f}</span>
       </div>
@@ -11963,7 +11963,7 @@ def create_app() -> Flask:
         <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
         <span class="tag" style="font-size:10px">{post_type}</span>
         <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
+          <div class="mh-bar-fill" style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
         </div>
         <span class="muted" style="font-size:11px">{prio:.2f}</span>
       </div>

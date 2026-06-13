@@ -534,6 +534,12 @@
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--mh-primary) 18%, transparent);
 }
 
+/* Bar fill — priority / progress bars sweep from 0 to their inline width on
+   load (animation overrides the inline width while playing; fill-mode `both`
+   settles on the element's real width). */
+.mh-bar-fill { animation: mh-bar-fill 760ms var(--ease-out) both; }
+@keyframes mh-bar-fill { from { width: 0; } }
+
 /* =====================================================================
    11. MULTI-STEP LOADER  (the pipeline / processing screen)
    States driven by JS: each step carries data-state = pending|active|done.
@@ -602,6 +608,7 @@
   .mh-moving-border::before,
   .mh-marquee__track,
   .mh-sparkles .mh-spark,
+  .mh-bar-fill,
   .mh-steploader__step[data-state="active"] .mh-steploader__dot {
     animation: none !important;
   }
