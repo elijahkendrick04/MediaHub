@@ -400,6 +400,35 @@
 .mh-marquee:hover .mh-marquee__track { animation-play-state: paused; }
 @keyframes mh-marquee { to { transform: translateX(-50%); } }
 
+/* Marquee band trim — sport-agnostic strip on the landing page (reusable for
+   sponsor / club logo rows too). */
+.mh-marquee-band {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-6) 0;
+  border-block: 1px solid var(--mh-outline-variant);
+}
+.mh-marquee-band-label {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-faint);
+}
+.mh-marquee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-7);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-muted);
+}
+.mh-marquee-chip::after { content: "/"; color: var(--mh-primary); opacity: 0.55; }
+
 /* =====================================================================
    6. SCROLL REVEAL  (Sticky-Scroll feel — entrance on first view)
    ===================================================================== */

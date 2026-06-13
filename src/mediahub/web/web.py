@@ -9336,21 +9336,21 @@ def create_app() -> Flask:
             '<div class="mh-section-eyebrow-strip"><span class="label">What lands in your queue</span></div>'
             '<h2 class="mh-section-title">A weekend reads like <em class="editorial">three drafts</em>, ready to approve.</h2>'
             '<div class="mh-sample-row mh-reveal-group">'
-            '<div class="mh-sample story">'
+            '<div class="mh-sample story mh-spotlight-card">'
             '<span class="mh-sample-eyebrow">Story card · 1080×1920</span>'
             '<div class="mh-sample-title">Tom Davies — <em>PB</em> 100m free.</div>'
-            '<div class="mh-sample-time">52.41<span class="mh-sample-delta">−0.74s</span></div>'
+            '<div class="mh-sample-time"><span class="mh-flapboard" data-mh-to="52.41">52.41</span><span class="mh-sample-delta">−0.74s</span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">A clean, vertical story graphic with the swimmer’s name, event and split — branded with your club’s palette.</p>'
             '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Story</div>'
             "</div>"
-            '<div class="mh-sample feed">'
+            '<div class="mh-sample feed mh-spotlight-card">'
             '<span class="mh-sample-eyebrow">Feed graphic · 1080×1350</span>'
             '<div class="mh-sample-title">Top three <em>finals</em></div>'
             '<div class="mh-sample-bars"><span class="bronze" style="height:55%"></span><span class="gold" style="height:100%"></span><span class="silver" style="height:78%"></span></div>'
             '<p style="margin:0;color:var(--ink-dim);font-size:14px;line-height:1.45">Podium-bar chart of the night’s finals — names, times and lanes from your meet file, dropped into your colour palette.</p>'
             '<div class="mh-sample-meta">Caption <span class="sep">/</span> Graphic <span class="sep">/</span> Feed</div>'
             "</div>"
-            '<div class="mh-sample reel">'
+            '<div class="mh-sample reel mh-spotlight-card">'
             '<span class="mh-sample-eyebrow">Motion reel · 15s MP4</span>'
             '<div class="mh-sample-title">Match-day <em>highlights</em></div>'
             '<div class="mh-sample-timeline"><span class="lit"></span><span class="lit"></span><span class="lit"></span><span></span><span></span></div>'
@@ -9425,7 +9425,7 @@ def create_app() -> Flask:
         # stripe accent so the page resolves with the same chrome.
         if prof and prof.is_ready():
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-inview">'
                 "<div>"
                 f'<h2 class="mh-final-cta-headline">Next weekend\'s meet, '
                 "<em>ready</em> in a sitting.</h2>"
@@ -9441,7 +9441,7 @@ def create_app() -> Flask:
             )
         else:
             final_cta_html = (
-                '<section class="mh-final-cta">'
+                '<section class="mh-final-cta mh-inview">'
                 "<div>"
                 '<h2 class="mh-final-cta-headline">A minute to set up. '
                 "<em>Then</em> every week is easier.</h2>"
@@ -9456,9 +9456,48 @@ def create_app() -> Flask:
                 "</section>"
             )
 
+        # --- Sport-agnostic marquee band (Infinite-Moving-Cards) — reinforces
+        # the "swimming first, every sport next" wedge-vs-vision story. Honest
+        # framing: these are sports the engine is built for, not integrations.
+        marquee_html = (
+            '<section class="mh-marquee-band" aria-label="Built for every sport">'
+            '<span class="mh-marquee-band-label">One engine &middot; every sport</span>'
+            '<div class="mh-marquee" data-mh-speed="34"><div class="mh-marquee__track">'
+            + "".join(
+                f'<span class="mh-marquee-chip">{s}</span>'
+                for s in [
+                    "Swimming",
+                    "Athletics",
+                    "Rugby",
+                    "Netball",
+                    "Rowing",
+                    "Hockey",
+                    "Cricket",
+                    "Football",
+                    "Triathlon",
+                    "Cycling",
+                    "Basketball",
+                    "Tennis",
+                    "Water polo",
+                    "Sailing",
+                    "Gymnastics",
+                    "Squash",
+                ]
+            )
+            + "</div></div></section>"
+        )
+
         return _layout(
             "Home",
-            hero_html + steps_html + sample_html + audience_html + promise_html + final_cta_html,
+            '<div class="mh-fx mh-spotlight">'
+            + hero_html
+            + "</div>"
+            + marquee_html
+            + steps_html
+            + sample_html
+            + audience_html
+            + promise_html
+            + final_cta_html,
             active="home",
         )
 
