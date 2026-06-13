@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `4a3e079d7` · Merge pull request #469 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-14 · `566234448` · Merge pull request #471 from elijahkendrick04/claude/dreamy-euler-cc25o8
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1309,6 +1309,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
 | 2026-06-13 | `c32f7da7e` | Fix 'Permission denied: /app/src/mediahub/data' aborting results parse |
 | 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
 | 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
@@ -1318,5 +1319,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
 | 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
 | 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
-| 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
 <!-- /ROADMAP:ACTIVITY -->
