@@ -307,6 +307,18 @@ Photo focus reuses the still's saliency maths (`saliency.focus_position`).
 Brief-less callers keep the legacy seed-permutation roles via the per-card
 `variation_seed` (`auto_variation_seed_for`).
 
+### Craft skills (design quality on both render surfaces)
+
+Design-quality conventions for these surfaces live in two house skills —
+`.claude/skills/motion-craft` (Remotion: beat direction, easing language,
+transitions, on-video text) and `.claude/skills/graphic-craft` (stills:
+composition density, type registers, data weight, anti-samey variety).
+They are MediaHub's own adaptation of HeyGen's HyperFrames skills
+(Apache-2.0; reference copy under `vendor/hyperframes-skills-main/`),
+rewritten for the frame-pure / brand-locked / fact-exact rules above.
+Structure guarded by `tests/test_craft_skills.py`. Load the relevant one
+before designing or reviewing motion or graphic output.
+
 ## Deployment
 
 Deployed on Render via `render.yaml`. Docker-compatible via `Dockerfile`.

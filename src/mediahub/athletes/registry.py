@@ -497,6 +497,40 @@ def list_athletes(profile_id: str, db_path: Optional[Path] = None) -> list[Athle
         conn.close()
 
 
+def athlete_swims(
+    profile_id: str,
+    athlete_id: str,
+    db_path: Optional[Path] = None,
+) -> list[dict]:
+    """All logged swims for one athlete, newest first.
+
+    Each row: ``{"event", "swim_date", "time_cs", "run_id"}``. Empty list
+    when the athlete has no logged swims (or isn't this org's).
+    """
+    if not profile_id or not athlete_id:
+        return []
+    ensure_schema(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT event, swim_date, time_cs, run_id FROM athlete_swims"
+            " WHERE profile_id = ? AND athlete_id = ?"
+            " ORDER BY swim_date DESC, event",
+            (profile_id, athlete_id),
+        ).fetchall()
+        return [
+            {
+                "event": r["event"],
+                "swim_date": r["swim_date"],
+                "time_cs": r["time_cs"],
+                "run_id": r["run_id"],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
 def merge_athletes(
     profile_id: str,
     keep_id: str,

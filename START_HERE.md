@@ -45,6 +45,7 @@ Open that folder's `README.md` first — it explains the folder in plain English
 | The **website** and its buttons | `src/mediahub/web/` |
 | Who can **sign in to which club** (workspaces) | `src/mediahub/web/tenancy.py` |
 | Who each **swimmer is** across meets (and their milestones) | `src/mediahub/athletes/` |
+| **Asking a question** about your own results ("when did Ella last PB?") | `src/mediahub/club_qa/` |
 | **Photo / name permission** per athlete (consent) | `src/mediahub/safeguarding/` |
 | The **club records** book | `src/mediahub/club_records/` |
 | **Qualifying times** ("made Counties!") | `src/mediahub/standards/` + `data/standards/` |

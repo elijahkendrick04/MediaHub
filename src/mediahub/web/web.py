@@ -854,6 +854,9 @@ _turn_into_jobs: BoundedCache = BoundedCache(max_size=32)
 # Turn-Into — status + the cited answer + source URLs — held in memory for
 # fast same-worker polls and mirrored to disk for the other worker.
 _research_jobs: BoundedCache = BoundedCache(max_size=32)
+# Club-data Q&A jobs ("Ask the data"). Same lifecycle as the research
+# console: background thread, memory + disk record, org-scoped polls.
+_club_qa_jobs: BoundedCache = BoundedCache(max_size=32)
 # RLock so callers holding _active_lock can re-enter BoundedCache's
 # own lock without deadlock.
 _active_lock = threading.RLock()
@@ -1322,6 +1325,110 @@ _WEB_RESEARCH_CONSOLE_BODY = """
         poll(su);
       })
       .catch(function(){ done(); statusEl.textContent = 'Could not start research (network error).'; });
+  });
+})();
+</script>
+"""
+
+_CLUB_QA_CONSOLE_BODY = """
+<section class="panel" style="max-width:840px;margin:28px auto">
+  <h1 style="margin-top:0">Ask the data</h1>
+  <p style="color:var(--muted);line-height:1.5">
+    Ask a question about your club's own results &mdash; swims, PBs, medals,
+    meets. The answer is grounded only in the meets MediaHub has processed for
+    this organisation, and the meets used are listed under the answer. No web
+    search, no guessing: if your data doesn't hold the answer, it says so.
+  </p>
+  <form id="qaform" data-no-loader="1" style="margin-top:16px">
+    <textarea id="qaq" name="question" rows="3" maxlength="400" required
+      placeholder="e.g. When did Alice Lee last swim a PB in the 100m Freestyle?"
+      style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:inherit;font-family:inherit;font-size:15px;box-sizing:border-box"></textarea>
+    <div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button class="btn" type="submit" id="qabtn">Ask</button>
+      <span id="qahint" style="color:var(--muted);font-size:13px"></span>
+    </div>
+  </form>
+  <div id="qaresult" style="display:none;margin-top:24px">
+    <div id="qastatus" style="font-size:13px;color:var(--muted);margin-bottom:12px"></div>
+    <div id="qaanswer" style="white-space:pre-wrap;line-height:1.55"></div>
+    <div id="qaruns" style="margin-top:20px"></div>
+    <div id="qameta" style="margin-top:14px;font-size:12px;color:var(--muted)"></div>
+  </div>
+</section>
+<script>
+(function(){
+  var SUBMIT_URL = "__SUBMIT_URL__";
+  var form = document.getElementById('qaform');
+  var btn = document.getElementById('qabtn');
+  var hint = document.getElementById('qahint');
+  var result = document.getElementById('qaresult');
+  var statusEl = document.getElementById('qastatus');
+  var answerEl = document.getElementById('qaanswer');
+  var runsEl = document.getElementById('qaruns');
+  var metaEl = document.getElementById('qameta');
+  var timer = null;
+
+  function clearOut(){ answerEl.textContent=''; runsEl.textContent=''; metaEl.textContent=''; }
+  function done(){ if(timer){clearInterval(timer); timer=null;} btn.classList.remove('loading'); btn.disabled=false; hint.textContent=''; }
+
+  function render(d){
+    statusEl.textContent = 'Done.';
+    answerEl.textContent = d.answer || '(no answer)';
+    var runs = d.runs_consulted || [];
+    if (runs.length){
+      var head = document.createElement('div');
+      head.textContent = 'Grounded in'; head.style.fontWeight = '600'; head.style.marginBottom = '8px';
+      runsEl.appendChild(head);
+      var ul = document.createElement('ul');
+      ul.style.margin = '0'; ul.style.paddingLeft = '18px';
+      runs.forEach(function(r){
+        var li = document.createElement('li'); li.style.marginBottom = '6px';
+        li.textContent = (r && r.meet_name) || (r && r.run_id) || '';
+        ul.appendChild(li);
+      });
+      runsEl.appendChild(ul);
+    }
+    metaEl.textContent = 'data look-ups: ' + (d.tool_calls || 0)
+      + (d.provider ? (' \\u00b7 answered by ' + d.provider) : '');
+  }
+
+  function poll(url){
+    fetch(url, {cache:'no-store'})
+      .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+      .then(function(o){
+        if (o.j && o.j.status === 'running') return;
+        done();
+        if (o.s >= 500 || (o.j && o.j.status === 'error')){
+          statusEl.textContent = 'Could not answer: ' + ((o.j && o.j.error) || 'unknown error');
+          return;
+        }
+        render(o.j || {});
+      })
+      .catch(function(){ /* transient — keep polling */ });
+  }
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var q = document.getElementById('qaq').value.trim();
+    if (!q) return;
+    if (timer){ clearInterval(timer); timer = null; }
+    clearOut();
+    result.style.display = 'block';
+    statusEl.textContent = 'Looking through your meets\\u2026';
+    btn.classList.add('loading'); btn.disabled = true; hint.textContent = 'Working\\u2026';
+    fetch(SUBMIT_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})})
+      .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+      .then(function(o){
+        if (!o.j || !o.j.ok || !o.j.status_url){
+          done();
+          statusEl.textContent = 'Could not start: ' + ((o.j && (o.j.message || o.j.error)) || ('HTTP ' + o.s));
+          return;
+        }
+        var su = o.j.status_url;
+        timer = setInterval(function(){ poll(su); }, 1500);
+        poll(su);
+      })
+      .catch(function(){ done(); statusEl.textContent = 'Could not start (network error).'; });
   });
 })();
 </script>
@@ -3400,11 +3507,11 @@ function turnMeetIntoPack() {{
   btn.textContent = 'Generating…';
   status.style.display = '';
   status.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(212,255,58,0.30);border-top-color:var(--lane);border-radius:50%;vertical-align:-2px;margin-right:8px;animation:spin 600ms linear infinite"></span>' +
-    '<span id="ti-status-text">Drafting all seven artefacts with live AI&hellip;</span>';
+    '<span id="ti-status-text">Drafting every artefact with live AI&hellip;</span>';
   var statusText = document.getElementById('ti-status-text');
   var ticker = setInterval(function() {{
     secs++;
-    if (statusText) statusText.textContent = 'Drafting all seven artefacts with live AI — ' + secs + 's. Usually under a minute.';
+    if (statusText) statusText.textContent = 'Drafting every artefact with live AI — ' + secs + 's. Usually under a minute.';
   }}, 1000);
   function _fail(msg) {{
     clearInterval(ticker);
@@ -15255,7 +15362,7 @@ Relay team broke club record"></textarea>
             ("Activity", "Every run for this organisation — status, matches, and one-click delete.", "activity", url_for("settings_section", section="activity")),
             ("Auto scheduling", "Connect a scheduling account so approved cards can be queued to your channels.", "schedule", url_for("settings_section", section="scheduling")),
             ("Autonomy", "Per-content-type publishing levels — what may post without a human, and the audit trail.", "autonomy", url_for("settings_section", section="autonomy")),
-            ("Club data", "Your club records — import the sheet once; faster swims become ranked record cards.", "clubdata", url_for("club_records_page")),
+            ("Club data", "Club records and asking questions of your own processed results.", "clubdata", url_for("settings_section", section="clubdata")),
             ("Privacy & data", "What this system stores, athletes & consent, cache clearing, and run deletion.", "privacy", url_for("settings_section", section="privacy")),
             ("Billing & plan", "Your plan, invoices and upgrades.", "billing", url_for("billing_page")),
             ("Sponsors", "Manage sponsors and the sponsor-safe content they appear in.", "sponsors", url_for("sponsors_page")),
@@ -15303,6 +15410,7 @@ Relay team broke club record"></textarea>
             "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
             "scheduling": ("Auto scheduling", lambda prof: _render_settings_scheduling_section(prof)),
             "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
+            "clubdata": ("Club data", lambda prof: _render_settings_clubdata_section()),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
             "account": ("Account", lambda prof: _render_settings_account_section()),
             "status": ("System status", lambda prof: _render_settings_status_public_section()),
@@ -16003,6 +16111,28 @@ window.mhSchedulerDisconnect = function(btn) {
             "REPLACE_DISCONNECT_URL", disconnect_url
         )
         return explainer + status_block + channels_block + js_html
+
+    def _render_settings_clubdata_section() -> str:
+        """Club data — club records + ask-the-data, relocated from the
+        retired Club-data tab."""
+        return (
+            '<p class="dim" style="margin-bottom:14px">The club&rsquo;s memory: the '
+            "records you keep, and questions you can ask of your own processed results.</p>"
+            '<div class="card">'
+            '<h3 style="margin-top:0">Club records</h3>'
+            '<p class="dim" style="font-size:13px">Import the records sheet once; every '
+            "faster swim becomes a ranked <b>new club record</b> card, and the table "
+            "updates only when you approve it.</p>"
+            f'<a class="btn secondary" href="{url_for("club_records_page")}">Manage club records</a>'
+            "</div>"
+            '<div class="card">'
+            '<h3 style="margin-top:0">Ask the data</h3>'
+            '<p class="dim" style="font-size:13px">Ask a question about your own results '
+            "&mdash; &ldquo;when did Alice last PB in 100 Free?&rdquo; &mdash; answered only "
+            "from the meets MediaHub has processed, with the meets it used cited.</p>"
+            f'<a class="btn secondary" href="{url_for("club_qa_console")}">Open Ask the data</a>'
+            "</div>"
+        )
 
     def _render_settings_account_section() -> str:
         """Account — security, data export, account deletion."""
@@ -26217,7 +26347,7 @@ function mhSetupMode(mode) {{
     # ---- Turn-Into: one meet &rarr; 7 derivative artefacts -------------------
     @app.route("/api/runs/<run_id>/turn-into", methods=["POST"])
     def api_turn_into(run_id):
-        """Generate a Turn-Into pack (up to 7 artefacts) from this run.
+        """Generate a Turn-Into pack (up to 8 artefacts) from this run.
 
         Body (JSON, all optional):
           { "deterministic": bool }   force heuristic mode (no LLM)
@@ -26471,6 +26601,98 @@ function mhSetupMode(mode) {{
             }
         )
 
+    @app.route("/club-qa")
+    def club_qa_console():
+        """Render the "Ask the data" console — Q&A over the org's own runs."""
+        body = _CLUB_QA_CONSOLE_BODY.replace("__SUBMIT_URL__", url_for("api_club_qa_submit"))
+        return _layout("Ask the data", body, active="settings")
+
+    @app.route("/api/club-qa", methods=["POST"])
+    def api_club_qa_submit():
+        """Start a background club-data Q&A job; return a job_id to poll.
+
+        The bounded tool loop can spend several LLM rounds reading runs, so
+        like the research console it never runs inline on a worker."""
+        payload = request.get_json(silent=True) or {}
+        question = (payload.get("question") or "").strip()
+        if not question:
+            return jsonify({"ok": False, "error": "empty_question"}), 400
+        question = question[:400]
+        pid = _active_profile_id()
+
+        def _do_answer(job_id: str, q: str) -> None:
+            try:
+                with app.app_context():
+                    from mediahub.ai_core import ProviderNotConfigured
+                    from mediahub.club_qa import QAEnv, answer_club_question
+
+                    try:
+                        res = answer_club_question(
+                            q, QAEnv(runs_dir=RUNS_DIR, profile_id=pid or "")
+                        )
+                        record = {
+                            "status": "done",
+                            "profile_id": pid,
+                            "answer": res.answer,
+                            "runs_consulted": res.runs_consulted,
+                            "tool_calls": res.tool_calls,
+                            "provider": res.provider,
+                        }
+                    except ProviderNotConfigured:
+                        record = {
+                            "status": "error",
+                            "profile_id": pid,
+                            "error": (
+                                "AI is not configured on this deployment — the "
+                                "operator must set a Gemini or Anthropic API key."
+                            ),
+                        }
+            except Exception as e:
+                record = {"status": "error", "profile_id": pid, "error": str(e)}
+            _club_qa_jobs[job_id] = record
+            _job_record_write("club_qa_jobs", job_id, record)
+
+        import uuid as _uuid
+
+        job_id = _uuid.uuid4().hex
+        with _active_lock:
+            _prune_job_records("club_qa_jobs")
+        running = {"status": "running", "profile_id": pid}
+        _club_qa_jobs[job_id] = running
+        _job_record_write("club_qa_jobs", job_id, running)
+        threading.Thread(target=_do_answer, args=(job_id, question), daemon=True).start()
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "status": "running",
+                "status_url": url_for("api_club_qa_status", job_id=job_id),
+            }
+        )
+
+    @app.route("/api/club-qa/<job_id>", methods=["GET"])
+    def api_club_qa_status(job_id: str):
+        """Poll a club-data Q&A job: running | done | error."""
+        job = _club_qa_jobs.get(job_id) or _job_record_read("club_qa_jobs", job_id)
+        if job is None:
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
+        # IDOR: a Q&A job belongs to the org that asked. The job_id is an
+        # unguessable uuid4, but still don't let another signed-in org read it.
+        owner = job.get("profile_id")
+        if owner and owner != _active_profile_id():
+            return jsonify({"status": "not_found", "error": "job not found"}), 404
+        if job.get("status") == "running":
+            return jsonify({"status": "running"})
+        if job.get("status") == "error":
+            return jsonify({"status": "error", "error": job.get("error", "unknown")}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "status": "done",
+                **{k: v for k, v in job.items() if k not in ("profile_id", "status")},
+            }
+        )
+
     @app.route("/api/runs/<run_id>/turn-into/<pack_id>/caption", methods=["POST"])
     def api_turn_into_edit_caption(run_id, pack_id):
         """Inline-edit a caption within a saved pack.
@@ -26622,7 +26844,7 @@ function mhSetupMode(mode) {{
 
     @app.route("/runs/<run_id>/pack/<pack_id>")
     def turn_into_pack_view(run_id, pack_id):
-        """Render a saved Turn-Into pack with the 7 artefacts."""
+        """Render a saved Turn-Into pack with the 8 artefacts."""
         # Turn-Into packs are namespaced under <run_id>/<pack_id> on
         # disk, so the run's owner check is the right gate.
         if not _can_access_run(run_id, _load_run(run_id), _active_profile_id()):
@@ -26674,6 +26896,7 @@ function mhSetupMode(mode) {{
             "linkedin_post": "LinkedIn post",
             "free_text": "Free text brief",
             "parent_newsletter": "Parent newsletter",
+            "club_report": "Club website report",
             "coach_dm": "Coach DM",
             "dm_pack": "DM pack",
         }
@@ -31065,11 +31288,11 @@ voice, and queues them for one-click approval.</p>
 
     @app.route("/club-data")
     def club_data_page():
-        # The Club-data top-nav tab was retired: club records live under
-        # Settings → Club data, athletes & consent under Settings → Privacy,
-        # and live meet / season wraps moved to Create (coming soon). This
-        # route stays only as a redirect so old links/bookmarks still resolve.
-        return redirect(url_for("settings_page"))
+        # The Club-data top-nav tab was retired: club records + "Ask the data"
+        # live under Settings → Club data, athletes & consent under Settings →
+        # Privacy, and live meet / season wraps moved to Create (coming soon).
+        # This route stays only as a redirect so old links/bookmarks resolve.
+        return redirect(url_for("settings_section", section="clubdata"))
 
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
