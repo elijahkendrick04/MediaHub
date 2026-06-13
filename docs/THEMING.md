@@ -405,4 +405,5 @@ citation matches a specific algorithm choice in the code:
 The detailed per-stage thesis plans (A–J) that documented this work
 have been consolidated — **this file is now the single canonical record
 of the theming architecture and its stages**. The stage breakdown and
-acceptance criteria live in [`docs/ROADMAP.md`](ROADMAP.md) §1.6.
+acceptance criteria live in [`docs/ROADMAP_BUILT.md`](ROADMAP_BUILT.md) §1.6
+(Appendix C — the theming engine is shipped, so its record moved to the built file).

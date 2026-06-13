@@ -1,7 +1,14 @@
 # Creative-Suite Parity — the MediaHub-shaped Canva / Adobe Express capability map
 
-**Status:** planned · the long-form companion for **Phase 6** in
-[`ROADMAP.md`](ROADMAP.md) · evidence bases checked in at
+**Status:** planned · the long-form companion for **Phase 3 — creative-suite
+breadth** in [`ROADMAP.md`](ROADMAP.md) · evidence bases checked in at
+
+> **Phase note (2026-06-13).** What this doc calls "Phase 6" is now **Phase 3**
+> in the reordered, build-first roadmap (the creative suite ships *before*
+> go-to-market). The `P6.*` item IDs are unchanged, and the "gated behind Phase
+> C / commercial-readiness + traction gates" sequencing stated below is
+> **superseded** — see [`ROADMAP.md`](ROADMAP.md) rule 2. Read "Phase 6" as
+> "Phase 3" throughout.
 [`research/CANVA_FEATURE_INVENTORY_2026.md`](research/CANVA_FEATURE_INVENTORY_2026.md)
 and
 [`research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md`](research/ADOBE_EXPRESS_FEATURE_INVENTORY_2026.md)
