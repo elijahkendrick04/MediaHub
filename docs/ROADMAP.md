@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `566234448` · Merge pull request #471 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-14 · `6207d5c38` · Merge pull request #474 from elijahkendrick04/claude/trusting-tesla-wf0iwf
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -125,7 +125,6 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
-- **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI · ❌ **NOT STARTED**
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
 - **P4.5** · Phase 2 (Direct publishing) — Email digest delivery: the existing newsletter actually sends (member lists, unsubscribe) behind an in-house SMTP relay by default; a managed relay (Resend) is an optional deliverability upgrade on the same seam · ❌ **NOT STARTED**
@@ -1309,6 +1308,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
 | 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
 | 2026-06-13 | `c32f7da7e` | Fix 'Permission denied: /app/src/mediahub/data' aborting results parse |
 | 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
@@ -1317,6 +1317,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
 | 2026-06-13 | `040cd8d61` | Design every primary-flow state (U.2): honest AI error, pipeline failure, parse notes, success toast |
 | 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
-| 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
-| 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
 <!-- /ROADMAP:ACTIVITY -->
