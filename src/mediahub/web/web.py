@@ -5667,6 +5667,18 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   color: var(--ink);
   transform: translateY(-1px);
 }
+/* Press + keyboard-focus parity with .btn — the hero CTAs are the most
+   prominent primary actions in the app and were missing both: a press
+   settles the hover lift (so the button feels responsive to the click),
+   and a visible focus ring keeps them keyboard-navigable. */
+.mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
+.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
+.mh-cta-primary:focus-visible,
+.mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-cta-primary, .mh-cta-secondary { transition: background var(--transition), box-shadow var(--transition), border-color var(--transition); }
+  .mh-cta-primary:hover, .mh-cta-secondary:hover, .mh-cta-primary:active, .mh-cta-secondary:active { transform: none; }
+}
 .mh-hero-meta {
   margin-top: var(--sp-7);
   padding-top: var(--sp-4);
@@ -5860,6 +5872,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   text-decoration: none;
 }
 .mh-template:hover::before { opacity: 1; }
+/* The Create ("Add input") and Settings grids are tile-LINKS — they had a
+   hover state but no keyboard focus ring (a tabbing volunteer saw nothing)
+   and no pressed state. Add both, reusing the lane focus ring used on .btn. */
+.mh-template:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+.mh-template:focus-visible::before { opacity: 1; }
+.mh-template:active { background: var(--surface-3); }
 .mh-template-icon {
   width: 40px; height: 40px;
   border-radius: 0;
@@ -11774,29 +11792,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {_provenance_card}
 
-<div class="card">
-  <h2>Recognition summary</h2>
-  <div class="stat-block">{rec_stats_html}</div>
-  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn secondary" href="{_export_url}">Download export</a>
-    <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
-      <button class="btn danger" type="submit">Delete run</button>
-    </form>
-  </div>
-  <details style="margin-top:var(--sp-4)">
-    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
-    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
-      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
-      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
-    </div>
-  </details>
-</div>
-
 {workflow_summary_card}
-
-{meet_ctx_html}
-
-{pb_audit_html}
 
 {warn_html}
 
@@ -11820,6 +11816,33 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </div>
   <div id="ach-list">{ach_rows_html_wf}</div>
 </div>
+
+<!-- Run detail & diagnostics: the recognition read, meet context, PB audit and
+     raw tables a volunteer rarely needs are demoted below the decision surface,
+     so the page leads with the task (review & approve) rather than the data. -->
+<div style="margin:var(--sp-8) 0 var(--sp-3) 0;display:flex;align-items:center;gap:14px">
+  <span style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);white-space:nowrap">Run detail &amp; diagnostics</span>
+  <span style="flex:1;height:1px;background:var(--hairline)"></span>
+</div>
+
+<div class="card">
+  <h2>Recognition summary</h2>
+  <div class="stat-block">{rec_stats_html}</div>
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{_export_url}">Download export</a>
+  </div>
+  <details style="margin-top:var(--sp-4)">
+    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
+    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
+      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
+      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+  </details>
+</div>
+
+{meet_ctx_html}
+
+{pb_audit_html}
 
 <div class="card">
   <details>
@@ -11856,6 +11879,18 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       </table>
     </div>
   </details>
+</div>
+
+<div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <p class="muted" style="margin:0;font-size:12px">Removes the generated cards and review state for this run. Source files stay on disk and can be re-processed.</p>
+    </div>
+    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
+      <button class="btn danger" type="submit">Delete run</button>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -15803,6 +15838,49 @@ Relay team broke club record"></textarea>
                 f"</tr>"
             )
 
+        # --- Posture summary — the page's lead state. Make the safe default
+        # legible and reassuring, and surface clearly when any type has been
+        # opted into autonomy. Counts read straight off the resolved policy.
+        _levels = [
+            current_policy.get(ct.value, "approval_required") for ct in _CT_REGISTRY
+        ]
+        _n_types = len(_levels)
+        _n_auto = sum(1 for v in _levels if v == "fully_autonomous")
+        _n_draft = sum(1 for v in _levels if v == "draft_only")
+        _n_gated = _n_types - _n_auto
+        if _n_auto == 0:
+            _posture_accent = "var(--good)"
+            _posture_bg = "var(--good-bg)"
+            _posture_title = "Every content type requires your approval"
+            _posture_sub = (
+                f"All {_n_types} content types are gated &mdash; nothing publishes "
+                "without an explicit human approval."
+                + (
+                    f" {_n_draft} {'is' if _n_draft == 1 else 'are'} draft-only."
+                    if _n_draft
+                    else ""
+                )
+            )
+        else:
+            _posture_accent = "var(--warn)"
+            _posture_bg = "var(--warn-bg)"
+            _posture_title = (
+                f"{_n_auto} of {_n_types} content types may auto-publish"
+            )
+            _posture_sub = (
+                f"{_n_auto} type{'s' if _n_auto != 1 else ''} can publish without a human "
+                "when every publish-gate guardrail passes; the other "
+                f"{_n_gated} still require approval."
+            )
+        posture_html = (
+            f'<div style="margin-bottom:18px;padding:14px 18px;background:{_posture_bg};'
+            f"border:1px solid {_posture_accent};border-left:3px solid {_posture_accent};"
+            f'border-radius:0 var(--radius-sm) var(--radius-sm) 0">'
+            f'<div style="font-weight:700;font-size:14px;margin-bottom:2px">{_h(_posture_title)}</div>'
+            f'<div style="font-size:13px;color:var(--ink-dim)">{_posture_sub}</div>'
+            f"</div>"
+        )
+
         warning_html = (
             '<div id="mh-autonomy-warn" style="display:none;margin-top:12px;padding:12px 18px;'
             "background:rgba(255,170,58,0.10);border-left:3px solid var(--mh-prim-warning-500);"
@@ -15953,10 +16031,11 @@ window.mhAutonomySweepNow = function(btn) {
         )
 
         return (
-            f'<p class="dim" style="margin-bottom:14px">Control how much MediaHub may publish '
-            f"on behalf of <b>{_h(prof.display_name)}</b> for each content type. "
-            f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
-            f"without your explicit opt-in.</p>"
+            f"{posture_html}"
+            f'<p class="dim" style="margin-bottom:14px">Set a publishing level per content type '
+            f"for <b>{_h(prof.display_name)}</b>. Everything defaults to "
+            f"<em>Approval required</em> &mdash; a type only publishes on its own once you "
+            f"opt it in below, and even then every publish-gate guardrail still applies.</p>"
             f"{form_html}{ops_html}{audit_html}{js_html}"
         )
 
