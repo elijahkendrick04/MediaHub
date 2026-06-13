@@ -7152,9 +7152,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                         _mime = str(_e.get("mime", "")).lower()
                         if not _mime.startswith("image/"):
                             continue
-                        _u = url_for(
-                            "organisation_setup_logo_serve", logo_id=_e["logo_id"]
-                        )
+                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"])
                         if _mime in (
                             "image/png",
                             "image/svg+xml",
@@ -7192,17 +7190,15 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         # Depth tiers: (min_px, vw, max_px, base_opacity, blur_px).
         _tiers = (
             (120, 15.5, 210, 0.120, 0.0),  # near — crisp, largest, strongest
-            (88, 11.5, 158, 0.095, 0.0),   # mid
-            (60, 8.5, 116, 0.070, 1.0),    # far — small, faint, softened
+            (88, 11.5, 158, 0.095, 0.0),  # mid
+            (60, 8.5, 116, 0.070, 1.0),  # far — small, faint, softened
         )
         _marks: list[str] = []
         for _i in range(_cells):
             _col, _row = _i % _cols, _i // _cols
             _x = (_col + 0.5) / _cols * 100.0 + _rng.uniform(-6.5, 6.5)
             _y = (_row + 0.5) / _rows * 100.0 + _rng.uniform(-9.0, 9.0)
-            _smin, _svw, _smax, _op, _blur = _rng.choices(
-                _tiers, weights=(3, 4, 3)
-            )[0]
+            _smin, _svw, _smax, _op, _blur = _rng.choices(_tiers, weights=(3, 4, 3))[0]
             _op = round(_op * _rng.uniform(0.82, 1.12), 4)
             _rot = round(_rng.uniform(-11.0, 11.0), 2)
             _scl = round(_rng.uniform(0.92, 1.08), 3)
@@ -7218,9 +7214,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                 '"></span>'
             )
         _brand = (
-            signed_in_primary
-            if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "")
-            else ""
+            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
         )
         _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
         bg_logos_html = (
