@@ -6051,9 +6051,7 @@ _MH_AUDIENCE_ICON_CSS = (
 # Motion / effect kit rides AFTER the components layer (so it can elevate
 # existing component primitives) but BEFORE the guardrails, which must stay the
 # cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
-BASE_CSS = (
-    _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_MOTION_CSS + _MH_RG_CSS
-)
+BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_MOTION_CSS + _MH_RG_CSS
 
 
 def _render_markdown(text: str) -> str:
