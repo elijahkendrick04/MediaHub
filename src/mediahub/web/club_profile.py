@@ -184,27 +184,27 @@ class ClubProfile:
     # exists, deterministic where it doesn't.
     brand_operating_profile: dict = field(default_factory=dict)
 
-    # ---- Per-org Buffer access token (multi-tenant publishing) ----
-    # Each ClubProfile carries its OWN Buffer personal access token.
+    # ---- Per-org the scheduler access token (multi-tenant publishing) ----
+    # Each ClubProfile carries its OWN the scheduler personal access token.
     # This is the multi-tenant-safe model: when MediaHub serves many
-    # clubs from one deployment, each club connects their own Buffer
-    # account — content is NEVER channelled through a shared Buffer
-    # account (which would violate Buffer's TOS and conflate every
+    # clubs from one deployment, each club connects their own the scheduler
+    # account — content is NEVER channelled through a shared the scheduler
+    # account (which would violate the scheduler's TOS and conflate every
     # club's posting queue).
     #
-    # Single-tenant self-hosted deployments may set BUFFER_ACCESS_TOKEN
+    # Single-tenant self-hosted deployments may set SCHEDULER_ACCESS_TOKEN
     # in the environment instead; the resolver in web.py falls back to
     # the env var when this field is empty. That model is safe because
     # operator IS the user.
     #
     # Connection happens inline inside the schedule modal, never in a
     # settings page (per the operator-config rewrite). Users who don't
-    # use Buffer at all can fall through to the download-and-post-
+    # use the scheduler at all can fall through to the download-and-post-
     # manually path.
-    buffer_access_token: str = ""
+    scheduler_access_token: str = ""
 
     # ---- P2.2/P2.3: autonomous publishing targets (optional) ----
-    # The Buffer channel ids autonomous posts may go to, chosen by a human in
+    # The Auto scheduling channel ids autonomous posts may go to, chosen by a human in
     # Settings → Autonomy. Empty (the default) means autonomy can auto-APPROVE
     # gate-passing cards but never place them anywhere — publishing stays a
     # human act until someone explicitly picks channels. Never auto-connected.
@@ -277,6 +277,12 @@ class ClubProfile:
     def from_dict(cls, d: dict) -> "ClubProfile":
         # Tolerant load: ignore unknown keys, default missing ones.
         known = {f.name for f in cls.__dataclass_fields__.values()}
+        d = dict(d)
+        # One-time migration: the auto-scheduling token was historically
+        # persisted under "buffer_access_token". Carry it onto the current
+        # field so an already-connected org keeps its connection.
+        if "scheduler_access_token" not in d and d.get("buffer_access_token"):
+            d["scheduler_access_token"] = d["buffer_access_token"]
         return cls(**{k: v for k, v in d.items() if k in known})
 
     # ----- runtime: matches V3 ClubRoster API for drop-in replacement -----

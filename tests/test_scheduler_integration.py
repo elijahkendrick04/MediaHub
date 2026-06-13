@@ -1,27 +1,27 @@
-"""tests/test_buffer_integration.py — Buffer publishing end-to-end coverage.
+"""tests/test_scheduler_integration.py — the scheduler publishing end-to-end coverage.
 
 This is the end-to-end / route-level companion to
-``tests/test_publishing_buffer.py`` (which is unit-level around the
+``tests/test_publishing_scheduler.py`` (which is unit-level around the
 publishing module itself). It pins behaviour at the boundary between
 Flask routes, the publishing module, the workflow store, and the
 posting log:
 
   * TestMediaUrlValidation  — the schedule endpoint rejects non-http/https
-    media URLs as defence-in-depth before they reach Buffer.
-  * TestRateLimitHandling   — ``BufferRateLimitError`` surfaces a 502 with
+    media URLs as defence-in-depth before they reach the scheduler.
+  * TestRateLimitHandling   — ``SchedulerRateLimitError`` surfaces a 502 with
     ``retry_after`` and stops the per-channel loop early (rate-limit is
     per-account, not per-channel).
   * TestPartialSuccessPath  — when some channels succeed and others fail
     the workflow store is marked SCHEDULED with the warning text, and
     every per-channel outcome is returned.
-  * TestPostingLogIntegration — every Buffer call writes exactly one row
+  * TestPostingLogIntegration — every the scheduler call writes exactly one row
     to the posting log scoped to the run's profile_id.
   * TestPostingLogApi       — ``/api/posting/log`` is org-gated and scoped
     to the active profile (no cross-tenant leakage).
 
-External calls into the Buffer module surface are mocked at the
-``mediahub.publishing.buffer.schedule_post`` / ``list_channels`` boundary
-so no live Buffer API request is ever made.
+External calls into the the scheduler module surface are mocked at the
+``mediahub.publishing.scheduler.schedule_post`` / ``list_channels`` boundary
+so no live the scheduler API request is ever made.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ sys.path.insert(0, str(_ROOT))
 
 # ---------------------------------------------------------------------------
 # Shared fixture — fresh DATA_DIR, ready org, pinned profile, seeded run,
-# Buffer token in the secrets store. Returns (client, run_id, card_id,
+# the scheduler token in the secrets store. Returns (client, run_id, card_id,
 # profile_id) so each test gets a fully-wired-up surface to poke.
 # ---------------------------------------------------------------------------
 
@@ -47,7 +47,7 @@ sys.path.insert(0, str(_ROOT))
 def ready_app(tmp_path, monkeypatch):
     """Spin up a TESTING app with the org-gate enforced, an active
     ``test-org`` profile, one seeded run with one ranked achievement,
-    and a Buffer access token in the on-disk secrets store.
+    and a the scheduler access token in the on-disk secrets store.
 
     Yields ``(client, run_id, card_id, profile_id)``.
     """
@@ -58,10 +58,10 @@ def ready_app(tmp_path, monkeypatch):
     (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
     (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
     (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-    # Buffer token must not leak from the host process. The secrets store
+    # the scheduler token must not leak from the host process. The secrets store
     # consults env first, then disk — clear both so the test-only token
-    # we set via set_buffer_access_token below is the only source.
-    monkeypatch.delenv("BUFFER_ACCESS_TOKEN", raising=False)
+    # we set via set_scheduler_access_token below is the only source.
+    monkeypatch.delenv("SCHEDULER_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     # Reload modules so module-level paths re-resolve against tmp_path.
@@ -117,9 +117,9 @@ def ready_app(tmp_path, monkeypatch):
     }
     (tmp_path / "runs_v4" / f"{run_id}.json").write_text(json.dumps(run_json))
 
-    # Buffer access token — operator-managed via env var post-rewrite.
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "test-token")
-    assert secrets_store.get_buffer_access_token() == "test-token"
+    # the scheduler access token — operator-managed via env var post-rewrite.
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "test-token")
+    assert secrets_store.get_scheduler_access_token() == "test-token"
 
     # Build the app with both TESTING and ENFORCE_ORG_GATE on so the
     # gate is actually evaluated for the API endpoints under test.
@@ -155,7 +155,7 @@ def _schedule_url(run_id: str, card_id: str) -> str:
 class TestMediaUrlValidation:
     """The schedule endpoint must reject non-http/https media URLs as
     defence-in-depth so a malicious caller can't smuggle file://,
-    javascript:, or data: URIs through to Buffer."""
+    javascript:, or data: URIs through to the scheduler."""
 
     def test_https_media_url_accepted(self, ready_app, monkeypatch):
         c, run_id, card_id, _ = ready_app
@@ -167,7 +167,7 @@ class TestMediaUrlValidation:
                     "channel_id": kw["channel_id"], "raw": {}}
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", fake_schedule,
+            "mediahub.publishing.scheduler.schedule_post", fake_schedule,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -190,7 +190,7 @@ class TestMediaUrlValidation:
                     "channel_id": kw["channel_id"], "raw": {}}
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", fake_schedule,
+            "mediahub.publishing.scheduler.schedule_post", fake_schedule,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -207,7 +207,7 @@ class TestMediaUrlValidation:
         c, run_id, card_id, _ = ready_app
         called = {"n": 0}
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: called.__setitem__("n", called["n"] + 1) or {
                 "ok": True, "update_id": "x", "channel_id": kw["channel_id"], "raw": {},
             },
@@ -225,13 +225,13 @@ class TestMediaUrlValidation:
         assert body.get("error") == "bad_media_url"
         # User caption is echoed back so the modal can preserve it.
         assert body.get("caption") == "my caption"
-        # And nothing was forwarded to Buffer.
+        # And nothing was forwarded to the scheduler.
         assert called["n"] == 0
 
     def test_javascript_scheme_rejected_400(self, ready_app, monkeypatch):
         c, run_id, card_id, _ = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "x",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -250,7 +250,7 @@ class TestMediaUrlValidation:
     def test_data_scheme_rejected_400(self, ready_app, monkeypatch):
         c, run_id, card_id, _ = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "x",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -269,7 +269,7 @@ class TestMediaUrlValidation:
     def test_garbage_string_rejected_400(self, ready_app, monkeypatch):
         c, run_id, card_id, _ = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "x",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -297,7 +297,7 @@ class TestMediaUrlValidation:
                     "channel_id": kw["channel_id"], "raw": {}}
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", fake_schedule,
+            "mediahub.publishing.scheduler.schedule_post", fake_schedule,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -317,7 +317,7 @@ class TestMediaUrlValidation:
 # ---------------------------------------------------------------------------
 
 class TestRateLimitHandling:
-    """Buffer's rate-limit is per-account, not per-channel. The schedule
+    """the scheduler's rate-limit is per-account, not per-channel. The schedule
     endpoint must:
       * return 502 with ``error="rate_limited"`` in the first result
       * surface ``retry_after`` from the raised exception
@@ -329,16 +329,16 @@ class TestRateLimitHandling:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, _ = ready_app
-        from mediahub.publishing.buffer import BufferRateLimitError
+        from mediahub.publishing.scheduler import SchedulerRateLimitError
 
         def raise_rate_limit(**kw):
-            raise BufferRateLimitError(
-                "Buffer rate-limit reached. Retry in 30s.",
+            raise SchedulerRateLimitError(
+                "the scheduler rate-limit reached. Retry in 30s.",
                 retry_after=30,
             )
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", raise_rate_limit,
+            "mediahub.publishing.scheduler.schedule_post", raise_rate_limit,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -356,23 +356,23 @@ class TestRateLimitHandling:
         self, ready_app, monkeypatch,
     ):
         """Even when three channel_ids are passed, the rate-limit must
-        short-circuit the loop after the first failure — calling Buffer
+        short-circuit the loop after the first failure — calling the scheduler
         a second time is wasted work that will produce the same error."""
         c, run_id, card_id, _ = ready_app
-        from mediahub.publishing.buffer import BufferRateLimitError
+        from mediahub.publishing.scheduler import SchedulerRateLimitError
 
         calls = {"n": 0, "channel_ids": []}
 
         def raise_rate_limit(**kw):
             calls["n"] += 1
             calls["channel_ids"].append(kw["channel_id"])
-            raise BufferRateLimitError(
-                "Buffer rate-limit reached. Retry in 60s.",
+            raise SchedulerRateLimitError(
+                "the scheduler rate-limit reached. Retry in 60s.",
                 retry_after=60,
             )
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", raise_rate_limit,
+            "mediahub.publishing.scheduler.schedule_post", raise_rate_limit,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -405,12 +405,12 @@ class TestPartialSuccessPath:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, _ = ready_app
-        from mediahub.publishing.buffer import BufferAPIError
+        from mediahub.publishing.scheduler import SchedulerAPIError
 
         def per_channel(**kw):
             cid = kw["channel_id"]
             if cid == "B":
-                raise BufferAPIError("boom")
+                raise SchedulerAPIError("boom")
             return {
                 "ok": True,
                 "update_id": f"upd-{cid}",
@@ -419,7 +419,7 @@ class TestPartialSuccessPath:
             }
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", per_channel,
+            "mediahub.publishing.scheduler.schedule_post", per_channel,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -445,21 +445,21 @@ class TestPartialSuccessPath:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, _ = ready_app
-        from mediahub.publishing.buffer import BufferAPIError
+        from mediahub.publishing.scheduler import SchedulerAPIError
         from mediahub.workflow.status import ScheduleStatus
         from mediahub.workflow.store import WorkflowStore
 
         def per_channel(**kw):
             cid = kw["channel_id"]
             if cid == "B":
-                raise BufferAPIError("boom")
+                raise SchedulerAPIError("boom")
             return {
                 "ok": True, "update_id": f"upd-{cid}",
                 "channel_id": cid, "raw": {},
             }
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", per_channel,
+            "mediahub.publishing.scheduler.schedule_post", per_channel,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -477,8 +477,8 @@ class TestPartialSuccessPath:
         # The warning text is preserved on the sidecar.
         assert state.schedule_error == "boom"
         # Both successful update_ids are recorded (joined by ';').
-        assert state.buffer_update_id is not None
-        ids = state.buffer_update_id.split(";")
+        assert state.scheduler_update_id is not None
+        ids = state.scheduler_update_id.split(";")
         assert "upd-A" in ids
         assert "upd-C" in ids
 
@@ -488,13 +488,13 @@ class TestPartialSuccessPath:
 # ---------------------------------------------------------------------------
 
 class TestPostingLogIntegration:
-    """Every Buffer call — success or failure — writes one row to the
+    """Every the scheduler call — success or failure — writes one row to the
     posting log scoped to the run's profile_id."""
 
     def test_successful_schedule_writes_ok_row(self, ready_app, monkeypatch):
         c, run_id, card_id, profile_id = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "upd-ok",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -518,13 +518,13 @@ class TestPostingLogIntegration:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, profile_id = ready_app
-        from mediahub.publishing.buffer import BufferAuthError
+        from mediahub.publishing.scheduler import SchedulerAuthError
 
         def raise_auth(**kw):
-            raise BufferAuthError("Buffer rejected the access token. Re-paste it.")
+            raise SchedulerAuthError("the scheduler rejected the access token. Re-paste it.")
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", raise_auth,
+            "mediahub.publishing.scheduler.schedule_post", raise_auth,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -545,13 +545,13 @@ class TestPostingLogIntegration:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, profile_id = ready_app
-        from mediahub.publishing.buffer import BufferRateLimitError
+        from mediahub.publishing.scheduler import SchedulerRateLimitError
 
         def raise_rl(**kw):
-            raise BufferRateLimitError("Buffer rate-limit reached.", retry_after=15)
+            raise SchedulerRateLimitError("the scheduler rate-limit reached.", retry_after=15)
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", raise_rl,
+            "mediahub.publishing.scheduler.schedule_post", raise_rl,
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -571,7 +571,7 @@ class TestPostingLogIntegration:
         """After three sequential calls, recent_attempts() lists them
         newest-first."""
         c, run_id, card_id, profile_id = ready_app
-        from mediahub.publishing.buffer import BufferAPIError
+        from mediahub.publishing.scheduler import SchedulerAPIError
 
         counter = {"n": 0}
 
@@ -579,12 +579,12 @@ class TestPostingLogIntegration:
             counter["n"] += 1
             n = counter["n"]
             if n == 2:
-                raise BufferAPIError(f"failure-{n}")
+                raise SchedulerAPIError(f"failure-{n}")
             return {"ok": True, "update_id": f"u-{n}",
                     "channel_id": kw["channel_id"], "raw": {}}
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post", per_call,
+            "mediahub.publishing.scheduler.schedule_post", per_call,
         )
         for cap in ["first", "second", "third"]:
             r = c.post(
@@ -610,7 +610,7 @@ class TestPostingLogIntegration:
         guarantee that multi-tenant scoping works on legacy runs."""
         c, run_id, card_id, profile_id = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "u-scoped",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -650,7 +650,7 @@ class TestPostingLogApi:
         (tmp_path / "runs_v4").mkdir(parents=True, exist_ok=True)
         (tmp_path / "uploads_v4").mkdir(parents=True, exist_ok=True)
         (tmp_path / "club_profiles").mkdir(parents=True, exist_ok=True)
-        monkeypatch.delenv("BUFFER_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("SCHEDULER_ACCESS_TOKEN", raising=False)
 
         import mediahub.web.club_profile as cp
         import mediahub.web.web as wm
@@ -671,7 +671,7 @@ class TestPostingLogApi:
 
         # Seed three attempts via the schedule endpoint.
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": f"u-{kw['channel_id']}",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -695,7 +695,7 @@ class TestPostingLogApi:
     def test_limit_param_caps_response(self, ready_app, monkeypatch):
         c, run_id, card_id, profile_id = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "u",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -720,7 +720,7 @@ class TestPostingLogApi:
         ``?limit=10000`` must be clamped to 200, never honoured raw."""
         c, run_id, card_id, profile_id = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "u",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -751,7 +751,7 @@ class TestPostingLogApi:
     def test_run_id_param_filters(self, ready_app, monkeypatch):
         c, run_id, card_id, profile_id = ready_app
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "u",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -780,7 +780,7 @@ class TestPostingLogApi:
 
         # Seed one attempt for org A via the route.
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "u-A",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -818,7 +818,7 @@ class TestPostingLogApi:
 
 # ---------------------------------------------------------------------------
 # 6. End-to-end "schedule survives refresh" — pins the user-facing
-#    promise of the pill state. After a successful Buffer schedule:
+#    promise of the pill state. After a successful the scheduler schedule:
 #      * the workflow sidecar persists the new ScheduleStatus
 #      * build_grouped_pack (the pack reload path) surfaces it on the item
 #      * /api/posting/log shows the ok row
@@ -832,7 +832,7 @@ class TestSchedulePillSurvivesRefresh:
         c, run_id, card_id, profile_id = ready_app
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
+            "mediahub.publishing.scheduler.schedule_post",
             lambda **kw: {"ok": True, "update_id": "upd-keep",
                           "channel_id": kw["channel_id"], "raw": {}},
         )
@@ -867,7 +867,7 @@ class TestSchedulePillSurvivesRefresh:
         state = ws.load(run_id).get(card_id)
         assert state is not None
         assert state.schedule_status == ScheduleStatus.SCHEDULED
-        assert state.buffer_update_id == "upd-keep"
+        assert state.scheduler_update_id == "upd-keep"
         # scheduled_at was round-tripped to UTC ISO and re-parses cleanly.
         assert state.scheduled_at and state.scheduled_at.startswith("2027-01-01T10:00:00")
 
@@ -897,7 +897,7 @@ class TestSchedulePillSurvivesRefresh:
                 break
         assert found is not None, "card disappeared from grouped pack"
         assert found.get("schedule_status") == "scheduled"
-        assert found.get("buffer_update_id") == "upd-keep"
+        assert found.get("scheduler_update_id") == "upd-keep"
 
         # 4. /api/posting/log has the row.
         log_resp = c.get("/api/posting/log")
@@ -916,14 +916,14 @@ class TestSchedulePillSurvivesRefresh:
         self, ready_app, monkeypatch,
     ):
         c, run_id, card_id, profile_id = ready_app
-        from mediahub.publishing.buffer import BufferAPIError
+        from mediahub.publishing.scheduler import SchedulerAPIError
         from mediahub.workflow.store import WorkflowStore
         from mediahub.workflow.status import ScheduleStatus
         from mediahub.web import web as _web
 
         monkeypatch.setattr(
-            "mediahub.publishing.buffer.schedule_post",
-            lambda **kw: (_ for _ in ()).throw(BufferAPIError("Buffer 500")),
+            "mediahub.publishing.scheduler.schedule_post",
+            lambda **kw: (_ for _ in ()).throw(SchedulerAPIError("the scheduler 500")),
         )
         resp = c.post(
             _schedule_url(run_id, card_id),
@@ -985,7 +985,7 @@ class TestScheduleModalRenderedSurface:
         # Stale-request guard so a re-open can't be clobbered by an
         # in-flight earlier fetch.
         assert "_openSeq" in js
-        # Network-error fallback in the connect-buffer-from-modal flow
+        # Network-error fallback in the connect-scheduler-from-modal flow
         # no longer uses alert() — it must surface inline via the modal
         # error div (or MH.toast as a fallback).
         assert "alert(" not in js, "modal JS should not use alert()"

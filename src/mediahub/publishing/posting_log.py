@@ -1,6 +1,6 @@
 """Posting-attempt log — SQLite store for every publish attempt.
 
-Every call into the publishing layer (Buffer today, future schedulers
+Every call into the publishing layer (the scheduler today, future schedulers
 tomorrow) lands one row here, regardless of whether the call succeeded
 or failed. The log is observability, not critical path:
 

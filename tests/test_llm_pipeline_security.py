@@ -173,7 +173,7 @@ def test_schedule_proceeds_only_after_human_approval(client):
         f"/api/runs/{run_id}/card/{card_id}/schedule",
         json={"channel_ids": ["ch1"], "caption": "Approved caption"},
     )
-    # past the approval gate; fails later only on the missing Buffer token
+    # past the approval gate; fails later only on the missing the scheduler token
     assert r.status_code != 409
     assert r.get_json().get("error") in ("no_token", None)
 

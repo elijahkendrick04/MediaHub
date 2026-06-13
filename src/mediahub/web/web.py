@@ -1923,15 +1923,15 @@ def _run_owner_profile_id(run_id: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------
-# Schedule (Buffer) modal &mdash; shared between classic + grouped pack pages
+# Schedule (the scheduler) modal &mdash; shared between classic + grouped pack pages
 # ---------------------------------------------------------------------
 
 
 def _schedule_modal_html() -> str:
-    """Return the hidden Buffer schedule modal markup.
+    """Return the hidden the scheduler schedule modal markup.
 
     The modal is populated by mhScheduleOpen() with channel checkboxes
-    fetched from /api/buffer/channels. When the token is missing the
+    fetched from /api/scheduler/channels. When the token is missing the
     fetch returns 401 and the open-handler shows an alert directing the
     user to contact their administrator, then closes the dialog.
     """
@@ -1945,7 +1945,7 @@ def _schedule_modal_html() -> str:
               border-radius:12px;max-width:560px;width:100%;max-height:90vh;
               overflow:auto;padding:22px;color:var(--ink,#e9eef5)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 id="mh-sched-title" style="margin:0;font-size:18px">Schedule with Buffer</h2>
+      <h2 id="mh-sched-title" style="margin:0;font-size:18px">Schedule this post</h2>
       <button class="btn secondary" style="font-size:14px;padding:4px 10px"
               onclick="mhScheduleClose()" aria-label="Close">&times;</button>
     </div>
@@ -1981,7 +1981,7 @@ def _schedule_modal_html() -> str:
     <input type="hidden" id="mh-sched-pill-id"/>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
       <button class="btn secondary" onclick="mhScheduleClose()">Cancel</button>
-      <button id="mh-sched-send" class="btn" onclick="mhScheduleSend()">Send to Buffer</button>
+      <button id="mh-sched-send" class="btn" onclick="mhScheduleSend()">Schedule</button>
     </div>
   </div>
 </div>
@@ -1989,14 +1989,14 @@ def _schedule_modal_html() -> str:
 
 
 def _schedule_modal_js() -> str:
-    """Return the JS that drives the Buffer schedule modal.
+    """Return the JS that drives the the scheduler schedule modal.
 
-    Pulls channels from /api/buffer/channels (401 or not-connected
+    Pulls channels from /api/scheduler/channels (401 or not-connected
     surfaces a "contact administrator" alert and closes the modal —
-    Buffer credentials are env-var configured at deploy time, no
+    Auto scheduling credentials are env-var configured at deploy time, no
     in-app redirect to a settings page exists), POSTs to
     /api/runs/<id>/card/<cid>/schedule, and preserves the user's
-    edited caption when Buffer returns an error.
+    edited caption when the scheduler returns an error.
     """
     return """
 <script>
@@ -2064,7 +2064,7 @@ def _schedule_modal_js() -> str:
   // current value, parses it as local time (matching localToIso's
   // semantics), and shows a UTC echo + a past-time warning when
   // appropriate. Called on input and after the modal opens. We use
-  // textContent throughout to keep it XSS-safe (a Buffer error message
+  // textContent throughout to keep it XSS-safe (a the scheduler error message
   // never reaches this code path, but the tz string in pathological
   // locales could).
   function refreshWhenHint() {
@@ -2075,7 +2075,7 @@ def _schedule_modal_js() -> str:
     if (!raw) {
       hint.style.color = '';
       hint.textContent = 'Times use your local timezone (' + tz + '). '
-        + 'Leave blank to use the next available Buffer queue slot.';
+        + 'Leave blank to use the next available auto scheduling slot.';
       return;
     }
     var d = new Date(raw);
@@ -2089,11 +2089,11 @@ def _schedule_modal_js() -> str:
     if (d.getTime() < now.getTime() - 60000) {
       hint.style.color = 'var(--bad)';
       hint.textContent = 'That time is in the past (' + tz
-        + '). Buffer will reject it — pick a future time or clear the field.';
+        + '). Auto scheduling will reject it — pick a future time or clear the field.';
       return;
     }
     hint.style.color = '';
-    hint.textContent = tz + ' → sends to Buffer as '
+    hint.textContent = tz + ' → schedules as '
       + d.toISOString() + ' (UTC).';
   }
 
@@ -2123,7 +2123,7 @@ def _schedule_modal_js() -> str:
     var chWrap = document.getElementById('mh-sched-channels');
     chWrap.innerHTML = '<p class="muted" style="margin:0">Loading channels&hellip;</p>';
 
-    fetch(API_BASE + '/api/buffer/channels', {cache:'no-store'}).then(function(r){
+    fetch(API_BASE + '/api/scheduler/channels', {cache:'no-store'}).then(function(r){
       return r.json().then(function(j){ return {status:r.status, body:j}; }, function(){
         // Non-JSON response (e.g. a proxy returned HTML). Return a synthetic
         // body so the downstream branches can still surface a clear error.
@@ -2134,10 +2134,10 @@ def _schedule_modal_js() -> str:
       // this fetch was in flight, so discard our result rather than
       // overwriting the channel list / error UI for the new card.
       if (seq !== _openSeq) return;
-      // 401 = no token configured OR token rejected by Buffer. Both
-      // cases want the inline Connect-Buffer form so the user can paste
+      // 401 = no token configured OR token rejected by the scheduler. Both
+      // cases want the inline Connect-the scheduler form so the user can paste
       // a (fresh) personal token without leaving the modal. The download
-      // fallback is always offered so a club with no Buffer at all
+      // fallback is always offered so a club with no the scheduler at all
       // isn't blocked from getting their content out.
       if (o.status === 401) {
         var runIdForDl = document.getElementById('mh-sched-run-id').value;
@@ -2150,21 +2150,21 @@ def _schedule_modal_js() -> str:
           + '/download?caption=' + capForDl;
         chWrap.innerHTML =
           '<div style="font-size:13px;line-height:1.5;margin-bottom:10px">'
-          + ((o.body && o.body.message) || 'Buffer is not connected for this organisation.')
+          + ((o.body && o.body.message) || 'Auto scheduling is not connected for this organisation.')
           + '</div>'
           + '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">'
-          +   '<label for="mh-buf-token" style="font-size:12px;font-weight:600">Buffer access token</label>'
+          +   '<label for="mh-buf-token" style="font-size:12px;font-weight:600">Auto scheduling access token</label>'
           +   '<input id="mh-buf-token" type="password" '
           +     'placeholder="1/..." autocomplete="off" '
           +     'style="padding:8px;border:1px solid var(--border,#252a36);'
           +     'border-radius:6px;background:rgba(255,255,255,0.04);color:inherit;font-family:inherit"/>'
           +   '<button id="mh-buf-connect" class="btn" style="font-size:13px;padding:6px 12px;align-self:flex-start"'
-          +     ' onclick="mhConnectBufferFromModal()">Connect Buffer for this org</button>'
+          +     ' onclick="mhConnectSchedulerFromModal()">Connect auto scheduling for this org</button>'
           +   '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
-          +     'style="font-size:11px;color:var(--accent)">Where do I get a Buffer access token? &rarr;</a>'
+          +     'style="font-size:11px;color:var(--accent)">Where do I get an access token? &rarr;</a>'
           + '</div>'
           + '<div style="border-top:1px solid var(--border,#252a36);padding-top:10px;margin-top:10px">'
-          +   '<div style="font-size:12px;color:var(--muted,#7a8597);margin-bottom:6px">No Buffer? Download the post for manual sharing:</div>'
+          +   '<div style="font-size:12px;color:var(--muted,#7a8597);margin-bottom:6px">Not connected? Download the post for manual sharing:</div>'
           +   '<a class="btn secondary" style="font-size:13px;padding:6px 12px" href="'
           +     dlUrl + '">Download caption + visual (.zip)</a>'
           + '</div>';
@@ -2173,13 +2173,13 @@ def _schedule_modal_js() -> str:
       }
       if (o.status >= 400) {
         chWrap.innerHTML = '<p style="color:var(--bad);margin:0">' +
-          ((o.body && o.body.message) || ('Buffer error ' + o.status)) + '</p>';
+          ((o.body && o.body.message) || ('Scheduling error ' + o.status)) + '</p>';
         modal.style.display = 'flex';
         return;
       }
       var channels = (o.body && o.body.channels) || [];
       if (!channels.length) {
-        chWrap.innerHTML = '<p class="muted" style="margin:0">No channels connected to this Buffer account.</p>';
+        chWrap.innerHTML = '<p class="muted" style="margin:0">No channels connected to this auto scheduling account.</p>';
       } else {
         chWrap.innerHTML = '';
         channels.forEach(function(c, i){
@@ -2236,7 +2236,7 @@ def _schedule_modal_js() -> str:
     if (!caption) { err.style.display = 'block'; err.textContent = 'Caption is required.'; return; }
 
     // Past-date guard: a `datetime-local` input has no min and the
-    // server / Buffer would surface a cryptic 4xx if we sent yesterday.
+    // server / the scheduler would surface a cryptic 4xx if we sent yesterday.
     // 1-minute grace so picking "now" doesn't false-positive on clock skew.
     if (whenLocal) {
       var pickedTs = new Date(whenLocal).getTime();
@@ -2282,12 +2282,12 @@ def _schedule_modal_js() -> str:
         }
         var warn = o.body.warning ? (' Warning: ' + o.body.warning) : '';
         if (window.MH && typeof window.MH.toast === 'function') {
-          window.MH.toast('Scheduled to Buffer.' + warn, warn ? 'info' : 'success');
+          window.MH.toast('Scheduled.' + warn, warn ? 'info' : 'success');
         } else if (window.console && console.log) {
           // Quiet fallback for pathological host pages that lack
           // MH.toast — log to console so a successful schedule never
           // blocks the user with a synchronous browser dialog.
-          console.log('Scheduled to Buffer.' + warn);
+          console.log('Scheduled.' + warn);
         }
         mhScheduleClose();
       } else {
@@ -3175,11 +3175,11 @@ function addGraphicToPack(btn, visualId) {
 def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
     """Render the per-card "Schedule" affordance, plan-gated.
 
-    PC.4 free-tier soft limit: Buffer scheduling is a paid feature. On a Free
+    PC.4 free-tier soft limit: Auto scheduling is a paid feature. On a Free
     plan (or signed-out, which resolves to Free) the button is swapped for a
     non-functional "Upgrade to schedule" link to /pricing — a soft nudge, not a
     hard lock (the card itself, its caption, graphics and motion all stay
-    usable; only the Buffer hand-off is gated). Premium plans get the live
+    usable; only the the scheduler hand-off is gated). Premium plans get the live
     button that opens the schedule modal. Reads the plan from the session via
     ``auth.current_plan`` so the gate is consistent everywhere a card renders.
     """
@@ -3194,7 +3194,7 @@ def _schedule_button_html(run_id: str, card_id_raw, el_id: str) -> str:
     return (
         f'<a class="btn secondary" href="{url_for("pricing_page")}" '
         'style="font-size:11px;padding:4px 10px" '
-        'title="Buffer scheduling is on the Club plan">Upgrade to schedule</a>'
+        'title="Auto scheduling is on the Club plan">Upgrade to schedule</a>'
     )
 
 
@@ -7068,7 +7068,6 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('organisation_page') }}" class="{{ 'active' if active=='organisation' else '' }}">Organisation</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
-    <a href="{{ url_for('club_data_page') }}" class="{{ 'active' if active=='clubdata' else '' }}">Club data</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
@@ -7297,13 +7296,13 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   };
 
   // Phase 1.4 — "Use in next caption". Re-runs the caption LLM with
-  // Multi-tenant Buffer connect — called from the inline form that
-  // the schedule modal renders when /api/buffer/channels returns 401.
-  // POSTs the pasted access token to /api/organisation/connect-buffer
-  // which validates against Buffer and persists on the active org's
+  // Multi-tenant the scheduler connect — called from the inline form that
+  // the schedule modal renders when /api/scheduler/channels returns 401.
+  // POSTs the pasted access token to /api/organisation/connect-scheduler
+  // which validates against the scheduler and persists on the active org's
   // ClubProfile. On success, the modal silently retries the channel
   // listing so the user lands in the normal schedule flow.
-  window.mhConnectBufferFromModal = function() {
+  window.mhConnectSchedulerFromModal = function() {
     var API_BASE = window._API_BASE || '';
     var input = document.getElementById('mh-buf-token');
     var btn = document.getElementById('mh-buf-connect');
@@ -7329,16 +7328,16 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     var token = (input.value || '').trim();
     if (!token) {
       input.focus();
-      showError('Paste your Buffer access token to connect.');
+      showError('Paste your auto scheduling access token to connect.');
       return;
     }
     var origLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Connecting…';
-    fetch(API_BASE + '/api/organisation/connect-buffer', {
+    fetch(API_BASE + '/api/organisation/connect-scheduler', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({buffer_access_token: token}),
+      body: JSON.stringify({scheduler_access_token: token}),
     }).then(function(r){
       return r.json().then(function(j){ return {status: r.status, body: j}; }, function(){
         return {status: r.status, body: {message: 'Server returned an unreadable response.'}};
@@ -8898,7 +8897,7 @@ def create_app() -> Flask:
             '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
             "<div><b>Your brand, your tone</b><span>Palette, fonts, voice and example posts feed the model. Nothing gets re-trained on your data.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
-            "<div><b>We don't auto-post</b><span>No scheduled feed pushes without you saying so. The Buffer connection is opt-in per-card.</span></div></li>"
+            "<div><b>We don't auto-post</b><span>No scheduled feed pushes without you saying so. The auto scheduling connection is opt-in per-card.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
             "<div><b>We don't invent results</b><span>If the file doesn't contain a time, the caption doesn't claim one. Heuristic fills are forbidden.</span></div></li>"
             '<li class="deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
@@ -9048,7 +9047,7 @@ def create_app() -> Flask:
             log.warning("activity: runs DB unreachable: %s", e)
             db_failed = True
 
-        # Phase 1.3 — Recent posting activity. Last 20 Buffer attempts for
+        # Phase 1.3 — Recent posting activity. Last 20 the scheduler attempts for
         # this organisation. Fail-soft: if the log module isn't available
         # or the DB lookup errors, the rest of the page still renders.
         try:
@@ -9278,7 +9277,7 @@ def create_app() -> Flask:
                 '<h2 style="margin-top:30px;margin-bottom:6px;font-size:18px">'
                 "Recent posting activity</h2>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} Buffer attempts for this organisation. "
+                f"Last {len(recent_attempts)} scheduling attempts for this organisation. "
                 "Failures stay listed here so you can see what went wrong without "
                 "digging through individual runs.</p>"
                 '<div class="card"><table>'
@@ -11208,7 +11207,7 @@ def create_app() -> Flask:
       Approve the achievements you want to post — anything you skip simply
       stays in the queue. Approved cards flow into the
       <strong>Content builder</strong>, where you pick a caption, create graphics
-      and video, then schedule to Buffer or download. Nothing is created until
+      and video, then schedule or download. Nothing is created until
       you&rsquo;ve approved it.
     </p>
   </div>
@@ -14663,6 +14662,21 @@ Relay team broke club record"></textarea>
 
     @app.route("/status")
     def status_page():
+        # Public view: just "Website operational" / "Website down". The detailed
+        # uptime/incident/version breakdown is operator-only (also reachable at
+        # Settings → Developer for a signed-in operator).
+        if not _auth.is_dev_operator():
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-4)">'
+                '<span class="mh-hero-eyebrow">Status</span>'
+                '<h1>Service <em class="editorial">status</em></h1></section>'
+                + _render_settings_status_public_section()
+            )
+            resp = make_response(_layout("Status", body, active="status"))
+            resp.headers["Refresh"] = "60"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+
         from mediahub.observability import uptime as _uptime
 
         # Pull three windows so the page reads "24h / 7d / 30d uptime"
@@ -15131,72 +15145,112 @@ Relay team broke club record"></textarea>
     def settings_page():
         return _render_settings_page()
 
-    def _render_settings_page() -> str:
-        """Render the consolidated Settings page.
+    # Settings is a card grid like Create: each heading is a tile you click
+    # into for the detail. The detail pages are served by ``settings_section``
+    # below (plus a few that link straight to an existing full page). This
+    # keeps every heading short and scannable instead of one long scroll.
+    _SETTINGS_ICONS = {
+        "org": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>',
+        "members": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+        "activity": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+        "schedule": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
+        "autonomy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg>',
+        "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
+        "privacy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
+        "sponsors": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.7 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
+        "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
+        "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+        "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+    }
 
-        Each section renders independently so a failure inside one
-        (e.g. a missing observability table) doesn't break the rest.
+    def _settings_card_specs(is_dev: bool) -> list[tuple[str, str, str, str]]:
+        """(title, description, icon_key, href) for the settings tiles.
+
+        11 cards for everyone, a 12th (Developer) only when an operator is
+        signed in — matching the "11 headings, 12 for a developer" spec.
         """
-        prof = _active_profile()
+        cards: list[tuple[str, str, str, str]] = [
+            ("Organisation & brand", "Logos, palette, tone and the brand the engine applies to every card.", "org", url_for("organisation_setup")),
+            ("Team members", "Invite teammates and manage who can see and approve content.", "members", url_for("organisation_members_page")),
+            ("Activity", "Every run for this organisation — status, matches, and one-click delete.", "activity", url_for("settings_section", section="activity")),
+            ("Auto scheduling", "Connect a scheduling account so approved cards can be queued to your channels.", "schedule", url_for("settings_section", section="scheduling")),
+            ("Autonomy", "Per-content-type publishing levels — what may post without a human, and the audit trail.", "autonomy", url_for("settings_section", section="autonomy")),
+            ("Club data", "Your club records — import the sheet once; faster swims become ranked record cards.", "clubdata", url_for("club_records_page")),
+            ("Privacy & data", "What this system stores, athletes & consent, cache clearing, and run deletion.", "privacy", url_for("settings_section", section="privacy")),
+            ("Billing & plan", "Your plan, invoices and upgrades.", "billing", url_for("billing_page")),
+            ("Sponsors", "Manage sponsors and the sponsor-safe content they appear in.", "sponsors", url_for("sponsors_page")),
+            ("Account", "Two-factor security, data export, and account deletion.", "account", url_for("settings_section", section="account")),
+            ("System status", "Whether the site is operational right now.", "status", url_for("settings_section", section="status")),
+        ]
+        if is_dev:
+            cards.append(
+                ("Developer", "Deployment health, operator dashboards, uptime detail and autopublish confidence.", "dev", url_for("settings_section", section="developer"))
+            )
+        return cards
 
-        # ---- Hero + sticky section nav --------------------------------
-        toc_html = (
-            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">'
+    def _render_settings_page() -> str:
+        """Render the Settings landing — a grid of heading cards."""
+        is_dev = _auth.is_dev_operator()
+        tiles = ""
+        for title, desc, icon_key, href in _settings_card_specs(is_dev):
+            icon = _SETTINGS_ICONS.get(icon_key, "")
+            tiles += (
+                f'<a href="{href}" class="mh-template">'
+                f'<div class="mh-template-icon">{icon}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(title)}</h3>'
+                "</div>"
+                f"<p>{_h(desc)}</p>"
+                '<span class="mh-template-cta">Open</span>'
+                "</a>"
+            )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-5)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
             '<h1>Operations &amp; <em class="editorial">data</em></h1>'
-            '<p class="lede">Activity, deployment health, the data this system keeps, '
-            "and how to delete it &mdash; all in one place.</p>"
+            '<p class="lede">Pick a heading to manage it. Each card opens its own '
+            "page so nothing is buried in one long scroll.</p>"
             "</section>"
-            '<nav class="mh-tabnav" id="mh-settings-tabs" aria-label="Settings sections">'
-            '<a href="#activity" class="is-active">Activity</a>'
-            '<a href="#status">Status</a>'
-            '<a href="#autonomy">Autonomy</a>'
-            '<a href="#privacy">Privacy &amp; data</a>'
-            '<a href="#deployment">Deployment</a>'
-            "</nav>"
-        )
-
-        activity_html = _render_settings_activity_section(prof)
-        status_html = _render_settings_status_section()
-        autonomy_html = _render_settings_autonomy_section(prof)
-        privacy_html = _render_settings_privacy_section()
-        deployment_html = _render_settings_deployment_section()
-
-        # Scroll-spy: highlight the tab whose section is in view.
-        spy_js = """
-<script>
-(function(){
-  var nav = document.getElementById('mh-settings-tabs');
-  if (!nav) return;
-  var links = Array.prototype.slice.call(nav.querySelectorAll('a'));
-  var targets = links.map(function(a){
-    var id = a.getAttribute('href').slice(1);
-    return document.getElementById(id);
-  });
-  if (!('IntersectionObserver' in window)) return;
-  var io = new IntersectionObserver(function(entries){
-    entries.forEach(function(en){
-      if (!en.isIntersecting) return;
-      var idx = targets.indexOf(en.target);
-      if (idx < 0) return;
-      links.forEach(function(l){ l.classList.remove('is-active'); });
-      links[idx].classList.add('is-active');
-    });
-  }, {rootMargin: '-30% 0px -60% 0px', threshold: 0});
-  targets.forEach(function(t){ if (t) io.observe(t); });
-})();
-</script>"""
-
-        body = (
-            toc_html
-            + activity_html
-            + status_html
-            + autonomy_html
-            + privacy_html
-            + deployment_html
-            + spy_js
+            f'<div class="mh-template-grid">{tiles}</div>'
         )
         return _layout("Settings", body, active="settings")
+
+    # Detail pages behind the settings cards. ``developer`` is operator-only;
+    # everything else is org-scoped and degrades gracefully with no org.
+    @app.route("/settings/<section>")
+    def settings_section(section):
+        renderers = {
+            "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
+            "scheduling": ("Auto scheduling", lambda prof: _render_settings_scheduling_section(prof)),
+            "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
+            "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
+            "account": ("Account", lambda prof: _render_settings_account_section()),
+            "status": ("System status", lambda prof: _render_settings_status_public_section()),
+            "developer": ("Developer", lambda prof: _render_settings_developer_section()),
+        }
+        entry = renderers.get(section)
+        if entry is None:
+            return redirect(url_for("settings_page"))
+        if section == "developer" and not _auth.is_dev_operator():
+            return redirect(url_for("settings_page"))
+        title, render = entry
+        prof = _active_profile()
+        back = (
+            f'<a href="{url_for("settings_page")}" '
+            'style="display:inline-flex;align-items:center;gap:6px;font-size:13px;'
+            'color:var(--ink-muted);text-decoration:none;margin-bottom:14px">'
+            "&larr; All settings</a>"
+        )
+        body = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-3);margin-bottom:var(--sp-2)">'
+            '<span class="mh-hero-eyebrow">Settings</span>'
+            f'<h1 style="margin-bottom:0">{_h(title)}</h1>'
+            "</section>"
+            + back
+            + render(prof)
+        )
+        return _layout(f"{title} · Settings", body, active="settings")
 
     def _render_settings_activity_section(prof: Optional[ClubProfile]) -> str:
         """Activity section — recent runs for the pinned org.
@@ -15380,7 +15434,7 @@ Relay team broke club record"></textarea>
                 '<h3 style="margin-top:24px;margin-bottom:6px;font-size:16px">'
                 "Recent posting activity</h3>"
                 '<p class="dim" style="margin-bottom:14px;font-size:13px">'
-                f"Last {len(recent_attempts)} Buffer attempts for this organisation.</p>"
+                f"Last {len(recent_attempts)} scheduling attempts for this organisation.</p>"
                 '<div class="card"><table>'
                 "<thead><tr><th>When</th><th>Channel</th><th>Status</th>"
                 "<th>Caption excerpt</th><th>Error</th></tr></thead>"
@@ -15535,77 +15589,50 @@ Relay team broke club record"></textarea>
             f"{last_incident_html}</div>"
         )
 
+    _AUTONOMY_LEVEL_OPTS = [
+        ("approval_required", "Approval required", "A human must approve before publishing."),
+        ("draft_only", "Draft only", "Generate drafts; never schedule or publish automatically."),
+        ("fully_autonomous", "Fully autonomous", "May publish without human approval when all guardrails pass."),
+    ]
+
     def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
-        """Autonomy section — per-type publishing policy controls (P2.4)."""
-        section_header = (
-            '<h2 id="autonomy" style="margin:40px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Autonomy controls</h2>'
-        )
+        """Autonomy — per-type publishing levels + cadence + audit (P2.4).
+
+        Confidence thresholds moved to the operator-only Developer page; the
+        auto-scheduling connection + channel list moved to Auto scheduling.
+        """
         if prof is None:
             return (
-                f"{section_header}"
                 '<p class="dim" style="margin-bottom:14px">'
                 "Sign in to an organisation to manage its publishing autonomy controls.</p>"
                 '<div class="card empty">No organisation pinned.</div>'
             )
-
         try:
             from mediahub.publishing.per_type_policy import load_policy as _load_policy
-            from mediahub.publishing.publish_gate import (
-                DEFAULT_CONFIDENCE_THRESHOLD as _DEF_THRESH,
-            )
-            from mediahub.publishing.publish_gate import load_thresholds as _load_thresholds
             from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
 
             current_policy = _load_policy(prof.profile_id)
-            current_thresholds = _load_thresholds(prof.profile_id)
         except Exception as _e:
-            return (
-                f"{section_header}"
-                f'<div class="card empty">Could not load autonomy policy: {_h(str(_e))}</div>'
-            )
+            return f'<div class="card empty">Could not load autonomy policy: {_h(str(_e))}</div>'
 
         save_url = url_for("api_autonomy_policy_save")
-
-        level_opts = [
-            ("approval_required", "Approval required", "A human must approve before publishing."),
-            (
-                "draft_only",
-                "Draft only",
-                "Generate drafts; never schedule or publish automatically.",
-            ),
-            (
-                "fully_autonomous",
-                "Fully autonomous",
-                "May publish without human approval when all guardrails pass.",
-            ),
-        ]
-
         rows_html = ""
         for ct_str, ct_meta in _CT_REGISTRY.items():
             current_val = current_policy.get(ct_str.value, "approval_required")
             select_opts = ""
-            for val, label, _ in level_opts:
+            for val, label, _ in _AUTONOMY_LEVEL_OPTS:
                 sel = " selected" if current_val == val else ""
                 select_opts += f'<option value="{_h(val)}"{sel}>{_h(label)}</option>'
-            thresh_val = current_thresholds.get(ct_str.value, _DEF_THRESH)
             rows_html += (
                 f"<tr>"
                 f'<td style="font-weight:500">{_h(ct_meta.title)}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted);max-width:220px">{_h(ct_meta.description)}</td>'
+                f'<td style="font-size:12px;color:var(--ink-muted);max-width:260px">{_h(ct_meta.description)}</td>'
                 f"<td>"
                 f'<select name="{_h(ct_str.value)}" '
                 f'style="background:var(--bg);color:var(--ink);'
                 f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px">'
                 f"{select_opts}"
                 f"</select>"
-                f"</td>"
-                f"<td>"
-                f'<input type="number" name="threshold_{_h(ct_str.value)}" '
-                f'value="{thresh_val:.2f}" min="0.5" max="1" step="0.05" '
-                f'title="Minimum recognition confidence for autonomous publishing of this type" '
-                f'style="width:74px;background:var(--bg);color:var(--ink);'
-                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px"/>'
                 f"</td>"
                 f"</tr>"
             )
@@ -15619,49 +15646,27 @@ Relay team broke club record"></textarea>
             "All other types remain gated. You can revert to <em>Approval required</em> at any time."
             "</div>"
         )
-
-        channels_val = _h(", ".join(getattr(prof, "autonomy_channel_ids", []) or []))
-        has_buffer = bool((getattr(prof, "buffer_access_token", "") or "").strip())
-        channels_note = (
-            "Buffer channel ids autonomous posts may go to (comma-separated — ids appear "
-            "in the schedule modal's channel list). Leave empty to let autonomy approve "
-            "gate-passing cards while a human still does all scheduling."
-            if has_buffer
-            else "Connect Buffer (inside any card's schedule modal) before choosing "
-            "autonomous channels — without it, autonomy can approve but never post."
+        confidence_note = (
+            '<p class="dim" style="font-size:12px;margin:10px 0 0 0">The minimum recognition '
+            "confidence a card must clear before it can auto-publish is set by the operator in "
+            "Developer settings.</p>"
         )
-        channels_html = (
-            '<div class="card" style="margin-top:14px;padding:16px 18px">'
-            '<label for="mh-autonomy-channels" style="font-weight:600">Autonomous channels</label>'
-            f'<p class="dim" style="font-size:12px;margin:4px 0 8px 0">{channels_note}</p>'
-            f'<input id="mh-autonomy-channels" type="text" name="autonomy_channel_ids" '
-            f'value="{channels_val}" placeholder="e.g. 5f1a…, 5f1b…" '
-            f'style="width:100%;max-width:520px"{"" if has_buffer else " disabled"}/>'
-            "</div>"
-        )
-
         form_html = (
-            f'<form id="mh-autonomy-form" method="post" action="{save_url}" '
-            f'data-no-loader="1">'
+            f'<form id="mh-autonomy-form" method="post" action="{save_url}" data-no-loader="1">'
             f'<div class="card" style="padding:0;overflow:hidden">'
             f'<table class="mh-table-stack" style="width:100%">'
-            f"<thead><tr>"
-            f"<th>Content type</th><th>Description</th><th>Publishing level</th>"
-            f'<th title="Only used when the level is Fully autonomous">Auto-publish confidence ≥</th>'
-            f"</tr></thead>"
+            f"<thead><tr><th>Content type</th><th>Description</th><th>Publishing level</th></tr></thead>"
             f"<tbody>{rows_html}</tbody>"
             f"</table></div>"
-            f"{channels_html}"
             f"{warning_html}"
             f'<div style="margin-top:14px">'
             f'<button type="submit" class="btn primary">Save autonomy settings</button>'
             f'<span id="mh-autonomy-saved" style="margin-left:12px;font-size:13px;'
             f'color:var(--mh-prim-success-400);display:none">Saved.</span>'
-            f"</div>"
-            f"</form>"
+            f"</div></form>"
+            f"{confidence_note}"
         )
 
-        # JS: warn on fully_autonomous; AJAX save so the page doesn't reload
         js_html = """
 <script>
 (function(){
@@ -15691,17 +15696,6 @@ Relay team broke club record"></textarea>
       .catch(function(){});
   });
 })();
-window.mhBufferDisconnect = function(btn) {
-  if (!window.confirm('Disconnect Buffer for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
-  btn.disabled = true;
-  fetch('REPLACE_DISCONNECT_URL', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}})
-    .then(function(r){ return r.json(); })
-    .then(function(j){
-      if (j && j.ok) { window.location.reload(); }
-      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect Buffer.', 'error'); }
-    })
-    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect Buffer.', 'error'); });
-};
 window.mhAutonomySweepNow = function(btn) {
   var out = document.getElementById('mh-sweep-result');
   btn.disabled = true; out.textContent = 'Checking recent runs against the publish gate…';
@@ -15716,14 +15710,8 @@ window.mhAutonomySweepNow = function(btn) {
     .catch(function(){ btn.disabled = false; out.textContent = 'Sweep failed.'; });
 };
 </script>"""
-        js_html = js_html.replace(
-            "REPLACE_DISCONNECT_URL", url_for("api_disconnect_buffer")
-        ).replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
+        js_html = js_html.replace("REPLACE_SWEEP_URL", url_for("api_autonomy_sweep"))
 
-        # Buffer connection + on-demand sweep + cadence state — the operational
-        # half of autonomy: the policy table above decides *if*, this shows
-        # *whether it can actually run* (token, cadence) and lets a human
-        # trigger one cycle now instead of waiting for the hourly task.
         cadence_on = False
         try:
             from mediahub.workflow.schedule import list_tasks as _sched_list_tasks2
@@ -15736,12 +15724,14 @@ window.mhAutonomySweepNow = function(btn) {
             )
         except Exception:
             pass
-        buffer_status = (
-            '<span style="color:var(--mh-prim-success-400)">Buffer connected</span>'
-            '<button type="button" class="btn secondary" onclick="mhBufferDisconnect(this)" '
-            'style="font-size:11px;padding:3px 10px;margin-left:10px">Disconnect</button>'
-            if has_buffer
-            else '<span class="dim">Buffer not connected — connect inside any card’s schedule modal.</span>'
+        has_scheduler = bool((getattr(prof, "scheduler_access_token", "") or "").strip())
+        sched_link = url_for("settings_section", section="scheduling")
+        scheduler_status = (
+            '<span style="color:var(--mh-prim-success-400)">Auto scheduling connected.</span> '
+            f'<a href="{sched_link}" style="font-size:12px">Manage &rarr;</a>'
+            if has_scheduler
+            else f'<span class="dim">Auto scheduling not connected.</span> '
+            f'<a href="{sched_link}" style="font-size:12px">Connect &rarr;</a>'
         )
         cadence_status = (
             '<span style="color:var(--mh-prim-success-400)">active</span> — recent runs are '
@@ -15753,7 +15743,7 @@ window.mhAutonomySweepNow = function(btn) {
         ops_html = (
             '<div class="card" style="margin-top:14px;padding:16px 18px">'
             '<div style="font-weight:600;margin-bottom:6px">Autonomy operations</div>'
-            f'<p style="font-size:13px;margin:0 0 6px 0">{buffer_status}</p>'
+            f'<p style="font-size:13px;margin:0 0 6px 0">{scheduler_status}</p>'
             f'<p style="font-size:13px;margin:0 0 10px 0">Hourly cadence: {cadence_status}.</p>'
             '<button type="button" class="btn secondary" onclick="mhAutonomySweepNow(this)" '
             'style="font-size:12px">Run autonomy check now</button>'
@@ -15761,9 +15751,6 @@ window.mhAutonomySweepNow = function(btn) {
             "</div>"
         )
 
-        # The audit ledger, surfaced — every gate verdict, auto-approval and
-        # publish attempt for this org, newest first. Append-only JSONL via
-        # workflow.autonomy.AuditLog; this is its read surface.
         audit_rows = ""
         try:
             from mediahub.workflow.autonomy import AuditLog as _AuditLog
@@ -15800,22 +15787,300 @@ window.mhAutonomySweepNow = function(btn) {
         )
 
         return (
-            f"{section_header}"
             f'<p class="dim" style="margin-bottom:14px">Control how much MediaHub may publish '
             f"on behalf of <b>{_h(prof.display_name)}</b> for each content type. "
             f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
             f"without your explicit opt-in.</p>"
-            f"{form_html}"
-            f"{ops_html}"
-            f"{audit_html}"
-            f"{js_html}"
+            f"{form_html}{ops_html}{audit_html}{js_html}"
+        )
+
+    def _render_settings_scheduling_section(prof: Optional[ClubProfile]) -> str:
+        """Auto scheduling — connect a scheduling account + pick channels.
+
+        This is the page the Settings "Auto scheduling" card opens. It replaces
+        the old per-card "Buffer" wording entirely; the only place the upstream
+        provider name still appears is the GDPR sub-processor record.
+        """
+        if prof is None:
+            return (
+                '<p class="dim" style="margin-bottom:14px">'
+                "Sign in to an organisation to connect auto scheduling.</p>"
+                '<div class="card empty">No organisation pinned.</div>'
+            )
+        has_scheduler = bool((getattr(prof, "scheduler_access_token", "") or "").strip())
+        channels_val = _h(", ".join(getattr(prof, "autonomy_channel_ids", []) or []))
+        connect_url = url_for("api_connect_scheduler")
+        disconnect_url = url_for("api_disconnect_scheduler")
+        save_url = url_for("api_autonomy_policy_save")
+
+        explainer = (
+            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<p style="margin:0 0 8px 0">Auto scheduling queues your <b>approved</b> cards to '
+            "your social channels at the times you choose, so a volunteer doesn't have to be at "
+            "a keyboard to post. Nothing is ever scheduled without approval (unless you opt a "
+            "content type into full autonomy under "
+            f'<a href="{url_for("settings_section", section="autonomy")}">Autonomy</a>). '
+            "Not connected? You can always download a caption + visual ZIP from any card and "
+            "post by hand.</p></div>"
+        )
+
+        if has_scheduler:
+            status_block = (
+                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+                '<div style="font-weight:600;margin-bottom:6px">Connection</div>'
+                '<p style="font-size:13px;margin:0 0 10px 0">'
+                '<span style="color:var(--mh-prim-success-400)">Auto scheduling is connected</span> '
+                "for this organisation.</p>"
+                '<button type="button" class="btn secondary" onclick="mhSchedulerDisconnect(this)" '
+                'style="font-size:12px">Disconnect</button>'
+                "</div>"
+            )
+        else:
+            status_block = (
+                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+                '<div style="font-weight:600;margin-bottom:6px">Connect</div>'
+                '<p class="dim" style="font-size:13px;margin:0 0 8px 0">Paste your scheduling '
+                "access token to connect this organisation.</p>"
+                '<div style="display:flex;flex-direction:column;gap:8px;max-width:520px">'
+                '<input id="mh-sched-token" type="text" placeholder="Access token" '
+                'style="width:100%;font-family:var(--font-mono,monospace);font-size:13px;'
+                'padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
+                'background:var(--bg);color:var(--ink)"/>'
+                '<button type="button" id="mh-sched-connect" class="btn" '
+                'style="align-self:flex-start;font-size:13px" '
+                'onclick="mhConnectSchedulerFromSettings()">Connect auto scheduling</button>'
+                '<a href="https://publish.buffer.com/account/apps" target="_blank" rel="noopener" '
+                'style="font-size:11px;color:var(--accent)">Where do I get an access token? &rarr;</a>'
+                '<div id="mh-sched-connect-msg" class="dim" style="font-size:12px"></div>'
+                "</div></div>"
+            )
+
+        channels_note = (
+            "Channel ids autonomous posts may go to (comma-separated — ids appear in the "
+            "schedule modal's channel list). Leave empty to let autonomy approve gate-passing "
+            "cards while a human still does all scheduling."
+            if has_scheduler
+            else "Connect auto scheduling first, then choose which channels autonomous posts may "
+            "go to."
+        )
+        channels_block = (
+            f'<form id="mh-sched-channels-form" method="post" action="{save_url}" data-no-loader="1">'
+            '<div class="card" style="padding:16px 18px">'
+            '<label for="mh-autonomy-channels" style="font-weight:600">Autonomous channels</label>'
+            f'<p class="dim" style="font-size:12px;margin:4px 0 8px 0">{channels_note}</p>'
+            f'<input id="mh-autonomy-channels" type="text" name="autonomy_channel_ids" '
+            f'value="{channels_val}" placeholder="e.g. 5f1a…, 5f1b…" '
+            f'style="width:100%;max-width:520px"{"" if has_scheduler else " disabled"}/>'
+            '<div style="margin-top:12px">'
+            f'<button type="submit" class="btn primary"{"" if has_scheduler else " disabled"} '
+            'style="font-size:13px">Save channels</button>'
+            '<span id="mh-sched-saved" style="margin-left:12px;font-size:13px;'
+            'color:var(--mh-prim-success-400);display:none">Saved.</span>'
+            "</div></div></form>"
+        )
+
+        js_html = """
+<script>
+window.mhConnectSchedulerFromSettings = function() {
+  var inp = document.getElementById('mh-sched-token');
+  var msg = document.getElementById('mh-sched-connect-msg');
+  var btn = document.getElementById('mh-sched-connect');
+  var token = (inp && inp.value || '').trim();
+  if (!token) { if (msg) msg.textContent = 'Paste your access token to connect.'; return; }
+  btn.disabled = true; if (msg) msg.textContent = 'Connecting…';
+  fetch('REPLACE_CONNECT_URL', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({scheduler_access_token: token})})
+    .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); })
+    .then(function(o){
+      if (o.status >= 200 && o.status < 300 && o.body && o.body.ok) { window.location.reload(); }
+      else { btn.disabled = false; if (msg) msg.textContent = (o.body && o.body.message) || 'Could not connect.'; }
+    })
+    .catch(function(){ btn.disabled = false; if (msg) msg.textContent = 'Could not connect.'; });
+};
+window.mhSchedulerDisconnect = function(btn) {
+  if (!window.confirm('Disconnect auto scheduling for this organisation? Autonomous and one-click scheduling will stop until a new token is connected.')) return;
+  btn.disabled = true;
+  fetch('REPLACE_DISCONNECT_URL', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok) { window.location.reload(); }
+      else { btn.disabled = false; if (window.MH) MH.toast((j && j.error) || 'Could not disconnect auto scheduling.', 'error'); }
+    })
+    .catch(function(){ btn.disabled = false; if (window.MH) MH.toast('Could not disconnect auto scheduling.', 'error'); });
+};
+(function(){
+  var form = document.getElementById('mh-sched-channels-form');
+  if (!form) return;
+  var saved = document.getElementById('mh-sched-saved');
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    fetch(form.action, {method:'POST', body:new FormData(form), headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ if (j && j.ok && saved){ saved.style.display=''; setTimeout(function(){saved.style.display='none';},3000);} })
+      .catch(function(){});
+  });
+})();
+</script>"""
+        js_html = js_html.replace("REPLACE_CONNECT_URL", connect_url).replace(
+            "REPLACE_DISCONNECT_URL", disconnect_url
+        )
+        return explainer + status_block + channels_block + js_html
+
+    def _render_settings_account_section() -> str:
+        """Account — security, data export, account deletion."""
+        try:
+            email = _auth.current_user_email() or ""
+        except Exception:
+            email = ""
+        who = (
+            f'<p class="dim" style="margin-bottom:14px">Signed in as <b>{_h(email)}</b>.</p>'
+            if email
+            else '<p class="dim" style="margin-bottom:14px">These actions apply to your '
+            "MediaHub account.</p>"
+        )
+        return (
+            who
+            + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Security</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Protect your account with '
+            "a second factor.</p>"
+            f'<a class="btn secondary" href="{url_for("account_2fa")}">Two-factor authentication</a>'
+            "</div>"
+            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Your data</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Download everything this '
+            "account holds.</p>"
+            f'<a class="btn secondary" href="{url_for("account_export_route")}">Export my data</a>'
+            "</div>"
+            '<div class="card" style="padding:16px 18px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<h3 style="margin-top:0;font-size:16px">Delete account</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Permanently delete your '
+            "account. This cannot be undone.</p>"
+            '<form method="post" action="'
+            + url_for("account_delete")
+            + '" onsubmit="return confirm(\'Permanently delete your account? This cannot be undone.\')">'
+            '<input type="password" name="password" placeholder="Confirm password" '
+            'style="font-size:13px;padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
+            'background:var(--bg);color:var(--ink);margin-right:8px"/>'
+            '<button class="btn danger" type="submit" style="font-size:13px">Delete my account</button>'
+            "</form></div>"
+        )
+
+    def _render_settings_status_public_section() -> str:
+        """Public status — just "operational" or "down", nothing more.
+
+        The detailed uptime/incident/version view moved to Developer settings.
+        """
+        operational = True
+        try:
+            from mediahub.observability import uptime as _uptime
+
+            latest = _uptime.latest_heartbeat()
+            if latest is not None:
+                ts_raw = latest["ts"]
+                if ts_raw.endswith("Z"):
+                    ts_raw = ts_raw[:-1] + "+00:00"
+                from datetime import datetime as _dt
+
+                age_s = (datetime.now(timezone.utc) - _dt.fromisoformat(ts_raw)).total_seconds()
+                operational = bool(latest.get("ok")) and age_s <= 1800
+        except Exception:
+            operational = True
+        if operational:
+            return (
+                '<div class="card" style="padding:22px 24px">'
+                '<div style="display:flex;align-items:center;gap:12px">'
+                '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+                'background:#2cc97f;box-shadow:0 0 0 4px rgba(44,201,127,0.18)"></span>'
+                '<span style="font-size:18px;font-weight:600">Website operational</span></div>'
+                '<p class="dim" style="margin:10px 0 0 0;font-size:13px">Everything is running '
+                "normally.</p></div>"
+            )
+        return (
+            '<div class="card" style="padding:22px 24px;border-left:2px solid var(--mh-prim-error-500)">'
+            '<div style="display:flex;align-items:center;gap:12px">'
+            '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+            'background:#ff5d6c;box-shadow:0 0 0 4px rgba(255,93,108,0.18)"></span>'
+            '<span style="font-size:18px;font-weight:600">Website down</span></div>'
+            '<p class="dim" style="margin:10px 0 0 0;font-size:13px">We are working on getting '
+            "things back up and running. Please check back shortly.</p></div>"
+        )
+
+    def _render_settings_developer_section() -> str:
+        """Operator-only — deployment health, dashboards, detailed status, and
+        the autopublish confidence thresholds (moved out of the public UI)."""
+        return (
+            _render_settings_confidence_section()
+            + _render_settings_status_section()
+            + _render_settings_deployment_section()
+        )
+
+    def _render_settings_confidence_section() -> str:
+        """Operator-only per-type autopublish confidence thresholds."""
+        prof = _active_profile()
+        if prof is None:
+            return (
+                '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+                '<h3 style="margin-top:0;font-size:16px">Autopublish confidence</h3>'
+                '<p class="dim">Sign in to an organisation to set its thresholds.</p></div>'
+            )
+        try:
+            from mediahub.publishing.publish_gate import (
+                DEFAULT_CONFIDENCE_THRESHOLD as _DEF_THRESH,
+            )
+            from mediahub.publishing.publish_gate import load_thresholds as _load_thresholds
+            from mediahub.club_platform.content_types import REGISTRY as _CT_REGISTRY
+
+            current_thresholds = _load_thresholds(prof.profile_id)
+        except Exception as _e:
+            return f'<div class="card empty">Could not load thresholds: {_h(str(_e))}</div>'
+        save_url = url_for("api_autonomy_policy_save")
+        rows = ""
+        for ct_str, ct_meta in _CT_REGISTRY.items():
+            thresh_val = current_thresholds.get(ct_str.value, _DEF_THRESH)
+            rows += (
+                f'<tr><td style="font-weight:500">{_h(ct_meta.title)}</td>'
+                f'<td><input type="number" name="threshold_{_h(ct_str.value)}" '
+                f'value="{thresh_val:.2f}" min="0.5" max="1" step="0.05" '
+                f'style="width:84px;background:var(--bg);color:var(--ink);'
+                f'border:1px solid var(--panel);border-radius:6px;padding:4px 8px;font-size:13px"/></td></tr>'
+            )
+        js = (
+            "<script>(function(){var f=document.getElementById('mh-conf-form');if(!f)return;"
+            "var s=document.getElementById('mh-conf-saved');"
+            "f.addEventListener('submit',function(e){e.preventDefault();"
+            "fetch(f.action,{method:'POST',body:new FormData(f),headers:{'X-Requested-With':'XMLHttpRequest'}})"
+            ".then(function(r){return r.json();}).then(function(j){if(j&&j.ok&&s){s.style.display='';"
+            "setTimeout(function(){s.style.display='none';},3000);}}).catch(function(){});});})();</script>"
+        )
+        return (
+            '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            '<h3 style="margin-top:0;font-size:16px">Autopublish confidence</h3>'
+            '<p class="dim" style="font-size:13px;margin-bottom:10px">Minimum recognition '
+            "confidence a card must clear before a <em>Fully autonomous</em> type can publish it. "
+            f"The standard is {_DEF_THRESH:.0%}. Operator-only.</p>"
+            f'<form id="mh-conf-form" method="post" action="{save_url}" data-no-loader="1">'
+            '<table class="mh-table-stack" style="width:100%"><thead><tr>'
+            "<th>Content type</th><th>Confidence ≥</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            '<div style="margin-top:12px">'
+            '<button type="submit" class="btn primary" style="font-size:13px">Save thresholds</button>'
+            '<span id="mh-conf-saved" style="margin-left:12px;font-size:13px;'
+            'color:var(--mh-prim-success-400);display:none">Saved.</span>'
+            "</div></form></div>" + js
         )
 
     def _render_settings_privacy_section() -> str:
-        """Privacy section — inventory + cache-clear, mirrors /privacy."""
-        section_header = (
-            '<h2 id="privacy" style="margin:40px 0 6px;font-size:22px;'
-            'scroll-margin-top:80px">Privacy &amp; data</h2>'
+        """Privacy section — inventory, athletes & consent, cache-clear, deletion."""
+        section_header = ""
+        athletes_card = (
+            '<div class="card">'
+            '<h3 style="margin-top:0">Athletes &amp; consent</h3>'
+            '<p class="dim" style="font-size:13px">Your swimmer roster across every meet — '
+            "merge duplicate names, set photo/name permission per athlete, import the consent "
+            "register, and export it for the welfare officer.</p>"
+            f'<a class="btn secondary" href="{url_for("athletes_page")}">Manage athletes &amp; consent</a>'
+            "</div>"
         )
         try:
             conn = _db()
@@ -15854,11 +16119,13 @@ window.mhAutonomySweepNow = function(btn) {
   </div>
 </div>
 
+{athletes_card}
+
 <div class="card">
   <h3 style="margin-top:0">What we store</h3>
   <ul>
     <li><strong>Run records</strong> &mdash; per upload: meet metadata, parsed swims, generated cards, captions, audit log. Deletable per run.</li>
-    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Profiles tab.</li>
+    <li><strong>Club profiles</strong> &mdash; your roster + branding. Editable on the Organisation tab.</li>
     <li><strong>PB cache</strong> &mdash; local cache of public PB-lookup pages (the active source is chosen at runtime), keyed by member id. Clearable.</li>
     <li><strong>Database</strong> &mdash; small SQLite index <code>data.db</code> for the run list.</li>
   </ul>
@@ -15866,11 +16133,16 @@ window.mhAutonomySweepNow = function(btn) {
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0">Actions</h3>
-  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the PB cache?')">
-    <button class="btn secondary" type="submit">Clear PB cache</button>
+  <h3 style="margin-top:0">Clear cache</h3>
+  <p class="dim" style="font-size:13px;margin-bottom:10px">Clear the local cache of public PB-lookup pages for this deployment. Safe to do any time — it just re-fetches on the next run.</p>
+  <form method="post" action="{url_for("privacy_cache_clear")}" style="display:inline" onsubmit="return confirm('Clear the cache?')">
+    <button class="btn secondary" type="submit">Clear cache</button>
   </form>
-  <p class="muted" style="margin-top:8px">To delete an individual run, open it from the activity section above and use the Delete button on the row.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Delete runs</h3>
+  <p class="muted" style="margin-top:0">To delete an individual run, open <a href="{url_for("settings_section", section="activity")}">Activity</a> and use the Delete button on its row — it's removed from everywhere across the site, including the athlete spotlight.</p>
 </div>
 """
 
@@ -16411,57 +16683,57 @@ function mhPlanGenerate(btn) {{
 """
         return _layout("Content plan", body, active="plan")
 
-    # ---- Buffer publishing -------------------------------------------
+    # ---- the scheduler publishing -------------------------------------------
     #
     # Multi-tenant publishing model (post-rewrite):
     #
-    #   1. **Per-profile Buffer token** — each ClubProfile carries its
-    #      own optional `buffer_access_token`. Set via /api/organisation/
-    #      connect-buffer (inline in the publishing flow, no settings
+    #   1. **Per-profile the scheduler token** — each ClubProfile carries its
+    #      own optional `scheduler_access_token`. Set via /api/organisation/
+    #      connect-scheduler (inline in the publishing flow, no settings
     #      page). This is the safe multi-tenant pattern: each club
-    #      authenticates with their own Buffer account; content never
+    #      authenticates with their own the scheduler account; content never
     #      flows through a shared account.
     #
-    #   2. **Env-var fallback** — `BUFFER_ACCESS_TOKEN` env var is
+    #   2. **Env-var fallback** — `SCHEDULER_ACCESS_TOKEN` env var is
     #      consulted only when the active profile has no token. This
     #      stays as a convenience for single-tenant self-hosted
     #      deployments where operator IS the user (one club running
     #      MediaHub on their own infra). It is NOT the multi-tenant
     #      story.
     #
-    #   3. **No-Buffer path** — clubs that don't have Buffer can fall
+    #   3. **No-the scheduler path** — clubs that don't have the scheduler can fall
     #      through to /api/runs/<run>/card/<id>/download which packages
     #      the caption + visual as a ZIP for manual posting.
     #
     # This resolver picks 1 → 2 in priority order. Returns "" when no
     # token is reachable for the active org; callers surface the
     # connect-or-download choice.
-    def _resolve_buffer_token() -> str:
+    def _resolve_scheduler_token() -> str:
         prof = _active_profile()
         if prof is not None:
-            tok = (getattr(prof, "buffer_access_token", "") or "").strip()
+            tok = (getattr(prof, "scheduler_access_token", "") or "").strip()
             if tok:
                 return tok
         # Env fallback for single-tenant self-hosted operators.
-        from mediahub.web.secrets_store import get_buffer_access_token
+        from mediahub.web.secrets_store import get_scheduler_access_token
 
-        return (get_buffer_access_token() or "").strip()
+        return (get_scheduler_access_token() or "").strip()
 
-    @app.route("/api/buffer/channels")
-    def api_buffer_channels():
-        """List the user's connected Buffer channels.
+    @app.route("/api/scheduler/channels")
+    def api_scheduler_channels():
+        """List the user's connected the scheduler channels.
 
         Returns 401 when neither the active profile nor the env var
-        has a token, so the UI can show the inline Connect Buffer +
+        has a token, so the UI can show the inline Connect the scheduler +
         Copy/Download alternative instead of opening the schedule modal.
         """
-        from mediahub.publishing.buffer import (
-            list_channels as _buf_list,
-            BufferAuthError,
-            BufferAPIError,
+        from mediahub.publishing.scheduler import (
+            list_channels as _chan_list,
+            SchedulerAuthError,
+            SchedulerAPIError,
         )
 
-        token = _resolve_buffer_token()
+        token = _resolve_scheduler_token()
         if not token:
             return jsonify(
                 {
@@ -16469,16 +16741,16 @@ function mhPlanGenerate(btn) {{
                     "channels": [],
                     "error": "no_token",
                     "message": (
-                        "Buffer isn't connected for this organisation. Paste "
-                        "your Buffer access token to enable scheduling, or "
+                        "Auto scheduling isn't connected for this organisation. Paste "
+                        "your auto scheduling access token to enable scheduling, or "
                         "use the download option to post manually."
                     ),
-                    "connect_url": url_for("api_connect_buffer"),
+                    "connect_url": url_for("api_connect_scheduler"),
                 }
             ), 401
         try:
-            channels = _buf_list(token)
-        except BufferAuthError as exc:
+            channels = _chan_list(token)
+        except SchedulerAuthError as exc:
             return jsonify(
                 {
                     "connected": False,
@@ -16487,7 +16759,7 @@ function mhPlanGenerate(btn) {{
                     "message": str(exc),
                 }
             ), 401
-        except BufferAPIError as exc:
+        except SchedulerAPIError as exc:
             return jsonify(
                 {
                     "connected": True,
@@ -16504,23 +16776,23 @@ function mhPlanGenerate(btn) {{
             }
         )
 
-    @app.route("/api/organisation/connect-buffer", methods=["POST"])
-    def api_connect_buffer():
-        """Save a Buffer access token onto the **active organisation**.
+    @app.route("/api/organisation/connect-scheduler", methods=["POST"])
+    def api_connect_scheduler():
+        """Save a the scheduler access token onto the **active organisation**.
 
-        This is the multi-tenant-safe Buffer connection path: each club
+        This is the multi-tenant-safe the scheduler connection path: each club
         pastes their own personal access token, which is persisted on
         their ClubProfile (not in a shared env var, not in a shared
-        secrets file). Their content then flows through THEIR Buffer
+        secrets file). Their content then flows through THEIR the scheduler
         account, never a shared operator account.
 
         The token is validated by attempting a `list_channels` probe
-        before saving — a token that Buffer rejects is not persisted,
+        before saving — a token that the scheduler rejects is not persisted,
         so the user gets immediate feedback rather than a silent fail
         at schedule time.
 
         POST body (form or JSON):
-            { "buffer_access_token": "1/..." }
+            { "scheduler_access_token": "1/..." }
 
         Returns 200 on success with the connected channel count, or
         4xx on validation / auth failures.
@@ -16531,22 +16803,22 @@ function mhPlanGenerate(btn) {{
                 {
                     "ok": False,
                     "error": "no_active_profile",
-                    "message": "Set up your organisation before connecting Buffer.",
+                    "message": "Set up your organisation before connecting auto scheduling.",
                 }
             ), 409
         # Accept both form-data and JSON for browser-form + fetch use.
         token = ""
         if request.is_json:
             body = request.get_json(silent=True) or {}
-            token = str(body.get("buffer_access_token") or "").strip()
+            token = str(body.get("scheduler_access_token") or "").strip()
         if not token:
-            token = (request.form.get("buffer_access_token") or "").strip()
+            token = (request.form.get("scheduler_access_token") or "").strip()
         if not token:
             return jsonify(
                 {
                     "ok": False,
                     "error": "missing_token",
-                    "message": "Paste your Buffer access token to connect.",
+                    "message": "Paste your auto scheduling access token to connect.",
                 }
             ), 400
         if len(token) < 10:
@@ -16554,21 +16826,21 @@ function mhPlanGenerate(btn) {{
                 {
                     "ok": False,
                     "error": "short_token",
-                    "message": "That doesn't look like a Buffer access token (too short).",
+                    "message": "That doesn't look like a the scheduler access token (too short).",
                 }
             ), 400
 
-        # Validate by probing Buffer for the connected channels. If Buffer
+        # Validate by probing the scheduler for the connected channels. If the scheduler
         # rejects the token we never persist it.
-        from mediahub.publishing.buffer import (
-            list_channels as _buf_list,
-            BufferAuthError,
-            BufferAPIError,
+        from mediahub.publishing.scheduler import (
+            list_channels as _chan_list,
+            SchedulerAuthError,
+            SchedulerAPIError,
         )
 
         try:
-            channels = _buf_list(token)
-        except BufferAuthError as exc:
+            channels = _chan_list(token)
+        except SchedulerAuthError as exc:
             return jsonify(
                 {
                     "ok": False,
@@ -16576,7 +16848,7 @@ function mhPlanGenerate(btn) {{
                     "message": str(exc),
                 }
             ), 401
-        except BufferAPIError as exc:
+        except SchedulerAPIError as exc:
             return jsonify(
                 {
                     "ok": False,
@@ -16586,7 +16858,7 @@ function mhPlanGenerate(btn) {{
             ), 502
 
         # Persist on the profile.
-        prof.buffer_access_token = token
+        prof.scheduler_access_token = token
         save_profile(prof)
         return jsonify(
             {
@@ -16596,13 +16868,13 @@ function mhPlanGenerate(btn) {{
             }
         )
 
-    @app.route("/api/organisation/disconnect-buffer", methods=["POST"])
-    def api_disconnect_buffer():
-        """Clear the Buffer access token on the active organisation."""
+    @app.route("/api/organisation/disconnect-scheduler", methods=["POST"])
+    def api_disconnect_scheduler():
+        """Clear the the scheduler access token on the active organisation."""
         prof = _active_profile()
         if prof is None:
             return jsonify({"ok": False, "error": "no_active_profile"}), 409
-        prof.buffer_access_token = ""
+        prof.scheduler_access_token = ""
         save_profile(prof)
         return jsonify({"ok": True})
 
@@ -16613,7 +16885,7 @@ function mhPlanGenerate(btn) {{
     def api_card_download(run_id, card_id):
         """Download a card's caption + visual as a ZIP for manual posting.
 
-        The Buffer-free path: clubs that don't have Buffer (or don't
+        The the scheduler-free path: clubs that don't have the scheduler (or don't
         want to use it) can grab a ZIP containing the caption text
         and the generated visual, then post manually to whatever
         platform they like. This is the always-safe option — no
@@ -16692,7 +16964,7 @@ function mhPlanGenerate(btn) {{
                     "  open the card in the content builder and click 'Create\n"
                     "  graphic' first.\n\n"
                     "Post the visual + caption to your chosen platform\n"
-                    "manually. No Buffer / third-party scheduler required.\n"
+                    "manually. No third-party scheduler required.\n"
                 ),
             )
         buf.seek(0)
@@ -16708,7 +16980,7 @@ function mhPlanGenerate(btn) {{
         methods=["POST"],
     )
     def api_card_schedule(run_id, card_id):
-        """Schedule a card to one or more Buffer channels.
+        """Schedule a card to one or more the scheduler channels.
 
         Body JSON:
             {
@@ -16719,15 +16991,15 @@ function mhPlanGenerate(btn) {{
             }
 
         Returns 200 with the per-channel results on success, 4xx on bad
-        input / missing token, 502 if Buffer rejects the call. The
+        input / missing token, 502 if the scheduler rejects the call. The
         user's edited caption is echoed back in `caption` so the UI
         can preserve it even after a failure.
         """
-        from mediahub.publishing.buffer import (
+        from mediahub.publishing.scheduler import (
             schedule_post as _buf_schedule,
-            BufferAuthError,
-            BufferAPIError,
-            BufferRateLimitError,
+            SchedulerAuthError,
+            SchedulerAPIError,
+            SchedulerRateLimitError,
         )
         from mediahub.publishing import posting_log as _plog
 
@@ -16778,7 +17050,7 @@ function mhPlanGenerate(btn) {{
                 {
                     "ok": False,
                     "error": "no_channels",
-                    "message": "Pick at least one Buffer channel.",
+                    "message": "Pick at least one auto scheduling channel.",
                     "caption": payload.get("caption", ""),
                 }
             ), 400
@@ -16797,7 +17069,7 @@ function mhPlanGenerate(btn) {{
         media_url = (payload.get("media_url") or "").strip()
         if media_url:
             # Defence-in-depth: only allow http/https URLs to be passed
-            # through to Buffer. Anything else (file://, javascript:,
+            # through to the scheduler. Anything else (file://, javascript:,
             # data:, internal ips by raw IP) is rejected up front so a
             # malicious or accidental relative-href can't reach the
             # upstream API.
@@ -16838,19 +17110,19 @@ function mhPlanGenerate(btn) {{
                     }
                 ), 400
 
-        token = _resolve_buffer_token()
+        token = _resolve_scheduler_token()
         if not token:
             return jsonify(
                 {
                     "ok": False,
                     "error": "no_token",
                     "message": (
-                        "Buffer isn't connected for this organisation. Paste "
-                        "your Buffer access token to enable scheduling, or "
+                        "Auto scheduling isn't connected for this organisation. Paste "
+                        "your auto scheduling access token to enable scheduling, or "
                         "use the download option to post manually."
                     ),
                     "caption": caption,
-                    "connect_url": url_for("api_connect_buffer"),
+                    "connect_url": url_for("api_connect_scheduler"),
                 }
             ), 401
 
@@ -16957,7 +17229,7 @@ function mhPlanGenerate(btn) {{
                     )
                 except Exception:
                     pass
-            except BufferAuthError as exc:
+            except SchedulerAuthError as exc:
                 failure = str(exc)
                 results.append(
                     {
@@ -16980,7 +17252,7 @@ function mhPlanGenerate(btn) {{
                     scheduled_at=scheduled_at_iso_for_log,
                 )
                 break  # Stop early &mdash; token is the same for every channel.
-            except BufferRateLimitError as exc:
+            except SchedulerRateLimitError as exc:
                 # Rate-limit is per-account, not per-channel — once we
                 # hit it for one channel we will hit it for every
                 # subsequent one in the loop. Surface the retry hint
@@ -17008,7 +17280,7 @@ function mhPlanGenerate(btn) {{
                     scheduled_at=scheduled_at_iso_for_log,
                 )
                 break
-            except BufferAPIError as exc:
+            except SchedulerAPIError as exc:
                 failure = str(exc)
                 results.append(
                     {
@@ -17043,7 +17315,7 @@ function mhPlanGenerate(btn) {{
                     run_id,
                     card_id,
                     schedule_status=ScheduleStatus.SCHEDULED,
-                    buffer_update_id=";".join(update_ids) or None,
+                    scheduler_update_id=";".join(update_ids) or None,
                     scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
                     schedule_error=None,
                 )
@@ -17055,7 +17327,7 @@ function mhPlanGenerate(btn) {{
                     run_id,
                     card_id,
                     schedule_status=ScheduleStatus.SCHEDULED,
-                    buffer_update_id=";".join(update_ids) or None,
+                    scheduler_update_id=";".join(update_ids) or None,
                     scheduled_at=scheduled_at_dt.isoformat() if scheduled_at_dt else None,
                     schedule_error=failure,
                 )
@@ -17064,7 +17336,7 @@ function mhPlanGenerate(btn) {{
                     run_id,
                     card_id,
                     schedule_status=ScheduleStatus.FAILED,
-                    buffer_update_id=None,
+                    scheduler_update_id=None,
                     scheduled_at=None,
                     schedule_error=failure or "Scheduling failed.",
                 )
@@ -17073,8 +17345,8 @@ function mhPlanGenerate(btn) {{
             return jsonify(
                 {
                     "ok": False,
-                    "error": "buffer_failed",
-                    "message": failure or "Buffer rejected the request.",
+                    "error": "scheduling_failed",
+                    "message": failure or "Auto scheduling rejected the request.",
                     "results": results,
                     "caption": caption,
                 }
@@ -17084,7 +17356,7 @@ function mhPlanGenerate(btn) {{
             {
                 "ok": True,
                 "schedule_status": "scheduled",
-                "buffer_update_ids": update_ids,
+                "scheduler_update_ids": update_ids,
                 "scheduled_at": scheduled_at_dt.isoformat() if scheduled_at_dt else None,
                 "results": results,
                 "caption": caption,
@@ -17223,6 +17495,50 @@ function mhPlanGenerate(btn) {{
                 f"<p>{_h(meta.description)}</p>"
                 f'<div class="mh-template-formats">{fmt_chips}{effort_html}</div>'
                 '<span class="mh-template-cta">Start</span>'
+                "</a>"
+            )
+
+        # Coming-soon surfaces relocated here from the old Club-data tab —
+        # presented as Create tiles so the whole "what can I make?" catalogue
+        # lives in one place. Disabled until they ship.
+        _live_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/>'
+            '<path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+            '<path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>'
+        )
+        _wraps_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="28" height="28">'
+            '<polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/>'
+            '<line x1="12" y1="22" x2="12" y2="7"/>'
+            '<path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>'
+            '<path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>'
+        )
+        for _cs_title, _cs_desc, _cs_icon in (
+            (
+                "Live meet",
+                "Point MediaHub at the host club's live-results page during a gala; "
+                "new results queue cards for approval as they land.",
+                _live_svg,
+            ),
+            (
+                "Season wraps",
+                "Month-in-numbers and season recap packs built from your stored "
+                "history — PBs, medals, records, debuts, busiest swimmer.",
+                _wraps_svg,
+            ),
+        ):
+            tiles_html += (
+                '<a href="#" onclick="return false" class="mh-template is-disabled" aria-disabled="true">'
+                f'<div class="mh-template-icon">{_cs_icon}</div>'
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
+                f'<h3 style="margin:0">{_h(_cs_title)}</h3>'
+                '<span class="tag">Coming soon</span>'
+                "</div>"
+                f"<p>{_h(_cs_desc)}</p>"
+                '<span class="mh-template-cta">Soon</span>'
                 "</a>"
             )
 
@@ -19018,7 +19334,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
         # Per-card Schedule (plan-gated; free tier sees the upgrade nudge).
         # Spotlight packs schedule against their source run; pure drafts
         # (event preview, sponsor, free text) use a synthetic stub run id —
-        # the schedule API only needs the caption + Buffer channels.
+        # the schedule API only needs the caption + the scheduler channels.
         _pack_cards = rec.get("cards") or []
         _pack_fd = rec.get("form_data") or {}
         _sched_run_id = str(_pack_fd.get("run_id") or f"_stub_{pack_id}")
@@ -20561,7 +20877,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             f"<strong>{headline}</strong> "
             "Free includes 3 content runs a month and a single brand profile. "
             "You can keep working &mdash; nothing is locked &mdash; but for "
-            "unlimited runs and Buffer scheduling, "
+            "unlimited runs and Auto scheduling, "
             f'<a href="{pricing_url}" style="color:var(--accent);font-weight:600">'
             "see plans</a>."
             "</div>"
@@ -22288,7 +22604,7 @@ what you're doing, what they should do.</p>
             manage_html = (
                 f'<a class="btn" href="{url_for("pricing_page")}">See plans &rarr;</a>'
                 '<div class="dim" style="font-size:12px;margin-top:10px">'
-                "Upgrade to unlock unlimited runs and Buffer scheduling.</div>"
+                "Upgrade to unlock unlimited runs and auto scheduling.</div>"
             )
 
         body = (
@@ -25350,7 +25666,7 @@ function mhSetupMode(mode) {{
         """Content builder — the post-approval step.
 
         Shows only APPROVED cards. This is where the user picks a caption
-        tone, creates graphics + motion, then schedules to Buffer or downloads.
+        tone, creates graphics + motion, then schedules or downloads.
         Approval / rejection happens first on the Review page; nothing is
         created here until a card has been approved. The grouped 8-bucket
         recommendation explorer still lives at /pack/<run_id>/grouped.
@@ -25393,7 +25709,7 @@ function mhSetupMode(mode) {{
                 '<p class="lede">'
                 f"The content builder holds the cards you approve in <strong>{meet_name}</strong>. "
                 "Approve a few in the review queue and they land here &mdash; ready to caption, turn into "
-                "graphics and video, then schedule to Buffer or download."
+                "graphics and video, then schedule or download."
                 "</p>"
                 '<div class="mh-hero-actions">'
                 f'<a class="mh-cta-primary" href="{_review_url}">Go to review &amp; approve &rarr;</a>'
@@ -25404,7 +25720,7 @@ function mhSetupMode(mode) {{
             return _layout("Content builder", body, active="home")
 
         # Per-card builder rows: header + the live creative toolbar (caption
-        # tones, create graphic, motion, schedule) + a Buffer-free download.
+        # tones, create graphic, motion, schedule) + a the scheduler-free download.
         cards_html = ""
         for card in approved:
             ach = card.get("achievement") or {}
@@ -25438,8 +25754,8 @@ function mhSetupMode(mode) {{
   {_render_card_creative_toolbar(run_id, card_id_raw)}
   <div class="no-print" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <a class="btn secondary" style="font-size:11px;padding:4px 10px" href="{_h(_dl_url)}"
-       title="Download caption + visual as a .zip for manual posting (no Buffer needed)">&#x2B07; Download .zip</a>
-    <span class="muted" style="font-size:11px">Pick a tone, create a graphic or motion, then schedule to Buffer or download.</span>
+       title="Download caption + visual as a .zip for manual posting (no scheduler needed)">&#x2B07; Download .zip</a>
+    <span class="muted" style="font-size:11px">Pick a tone, create a graphic or motion, then schedule or download.</span>
   </div>
 </div>"""
 
@@ -27435,7 +27751,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             if hook:
                 hooks.append(hook)
             # Cap at 12 entries — the AI / picker only ever looks at the
-            # most recent 6 so this gives a comfortable buffer.
+            # most recent 6 so this gives a comfortable scheduler.
             sigs = sigs[-12:]
             hooks = hooks[-12:]
             p.write_text(json.dumps({"signatures": sigs, "hooks": hooks}), encoding="utf-8")
@@ -30498,53 +30814,11 @@ voice, and queues them for one-click approval.</p>
 
     @app.route("/club-data")
     def club_data_page():
-        pid = _phase_w_org()
-        if not pid:
-            return _layout("Club data", _PW_NO_ORG, active="clubdata")
-        tiles = [
-            (
-                url_for("athletes_page"),
-                "Athletes &amp; consent",
-                "Your swimmer roster across every meet — merge duplicate names, "
-                "set photo/name permission per athlete, import the consent "
-                "register, export it for the welfare officer.",
-            ),
-            (
-                url_for("club_records_page"),
-                "Club records",
-                "Import the records sheet once; every faster swim becomes a "
-                "ranked NEW CLUB RECORD card, and the table updates only when "
-                "you approve it.",
-            ),
-            (
-                url_for("live_meet_page"),
-                "Live meet",
-                "Point MediaHub at the host club's live-results page during a "
-                "gala. New results queue cards for approval as they land — "
-                "nothing posts itself.",
-            ),
-            (
-                url_for("season_wraps_page"),
-                "Season wraps",
-                "Month-in-numbers and season recap packs built from your stored "
-                "history — PBs, medals, records, debuts, busiest swimmer.",
-            ),
-        ]
-        body = (
-            '<section class="mh-hero" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5)">'
-            '<span class="mh-hero-eyebrow">Club data</span>'
-            '<h1>The club&rsquo;s <em class="editorial">memory</em></h1>'
-            '<p class="lede">Athletes, consent, records and history — the layer that '
-            "makes milestone, record and recap content possible.</p></section>"
-            '<div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">'
-            + "".join(
-                f'<a class="card" href="{href}" style="display:block;text-decoration:none">'
-                f'<h2 style="margin-top:0">{title}</h2><p class="dim">{desc}</p></a>'
-                for href, title, desc in tiles
-            )
-            + "</div>"
-        )
-        return _layout("Club data", body, active="clubdata")
+        # The Club-data top-nav tab was retired: club records live under
+        # Settings → Club data, athletes & consent under Settings → Privacy,
+        # and live meet / season wraps moved to Create (coming soon). This
+        # route stays only as a redirect so old links/bookmarks still resolve.
+        return redirect(url_for("settings_page"))
 
     # ---- W.1 + W.2: athletes roster, merge, consent ----------------------
 
@@ -30552,7 +30826,7 @@ voice, and queues them for one-click approval.</p>
     def athletes_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Athletes", _PW_NO_ORG, active="clubdata")
+            return _layout("Athletes", _PW_NO_ORG, active="settings")
         from mediahub.athletes import list_athletes
         from mediahub.safeguarding import LEVEL_LABELS, list_consent, regime_active
 
@@ -30670,7 +30944,7 @@ voice, and queues them for one-click approval.</p>
   </form>
 </div>
 """
-        return _layout("Athletes & consent", body, active="clubdata")
+        return _layout("Athletes & consent", body, active="settings")
 
     @app.route("/athletes/action", methods=["POST"])
     def athletes_action():
@@ -30742,7 +31016,7 @@ voice, and queues them for one-click approval.</p>
     def club_records_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Club records", _PW_NO_ORG, active="clubdata")
+            return _layout("Club records", _PW_NO_ORG, active="settings")
         from mediahub.club_records import list_records
 
         msg = (request.args.get("msg") or "").strip()
@@ -30800,7 +31074,7 @@ voice, and queues them for one-click approval.</p>
   </form>
 </div>
 """
-        return _layout("Club records", body, active="clubdata")
+        return _layout("Club records", body, active="settings")
 
     @app.route("/records/action", methods=["POST"])
     def club_records_action():
@@ -30855,7 +31129,7 @@ voice, and queues them for one-click approval.</p>
     def live_meet_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Live meet", _PW_NO_ORG, active="clubdata")
+            return _layout("Live meet", _PW_NO_ORG, active="create")
         from mediahub.results_fetch.live_watch import list_watches
 
         msg = (request.args.get("msg") or "").strip()
@@ -30919,7 +31193,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout("Live meet", body, active="clubdata")
+        return _layout("Live meet", body, active="create")
 
     @app.route("/live/action", methods=["POST"])
     def live_meet_action():
@@ -30979,7 +31253,7 @@ voice, and queues them for one-click approval.</p>
     def season_wraps_page():
         pid = _phase_w_org()
         if not pid:
-            return _layout("Season wraps", _PW_NO_ORG, active="clubdata")
+            return _layout("Season wraps", _PW_NO_ORG, active="create")
         from mediahub.season_wrap import list_drafts
 
         msg = (request.args.get("msg") or "").strip()
@@ -31038,7 +31312,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout("Season wraps", body, active="clubdata")
+        return _layout("Season wraps", body, active="create")
 
     @app.route("/wraps/action", methods=["POST"])
     def season_wraps_action():
@@ -31105,7 +31379,7 @@ voice, and queues them for one-click approval.</p>
     def season_wrap_view(draft_id: str):
         pid = _phase_w_org()
         if not pid:
-            return _layout("Season wrap", _PW_NO_ORG, active="clubdata")
+            return _layout("Season wrap", _PW_NO_ORG, active="create")
         from mediahub.season_wrap import load_draft
 
         draft = load_draft(pid, draft_id)
@@ -31146,7 +31420,7 @@ voice, and queues them for one-click approval.</p>
   </table>
 </div>
 """
-        return _layout(draft.get("title", "Season wrap"), body, active="clubdata")
+        return _layout(draft.get("title", "Season wrap"), body, active="create")
 
     @app.route("/wraps/<draft_id>/poster.pdf")
     def season_wrap_poster(draft_id: str):

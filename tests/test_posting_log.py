@@ -1,7 +1,7 @@
 """tests/test_posting_log.py — publishing-layer posting attempt log.
 
 The posting log is observability for every publish attempt that goes
-through Buffer (or any future scheduler). It is intentionally lossy
+through the scheduler (or any future scheduler). It is intentionally lossy
 and exception-safe: it must never crash the calling endpoint, never
 grow unbounded, and never leak rows across organisations.
 
@@ -158,14 +158,14 @@ class TestRecordAttempt:
             card_id="card-1",
             status="failed",
             error_kind="auth",
-            error_message="missing buffer token",
+            error_message="missing scheduling token",
             caption="(would have posted)",
         )
         assert new_id > 0
         row = fresh_log.recent_attempts("org-a")[0]
         assert row["status"] == "failed"
         assert row["error_kind"] == "auth"
-        assert row["error_message"] == "missing buffer token"
+        assert row["error_message"] == "missing scheduling token"
         # update_id remains null on failure
         assert row["update_id"] is None
 

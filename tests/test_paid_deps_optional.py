@@ -24,7 +24,7 @@ _PAID_ENVS = (
     "REPLICATE_API_TOKEN",
     "PHOTOROOM_API_KEY",
     "STRIPE_SECRET_KEY",
-    "BUFFER_ACCESS_TOKEN",
+    "SCHEDULER_ACCESS_TOKEN",
 )
 
 
@@ -70,15 +70,15 @@ def test_voiceover_is_off_by_default(no_paid_config):
     assert flag not in {"1", "true", "yes", "on"}
 
 
-# --- Buffer (paid scheduling SaaS) ------------------------------------------
+# --- the scheduler (paid scheduling SaaS) ------------------------------------------
 
 
-def test_buffer_errors_honestly_without_a_token(no_paid_config):
-    from mediahub.publishing.buffer import BufferAuthError, _PreparedToken
+def test_scheduler_errors_honestly_without_a_token(no_paid_config):
+    from mediahub.publishing.scheduler import SchedulerAuthError, _PreparedToken
 
-    with pytest.raises(BufferAuthError, match="not configured"):
+    with pytest.raises(SchedulerAuthError, match="not configured"):
         _PreparedToken.require(None)
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         _PreparedToken.require("   ")
 
 

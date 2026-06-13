@@ -165,7 +165,7 @@ def _seed_schedule_states(
         ws.set_schedule(
             run_id, f"card-sched-{card_idx}",
             ScheduleStatus.SCHEDULED,
-            buffer_update_id=f"buf-{card_idx}",
+            scheduler_update_id=f"buf-{card_idx}",
             scheduled_at="2026-05-20T10:00:00+00:00",
         )
         card_idx += 1
@@ -173,7 +173,7 @@ def _seed_schedule_states(
         ws.set_schedule(
             run_id, f"card-pub-{card_idx}",
             ScheduleStatus.PUBLISHED,
-            buffer_update_id=f"buf-{card_idx}",
+            scheduler_update_id=f"buf-{card_idx}",
         )
         card_idx += 1
     for _ in range(failed):
@@ -219,7 +219,7 @@ def _seed_attempt(
 
 class TestPerRunScheduleSummary:
     def test_run_with_no_scheduled_cards_shows_em_dash(self, gated_client):
-        """A run that has never been handed off to Buffer must render
+        """A run that has never been handed off to the scheduler must render
         an em-dash rather than a misleading '0 scheduled' pill."""
         c, _ = gated_client
         _pin(c, "club-a")
@@ -379,7 +379,7 @@ class TestPostingLogPanel:
             caption="(would have posted)",
             status="failed",
             error_kind="auth",
-            error_message="Buffer token expired — please reconnect.",
+            error_message="Scheduling token expired — please reconnect.",
         )
         _pin(c, "club-a")
         resp = c.get("/activity")
@@ -390,7 +390,7 @@ class TestPostingLogPanel:
         assert 'class="tag bad"' in body
         # Full error message appears in the row (so operators can read
         # the failure cause without opening another tab).
-        assert "Buffer token expired" in body
+        assert "Scheduling token expired" in body
 
     def test_panel_is_org_scoped(self, gated_client):
         """Attempts logged under another org MUST NOT appear in the
