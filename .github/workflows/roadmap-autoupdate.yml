@@ -95,7 +95,7 @@ jobs:
           # github.token so the workflow still functions without the secret.
           GH_TOKEN: ${{ secrets.AUTOTEST_GH_PAT || github.token }}
         run: |
-          if git diff --quiet -- docs/ROADMAP.md; then
+          if git diff --quiet -- docs/ROADMAP.md docs/ROADMAP_BUILT.md; then
             echo "No roadmap changes — nothing to land."
             exit 0
           fi
@@ -103,7 +103,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add docs/ROADMAP.md
+          git add docs/ROADMAP.md docs/ROADMAP_BUILT.md
           # [skip render]: a roadmap refresh is docs-only — deploying it is
           # pure waste, and these bot deploys have repeatedly wedged
           # Render's build queue (queued with zero build logs for hours,

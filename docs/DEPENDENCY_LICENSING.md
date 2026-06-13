@@ -23,7 +23,8 @@
 
 Evidence base: [`research/ROADMAP_RESEARCH_2026.md`](research/ROADMAP_RESEARCH_2026.md)
 Parts C & D. Related: [`ARCHITECTURE_TARGET.md`](ARCHITECTURE_TARGET.md),
-[`ROADMAP.md`](ROADMAP.md) (Phase 0 de-risk, Phase 5 local-AI).
+[`ROADMAP_BUILT.md`](ROADMAP_BUILT.md) (Phase 0 de-risk — shipped) and
+[`ROADMAP.md`](ROADMAP.md) (Phase 4 — zero-cost local AI).
 
 > **Two rules before wiring anything in.**
 > 1. **Verify the licence yourself** from the actual `LICENSE` file at the version

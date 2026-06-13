@@ -17,7 +17,7 @@
 > medals); more sports and more "decide-and-post-for-me" automation are on the way
 > (see the [roadmap](docs/ROADMAP.md)).
 
-**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Phase 0–6); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
+**The direction.** MediaHub is becoming a multi-sport, multi-tenant content-strategy brain: it fuses a team's own signals (past posts, brand voice), external signals (fixtures, results, news), and direct input (goals, blackout dates) into a ranked content plan, gated by a **per-content-type autonomy toggle**, on a stack with **no mandatory paid dependencies**. The plan is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (phases in priority order — build-first: rebrand → second sport → go-to-market are deliberately last; everything already shipped is recorded in [`docs/ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md)); the strategy docs are linked below. Results ingestion is one spoke among many — not the product's identity.
 
 **What ships today (the swimming wedge).** MediaHub ingests raw competition data — Hy-Tek HY3 ZIPs, SDIF/CL2 files, exported PDFs, scraped HTML result pages — and produces a curated stream of athlete-spotlight, weekend-recap, and meet-preview posts ready for Instagram / Facebook / TikTok. It is a cloud-hosted SaaS that customers access via a web browser; the engine runs on the operator's managed deployment, with AI captioning and image processing handled through cloud APIs. Human approval is required before anything is published.
 
@@ -68,7 +68,8 @@ Upload  →  Interpreter  →  Pipeline  →  Recognition  →  Content Pack
 | [`UPLOAD_TO_CARDS.md`](docs/UPLOAD_TO_CARDS.md) | End-to-end request walkthrough |
 | [`EXTENSION_GUIDE.md`](docs/EXTENSION_GUIDE.md) | Add a new sport / layout / voice / cutout provider |
 | [`DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Render, Fly, Docker, VPS |
-| [`ROADMAP.md`](docs/ROADMAP.md) | The Phase 0–6 multi-sport, autonomy-first plan |
+| [`ROADMAP.md`](docs/ROADMAP.md) | The forward plan — phases in priority order (build-first; rebrand → second sport → go-to-market last) |
+| [`ROADMAP_BUILT.md`](docs/ROADMAP_BUILT.md) | The record of everything already shipped (split out of the roadmap) |
 | [`ARCHITECTURE_TARGET.md`](docs/ARCHITECTURE_TARGET.md) | Hub-and-spoke target architecture (mapped onto today's modules) |
 | [`POST_TYPE_TAXONOMY.md`](docs/POST_TYPE_TAXONOMY.md) | Universal vs sport-specific post types (swimming, football, basketball, running) |
 | [`SPORT_PROFILES.md`](docs/SPORT_PROFILES.md) | The sport-profile concept + how to add a new sport |
