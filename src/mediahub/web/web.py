@@ -7241,6 +7241,19 @@ def _layout(title: str, body: str, active: str = "home") -> str:
             + "</div>"
         )
 
+    # One-shot success/error toast queued by a prior POST (see _flash_toast).
+    # Popped here so it fires exactly once, on the next page the user sees. The
+    # "in session" guard means the common no-flash render never marks the
+    # session dirty (no spurious Set-Cookie on every page).
+    flash_toast = None
+    try:
+        from flask import has_request_context as _hrc
+
+        if _hrc() and "mh_toast" in session:
+            flash_toast = session.pop("mh_toast", None)
+    except Exception:
+        flash_toast = None
+
     return render_template_string(
         """
 <!DOCTYPE html>
@@ -8172,6 +8185,23 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   document.addEventListener('click', onClick);
 })();
 </script>
+{% if flash_toast %}
+<script>
+/* One-shot success/error toast queued server-side by _flash_toast and popped
+   in _layout. Runs after the MH framework above defines window.MH; the small
+   retry covers the framework not having executed yet. tojson escapes the
+   message, so it can never break out of the JS string or the markup. */
+(function(){
+  var f = {msg: {{ flash_toast.msg|tojson }}, kind: {{ flash_toast.kind|tojson }}};
+  function go(){
+    if (window.MH && MH.toast) { MH.toast(f.msg, f.kind); }
+    else { setTimeout(go, 60); }
+  }
+  if (document.readyState !== 'loading') go();
+  else document.addEventListener('DOMContentLoaded', go);
+})();
+</script>
+{% endif %}
 </body>
 </html>
 """,
@@ -8189,6 +8219,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
         bg_logos_html=bg_logos_html,
+        flash_toast=flash_toast,
         theme_seed_style=_theme_seed_style_block(),
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
@@ -8277,6 +8308,199 @@ def _recovery_page(
     sects.append("</div>")
     sects.append("</section>")
     return _layout(headline, "".join(sects)), code
+
+
+# --- Honest "AI provider not configured" banner (U.2) -------------------------
+#
+# MediaHub never substitutes a heuristic when the cloud LLM is absent — it
+# surfaces an honest error instead (CLAUDE.md: "Gemini-first, AI required, never
+# heuristic-substituted"). This is the *designed* shape of that error, defined
+# once so the wording and styling stay identical on every primary-flow surface
+# that promises AI output (the review page and both content builders). It used to
+# be hand-inlined three times with copy that had already drifted apart.
+_AI_UNAVAILABLE_DETAIL_FULL = (
+    "Cards show ranker reasoning and grounded source lines only. Captions, "
+    "&ldquo;why this card&rdquo; explanations and performance context need a "
+    "Gemini or Anthropic key set by the deployment operator."
+)
+_AI_UNAVAILABLE_DETAIL_PACK = (
+    "Captions and &ldquo;why this card&rdquo; explanations need a Gemini or "
+    "Anthropic key set by the deployment operator."
+)
+# Warning glyph from the same line-art set as the toast icons, so the banner
+# reads as a designed state rather than a bare strap of text.
+_AI_UNAVAILABLE_ICON = (
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+    'style="flex-shrink:0;color:var(--warn)">'
+    '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>'
+    '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+)
+
+
+def _ai_unavailable_banner(detail: str = "") -> str:
+    """Return the honest "AI provider not configured" banner, or "" when a
+    provider IS available — so a call site can drop the result straight into a
+    template with no branching of its own.
+
+    ``detail`` overrides the body copy for surfaces that promise a narrower
+    slice of AI output (the content builders don't show ranker reasoning).
+    """
+    try:
+        from mediahub.media_ai.llm import is_available as _llm_available  # noqa: PLC0415
+
+        if _llm_available():
+            return ""
+    except Exception:  # noqa: BLE001 — a provider probe must never block a page
+        return ""
+    body = detail or _AI_UNAVAILABLE_DETAIL_FULL
+    return (
+        '<div role="status" class="mh-ai-unavailable" '
+        'style="margin-bottom:var(--sp-5);padding:14px 18px;'
+        "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
+        "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
+        "font-family:var(--font-body);font-size:13px;color:var(--ink);"
+        'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
+        f"{_AI_UNAVAILABLE_ICON}"
+        '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
+        f'<span style="color:var(--ink-dim)">{body}</span>'
+        "</div>"
+    )
+
+
+# --- Parse-uncertainty / flag-for-review surface (U.2) ------------------------
+#
+# The pipeline never silently guesses: anything it inferred or could not fully
+# resolve is recorded as a ParseWarning and shown to the reviewer. The raw codes
+# are engine vocabulary ("course_inferred", "pb_enrichment_failed") and mean
+# nothing to a committee volunteer, so we map the known ones to plain English and
+# split the serious (error-severity) flags out from the routine "we filled this
+# in" inferences. Unknown codes fall back to a humanised form of the code so a
+# newly-added warning is never shown as raw snake_case.
+_PARSE_NOTE_LABELS: dict[str, str] = {
+    # Inference — a gap filled from the data we had
+    "course_inferred": "Course length inferred",
+    "course_mixed": "Mixed course lengths in file",
+    "start_date_inferred": "Start date inferred",
+    "end_date_inferred": "End date inferred",
+    "host_inferred": "Host club inferred",
+    "gb_inferred": "Governing body assumed",
+    # Ambiguity / partial reads
+    "orphan_swim": "Swim with no swimmer record",
+    "needs_verification": "Swimmer needs verification",
+    "low-confidence-column": "Low-confidence column read",
+    "low-overall-confidence": "Low overall read confidence",
+    "ocr-used": "Read via OCR",
+    "ocr-low-confidence-row": "Low-confidence OCR row",
+    "image-needs-ocr": "Image needs OCR to read",
+    "no-events-detected": "No event headers detected",
+    # Lookups that didn't fully complete (non-fatal)
+    "pb_enrichment_failed": "PB history lookup incomplete",
+    "pb_audit_failed": "PB audit incomplete",
+    # Hard problems (error severity)
+    "decode_failed": "File couldn't be decoded",
+    "parse_failed": "File couldn't be parsed",
+    "no_swims": "No swims found in file",
+    "no_results": "No results found",
+    "no_club_filter": "No club selected",
+}
+
+
+def _humanise_parse_code(code: str) -> str:
+    """Plain-English label for a parse-warning code, falling back to a
+    title-cased form of the raw code for ones we have not named yet."""
+    code = (code or "").strip()
+    if not code:
+        return "Parse note"
+    if code in _PARSE_NOTE_LABELS:
+        return _PARSE_NOTE_LABELS[code]
+    return code.replace("_", " ").replace("-", " ").strip().capitalize() or "Parse note"
+
+
+def _parse_notes_card(warnings: list) -> str:
+    """Render the "Parse notes" card from a run's parse_warnings, or "" when
+    there are none. Error-severity flags lead in a "Needs your attention" block;
+    inferences and ambiguities follow. The point of the surface is that we never
+    silently guess, so it always names both the human label and the raw code."""
+    if not warnings:
+        return ""
+    errs = [w for w in warnings if isinstance(w, dict) and w.get("severity") == "error"]
+    notes = [w for w in warnings if isinstance(w, dict) and w.get("severity") != "error"]
+    if not errs and not notes:
+        return ""
+    _CAP = 12
+    err_shown = errs[:_CAP]
+    note_shown = notes[: max(0, _CAP - len(err_shown))]
+    extra = (len(errs) - len(err_shown)) + (len(notes) - len(note_shown))
+
+    def _row(w: dict) -> str:
+        sev = w.get("severity", "")
+        cls = {"info": "info", "warn": "warn", "error": "bad"}.get(sev, "")
+        label = _humanise_parse_code(w.get("code", ""))
+        msg = (w.get("message") or "").strip()
+        msg_html = f" &mdash; {_h(msg)}" if msg else ""
+        raw = (w.get("code") or "").strip()
+        code_html = (
+            f'<code style="font-size:10.5px;color:var(--ink-faint);margin-left:6px">{_h(raw)}</code>'
+            if raw
+            else ""
+        )
+        return (
+            '<li style="margin-bottom:6px">'
+            f'<span class="tag {cls}">{_h(sev) or "note"}</span> '
+            f"<strong>{_h(label)}</strong>{msg_html}{code_html}</li>"
+        )
+
+    sections = ""
+    if err_shown:
+        sections += (
+            '<div style="margin-top:10px"><div class="strap" '
+            'style="color:var(--bad);margin-bottom:6px">Needs your attention</div>'
+            f'<ul style="margin:0;padding-left:18px">{"".join(_row(w) for w in err_shown)}</ul></div>'
+        )
+    if note_shown:
+        head = (
+            '<div class="strap" style="color:var(--ink-muted);margin:10px 0 6px">'
+            "Inferred &amp; ambiguous</div>"
+            if err_shown
+            else ""
+        )
+        sections += (
+            f"{head}"
+            f'<ul style="margin:0;padding-left:18px">{"".join(_row(w) for w in note_shown)}</ul>'
+        )
+    more_html = (
+        f'<p class="muted" style="font-size:12px;margin-top:8px">+{extra} more '
+        f'note{"s" if extra != 1 else ""} not shown.</p>'
+        if extra > 0
+        else ""
+    )
+    return (
+        '<div class="card"><h2>Parse notes</h2>'
+        '<p class="dim">We never silently guess. Anything we inferred from the source '
+        "file, or couldn&rsquo;t fully resolve, is listed here so you can check it "
+        "before approving.</p>"
+        f"{sections}{more_html}</div>"
+    )
+
+
+def _flash_toast(message: str, kind: str = "success") -> None:
+    """Queue a one-shot toast to show on the next rendered page.
+
+    Mirrors the operator-notice pattern (session-stored, popped on render in
+    ``_layout``). It feeds the existing ``MH.toast`` framework, so a POST that
+    redirects (a run deleted, settings saved) finally gives the user an honest
+    success/error confirmation instead of a silent reload. Best-effort: it
+    never raises into a request handler, and a missing request context is a
+    no-op (so direct ``_layout`` calls in tests stay unaffected)."""
+    try:
+        from flask import has_request_context  # noqa: PLC0415
+
+        if not has_request_context():
+            return
+        session["mh_toast"] = {"msg": str(message), "kind": (kind or "success")}
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # Module-level JS for the palette confirmation form (rendered inside an
@@ -10483,11 +10707,24 @@ def create_app() -> Flask:
         if request.method == "POST":
             club_filter = (request.form.get("club_filter") or "").strip() or None
             if not club_filter:
+                # Designed error state (U.2), not a dead-end card: the staged
+                # upload is still on disk, so offer a clear way back to re-pick
+                # rather than stranding the volunteer on a one-line error.
                 return _layout(
                     "Configure",
-                    '<div class="card"><p class="tag bad">Pick a club to feature.</p></div>',
+                    _empty_state(
+                        "alert",
+                        "Pick a club to feature",
+                        "Choose which club&rsquo;s swimmers this content pack is about, "
+                        "then start the run &mdash; we never guess the club for you.",
+                        actions=(
+                            f'<a class="btn" href="{url_for("upload_configure", run_id=run_id)}">'
+                            "Back to configure &rarr;</a>"
+                        ),
+                        kind="error",
+                    ),
                     active="create",
-                )
+                ), 400
 
             # Phase 1.5 logo consolidation: logos now live on the active
             # organisation profile, not on individual runs. The configure
@@ -10958,6 +11195,58 @@ def create_app() -> Flask:
         rr = data.get("recognition_report") or {}
         recognition_error = data.get("recognition_error") or ""
 
+        # --- Hard pipeline failure (U.2 error state).
+        # A run that failed terminally persists a top-level ``error`` and
+        # usually has no meet/cards/recognition_report. Rendering the normal
+        # review page for it showed a misleading "(unknown meet)" header and a
+        # "No standout swims" empty state — implying the swimmers simply had no
+        # good results, hiding that the file never processed. Surface the honest
+        # reason instead (never a silent guess), with the parse notes that often
+        # explain why and a clear path to re-run or delete.
+        _run_err = (data.get("error") or "").strip()
+        if _run_err:
+            _file_disp = _h(
+                data.get("file_name")
+                or (data.get("dispatch_log") or {}).get("chosen_filename")
+                or "your file"
+            )
+            _err_body = f"""
+<section class="mh-hero" data-lane="failed" style="padding-top:var(--sp-9);padding-bottom:var(--sp-8)">
+  <span class="mh-hero-eyebrow">Processing failed</span>
+  <h1>We couldn&rsquo;t finish processing this run</h1>
+  <p class="lede">The pipeline started on <strong>{_file_disp}</strong> but stopped
+    before it could produce any cards. Nothing was guessed &mdash; here&rsquo;s
+    exactly what went wrong.</p>
+  <div class="mh-hero-actions">
+    <a class="mh-cta-primary" href="{url_for("upload")}">Try another file &rarr;</a>
+    <a class="mh-cta-secondary" href="{url_for("activity_page")}">Back to runs</a>
+  </div>
+</section>
+<div class="card" style="border-color:rgba(255,107,107,0.35);border-left:3px solid var(--bad)">
+  <h2 style="margin-top:0">What went wrong</h2>
+  <p style="font-family:var(--font-mono);font-size:13px;color:var(--ink);background:var(--bad-bg);
+            padding:12px 14px;border-radius:var(--radius-sm);white-space:pre-wrap;word-break:break-word">{_h(_run_err)}</p>
+  <p class="dim" style="font-size:13px;margin-bottom:0">Common causes: the file wasn&rsquo;t a
+    readable results export, it was an entry list or heat sheet with no times, or no club was
+    matched. Re-upload and check the file and the club you selected.</p>
+</div>
+{_parse_notes_card(warnings)}
+<div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <p class="muted" style="margin:0;font-size:12px">Removes the failed run. Source files stay
+        on disk and can be re-processed.</p>
+    </div>
+    <form method="post" action="{url_for("privacy_delete_run", run_id=run_id)}"
+          onsubmit="return confirm('Delete this run permanently?')">
+      <button class="btn danger" type="submit">Delete run</button>
+    </form>
+  </div>
+</div>
+"""
+            return _layout(f"Run failed — {meet.get('name') or run_id}", _err_body, active="home")
+
         # --- Header
         _gt_url = url_for("ground_truth", run_id=run_id)
         _export_url = url_for("api_export", run_id=run_id)
@@ -11264,21 +11553,9 @@ def create_app() -> Flask:
                 f"</div></div>"
             )
 
-        # Warnings
-        warn_html = ""
-        if warnings:
-            items = []
-            for w in warnings[:10]:
-                cls = {"info": "info", "warn": "warn", "error": "bad"}.get(w.get("severity"), "")
-                items.append(
-                    f'<li><span class="tag {cls}">{_h(w.get("severity", ""))}</span> '
-                    f"<strong>{_h(w.get('code', ''))}</strong> &mdash; {_h(w.get('message', ''))}</li>"
-                )
-            warn_html = (
-                '<div class="card"><h2>Parse notes</h2>'
-                '<p class="dim">Anything inferred or ambiguous in the source file is shown here.</p>'
-                f"<ul>{''.join(items)}</ul></div>"
-            )
+        # Parse notes — the flag-for-review surface (U.2). Humanised codes,
+        # error-severity flags led out, "+N more" when truncated. See helper.
+        warn_html = _parse_notes_card(warnings)
 
         # --- V6 PB Audit panel
         pb_audit_data = data.get("pb_audit") or {}
@@ -11719,30 +11996,9 @@ def create_app() -> Flask:
                     )
 
         # Single global AI-availability banner — replaces the 177 per-card
-        # "AI UNAVAILABLE" alerts the previous implementation emitted.
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
-
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Cards show ranker reasoning and grounded source lines only. "
-                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
-                    "context need a Gemini or Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
-            )
-        except Exception:
-            _ai_banner_html = ""
+        # "AI UNAVAILABLE" alerts the previous implementation emitted. Now the
+        # one shared honest-error helper (U.2), so the copy can't drift again.
+        _ai_banner_html = _ai_unavailable_banner()
 
         body = f"""
 <style>
@@ -13530,6 +13786,9 @@ Relay team broke club record"></textarea>
         # settings page rather than bouncing the user home.
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify({"ok": True, "deleted": run_id})
+        # Plain form post (e.g. the review-page danger zone) redirects away with
+        # no other signal — a one-shot toast confirms the delete landed (U.2).
+        _flash_toast("Run deleted.")
         nxt = _safe_next(request.form.get("next") or request.args.get("next"))
         return redirect(nxt or url_for("settings_page"))
 
@@ -15933,8 +16192,9 @@ Relay team broke club record"></textarea>
       .then(function(r){ return r.json(); })
       .then(function(j){
         if (j && j.ok) { saved.style.display = ''; setTimeout(function(){ saved.style.display='none'; }, 3000); }
+        else if (window.MH) { MH.toast((j && j.error) || 'Could not save autonomy settings.', 'error'); }
       })
-      .catch(function(){});
+      .catch(function(){ if (window.MH) MH.toast('Could not save autonomy settings — check your connection and try again.', 'error'); });
   });
 })();
 window.mhAutonomySweepNow = function(btn) {
@@ -26133,6 +26393,11 @@ function mhSetupMode(mode) {{
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        # A terminally-failed run has nothing to build from; the honest "what
+        # went wrong" surface lives on /review (U.2), so send the user there
+        # rather than showing an empty "Nothing approved yet" builder.
+        if (run_data.get("error") or "").strip():
+            return redirect(url_for("review", run_id=run_id))
 
         profile_id = run_data.get("profile_id", "")
         try:
@@ -26244,29 +26509,10 @@ function mhSetupMode(mode) {{
         except Exception:
             _prefs_html = ""
 
-        # Single global AI-availability banner (same pattern as /review).
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
-
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Captions and &ldquo;why this card&rdquo; explanations need a Gemini or "
-                    "Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
-            )
-        except Exception:
-            _ai_banner_html = ""
+        # Single global AI-availability banner (shared helper — U.2). The
+        # content builder promises a narrower slice of AI than /review, so it
+        # passes the shorter body copy.
+        _ai_banner_html = _ai_unavailable_banner(_AI_UNAVAILABLE_DETAIL_PACK)
 
         body = f"""
 <style>
@@ -27195,6 +27441,10 @@ function tiRegenerate() {{
                 primary_cta=("Open activity", url_for("activity_page")),
                 secondary_cta=("Back to home", url_for("home")),
             )
+        # Failed run → the honest error surface on /review (U.2), not an empty
+        # grouped builder.
+        if (run_data.get("error") or "").strip():
+            return redirect(url_for("review", run_id=run_id))
 
         profile_id = run_data.get("profile_id", "")
         meet_name = _h(
@@ -27478,30 +27728,8 @@ function tiRegenerate() {{
         except Exception:
             visuals_strip = ""
 
-        # Single global AI-availability banner (same pattern as /review).
-        try:
-            from mediahub.media_ai.llm import is_available as _llm_available
-
-            _ai_banner_html = (
-                ""
-                if _llm_available()
-                else (
-                    '<div role="status" style="margin-bottom:var(--sp-5);padding:14px 18px;'
-                    "background:var(--warn-bg);border:1px solid rgba(255,180,84,0.30);"
-                    "border-left:3px solid var(--warn);border-radius:var(--radius-sm);"
-                    "font-family:var(--font-body);font-size:13px;color:var(--ink);"
-                    'display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap">'
-                    '<span class="strap" style="color:var(--warn)">AI provider not configured</span>'
-                    '<span style="color:var(--ink-dim)">'
-                    "Cards show ranker reasoning and grounded source lines only. "
-                    "Captions, &ldquo;why this card&rdquo; explanations and performance "
-                    "context need a Gemini or Anthropic key set by the deployment operator."
-                    "</span>"
-                    "</div>"
-                )
-            )
-        except Exception:
-            _ai_banner_html = ""
+        # Single global AI-availability banner (shared helper — U.2).
+        _ai_banner_html = _ai_unavailable_banner()
 
         body = f"""
 {_ai_banner_html}
