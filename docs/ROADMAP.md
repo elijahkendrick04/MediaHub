@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `015b0a4f8` · Switch to merge commits (drop squash) across the self-merging bots (#464) [skip render]
+**Last updated:** 2026-06-13 · `a0d315a64` · Design every primary-flow state (U.2): honest AI error, pipeline failure, parse notes, success toast
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -125,7 +125,6 @@ final hop (rule 11). **Phase 6 and Phase 7 are hard-gated** (🔒): they don't
 begin until Phases 1–5 are complete (rule 12).
 
 <!-- ROADMAP:TODO -->
-- **U.2** · Phase 1 (Product polish) — Every state designed across the primary flow (empty / loading / error / success), including the honest AI-unavailable error and the parse-uncertainty / flag-for-review surfaces · ❌ **NOT STARTED**
 - **U.3** · Phase 1 (Product polish) — Explainability + confidence surfaces: "why this card / why not" and confidence displays made clear and trustworthy in the review UI · ❌ **NOT STARTED**
 - **U.4** · Phase 1 (Product polish) — First-run onboarding + brand-kit setup as a fast sample-to-first-pack path; mobile-aware review/approve (desktop-primary) · ❌ **NOT STARTED**
 - **P4.1** · Phase 2 (Direct publishing) — Bluesky (AT Protocol) + Mastodon adapters — the free/open posting targets first · ❌ **NOT STARTED**
@@ -1313,11 +1312,11 @@ list and the auto table below, not here.
 | 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
 | 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
 | 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
+| 2026-06-13 | `040cd8d61` | Design every primary-flow state (U.2): honest AI error, pipeline failure, parse notes, success toast |
 | 2026-06-13 | `fa475f5fc` | Move Pricing into Settings when signed into a club profile (#459) |
 | 2026-06-13 | `073d274dc` | Polish the core flow (U.1): review hierarchy, autonomy posture, CTA a11y (#455) |
 | 2026-06-13 | `cf3a54bae` | docs(roadmap): in-house-first hardening + hard-gate second-sport & go-to-market (#456) [skip render] |
 | 2026-06-13 | `ce271d4fd` | Make the signed-in logo wall versatile for any logo / any colour (#454) |
 | 2026-06-13 | `ab1613c10` | fix(ci): make roadmap auto-update conflict-proof (#453) [skip render] |
 | 2026-06-13 | `ced4d22e8` | Remove Organisation tab from the top bar (#448) |
-| 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
 <!-- /ROADMAP:ACTIVITY -->

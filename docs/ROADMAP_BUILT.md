@@ -57,6 +57,7 @@ item marked done out of the `ROADMAP.md` to-do lists into the block here
 - ✅ **PC.14** · Phase C 🥇 (sell gate) — Operational-trust remainder *(completed 2026-06-12 — founder remainder: F.1/F.6)*
 - ✅ **PC.9** · Phase C 🥇 — In-product referral engine *(completed 2026-06-12)*
 - ✅ **U.1** · Phase 1 (Product polish) — Core-flow polish: Home, Add Input, the content-pack review, and Settings → Autonomy raised to a credible sport-editorial standard — strong hierarchy, one obvious primary action per screen, dark-first on the existing `--bg`/`--accent`/`--ink`/`--panel` CSS variables *(completed 2026-06-13)*
+- ✅ **U.2** · Phase 1 (Product polish) — Every state designed across the primary flow (empty / loading / error / success), including the honest AI-unavailable error and the parse-uncertainty / flag-for-review surfaces *(completed 2026-06-13)*
 <!-- /ROADMAP:DONE -->
 
 ## Cross-cutting investments (status snapshot)
