@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `3267dc9bc` · fix(autotest): only run axe-core a11y on HTML responses (#443)
+**Last updated:** 2026-06-13 · `9c5d5cc26` · refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -702,6 +702,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
 | 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
 | 2026-06-13 | `874379a4b` | Apply ruff-format (pre-commit hygiene) to changed files |
 | 2026-06-13 | `4b6971191` | Settings polish: drop redundant Activity sub-heading; keep Clear cache on its page |
@@ -713,7 +714,6 @@ list and the auto table below, not here.
 | 2026-06-13 | `b7052ff57` | skills: add motion-craft + graphic-craft from HyperFrames (#437) |
 | 2026-06-13 | `e4fa8e4e2` | Run delete stays in place; spotlight last-month; purge athlete_swims on delete; 90% autopublish; sig |
 | 2026-06-12 | `3474910ad` | Remove claude-flow-dependent coding skills (no MCP/CLI access) |
-| 2026-06-12 | `73f198afb` | Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4 |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
