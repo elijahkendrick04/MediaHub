@@ -1,0 +1,617 @@
+/* =====================================================================
+   THEME MOTION — interaction & effect kit
+   ---------------------------------------------------------------------
+   Loads AFTER theme-components in the cascade (web.py BASE_CSS assembly),
+   so it can consume every tier-2 token AND every component primitive.
+
+   This is MediaHub's own, first-party re-implementation of the effects
+   worth borrowing from modern component libraries (Aceternity UI) and the
+   design directions catalogued on Refero — rebuilt as vanilla CSS + a
+   small progressive-enhancement JS layer (static/js/ui-kit.js) instead of
+   React + Framer Motion + Tailwind, because the web UI is a Flask /
+   f-string-Jinja monolith with self-hosted assets and no bundler.
+
+   House rules (inherited from theme-components, Emil Kowalski principles):
+     - ease-out for entrances; transform+opacity together, never opacity
+       alone; explicit transition properties, never `transition: all`.
+     - Every continuous / large motion is gated so it stops dead under
+       `prefers-reduced-motion: reduce` (consolidated block at the end).
+     - All effects are decorative enhancements: the page is fully usable
+       with the effect absent (no-JS, reduced-motion, old engine).
+     - Colour comes from tokens only (--mh-primary, --lane-glow, …) so a
+       re-skinned brand re-skins every effect for free.
+
+   Pointer-driven effects read two custom properties the JS layer writes:
+       --mh-x / --mh-y   pointer position within the element, 0–100 (%)
+   Scroll / progress effects read:
+       --mh-progress     0–1 scroll progress
+   Tilt reads:
+       --mh-rx / --mh-ry rotateX / rotateY in deg
+   ===================================================================== */
+
+/* Registered so they can animate smoothly (rotating conic borders) and
+   so an unset value has a sane initial rather than `unset`. */
+@property --mh-ba {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --mh-x { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+@property --mh-y { syntax: "<percentage>"; inherits: true; initial-value: 50%; }
+
+:root {
+  /* Motion-kit knobs — one place to retune feel across every effect. */
+  --mh-spot-size: 320px;                 /* pointer spotlight radius */
+  --mh-tilt-max: 7deg;                   /* clamp 3D tilt so cards never wobble */
+  --mh-beam-speed: 6s;                   /* rotating border / moving border */
+  --mh-marquee-speed: 38s;               /* default logo/testimonial marquee */
+  --mh-reveal-rise: 14px;                /* scroll-reveal travel */
+  --mh-reveal-dur: 640ms;
+}
+
+/* =====================================================================
+   1. AMBIENT BACKGROUNDS  (Aurora · Spotlight · Grid · Dots · Scales · Grain · Sparkles)
+   Drop on any container; they paint behind content via ::before/::after,
+   so the container needs position:relative (the classes set it) and
+   children should sit in their own stacking context.
+   ===================================================================== */
+
+.mh-fx { position: relative; isolation: isolate; }
+.mh-fx > * { position: relative; z-index: 1; }
+
+/* --- Aurora: slow brand-tinted northern-lights wash (restrained) ------ */
+.mh-aurora::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  z-index: 0;
+  background:
+    radial-gradient(38% 44% at 22% 18%, color-mix(in oklch, var(--mh-primary) 20%, transparent), transparent 70%),
+    radial-gradient(36% 40% at 78% 26%, color-mix(in oklch, var(--mh-info) 16%, transparent), transparent 70%),
+    radial-gradient(48% 50% at 60% 88%, color-mix(in oklch, var(--mh-tertiary) 14%, transparent), transparent 72%);
+  filter: blur(46px) saturate(1.15);
+  opacity: 0.85;
+  will-change: transform;
+  animation: mh-aurora-drift 22s var(--ease-in-out) infinite alternate;
+  pointer-events: none;
+}
+@keyframes mh-aurora-drift {
+  from { transform: translate3d(-4%, -2%, 0) scale(1.02) rotate(-2deg); }
+  to   { transform: translate3d(4%, 3%, 0) scale(1.08) rotate(2deg); }
+}
+
+/* --- Spotlight: a single soft conic/elliptical beam for hero focus ---- */
+.mh-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(60% 70% at var(--mh-spot-at, 28% 0%),
+              color-mix(in oklch, var(--mh-primary) 16%, transparent), transparent 60%);
+  opacity: 0;
+  animation: mh-spot-in 1200ms var(--ease-out) 120ms forwards;
+  pointer-events: none;
+}
+.mh-spotlight--right::before { --mh-spot-at: 76% 0%; }
+.mh-spotlight--center::before { --mh-spot-at: 50% -10%; }
+@keyframes mh-spot-in { to { opacity: 1; } }
+
+/* --- Grid + Dot + Scales: structural texture, masked to a soft fade --- */
+.mh-grid-bg::before,
+.mh-dot-bg::before,
+.mh-scales-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(70% 70% at 50% 30%, #000 40%, transparent 100%);
+          mask-image: radial-gradient(70% 70% at 50% 30%, #000 40%, transparent 100%);
+}
+.mh-grid-bg::before {
+  background-image:
+    linear-gradient(to right, var(--mh-outline-variant) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--mh-outline-variant) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+.mh-dot-bg::before {
+  background-image: radial-gradient(var(--mh-outline) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.mh-scales-bg::before {
+  background-image: repeating-linear-gradient(135deg,
+    var(--mh-outline-variant) 0, var(--mh-outline-variant) 1px,
+    transparent 1px, transparent 9px);
+}
+
+/* --- Grain: 1st-party SVG fractal noise, kills gradient banding -------- */
+.mh-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* --- Sparkles: a few brand motes that twinkle (achievement accents) ---- */
+.mh-sparkles { position: relative; }
+.mh-sparkles .mh-spark {
+  position: absolute;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: var(--mh-primary);
+  box-shadow: 0 0 6px var(--lane-glow);
+  opacity: 0;
+  animation: mh-spark 2.6s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+@keyframes mh-spark {
+  0%, 100% { opacity: 0; transform: scale(0.4); }
+  50%      { opacity: 0.9; transform: scale(1); }
+}
+
+/* =====================================================================
+   2. CARD EFFECTS  (Card-Spotlight · Glow-Border · Gradient-Border · 3D Tilt · Glare · Hover-group)
+   ===================================================================== */
+
+/* --- Card Spotlight: radial reveal that tracks the pointer ------------- */
+.mh-spotlight-card { position: relative; isolation: isolate; }
+.mh-spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+  background: radial-gradient(var(--mh-spot-size) circle at var(--mh-x) var(--mh-y),
+              color-mix(in oklch, var(--mh-primary) 12%, transparent), transparent 60%);
+  pointer-events: none;
+}
+.mh-spotlight-card:hover::before,
+.mh-spotlight-card:focus-within::before { opacity: 1; }
+.mh-spotlight-card > * { position: relative; z-index: 1; }
+
+/* --- Glowing border that lights up nearest the pointer ---------------- */
+.mh-glow-border { position: relative; }
+.mh-glow-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(180px circle at var(--mh-x) var(--mh-y),
+              var(--mh-primary), transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+  pointer-events: none;
+}
+.mh-glow-border:hover::after,
+.mh-glow-border:focus-within::after { opacity: 0.9; }
+
+/* --- Animated gradient border: brand conic ring (top-ranked card / CTA) */
+.mh-gradient-border { position: relative; z-index: 0; border-radius: var(--radius-lg); }
+.mh-gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  z-index: -1;
+  border-radius: inherit;
+  background: conic-gradient(from var(--mh-ba),
+              var(--mh-primary), var(--mh-tertiary), var(--mh-info), var(--mh-primary));
+  animation: mh-ba-spin var(--mh-beam-speed) linear infinite;
+  filter: saturate(1.1);
+}
+@keyframes mh-ba-spin { to { --mh-ba: 360deg; } }
+
+/* --- 3D tilt: subtle perspective lift that follows the pointer -------- */
+.mh-tilt {
+  transform: perspective(900px)
+             rotateX(var(--mh-rx, 0deg))
+             rotateY(var(--mh-ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform var(--dur-med) var(--ease-out);
+  will-change: transform;
+}
+.mh-tilt:hover { transition-duration: var(--dur-fast); }
+
+/* --- Glare: holographic sheen for one featured/hero card -------------- */
+.mh-glare { position: relative; overflow: hidden; }
+.mh-glare::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+  background:
+    radial-gradient(40% 50% at var(--mh-x) var(--mh-y), rgba(255,255,255,0.22), transparent 60%),
+    conic-gradient(from 210deg at var(--mh-x) var(--mh-y),
+      transparent, color-mix(in oklch, var(--mh-info) 30%, transparent),
+      color-mix(in oklch, var(--mh-primary) 30%, transparent), transparent 60%);
+}
+.mh-glare:hover::after { opacity: 1; }
+
+/* --- Card hover group: highlight slides to the hovered sibling -------- */
+.mh-hover-group > * { position: relative; }
+.mh-hover-group > *::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--mh-surface-container);
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-med) var(--ease-out-quick);
+  pointer-events: none;
+}
+.mh-hover-group > *:hover::before,
+.mh-hover-group > *:focus-within::before { opacity: 1; transform: scale(1); }
+.mh-hover-group > * > * { position: relative; z-index: 1; }
+
+/* =====================================================================
+   3. BORDERS & BUTTONS  (Moving-Border · Hover-Border-Gradient · Stateful)
+   ===================================================================== */
+
+.mh-moving-border { position: relative; z-index: 0; overflow: hidden; border-radius: var(--radius-pill); }
+.mh-moving-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--mh-ba), transparent 0 75%, var(--mh-primary) 88%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: mh-ba-spin var(--mh-beam-speed) linear infinite;
+}
+
+.mh-hover-border-gradient { position: relative; z-index: 0; }
+.mh-hover-border-gradient::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, var(--mh-primary), var(--mh-tertiary));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+}
+.mh-hover-border-gradient:hover::before,
+.mh-hover-border-gradient:focus-visible::before { opacity: 1; }
+
+/* --- Stateful button: idle → loading → success (extends .btn) --------- */
+.btn[data-mh-state] .mh-btn-label { transition: opacity var(--dur-fast) var(--ease-out-quick); }
+.btn[data-mh-state="loading"] { pointer-events: none; }
+.btn[data-mh-state="loading"] .mh-btn-label { opacity: 0.55; }
+.btn[data-mh-state] .mh-btn-spin,
+.btn[data-mh-state] .mh-btn-check { display: none; }
+.btn[data-mh-state="loading"] .mh-btn-spin {
+  display: inline-block;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: mh-spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+.btn[data-mh-state="success"] { background: var(--mh-success); color: var(--mh-surface-deep); }
+.btn[data-mh-state="success"] .mh-btn-check { display: inline-block; animation: mh-pop 320ms var(--ease-spring); }
+@keyframes mh-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* =====================================================================
+   4. TEXT EFFECTS  (Text-Generate · Flip-Words · Hero-Highlight · Flapboard)
+   ===================================================================== */
+
+/* Words fade/rise in one-by-one when the block scrolls into view. The JS
+   wraps each word in <span class="mh-word" style="--i:N"> and flips
+   .is-inview; with no JS the text is simply visible. */
+.mh-js .mh-text-generate .mh-word {
+  display: inline-block;
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(0.18em);
+}
+.mh-js .mh-text-generate.is-inview .mh-word {
+  animation: mh-word-in 560ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+@keyframes mh-word-in {
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+
+/* Flip-words: JS swaps the active word; CSS animates the swap. */
+.mh-flip-words { display: inline-grid; vertical-align: bottom; }
+.mh-flip-words > .mh-fw {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateY(0.4em) rotateX(-40deg);
+  transition: opacity var(--dur-med) var(--ease-out),
+              transform var(--dur-med) var(--ease-out);
+  color: var(--mh-primary);
+}
+.mh-flip-words > .mh-fw.is-active { opacity: 1; transform: none; }
+.mh-flip-words > .mh-fw.is-leaving {
+  opacity: 0; transform: translateY(-0.4em) rotateX(40deg);
+}
+
+/* Hero-highlight: a marker sweep behind a phrase on reveal. */
+.mh-highlight {
+  background-image: linear-gradient(120deg,
+    color-mix(in oklch, var(--mh-primary) 36%, transparent),
+    color-mix(in oklch, var(--mh-tertiary) 36%, transparent));
+  background-repeat: no-repeat;
+  background-size: 0% 42%;
+  background-position: 0 88%;
+  padding: 0 0.08em;
+  transition: background-size var(--dur-slow) var(--ease-out);
+}
+.mh-inview.mh-highlight.is-inview,
+.is-inview .mh-highlight { background-size: 100% 42%; }
+
+/* Flapboard / scoreboard digits — split-flap aesthetic for times & stats */
+.mh-flapboard { display: inline-flex; gap: 2px; font-family: var(--font-mono); }
+.mh-flapboard .mh-flap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 0.72em; padding: 0.08em 0.12em;
+  background: var(--mh-surface-deep);
+  border: 1px solid var(--mh-outline-rule);
+  border-radius: 3px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.5);
+}
+.mh-flapboard .mh-flap.is-flipping { animation: mh-flap 90ms var(--ease-in-out); }
+@keyframes mh-flap {
+  0%   { transform: rotateX(0); }
+  50%  { transform: rotateX(-90deg); opacity: 0.5; }
+  100% { transform: rotateX(0); }
+}
+
+/* =====================================================================
+   5. MARQUEE  (Infinite-Moving-Cards — sponsors / logos / testimonials)
+   ===================================================================== */
+.mh-marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+              mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.mh-marquee__track {
+  display: flex;
+  gap: var(--sp-7);
+  width: max-content;
+  animation: mh-marquee var(--mh-marquee-speed) linear infinite;
+}
+.mh-marquee[data-direction="right"] .mh-marquee__track { animation-direction: reverse; }
+.mh-marquee:hover .mh-marquee__track { animation-play-state: paused; }
+@keyframes mh-marquee { to { transform: translateX(-50%); } }
+
+/* Marquee band trim — sport-agnostic strip on the landing page (reusable for
+   sponsor / club logo rows too). */
+.mh-marquee-band {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-6) 0;
+  border-block: 1px solid var(--mh-outline-variant);
+}
+.mh-marquee-band-label {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-faint);
+}
+.mh-marquee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-7);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mh-on-surface-muted);
+}
+.mh-marquee-chip::after { content: "/"; color: var(--mh-primary); opacity: 0.55; }
+
+/* =====================================================================
+   6. SCROLL REVEAL  (Sticky-Scroll feel — entrance on first view)
+   ===================================================================== */
+.mh-js .mh-inview {
+  opacity: 0;
+  transform: translateY(var(--mh-reveal-rise));
+  transition: opacity var(--mh-reveal-dur) var(--ease-out),
+              transform var(--mh-reveal-dur) var(--ease-out);
+}
+.mh-js .mh-inview.is-inview { opacity: 1; transform: none; }
+.mh-js .mh-inview[data-mh-delay] { transition-delay: calc(var(--mh-delay, 0) * 1ms); }
+
+/* =====================================================================
+   7. TABS  (animated sliding indicator — review panels / settings)
+   ===================================================================== */
+.mh-tabs { position: relative; display: inline-flex; gap: 2px; }
+.mh-tabs__ind {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  width: var(--mh-ind-w, 0);
+  transform: translateX(var(--mh-ind-x, 0));
+  background: var(--mh-primary);
+  box-shadow: 0 0 10px var(--lane-glow);
+  transition: transform var(--dur-med) var(--ease-out),
+              width var(--dur-med) var(--ease-out);
+  pointer-events: none;
+}
+
+/* =====================================================================
+   8. COMPARE  (before / after image slider — cutout & brand A/B)
+   ===================================================================== */
+.mh-compare { position: relative; overflow: hidden; user-select: none; touch-action: pan-y; border-radius: var(--radius-md); }
+.mh-compare img { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.mh-compare__after {
+  position: absolute; inset: 0;
+  clip-path: inset(0 0 0 var(--mh-pos, 50%));
+}
+.mh-compare__handle {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--mh-pos, 50%);
+  width: 2px; margin-left: -1px;
+  background: var(--mh-primary);
+  box-shadow: 0 0 12px var(--lane-glow);
+  cursor: ew-resize;
+}
+.mh-compare__handle::after {
+  content: "";
+  position: absolute; top: 50%; left: 50%;
+  width: 30px; height: 30px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--mh-surface);
+  border: 2px solid var(--mh-primary);
+  box-shadow: var(--mh-elevation-2);
+}
+
+/* =====================================================================
+   9. LENS  (magnify on hover — inspect a card / asset detail)
+   ===================================================================== */
+.mh-lens { position: relative; overflow: hidden; cursor: zoom-in; }
+.mh-lens__zoom {
+  position: absolute; inset: 0;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out-quick);
+  background-repeat: no-repeat;
+  background-size: 200%;
+  background-position: var(--mh-x) var(--mh-y);
+  pointer-events: none;
+}
+.mh-lens:hover .mh-lens__zoom,
+.mh-lens:focus-within .mh-lens__zoom { opacity: 1; }
+
+/* =====================================================================
+   10. TRACING BEAM + TIMELINE  (explainability · meet recap · audit)
+   ===================================================================== */
+.mh-tracing-beam { position: relative; }
+.mh-tracing-beam__rail {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: 2px;
+  background: var(--mh-outline-variant);
+  overflow: hidden;
+}
+.mh-tracing-beam__rail::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 100%;
+  transform-origin: top;
+  transform: scaleY(var(--mh-progress, 0));
+  background: linear-gradient(var(--mh-primary), var(--mh-tertiary));
+  box-shadow: 0 0 12px var(--lane-glow);
+}
+
+.mh-timeline { position: relative; padding-left: var(--sp-7); }
+.mh-timeline__item { position: relative; padding-bottom: var(--sp-6); }
+.mh-timeline__item::before {
+  content: "";
+  position: absolute; left: calc(-1 * var(--sp-7) + 5px); top: 4px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--mh-primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--mh-primary) 18%, transparent);
+}
+
+/* =====================================================================
+   11. MULTI-STEP LOADER  (the pipeline / processing screen)
+   States driven by JS: each step carries data-state = pending|active|done.
+   ===================================================================== */
+.mh-steploader { display: grid; gap: var(--sp-3); }
+.mh-steploader__step {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--mh-outline-variant);
+  border-radius: var(--radius-md);
+  color: var(--mh-on-surface-muted);
+  transition: color var(--dur-med) var(--ease-out-quick),
+              border-color var(--dur-med) var(--ease-out-quick),
+              background-color var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-med) var(--ease-out);
+}
+.mh-steploader__dot {
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  font-size: 10px;
+}
+.mh-steploader__step[data-state="active"] {
+  color: var(--mh-on-surface);
+  border-color: color-mix(in oklch, var(--mh-primary) 50%, var(--mh-outline));
+  background: color-mix(in oklch, var(--mh-primary) 6%, transparent);
+  transform: translateX(2px);
+}
+.mh-steploader__step[data-state="active"] .mh-steploader__dot {
+  color: var(--mh-primary);
+  border-style: solid;
+  animation: mh-pulse 1.4s var(--ease-in-out) infinite;
+}
+.mh-steploader__step[data-state="done"] { color: var(--mh-success); border-color: color-mix(in oklch, var(--mh-success) 36%, var(--mh-outline-variant)); }
+.mh-steploader__step[data-state="done"] .mh-steploader__dot { color: var(--mh-success); border-color: var(--mh-success); background: var(--mh-success); }
+.mh-steploader__step[data-state="done"] .mh-steploader__dot::after { content: "✓"; color: var(--mh-surface-deep); font-weight: 700; }
+.mh-steploader__step[data-state="error"] { color: var(--mh-error); border-color: color-mix(in oklch, var(--mh-error) 40%, var(--mh-outline-variant)); }
+.mh-steploader__step[data-state="error"] .mh-steploader__dot { color: var(--mh-error); border-color: var(--mh-error); }
+.mh-steploader__step[data-state="error"] .mh-steploader__dot::after { content: "✕"; color: var(--mh-error); font-weight: 700; }
+.mh-steploader__label { min-width: 0; overflow-wrap: anywhere; }
+
+/* =====================================================================
+   12. VANISH INPUT  (rotating placeholders — search / command)
+   ===================================================================== */
+.mh-vanish { position: relative; }
+.mh-vanish .mh-vanish__ph {
+  position: absolute; left: var(--mh-vanish-pad, 14px); top: 50%;
+  transform: translateY(-50%);
+  color: var(--mh-on-surface-faint);
+  pointer-events: none;
+  transition: opacity var(--dur-med) var(--ease-out-quick),
+              transform var(--dur-med) var(--ease-out-quick);
+}
+.mh-vanish.is-typing .mh-vanish__ph { opacity: 0; transform: translateY(-50%) translateX(6px); }
+.mh-vanish__ph.is-swapping { opacity: 0; transform: translateY(calc(-50% + 6px)); }
+
+/* =====================================================================
+   REDUCED MOTION — stop dead. State changes keep their (instant) end
+   state; continuous / large / pointer-driven motion is disabled.
+   ===================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .mh-aurora::before,
+  .mh-gradient-border::before,
+  .mh-moving-border::before,
+  .mh-marquee__track,
+  .mh-sparkles .mh-spark,
+  .mh-steploader__step[data-state="active"] .mh-steploader__dot {
+    animation: none !important;
+  }
+  .mh-aurora::before { transform: none; }
+  .mh-tilt { transform: none !important; transition: none; }
+  .mh-marquee { -webkit-mask-image: none; mask-image: none; overflow-x: auto; }
+  .mh-marquee__track { width: auto; }
+  .mh-spotlight::before { animation: none; opacity: 1; }
+  .mh-js .mh-text-generate .mh-word { opacity: 1; filter: none; transform: none; animation: none; }
+  .mh-js .mh-inview { opacity: 1; transform: none; transition: none; }
+  .mh-flip-words > .mh-fw { transition: none; }
+  .mh-highlight { transition: none; background-size: 100% 42%; }
+}

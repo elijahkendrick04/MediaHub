@@ -75,6 +75,8 @@ __all__ = [
     "THEME_FALLBACK_CSS",
     "THEME_DERIVE_CSS",
     "THEME_CASCADE_CSS",
+    "THEME_COMPONENTS_CSS",
+    "THEME_MOTION_CSS",
     "STATIC_THEME_DIR",
 ]
 
@@ -113,6 +115,13 @@ THEME_CASCADE_CSS: str = _load("theme-cascade.css")
 # load AFTER BASE_CSS in web.py so it can override legacy component
 # rules with the same specificity.
 THEME_COMPONENTS_CSS: str = _load("theme-components.css")
+# Motion / effect kit — first-party re-implementation of the worth-borrowing
+# interaction effects (Aceternity UI) and Refero-catalogued design directions,
+# rebuilt as vanilla CSS + static/js/ui-kit.js. Exported separately because it
+# must load AFTER the components layer (so it can elevate existing components)
+# but BEFORE the responsive guardrails (which must remain the cascade's final
+# layer — see tests/test_theme_tokens.py::test_guardrails_appended_last).
+THEME_MOTION_CSS: str = _load("theme-motion.css")
 
 
 # The single module-level constant every other module consumes.
