@@ -131,7 +131,7 @@ jobs:
           # pure waste, and these bot deploys have repeatedly wedged
           # Render's build queue (queued with zero build logs for hours,
           # blocking real deploys behind them). The marker must also ride the
-          # squash commit subject below — that's the commit Render inspects on
+          # merge commit subject below — that's the commit Render inspects on
           # a push to main.
           git commit -m "docs: auto-update roadmap [skip render]"
           # Single-purpose branch, rebuilt from origin/main this run: force-push
@@ -148,18 +148,19 @@ jobs:
           else
             echo "Reusing open roadmap PR #$PR"
           fi
-          # Squash so each refresh is ONE `docs: auto-update roadmap (#N)
-          # [skip render]` commit on main — not a merge commit plus a sibling
-          # branch commit that read like two separate writers. --auto arms
-          # auto-merge while checks are pending; a docs-only PR is often
-          # ALREADY clean by now, and GitHub refuses to arm auto-merge on a
-          # clean PR — so fall through to an immediate squash. Only if both
-          # fail (auto-merge disabled repo-side AND checks pending/failed) is
-          # the PR left open for a human — preserved, never lost.
-          if gh pr merge "$PR" --squash --auto \
+          # The repo standardises on merge commits (squash disabled repo-wide),
+          # so land with --merge. The [skip render] marker still rides the merge
+          # commit subject via --subject — that's the commit Render inspects — so
+          # the docs-only refresh never triggers a deploy. --auto arms auto-merge
+          # while checks are pending; a docs-only PR is often ALREADY clean by
+          # now, and GitHub refuses to arm auto-merge on a clean PR — so fall
+          # through to an immediate --merge. Only if both fail (auto-merge
+          # disabled repo-side AND checks pending/failed) is the PR left open for
+          # a human — preserved, never lost.
+          if gh pr merge "$PR" --merge --auto \
                --subject "docs: auto-update roadmap (#${PR}) [skip render]"; then
             echo "Auto-merge armed on PR #$PR — lands when checks pass."
-          elif gh pr merge "$PR" --squash \
+          elif gh pr merge "$PR" --merge \
                --subject "docs: auto-update roadmap (#${PR}) [skip render]"; then
             echo "PR #$PR was already clean — merged directly."
           else
