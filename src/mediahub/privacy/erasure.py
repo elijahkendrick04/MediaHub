@@ -161,9 +161,7 @@ def run_deletion_cascade(run_id: str, profile_id: str = "") -> dict:
         try:
             from mediahub.athletes import registry as athlete_registry
 
-            report["athlete_swims"] = athlete_registry.purge_run(profile_id, run_id).get(
-                "swims", 0
-            )
+            report["athlete_swims"] = athlete_registry.purge_run(profile_id, run_id).get("swims", 0)
         except Exception as exc:
             log.warning("erasure: athlete-swims purge failed for %s: %s", run_id, exc)
     try:

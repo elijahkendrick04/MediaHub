@@ -15357,21 +15357,81 @@ Relay team broke club record"></textarea>
         signed in — matching the "11 headings, 12 for a developer" spec.
         """
         cards: list[tuple[str, str, str, str]] = [
-            ("Organisation & brand", "Logos, palette, tone and the brand the engine applies to every card.", "org", url_for("organisation_setup")),
-            ("Team members", "Invite teammates and manage who can see and approve content.", "members", url_for("organisation_members_page")),
-            ("Activity", "Every run for this organisation — status, matches, and one-click delete.", "activity", url_for("settings_section", section="activity")),
-            ("Auto scheduling", "Connect a scheduling account so approved cards can be queued to your channels.", "schedule", url_for("settings_section", section="scheduling")),
-            ("Autonomy", "Per-content-type publishing levels — what may post without a human, and the audit trail.", "autonomy", url_for("settings_section", section="autonomy")),
-            ("Club data", "Club records and asking questions of your own processed results.", "clubdata", url_for("settings_section", section="clubdata")),
-            ("Privacy & data", "What this system stores, athletes & consent, cache clearing, and run deletion.", "privacy", url_for("settings_section", section="privacy")),
-            ("Billing & plan", "Your plan, invoices and upgrades.", "billing", url_for("billing_page")),
-            ("Sponsors", "Manage sponsors and the sponsor-safe content they appear in.", "sponsors", url_for("sponsors_page")),
-            ("Account", "Two-factor security, data export, and account deletion.", "account", url_for("settings_section", section="account")),
-            ("System status", "Whether the site is operational right now.", "status", url_for("settings_section", section="status")),
+            (
+                "Organisation & brand",
+                "Logos, palette, tone and the brand the engine applies to every card.",
+                "org",
+                url_for("organisation_setup"),
+            ),
+            (
+                "Team members",
+                "Invite teammates and manage who can see and approve content.",
+                "members",
+                url_for("organisation_members_page"),
+            ),
+            (
+                "Activity",
+                "Every run for this organisation — status, matches, and one-click delete.",
+                "activity",
+                url_for("settings_section", section="activity"),
+            ),
+            (
+                "Auto scheduling",
+                "Connect a scheduling account so approved cards can be queued to your channels.",
+                "schedule",
+                url_for("settings_section", section="scheduling"),
+            ),
+            (
+                "Autonomy",
+                "Per-content-type publishing levels — what may post without a human, and the audit trail.",
+                "autonomy",
+                url_for("settings_section", section="autonomy"),
+            ),
+            (
+                "Club data",
+                "Club records and asking questions of your own processed results.",
+                "clubdata",
+                url_for("settings_section", section="clubdata"),
+            ),
+            (
+                "Privacy & data",
+                "What this system stores, athletes & consent, cache clearing, and run deletion.",
+                "privacy",
+                url_for("settings_section", section="privacy"),
+            ),
+            (
+                "Billing & plan",
+                "Your plan, invoices and upgrades.",
+                "billing",
+                url_for("billing_page"),
+            ),
+            (
+                "Sponsors",
+                "Manage sponsors and the sponsor-safe content they appear in.",
+                "sponsors",
+                url_for("sponsors_page"),
+            ),
+            (
+                "Account",
+                "Two-factor security, data export, and account deletion.",
+                "account",
+                url_for("settings_section", section="account"),
+            ),
+            (
+                "System status",
+                "Whether the site is operational right now.",
+                "status",
+                url_for("settings_section", section="status"),
+            ),
         ]
         if is_dev:
             cards.append(
-                ("Developer", "Deployment health, operator dashboards, uptime detail and autopublish confidence.", "dev", url_for("settings_section", section="developer"))
+                (
+                    "Developer",
+                    "Deployment health, operator dashboards, uptime detail and autopublish confidence.",
+                    "dev",
+                    url_for("settings_section", section="developer"),
+                )
             )
         return cards
 
@@ -15408,7 +15468,10 @@ Relay team broke club record"></textarea>
     def settings_section(section):
         renderers = {
             "activity": ("Activity", lambda prof: _render_settings_activity_section(prof)),
-            "scheduling": ("Auto scheduling", lambda prof: _render_settings_scheduling_section(prof)),
+            "scheduling": (
+                "Auto scheduling",
+                lambda prof: _render_settings_scheduling_section(prof),
+            ),
             "autonomy": ("Autonomy", lambda prof: _render_settings_autonomy_section(prof)),
             "clubdata": ("Club data", lambda prof: _render_settings_clubdata_section()),
             "privacy": ("Privacy & data", lambda prof: _render_settings_privacy_section()),
@@ -15433,9 +15496,7 @@ Relay team broke club record"></textarea>
             '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-6);padding-bottom:var(--sp-3);margin-bottom:var(--sp-2)">'
             '<span class="mh-hero-eyebrow">Settings</span>'
             f'<h1 style="margin-bottom:0">{_h(title)}</h1>'
-            "</section>"
-            + back
-            + render(prof)
+            "</section>" + back + render(prof)
         )
         return _layout(f"{title} · Settings", body, active="settings")
 
@@ -15778,7 +15839,11 @@ Relay team broke club record"></textarea>
     _AUTONOMY_LEVEL_OPTS = [
         ("approval_required", "Approval required", "A human must approve before publishing."),
         ("draft_only", "Draft only", "Generate drafts; never schedule or publish automatically."),
-        ("fully_autonomous", "Fully autonomous", "May publish without human approval when all guardrails pass."),
+        (
+            "fully_autonomous",
+            "Fully autonomous",
+            "May publish without human approval when all guardrails pass.",
+        ),
     ]
 
     def _render_settings_autonomy_section(prof: Optional[ClubProfile]) -> str:
@@ -16030,7 +16095,7 @@ window.mhAutonomySweepNow = function(btn) {
                 '<div style="display:flex;flex-direction:column;gap:8px;max-width:520px">'
                 '<input id="mh-sched-token" type="text" placeholder="Access token" '
                 'style="width:100%;font-family:var(--font-mono,monospace);font-size:13px;'
-                'padding:8px 10px;border:1px solid var(--panel);border-radius:6px;'
+                "padding:8px 10px;border:1px solid var(--panel);border-radius:6px;"
                 'background:var(--bg);color:var(--ink)"/>'
                 '<button type="button" id="mh-sched-connect" class="btn" '
                 'style="align-self:flex-start;font-size:13px" '
@@ -16147,8 +16212,7 @@ window.mhSchedulerDisconnect = function(btn) {
             "MediaHub account.</p>"
         )
         return (
-            who
-            + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
+            who + '<div class="card" style="padding:16px 18px;margin-bottom:14px">'
             '<h3 style="margin-top:0;font-size:16px">Security</h3>'
             '<p class="dim" style="font-size:13px;margin-bottom:10px">Protect your account with '
             "a second factor.</p>"

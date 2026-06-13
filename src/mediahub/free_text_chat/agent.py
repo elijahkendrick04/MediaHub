@@ -137,9 +137,7 @@ def _parse_brief_json(raw: str) -> dict:
         "headline": str(data.get("headline") or "").strip()[:120],
         "body": str(data.get("body") or "").strip(),
         "hashtags": [
-            str(h).lstrip("#").strip()
-            for h in (data.get("hashtags") or [])
-            if str(h).strip()
+            str(h).lstrip("#").strip() for h in (data.get("hashtags") or []) if str(h).strip()
         ][:8],
         "platform": (str(data.get("platform") or "Instagram").strip() or "Instagram"),
         "visual_concept": str(data.get("visual_concept") or "").strip(),

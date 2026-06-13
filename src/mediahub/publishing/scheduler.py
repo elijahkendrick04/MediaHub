@@ -287,7 +287,9 @@ def schedule_post(
             update_id = str(single.get("id", ""))
 
     if not update_id:
-        raise SchedulerAPIError("Auto scheduling accepted the request but did not return an update id.")
+        raise SchedulerAPIError(
+            "Auto scheduling accepted the request but did not return an update id."
+        )
 
     return {
         "ok": True,
