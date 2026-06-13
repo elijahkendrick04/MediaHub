@@ -1,5 +1,5 @@
 """
-turn_into/pipeline.py — orchestrate the 7 artefact builders.
+turn_into/pipeline.py — orchestrate the 8 artefact builders.
 
 Public surface:
 
@@ -142,7 +142,7 @@ def turn_meet_into_pack(
     *,
     deterministic: bool = False,
 ) -> dict:
-    """Generate the full 7-artefact content pack for one meet.
+    """Generate the full 8-artefact content pack for one meet.
 
     Parameters
     ----------
@@ -188,6 +188,7 @@ def turn_meet_into_pack(
         ("swimmer_spotlight", lambda: _t.build_swimmer_spotlights(meet_summary, ranked, **_kw)),
         ("data_thread", lambda: _t.build_data_thread(meet_summary, ranked, **_kw)),
         ("parent_newsletter", lambda: _t.build_parent_newsletter(meet_summary, ranked, **_kw)),
+        ("club_report", lambda: _t.build_club_report(meet_summary, ranked, **_kw)),
         ("sponsor_thank_you", lambda: _t.build_sponsor_thank_you(meet_summary, ranked, **_kw)),
         ("coach_quote", lambda: _t.build_coach_quote(meet_summary, ranked, **_kw)),
         ("next_meet_preview", lambda: _t.build_next_meet_preview(meet_summary, ranked, **_kw)),

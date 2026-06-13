@@ -14,6 +14,7 @@ calls an LLM — identity and milestone logic are deterministic by rule
 
 from .registry import (
     AthleteRecord,
+    athlete_swims,
     backfill_from_runs,
     ensure_schema,
     get_or_create,
@@ -30,6 +31,7 @@ from .registry import (
 
 __all__ = [
     "AthleteRecord",
+    "athlete_swims",
     "backfill_from_runs",
     "ensure_schema",
     "get_or_create",

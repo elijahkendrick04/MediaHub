@@ -99,9 +99,14 @@ break the program. Each of these folders also has its own short `README.md`.
   On its own it doesn't know swimming.
 - **`recognition_swim`** — The swimming-only part that plugs into `recognition`.
   (Two folders so we can add other sports later without touching the shared brain.)
-- **`turn_into`** — Takes one finished meet and "turns it into" seven ready-made
-  things at once: a recap, swimmer spotlights, a number thread, a parent newsletter,
-  a sponsor thank-you, a coach quote, and a next-meet preview.
+- **`turn_into`** — Takes one finished meet and "turns it into" eight ready-made
+  things at once: a recap, swimmer spotlights, a number thread, a parent newsletter
+  (with an email subject line), a long-form club website report, a sponsor thank-you,
+  a coach quote, and a next-meet preview.
+- **`club_qa`** — Lets you ask a plain question about your club's own results — like
+  "when did Ella last PB in 100 Free?" — and get an answer built only from the meets
+  MediaHub has already processed, with the meets it used listed underneath. It never
+  searches the web and never guesses.
 - **`content_engine`** — The single writer that makes all the captions. It first
   *plans* the set of posts, then *writes* each one.
 - **`content_pack`** — Bundles the finished cards into one ZIP you can download.
