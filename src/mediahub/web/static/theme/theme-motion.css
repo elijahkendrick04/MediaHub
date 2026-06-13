@@ -429,6 +429,21 @@
 }
 .mh-marquee-chip::after { content: "/"; color: var(--mh-primary); opacity: 0.55; }
 
+/* Gradient-text — the "single chromatic accent as a gradient on a key word"
+   move distilled from Refero (Apple / Mercury / Auros product-gradient idea).
+   Solid-colour fallback first, so engines without background-clip:text still
+   show a readable accent rather than invisible (transparent) text. */
+.mh-gradient-text { color: var(--mh-primary); }
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .mh-gradient-text {
+    background: linear-gradient(90deg, var(--mh-primary), var(--mh-tertiary));
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+            color: transparent;
+  }
+}
+
 /* =====================================================================
    6. SCROLL REVEAL  (Sticky-Scroll feel — entrance on first view)
    ===================================================================== */

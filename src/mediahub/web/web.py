@@ -9461,7 +9461,7 @@ def create_app() -> Flask:
         # framing: these are sports the engine is built for, not integrations.
         marquee_html = (
             '<section class="mh-marquee-band" aria-label="Built for every sport">'
-            '<span class="mh-marquee-band-label">One engine &middot; every sport</span>'
+            '<span class="mh-marquee-band-label mh-gradient-text">One engine &middot; every sport</span>'
             '<div class="mh-marquee" data-mh-speed="34"><div class="mh-marquee__track">'
             + "".join(
                 f'<span class="mh-marquee-chip">{s}</span>'
