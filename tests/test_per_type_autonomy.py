@@ -328,9 +328,10 @@ def test_post_policy_no_active_org(app_with_org):
 
 
 def test_settings_page_renders_autonomy_section(app_with_org):
+    # Autonomy is now its own settings sub-page reached from the card grid.
     with app_with_org.test_client() as client:
         _with_org(client, "org-test")
-        resp = client.get("/settings")
+        resp = client.get("/settings/autonomy")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert "autonomy" in body.lower()

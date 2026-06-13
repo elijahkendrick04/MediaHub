@@ -1,11 +1,11 @@
-"""Tests for the pure helper functions inside `mediahub.publishing.buffer`.
+"""Tests for the pure helper functions inside `mediahub.publishing.scheduler`.
 
-`tests/test_buffer_integration.py` and friends already exercise the
+`tests/test_scheduler_integration.py` and friends already exercise the
 HTTP-facing entry points. This module focuses on the small,
 deterministic helpers used by the error-handling paths — the bits
 that decide whether a 429 surfaces with a retry-after, whether
 auth-token blanks raise the right exception, and what message the
-user sees when Buffer returns garbage.
+user sees when the scheduler returns garbage.
 """
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from mediahub.publishing.buffer import (
-    BUFFER_API_BASE,
-    BufferAPIError,
-    BufferAuthError,
-    BufferError,
-    BufferRateLimitError,
+from mediahub.publishing.scheduler import (
+    SCHEDULER_API_BASE,
+    SchedulerAPIError,
+    SchedulerAuthError,
+    SchedulerError,
+    SchedulerRateLimitError,
     _parse_retry_after,
     _PreparedToken,
     _summarise_error_dict,
@@ -31,13 +31,13 @@ from mediahub.publishing.buffer import (
 
 
 class TestModuleSurface:
-    def test_base_url_is_buffer_api(self) -> None:
-        assert BUFFER_API_BASE == "https://api.bufferapp.com"
+    def test_base_url_is_scheduler_api(self) -> None:
+        assert SCHEDULER_API_BASE == "https://api.bufferapp.com"
 
     def test_exception_hierarchy(self) -> None:
-        assert issubclass(BufferAuthError, BufferError)
-        assert issubclass(BufferAPIError, BufferError)
-        assert issubclass(BufferRateLimitError, BufferAPIError)
+        assert issubclass(SchedulerAuthError, SchedulerError)
+        assert issubclass(SchedulerAPIError, SchedulerError)
+        assert issubclass(SchedulerRateLimitError, SchedulerAPIError)
 
 
 # ---------------------------------------------------------------------------
@@ -51,13 +51,13 @@ class TestPreparedTokenRequire:
         assert prep.token == "abc123"
 
     def test_none_raises_auth_error(self) -> None:
-        with pytest.raises(BufferAuthError):
+        with pytest.raises(SchedulerAuthError):
             _PreparedToken.require(None)
 
     def test_blank_raises_auth_error(self) -> None:
-        with pytest.raises(BufferAuthError):
+        with pytest.raises(SchedulerAuthError):
             _PreparedToken.require("")
-        with pytest.raises(BufferAuthError):
+        with pytest.raises(SchedulerAuthError):
             _PreparedToken.require("   ")
 
     def test_error_message_is_user_safe(self) -> None:
@@ -65,9 +65,9 @@ class TestPreparedTokenRequire:
         # MUST direct the user to the administrator.
         try:
             _PreparedToken.require("")
-        except BufferAuthError as exc:
+        except SchedulerAuthError as exc:
             msg = str(exc)
-            assert "Buffer is not configured" in msg
+            assert "Auto scheduling is not configured" in msg
             assert "administrator" in msg.lower()
             # And must not leak any token bytes — there shouldn't be any here.
             assert "None" not in msg
@@ -148,34 +148,34 @@ class TestSummariseErrorDict:
         assert out == "real error"
 
     def test_empty_dict_returns_default(self) -> None:
-        assert _summarise_error_dict({}) == "Buffer returned an error."
+        assert _summarise_error_dict({}) == "The scheduler returned an error."
 
     def test_non_dict_input_returns_default(self) -> None:
         # The function defensively handles non-dict (e.g. list/None payloads).
-        assert _summarise_error_dict([1, 2, 3]) == "Unexpected Buffer response."  # type: ignore[arg-type]
-        assert _summarise_error_dict(None) == "Unexpected Buffer response."  # type: ignore[arg-type]
+        assert _summarise_error_dict([1, 2, 3]) == "Unexpected scheduling response."  # type: ignore[arg-type]
+        assert _summarise_error_dict(None) == "Unexpected scheduling response."  # type: ignore[arg-type]
 
     def test_non_string_values_ignored(self) -> None:
         # If the API returned a number where a string is expected, fall through.
-        assert _summarise_error_dict({"message": 42}) == "Buffer returned an error."
+        assert _summarise_error_dict({"message": 42}) == "The scheduler returned an error."
 
 
 # ---------------------------------------------------------------------------
-# BufferRateLimitError carries retry_after
+# SchedulerRateLimitError carries retry_after
 # ---------------------------------------------------------------------------
 
 
-class TestBufferRateLimitError:
+class TestSchedulerRateLimitError:
     def test_carries_retry_after_value(self) -> None:
-        err = BufferRateLimitError("Slow down", retry_after=120)
+        err = SchedulerRateLimitError("Slow down", retry_after=120)
         assert err.retry_after == 120
         assert "Slow down" in str(err)
 
     def test_retry_after_optional_none(self) -> None:
-        err = BufferRateLimitError("Slow down")
+        err = SchedulerRateLimitError("Slow down")
         assert err.retry_after is None
 
-    def test_is_a_buffer_api_error(self) -> None:
-        err = BufferRateLimitError("x", retry_after=10)
-        assert isinstance(err, BufferAPIError)
-        assert isinstance(err, BufferError)
+    def test_is_a_scheduler_api_error(self) -> None:
+        err = SchedulerRateLimitError("x", retry_after=10)
+        assert isinstance(err, SchedulerAPIError)
+        assert isinstance(err, SchedulerError)

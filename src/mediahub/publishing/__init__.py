@@ -6,7 +6,9 @@ on /settings and then explicitly click Schedule on a card — there is no
 autopost path through this module.
 
 Currently supported:
-    - buffer: Buffer (https://buffer.com) for queueing posts across the
-      user's connected social channels (Instagram, Twitter/X, Facebook,
-      LinkedIn, etc.) via the Buffer API v1.
+    - scheduler: the "auto scheduling" provider for queueing posts across
+      the user's connected social channels (Instagram, Twitter/X, Facebook,
+      LinkedIn, etc.). The upstream relay is Buffer, Inc.'s API v1 (the only
+      place that real third-party name remains, for the GDPR sub-processor
+      record in web.legal).
 """

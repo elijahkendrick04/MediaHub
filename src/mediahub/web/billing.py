@@ -78,7 +78,7 @@ TIERS: tuple[TierInfo, ...] = (
         features=(
             "Unlimited content runs",
             "1 brand profile",
-            "Buffer scheduling",
+            "Auto scheduling",
             "Priority rendering",
             "Email support",
         ),

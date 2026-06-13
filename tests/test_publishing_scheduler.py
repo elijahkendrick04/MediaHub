@@ -1,16 +1,16 @@
-"""Buffer publishing layer tests.
+"""the scheduler publishing layer tests.
 
 Covers:
-  * publishing.buffer.list_channels — success + failure paths
-  * publishing.buffer.schedule_post — success + failure paths
-  * Both helpers raise BufferAuthError when token is missing/blank
-  * /settings Buffer save/clear round-trip
-  * /api/buffer/channels — 401 when no token, 200 with mocked channels
+  * publishing.scheduler.list_channels — success + failure paths
+  * publishing.scheduler.schedule_post — success + failure paths
+  * Both helpers raise SchedulerAuthError when token is missing/blank
+  * /settings the scheduler save/clear round-trip
+  * /api/scheduler/channels — 401 when no token, 200 with mocked channels
   * /api/runs/<id>/card/<cid>/schedule — happy path, missing-token,
-    Buffer-failure (caption preserved)
+    the scheduler-failure (caption preserved)
   * Card workflow state gains schedule_status="scheduled" on success
 
-External HTTP is patched out via monkeypatch — no live Buffer calls.
+External HTTP is patched out via monkeypatch — no live the scheduler calls.
 """
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ import pytest
 
 from mediahub.web import secrets_store
 from mediahub.web.web import create_app
-from mediahub.publishing import buffer as buffer_mod
-from mediahub.publishing.buffer import (
-    BufferAPIError,
-    BufferAuthError,
+from mediahub.publishing import scheduler as scheduler_mod
+from mediahub.publishing.scheduler import (
+    SchedulerAPIError,
+    SchedulerAuthError,
     list_channels,
     schedule_post,
 )
@@ -52,13 +52,13 @@ class _FakeResp:
 
 
 def _patch_requests(monkeypatch, *, get=None, post=None):
-    """Patch buffer_mod.requests.get / .post with the given callables."""
+    """Patch scheduler_mod.requests.get / .post with the given callables."""
     fake = SimpleNamespace(
         get=get or (lambda *a, **kw: _FakeResp(500, {})),
         post=post or (lambda *a, **kw: _FakeResp(500, {})),
         RequestException=Exception,
     )
-    monkeypatch.setattr(buffer_mod, "requests", fake)
+    monkeypatch.setattr(scheduler_mod, "requests", fake)
 
 
 # ---------------------------------------------------------------------
@@ -66,19 +66,19 @@ def _patch_requests(monkeypatch, *, get=None, post=None):
 # ---------------------------------------------------------------------
 
 def test_list_channels_missing_token_raises_auth_error():
-    with pytest.raises(BufferAuthError) as exc:
+    with pytest.raises(SchedulerAuthError) as exc:
         list_channels("")
     assert "administrator" in str(exc.value)
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         list_channels(None)  # type: ignore[arg-type]
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         list_channels("   ")
 
 
 def test_missing_token_error_points_to_administrator_not_settings():
     """Pin the post-rewrite invariant: the no-token error must direct users
     to an administrator, not to a deleted Settings page."""
-    with pytest.raises(BufferAuthError) as exc:
+    with pytest.raises(SchedulerAuthError) as exc:
         list_channels("")
     message = str(exc.value)
     assert "administrator" in message
@@ -124,13 +124,13 @@ def test_list_channels_success(monkeypatch):
 
 def test_list_channels_401_raises_auth_error(monkeypatch):
     _patch_requests(monkeypatch, get=lambda *a, **kw: _FakeResp(401, {"error": "Unauthenticated"}))
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         list_channels("bad-token")
 
 
 def test_list_channels_500_raises_api_error(monkeypatch):
     _patch_requests(monkeypatch, get=lambda *a, **kw: _FakeResp(500, {"message": "boom"}))
-    with pytest.raises(BufferAPIError) as exc:
+    with pytest.raises(SchedulerAPIError) as exc:
         list_channels("token")
     assert "boom" in str(exc.value)
 
@@ -143,23 +143,23 @@ def test_list_channels_transport_error_raises_api_error(monkeypatch):
         raise _Err("dns")
 
     fake = SimpleNamespace(get=boom, post=boom, RequestException=_Err)
-    monkeypatch.setattr(buffer_mod, "requests", fake)
-    with pytest.raises(BufferAPIError) as exc:
+    monkeypatch.setattr(scheduler_mod, "requests", fake)
+    with pytest.raises(SchedulerAPIError) as exc:
         list_channels("token")
     assert "dns" in str(exc.value)
 
 
 def test_schedule_post_missing_token_raises_auth_error():
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         schedule_post("", channel_id="cid", text="hello")
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         schedule_post("   ", channel_id="cid", text="hello")
 
 
 def test_schedule_post_missing_channel_or_text_raises_api_error():
-    with pytest.raises(BufferAPIError):
+    with pytest.raises(SchedulerAPIError):
         schedule_post("tok", channel_id="", text="hello")
-    with pytest.raises(BufferAPIError):
+    with pytest.raises(SchedulerAPIError):
         schedule_post("tok", channel_id="cid", text="")
 
 
@@ -171,8 +171,8 @@ def test_schedule_post_success(monkeypatch):
         captured["data"] = list(data or [])
         return _FakeResp(200, {
             "success": True,
-            "buffer_count": 1,
-            "updates": [{"id": "update-123", "status": "buffer"}],
+            "scheduler_count": 1,
+            "updates": [{"id": "update-123", "status": "scheduler"}],
         })
 
     _patch_requests(monkeypatch, post=fake_post)
@@ -211,15 +211,15 @@ def test_schedule_post_with_scheduled_at_sends_timestamp(monkeypatch):
 
 def test_schedule_post_401_raises_auth_error(monkeypatch):
     _patch_requests(monkeypatch, post=lambda *a, **kw: _FakeResp(403, {"error": "forbidden"}))
-    with pytest.raises(BufferAuthError):
+    with pytest.raises(SchedulerAuthError):
         schedule_post("tok", channel_id="cid", text="hi")
 
 
-def test_schedule_post_api_error_includes_buffer_message(monkeypatch):
+def test_schedule_post_api_error_includes_scheduler_message(monkeypatch):
     _patch_requests(monkeypatch, post=lambda *a, **kw: _FakeResp(
         400, {"message": "Profile has reached its queue limit."}
     ))
-    with pytest.raises(BufferAPIError) as exc:
+    with pytest.raises(SchedulerAPIError) as exc:
         schedule_post("tok", channel_id="cid", text="hi")
     assert "queue limit" in str(exc.value)
 
@@ -228,7 +228,7 @@ def test_schedule_post_no_update_id_raises_api_error(monkeypatch):
     _patch_requests(monkeypatch, post=lambda *a, **kw: _FakeResp(
         200, {"success": True, "updates": []}
     ))
-    with pytest.raises(BufferAPIError):
+    with pytest.raises(SchedulerAPIError):
         schedule_post("tok", channel_id="cid", text="hi")
 
 
@@ -240,7 +240,7 @@ def test_schedule_post_no_update_id_raises_api_error(monkeypatch):
 def app(tmp_path, monkeypatch):
     fake_secrets = tmp_path / "secrets.json"
     monkeypatch.setattr(secrets_store, "_SECRETS_PATH", fake_secrets)
-    monkeypatch.delenv("BUFFER_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SCHEDULER_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("MEDIAHUB_DISABLE_CLAUDE_CLI", "1")
     a = create_app()
@@ -248,30 +248,30 @@ def app(tmp_path, monkeypatch):
     return a
 
 
-def test_api_buffer_channels_no_token_returns_401(app):
+def test_api_scheduler_channels_no_token_returns_401(app):
     """No token configured for the active org (and no env-var fallback)
     surfaces the inline-connect choice. Post-multi-tenant-rewrite the
     message steers the user at the connect form, not at an administrator."""
     c = app.test_client()
-    r = c.get("/api/buffer/channels")
+    r = c.get("/api/scheduler/channels")
     assert r.status_code == 401
     j = r.get_json()
     assert j["connected"] is False
     assert j["error"] == "no_token"
     # The message points the user at the inline connect form.
-    assert "buffer" in j["message"].lower()
+    assert "scheduling" in j["message"].lower()
     # The 401 carries the connect endpoint URL so the modal can render
-    # the inline "Paste your Buffer access token" form.
+    # the inline "Paste your the scheduler access token" form.
     assert "connect_url" in j
-    assert j["connect_url"].endswith("/api/organisation/connect-buffer")
+    assert j["connect_url"].endswith("/api/organisation/connect-scheduler")
     # settings_url is no longer emitted — /settings route only redirects to home
     assert "settings_url" not in j
 
 
-def test_api_buffer_channels_returns_channels(app, monkeypatch):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test-token")
+def test_api_scheduler_channels_returns_channels(app, monkeypatch):
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test-token")
     monkeypatch.setattr(
-        "mediahub.publishing.buffer.list_channels",
+        "mediahub.publishing.scheduler.list_channels",
         lambda token: [
             {"id": "p1", "service": "instagram",
              "service_username": "@one", "formatted_username": "One",
@@ -282,7 +282,7 @@ def test_api_buffer_channels_returns_channels(app, monkeypatch):
         ],
     )
     c = app.test_client()
-    r = c.get("/api/buffer/channels")
+    r = c.get("/api/scheduler/channels")
     assert r.status_code == 200
     j = r.get_json()
     assert j["connected"] is True
@@ -290,15 +290,15 @@ def test_api_buffer_channels_returns_channels(app, monkeypatch):
     assert j["channels"][0]["id"] == "p1"
 
 
-def test_api_buffer_channels_auth_error_returns_401(app, monkeypatch):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/bad-token")
+def test_api_scheduler_channels_auth_error_returns_401(app, monkeypatch):
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/bad-token")
 
     def boom(token):
-        raise BufferAuthError("Buffer rejected the access token.")
+        raise SchedulerAuthError("the scheduler rejected the access token.")
 
-    monkeypatch.setattr("mediahub.publishing.buffer.list_channels", boom)
+    monkeypatch.setattr("mediahub.publishing.scheduler.list_channels", boom)
     c = app.test_client()
-    r = c.get("/api/buffer/channels")
+    r = c.get("/api/scheduler/channels")
     assert r.status_code == 401
     j = r.get_json()
     assert j["connected"] is False
@@ -335,7 +335,7 @@ def test_api_schedule_no_token_returns_401_and_preserves_caption(app):
 
 
 def test_api_schedule_rejects_empty_channels(app, monkeypatch):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test")
     _approve("r", "c")
     c = app.test_client()
     r = c.post(
@@ -347,7 +347,7 @@ def test_api_schedule_rejects_empty_channels(app, monkeypatch):
 
 
 def test_api_schedule_rejects_empty_caption(app, monkeypatch):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test")
     _approve("r", "c")
     c = app.test_client()
     r = c.post(
@@ -359,10 +359,10 @@ def test_api_schedule_rejects_empty_caption(app, monkeypatch):
 
 
 def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test")
     _approve("run1", "cardA")
     monkeypatch.setattr(
-        "mediahub.publishing.buffer.schedule_post",
+        "mediahub.publishing.scheduler.schedule_post",
         lambda **kw: {"ok": True, "update_id": "u-1", "channel_id": kw["channel_id"], "raw": {}},
     )
     c = app.test_client()
@@ -378,7 +378,7 @@ def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
     j = r.get_json()
     assert j["ok"] is True
     assert j["schedule_status"] == "scheduled"
-    assert len(j["buffer_update_ids"]) == 2
+    assert len(j["scheduler_update_ids"]) == 2
     assert j["scheduled_at"].startswith("2026-06-01")
 
     # Workflow sidecar was updated
@@ -387,20 +387,20 @@ def test_api_schedule_happy_path(app, monkeypatch, tmp_path):
     state = ws.load("run1").get("cardA")
     assert state is not None
     assert state.schedule_status == ScheduleStatus.SCHEDULED
-    assert state.buffer_update_id == "u-1;u-1"
+    assert state.scheduler_update_id == "u-1;u-1"
     assert state.schedule_error is None
 
 
-def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
+def test_api_schedule_scheduler_failure_preserves_caption_and_marks_failed(
     app, monkeypatch
 ):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test")
     _approve("run2", "cardB")
 
     def fail(**kw):
-        raise BufferAPIError("Profile has reached its queue limit.")
+        raise SchedulerAPIError("Profile has reached its queue limit.")
 
-    monkeypatch.setattr("mediahub.publishing.buffer.schedule_post", fail)
+    monkeypatch.setattr("mediahub.publishing.scheduler.schedule_post", fail)
     c = app.test_client()
     r = c.post(
         "/api/runs/run2/card/cardB/schedule",
@@ -421,7 +421,7 @@ def test_api_schedule_buffer_failure_preserves_caption_and_marks_failed(
 
 
 def test_api_schedule_bad_iso_time_returns_400(app, monkeypatch):
-    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "1/test")
+    monkeypatch.setenv("SCHEDULER_ACCESS_TOKEN", "1/test")
     _approve("r", "c")
     c = app.test_client()
     r = c.post(
@@ -444,7 +444,7 @@ def test_workflow_state_round_trips_schedule_fields(tmp_path):
     ws.set_schedule(
         "run-x", "card-y",
         schedule_status=ScheduleStatus.SCHEDULED,
-        buffer_update_id="update-1",
+        scheduler_update_id="update-1",
         scheduled_at="2026-06-01T10:00:00+00:00",
         schedule_error=None,
     )
@@ -452,7 +452,7 @@ def test_workflow_state_round_trips_schedule_fields(tmp_path):
     assert "card-y" in states
     s = states["card-y"]
     assert s.schedule_status == ScheduleStatus.SCHEDULED
-    assert s.buffer_update_id == "update-1"
+    assert s.scheduler_update_id == "update-1"
     assert s.scheduled_at == "2026-06-01T10:00:00+00:00"
 
 
@@ -475,4 +475,4 @@ def test_workflow_state_backwards_compatible_with_old_sidecar(tmp_path):
     s = states["card-a"]
     assert s.status.value == "approved"
     assert s.schedule_status == ScheduleStatus.QUEUED
-    assert s.buffer_update_id is None
+    assert s.scheduler_update_id is None
