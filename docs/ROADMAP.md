@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-12 · `9888b4a00` · Merge pull request #431 from elijahkendrick04/claude/nifty-brown-3i9ami
+**Last updated:** 2026-06-13 · `b7052ff57` · skills: add motion-craft + graphic-craft from HyperFrames (#437)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -702,6 +702,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `b7052ff57` | skills: add motion-craft + graphic-craft from HyperFrames (#437) |
 | 2026-06-12 | `3474910ad` | Remove claude-flow-dependent coding skills (no MCP/CLI access) |
 | 2026-06-12 | `73f198afb` | Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4 |
 | 2026-06-12 | `46d3616e7` | fix: a11y: Documents must have <title> element to aid in navigati (#424) |
@@ -710,7 +711,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `31785c89e` | build(deps): bump the python-deps group with 36 updates |
 | 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
 | 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
-| 2026-06-12 | `22224083a` | Revert "Make the home-page developer-login link clearly visible" |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
