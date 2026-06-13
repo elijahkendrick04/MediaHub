@@ -400,13 +400,17 @@ def _gen_longform(
             pass
     sponsor = (club_brand.get("sponsor_name") or "").strip()
     if sponsor:
-        system_parts.append(f"The club's sponsor is {sponsor} — a brief, natural mention is welcome.")
+        system_parts.append(
+            f"The club's sponsor is {sponsor} — a brief, natural mention is welcome."
+        )
 
     brief = _narrate_brief(payload) or fallback_text
     try:
         from mediahub.media_ai.llm import generate
 
-        text = generate(brief, system="\n\n".join(p for p in system_parts if p), max_tokens=max_tokens)
+        text = generate(
+            brief, system="\n\n".join(p for p in system_parts if p), max_tokens=max_tokens
+        )
     except Exception:
         return fallback_text
     text = (text or "").strip()
