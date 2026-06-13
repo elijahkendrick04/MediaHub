@@ -5667,6 +5667,18 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   color: var(--ink);
   transform: translateY(-1px);
 }
+/* Press + keyboard-focus parity with .btn — the hero CTAs are the most
+   prominent primary actions in the app and were missing both: a press
+   settles the hover lift (so the button feels responsive to the click),
+   and a visible focus ring keeps them keyboard-navigable. */
+.mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
+.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
+.mh-cta-primary:focus-visible,
+.mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .mh-cta-primary, .mh-cta-secondary { transition: background var(--transition), box-shadow var(--transition), border-color var(--transition); }
+  .mh-cta-primary:hover, .mh-cta-secondary:hover, .mh-cta-primary:active, .mh-cta-secondary:active { transform: none; }
+}
 .mh-hero-meta {
   margin-top: var(--sp-7);
   padding-top: var(--sp-4);
@@ -5860,6 +5872,12 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   text-decoration: none;
 }
 .mh-template:hover::before { opacity: 1; }
+/* The Create ("Add input") and Settings grids are tile-LINKS — they had a
+   hover state but no keyboard focus ring (a tabbing volunteer saw nothing)
+   and no pressed state. Add both, reusing the lane focus ring used on .btn. */
+.mh-template:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
+.mh-template:focus-visible::before { opacity: 1; }
+.mh-template:active { background: var(--surface-3); }
 .mh-template-icon {
   width: 40px; height: 40px;
   border-radius: 0;
@@ -8381,8 +8399,9 @@ def create_app() -> Flask:
                 if "<form" in html_text.lower():
                     tok = _csrf_token()
                     injected = _FORM_TAG_RX.sub(
-                        lambda m: m.group(1)
-                        + f'<input type="hidden" name="csrf_token" value="{tok}">',
+                        lambda m: (
+                            m.group(1) + f'<input type="hidden" name="csrf_token" value="{tok}">'
+                        ),
                         html_text,
                     )
                     if injected != html_text:
@@ -11774,29 +11793,7 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {_provenance_card}
 
-<div class="card">
-  <h2>Recognition summary</h2>
-  <div class="stat-block">{rec_stats_html}</div>
-  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
-    <a class="btn secondary" href="{_export_url}">Download export</a>
-    <form method="post" action="{_delete_url}" style="display:inline" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
-      <button class="btn danger" type="submit">Delete run</button>
-    </form>
-  </div>
-  <details style="margin-top:var(--sp-4)">
-    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
-    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
-      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
-      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
-    </div>
-  </details>
-</div>
-
 {workflow_summary_card}
-
-{meet_ctx_html}
-
-{pb_audit_html}
 
 {warn_html}
 
@@ -11820,6 +11817,33 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </div>
   <div id="ach-list">{ach_rows_html_wf}</div>
 </div>
+
+<!-- Run detail & diagnostics: the recognition read, meet context, PB audit and
+     raw tables a volunteer rarely needs are demoted below the decision surface,
+     so the page leads with the task (review & approve) rather than the data. -->
+<div style="margin:var(--sp-8) 0 var(--sp-3) 0;display:flex;align-items:center;gap:14px">
+  <span style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);white-space:nowrap">Run detail &amp; diagnostics</span>
+  <span style="flex:1;height:1px;background:var(--hairline)"></span>
+</div>
+
+<div class="card">
+  <h2>Recognition summary</h2>
+  <div class="stat-block">{rec_stats_html}</div>
+  <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{_export_url}">Download export</a>
+  </div>
+  <details style="margin-top:var(--sp-4)">
+    <summary style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);cursor:pointer">Developer tools</summary>
+    <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-3)">
+      <a class="btn secondary" href="{_rec_json_url}" target="_blank" rel="noopener" style="font-size:12px">Download recognition JSON</a>
+      <a class="btn secondary" href="{_gt_url}" style="font-size:12px">Run ground-truth check</a>
+    </div>
+  </details>
+</div>
+
+{meet_ctx_html}
+
+{pb_audit_html}
 
 <div class="card">
   <details>
@@ -11856,6 +11880,18 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
       </table>
     </div>
   </details>
+</div>
+
+<div class="card" style="border-color:rgba(255,107,107,0.25);margin-top:var(--sp-6)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0 0 2px 0;font-size:15px">Delete this run</h2>
+      <p class="muted" style="margin:0;font-size:12px">Removes the generated cards and review state for this run. Source files stay on disk and can be re-processed.</p>
+    </div>
+    <form method="post" action="{_delete_url}" onsubmit="return confirm('Delete this run permanently? Source files stay on disk; generated cards and the review state are removed.')">
+      <button class="btn danger" type="submit">Delete run</button>
+    </form>
+  </div>
 </div>
 
 <script>
@@ -13417,7 +13453,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Complaints</h2>
-  <p>Think we've handled personal data wrongly? <a href="{url_for('complaints_form')}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
+  <p>Think we've handled personal data wrongly? <a href="{url_for("complaints_form")}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
 </div>
 """
         body = _legal.privacy_html(
@@ -13542,7 +13578,7 @@ Relay team broke club record"></textarea>
 </section>
 <div class="card">
   {err_html}
-  <form method="post" action="{url_for('complaints_submit')}">
+  <form method="post" action="{url_for("complaints_submit")}">
     <label>Your name<br><input type="text" name="name" maxlength="200" required></label><br>
     <label>How can we reach you? (email or phone)<br><input type="text" name="contact" maxlength="300" required></label><br>
     <label>You are…<br>
@@ -13715,7 +13751,7 @@ Relay team broke club record"></textarea>
 <div class="card"><h2>Incident register</h2>
 <table><thead><tr><th>Ref</th><th>Opened</th><th>Title</th><th>Severity</th><th>Personal data</th><th>Status</th></tr></thead>
 <tbody>{inc_rows}</tbody></table>
-<form method="post" action="{url_for('admin_compliance_incident')}" style="margin-top:12px">
+<form method="post" action="{url_for("admin_compliance_incident")}" style="margin-top:12px">
   <input type="text" name="title" placeholder="Incident title" maxlength="300" required>
   <select name="severity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select>
   <label><input type="checkbox" name="personal_data" value="1"> personal data involved</label>
@@ -13797,7 +13833,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Lawful basis &amp; gating mode</h2>
-  <form method="post" action="{url_for('org_consent_settings')}">
+  <form method="post" action="{url_for("org_consent_settings")}">
     <label>Lawful basis for publication<br>
       <select name="lawful_basis_publication">
         <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
@@ -13831,7 +13867,7 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Under-18 content controls</h2>
   <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
-  <form method="post" action="{url_for('org_child_policy_settings')}">
+  <form method="post" action="{url_for("org_child_policy_settings")}">
     <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
     <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
     <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
@@ -13842,18 +13878,18 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Retention</h2>
   <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
-  <form method="post" action="{url_for('org_retention_settings')}">
-    <label>Raw uploaded results files (days, default {_h(str(_ret_global('raw_uploads')))})<br>
-      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get('raw_uploads', '')))}"></label><br>
-    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global('runs')))})<br>
-      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get('runs', '')))}"></label><br>
+  <form method="post" action="{url_for("org_retention_settings")}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
     <button class="btn" type="submit">Save retention</button>
   </form>
 </div>
 
 <div class="card">
   <h2>Record a consent decision</h2>
-  <form method="post" action="{url_for('org_consent_record')}">
+  <form method="post" action="{url_for("org_consent_record")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
     <label>Decision<br>
       <select name="status">
@@ -14041,7 +14077,7 @@ Relay team broke club record"></textarea>
 </section>
 <div class="card">
   <h2>Log a request</h2>
-  <form method="post" action="{url_for('org_dsr_open')}">
+  <form method="post" action="{url_for("org_dsr_open")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
     <label>Request type<br>
       <select name="request_type">
@@ -15803,6 +15839,45 @@ Relay team broke club record"></textarea>
                 f"</tr>"
             )
 
+        # --- Posture summary — the page's lead state. Make the safe default
+        # legible and reassuring, and surface clearly when any type has been
+        # opted into autonomy. Counts read straight off the resolved policy.
+        _levels = [current_policy.get(ct.value, "approval_required") for ct in _CT_REGISTRY]
+        _n_types = len(_levels)
+        _n_auto = sum(1 for v in _levels if v == "fully_autonomous")
+        _n_draft = sum(1 for v in _levels if v == "draft_only")
+        _n_gated = _n_types - _n_auto
+        if _n_auto == 0:
+            _posture_accent = "var(--good)"
+            _posture_bg = "var(--good-bg)"
+            _posture_title = "Every content type requires your approval"
+            _posture_sub = (
+                f"All {_n_types} content types are gated &mdash; nothing publishes "
+                "without an explicit human approval."
+                + (
+                    f" {_n_draft} {'is' if _n_draft == 1 else 'are'} draft-only."
+                    if _n_draft
+                    else ""
+                )
+            )
+        else:
+            _posture_accent = "var(--warn)"
+            _posture_bg = "var(--warn-bg)"
+            _posture_title = f"{_n_auto} of {_n_types} content types may auto-publish"
+            _posture_sub = (
+                f"{_n_auto} type{'s' if _n_auto != 1 else ''} can publish without a human "
+                "when every publish-gate guardrail passes; the other "
+                f"{_n_gated} still require approval."
+            )
+        posture_html = (
+            f'<div style="margin-bottom:18px;padding:14px 18px;background:{_posture_bg};'
+            f"border:1px solid {_posture_accent};border-left:3px solid {_posture_accent};"
+            f'border-radius:0 var(--radius-sm) var(--radius-sm) 0">'
+            f'<div style="font-weight:700;font-size:14px;margin-bottom:2px">{_h(_posture_title)}</div>'
+            f'<div style="font-size:13px;color:var(--ink-dim)">{_posture_sub}</div>'
+            f"</div>"
+        )
+
         warning_html = (
             '<div id="mh-autonomy-warn" style="display:none;margin-top:12px;padding:12px 18px;'
             "background:rgba(255,170,58,0.10);border-left:3px solid var(--mh-prim-warning-500);"
@@ -15953,10 +16028,11 @@ window.mhAutonomySweepNow = function(btn) {
         )
 
         return (
-            f'<p class="dim" style="margin-bottom:14px">Control how much MediaHub may publish '
-            f"on behalf of <b>{_h(prof.display_name)}</b> for each content type. "
-            f"Everything defaults to <em>Approval required</em> — no autonomous publishing "
-            f"without your explicit opt-in.</p>"
+            f"{posture_html}"
+            f'<p class="dim" style="margin-bottom:14px">Set a publishing level per content type '
+            f"for <b>{_h(prof.display_name)}</b>. Everything defaults to "
+            f"<em>Approval required</em> &mdash; a type only publishes on its own once you "
+            f"opt it in below, and even then every publish-gate guardrail still applies.</p>"
             f"{form_html}{ops_html}{audit_html}{js_html}"
         )
 
@@ -19054,7 +19130,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {quick_err_html}
 
 <div class="card" style="padding:20px 22px;margin-bottom:18px">
-  <form method="post" action="{quick_url}" enctype="multipart/form-data" data-loader-text="Building your graphic">
+  <form method="post" action="{
+            quick_url
+        }" enctype="multipart/form-data" data-loader-text="Building your graphic">
     <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
     <textarea id="ft-prompt" name="prompt" rows="4" required
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
@@ -21595,7 +21673,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" style="max-width:420px;margin:40px auto">
   <h2>Two-factor code</h2>
   <p class="muted">Enter the 6-digit code from your authenticator app.</p>
-  <form method="post" action="{url_for('login_2fa')}">
+  <form method="post" action="{url_for("login_2fa")}">
     <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
     <button class="btn" type="submit">Verify</button>
   </form>
@@ -21673,7 +21751,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body = f"""
 <div class="card" style="max-width:520px;margin:40px auto">
   <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
-  <form method="post" action="{url_for('account_2fa')}">
+  <form method="post" action="{url_for("account_2fa")}">
     <input type="hidden" name="action" value="disable">
     <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
     <button class="btn secondary" type="submit">Disable 2FA</button>
@@ -21690,7 +21768,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
   <p><code>{_h(secret)}</code></p>
   <p class="muted" style="word-break:break-all">{_h(uri)}</p>
-  <form method="post" action="{url_for('account_2fa')}">
+  <form method="post" action="{url_for("account_2fa")}">
     <input type="hidden" name="action" value="enable">
     <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
     <button class="btn" type="submit">Enable 2FA</button>
