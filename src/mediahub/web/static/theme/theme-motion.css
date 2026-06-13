@@ -572,6 +572,10 @@
 .mh-steploader__step[data-state="done"] { color: var(--mh-success); border-color: color-mix(in oklch, var(--mh-success) 36%, var(--mh-outline-variant)); }
 .mh-steploader__step[data-state="done"] .mh-steploader__dot { color: var(--mh-success); border-color: var(--mh-success); background: var(--mh-success); }
 .mh-steploader__step[data-state="done"] .mh-steploader__dot::after { content: "✓"; color: var(--mh-surface-deep); font-weight: 700; }
+.mh-steploader__step[data-state="error"] { color: var(--mh-error); border-color: color-mix(in oklch, var(--mh-error) 40%, var(--mh-outline-variant)); }
+.mh-steploader__step[data-state="error"] .mh-steploader__dot { color: var(--mh-error); border-color: var(--mh-error); }
+.mh-steploader__step[data-state="error"] .mh-steploader__dot::after { content: "✕"; color: var(--mh-error); font-weight: 700; }
+.mh-steploader__label { min-width: 0; overflow-wrap: anywhere; }
 
 /* =====================================================================
    12. VANISH INPUT  (rotating placeholders — search / command)

@@ -11009,6 +11009,7 @@ def create_app() -> Flask:
 <div class="card">
   <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
+  <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
   <details style="margin-top:var(--sp-5)">
     <summary style="cursor:pointer;color:var(--ink-dim);font-size:13px;user-select:none">Show technical log</summary>
@@ -11081,6 +11082,7 @@ def create_app() -> Flask:
     var log = (j && j.log) || [];
     if (logEl && log.length) {{ logEl.textContent = log.join('\\n'); logEl.scrollTop = logEl.scrollHeight; }}
     if (stepEl) stepEl.textContent = log.length + ' step' + (log.length === 1 ? '' : 's');
+    if (window.MH && MH.renderLogSteps) MH.renderLogSteps('mh-steps', log, status);
 
     if (status === 'done') {{
       stopped = true;

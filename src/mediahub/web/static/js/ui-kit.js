@@ -44,6 +44,11 @@
     el.setAttribute(key, "1");
     return true;
   }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
 
   /* --- Pointer position (spotlight / glow-border / glare / lens) -------- */
   function bindPointer(el) {
@@ -341,6 +346,26 @@
     if (typeof btn === "string") btn = document.querySelector(btn);
     if (!btn) return;
     btn.setAttribute("data-mh-state", state || "idle");
+  };
+
+  /* --- Live multi-step loader rendered from a pipeline log array ------- */
+  MH.renderLogSteps = function (container, log, status) {
+    if (typeof container === "string") container = document.getElementById(container);
+    if (!container || !log) return;
+    var key = log.length + ":" + (status || "");
+    if (container.getAttribute("data-mh-key") === key) return; // only redraw on change
+    container.setAttribute("data-mh-key", key);
+    var lines = log.slice(-6), html = "";
+    for (var i = 0; i < lines.length; i++) {
+      var isLast = i === lines.length - 1;
+      var state = status === "done" ? "done"
+        : status === "error" ? (isLast ? "error" : "done")
+        : isLast ? "active" : "done";
+      html += '<div class="mh-steploader__step" data-state="' + state + '">' +
+              '<span class="mh-steploader__dot"></span>' +
+              '<span class="mh-steploader__label">' + esc(lines[i]) + "</span></div>";
+    }
+    container.innerHTML = html;
   };
 
   /* --- Init / re-init ------------------------------------------------- */
