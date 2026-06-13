@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `6732378ce` · Merge pull request #475 from elijahkendrick04/claude/dreamy-euler-cc25o8
+**Last updated:** 2026-06-14 · `8892126a5` · Merge pull request #477 from elijahkendrick04/claude/keen-mendel-szs10h
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1365,6 +1365,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `d82f5b630` | U.5-U.16: design-polish ideas from godly.website review — top of Phase U |
 | 2026-06-13 | `1bfbe9d6a` | Fix year-of-birth leaking into the club field (club picker showed '(04)') |
 | 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
 | 2026-06-13 | `f444419a9` | Add live progress bar to results-from-a-link fetch |
@@ -1373,5 +1374,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
 | 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
 | 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
-| 2026-06-13 | `040cd8d61` | Design every primary-flow state (U.2): honest AI error, pipeline failure, parse notes, success toast |
 <!-- /ROADMAP:ACTIVITY -->
