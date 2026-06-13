@@ -4795,6 +4795,22 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
+/* Signed-in background watermark: the active org's logo(s), faint, behind all
+   content (main.wrap is z-index:1). Gentle drift unless reduced-motion. */
+.mh-bg-logos { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.mh-bg-logo {
+  position: absolute; object-fit: contain; max-width: 40vw; height: auto;
+  filter: saturate(0.9);
+  animation: mh-bg-drift 30s ease-in-out infinite alternate;
+}
+@keyframes mh-bg-drift {
+  from { transform: translate3d(0, 0, 0) rotate(-1deg); }
+  to   { transform: translate3d(0, -22px, 0) rotate(1deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-bg-logo { animation: none; }
+}
+
 /* Card hover */
 .card { transition: background var(--transition), border-color var(--transition); }
 a.card, .card[data-interactive] { cursor: pointer; }
@@ -6947,6 +6963,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     signed_in_primary = ""
     signed_in_secondary = ""
     signed_in_logo = ""
+    signed_in_bg_logos: list[str] = []
     if signed_in_pid:
         try:
             _p = load_profile(signed_in_pid)
@@ -6982,8 +6999,57 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                             signed_in_logo = _cap
                 except Exception:
                     signed_in_logo = ""
+                # The org's logos, surfaced as a faint background watermark on
+                # every page while signed in (the "team's logos seamlessly in
+                # the background" ask). Uploaded logos served first-party; the
+                # signed-in pid IS the active profile, so the active-profile
+                # serve route resolves them.
+                try:
+                    for _e in getattr(_p, "brand_logos", None) or []:
+                        if (
+                            isinstance(_e, dict)
+                            and _e.get("logo_id")
+                            and str(_e.get("mime", "")).startswith("image/")
+                        ):
+                            signed_in_bg_logos.append(
+                                url_for(
+                                    "organisation_setup_logo_serve",
+                                    logo_id=_e["logo_id"],
+                                )
+                            )
+                        if len(signed_in_bg_logos) >= 4:
+                            break
+                    if not signed_in_bg_logos and signed_in_logo:
+                        signed_in_bg_logos = [signed_in_logo]
+                except Exception:
+                    signed_in_bg_logos = [signed_in_logo] if signed_in_logo else []
         except Exception:
             signed_in_name = ""
+
+    # Faint background watermark of the active org's logo(s) on every page
+    # while signed in. A handful of large, low-opacity marks scattered in the
+    # page margins, behind all content (z-index 0; main content is z-index 1).
+    bg_logos_html = ""
+    if signed_in_bg_logos:
+        _specs = [
+            # (top, left, size_px, opacity, drift_delay_s)
+            ("5%", "-3%", 230, 0.055, 0),
+            ("62%", "-5%", 300, 0.045, 3),
+            ("26%", "80%", 250, 0.05, 1.5),
+            ("76%", "70%", 200, 0.04, 4.5),
+            ("46%", "38%", 170, 0.03, 2.2),
+            ("-5%", "58%", 240, 0.05, 6),
+        ]
+        _marks = ""
+        for _i, (_t, _l, _sz, _op, _dl) in enumerate(_specs):
+            _src = signed_in_bg_logos[_i % len(signed_in_bg_logos)]
+            _marks += (
+                f'<img class="mh-bg-logo" src="{_h(_src)}" alt="" '
+                f'style="top:{_t};left:{_l};width:{_sz}px;opacity:{_op};'
+                f'animation-delay:{_dl}s" />'
+            )
+        bg_logos_html = f'<div class="mh-bg-logos" aria-hidden="true">{_marks}</div>'
+
     return render_template_string(
         """
 <!DOCTYPE html>
@@ -7040,6 +7106,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
 </head>
 <body>
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
+{{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
   <div class="mh-loader-inner">
     <div class="mh-spinner"></div>
@@ -7931,6 +7998,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         signed_in_primary=signed_in_primary,
         signed_in_secondary=signed_in_secondary,
         signed_in_logo=signed_in_logo,
+        bg_logos_html=bg_logos_html,
         theme_seed_style=_theme_seed_style_block(),
         provider_identity=(
             f"{_legal.COMPANY_NAME} · {_legal.REGISTERED_ADDRESS} · {_legal.CONTACT_EMAIL}"
