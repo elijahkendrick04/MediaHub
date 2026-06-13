@@ -14343,25 +14343,6 @@ Relay team broke club record"></textarea>
         except Exception:
             pass
 
-    def _wants_html_health() -> bool:
-        """True when the request is a genuine browser navigation that should
-        receive the HTML health page (axe-core document-title, WCAG 2.4.2).
-
-        Compares Accept qualities instead of ``best_match``: fetch()/curl/
-        python-requests send ``Accept: */*``, which matches both candidates
-        at equal quality — ``best_match`` then breaks the tie by list order
-        and misclassifies those API callers as browsers (the nav badge
-        choked on the HTML and painted "offline"). A real navigation ranks
-        text/html (q=1) strictly above ``*/*;q=0.8`` so it still gets HTML;
-        clients with no Accept header score 0 = 0 and stay on JSON.
-        ``Sec-Fetch-Dest: document`` covers proxies that strip Accept.
-        """
-        accept = request.accept_mimetypes
-        return (
-            accept["text/html"] > accept["application/json"]
-            or request.headers.get("Sec-Fetch-Dest", "") == "document"
-        )
-
     @app.route("/health")
     def health():
         import time as _time
@@ -14378,32 +14359,8 @@ Relay team broke club record"></textarea>
                     break
         _record_heartbeat_safe("health", payload["ok"], started, error=first_error)
         status_code = 200 if payload["ok"] else 503
-        # Return HTML (with a valid <title>) when a browser navigates to the
-        # page so that axe-core's document-title rule is satisfied; API and
-        # monitoring clients (Accept: application/json, */*, or no Accept)
-        # get plain JSON — see _wants_html_health.
-        if _wants_html_health():
-            status_label = _h("OK" if payload["ok"] else "Degraded")
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                f"<title>MediaHub Health — {status_label}</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html,
-                status=status_code,
-                mimetype="text/html",
-                headers={"Vary": "Accept, Sec-Fetch-Dest"},
-            )
         resp = jsonify(payload)
         resp.status_code = status_code
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
         return resp
 
     _FAVICON_SVG = (
@@ -14513,24 +14470,6 @@ Relay team broke club record"></textarea>
 
     @app.route("/static/theme/fonts.css")
     def static_fonts_css():
-        # Browser navigations (direct URL, axe-core page.goto) get a minimal
-        # HTML document with a valid <title> so axe-core's document-title rule
-        # (WCAG 2.4.2) is satisfied.  Stylesheet loads (Sec-Fetch-Dest: style
-        # or Accept: text/css) receive the real CSS file.
-        if _wants_html_health():
-            return Response(
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub — Fonts</title>"
-                "</head>"
-                "<body></body>"
-                "</html>",
-                status=200,
-                mimetype="text/html",
-                headers={"Vary": "Accept, Sec-Fetch-Dest"},
-            )
         return app.send_static_file("theme/fonts.css")
 
     @app.route("/healthz")
@@ -14543,50 +14482,12 @@ Relay team broke club record"></textarea>
         started = _time.monotonic()
         payload = {"ok": True, "version": APP_VERSION, "ts": datetime.now(timezone.utc).isoformat()}
         _record_heartbeat_safe("healthz", True, started)
-        # Return HTML (with a valid <title>) for browser navigations so that
-        # axe-core's document-title rule (WCAG 2.4.2) is satisfied. API and
-        # monitoring callers — including the nav badge's fetch(), curl, and
-        # Render's liveness probe — stay on JSON; see _wants_html_health.
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — OK</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/ping")
     def healthz_ping():
         payload = {"pong": True}
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Ping</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/memory")
     def healthz_memory():
@@ -14621,24 +14522,7 @@ Relay team broke club record"></textarea>
             "turn_into_jobs_limit": _TURN_INTO_LIMIT,
             "ts": datetime.now(timezone.utc).isoformat(),
         }
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Memory</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/deps")
     def healthz_deps():
@@ -14761,24 +14645,7 @@ Relay team broke club record"></textarea>
             _motion_ok = bool(_re_status.get("ffmpeg_available"))
         ok = deps["playwright"].get("chromium") and _motion_ok
         payload = {"ok": bool(ok), "deps": deps}
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Deps</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     # ---- /status -------------------------------------------------------
     #
@@ -15078,24 +14945,7 @@ Relay team broke club record"></textarea>
                 "'open': false means a few errors but no trip yet."
             ),
         }
-        if _wants_html_health():
-            body = _h(json.dumps(payload, indent=2))
-            html = (
-                "<!DOCTYPE html>"
-                '<html lang="en">'
-                "<head>"
-                '<meta charset="utf-8">'
-                "<title>MediaHub Health — Breaker</title>"
-                "</head>"
-                f"<body><pre>{body}</pre></body>"
-                "</html>"
-            )
-            return Response(
-                html, status=200, mimetype="text/html", headers={"Vary": "Accept, Sec-Fetch-Dest"}
-            )
-        resp = jsonify(payload)
-        resp.headers["Vary"] = "Accept, Sec-Fetch-Dest"
-        return resp
+        return jsonify(payload)
 
     @app.route("/healthz/search")
     def healthz_search():
