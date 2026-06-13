@@ -171,10 +171,12 @@ REGISTRY: dict[ContentType, ContentTypeMeta] = {
     ContentType.FREE_TEXT: ContentTypeMeta(
         type=ContentType.FREE_TEXT,
         title="Free Text",
-        description="Describe any moment and get content suggestions.",
+        description="Describe any post in a single prompt — and add photos — to get a branded graphic.",
         input_contract=(
-            "Type or paste a description of anything — a result, an event, a milestone, "
-            "a training session. We identify the strongest social angles and draft platform-ready cards."
+            "Type what you want — a shout-out, a sponsor thank-you, a session update, a "
+            "milestone, anything. MediaHub interprets the prompt, writes the caption, and "
+            "builds a branded graphic from it; attach your own photos and it places them in. "
+            "Lands on a draft you can edit, approve and export."
         ),
         is_implemented=True,
         icon_svg=_PENCIL_SVG,

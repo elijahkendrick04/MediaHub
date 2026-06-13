@@ -6658,6 +6658,14 @@ _VISUAL_PANEL_JS = """<script>
     panel._mh = {url: url, cardId: cardId, fmt: fmt || 'feed_portrait', assetId: '', noPhoto: false};
     mhGen(panel);
   };
+  // Single-prompt flow: render a card's graphic on page load, optionally with
+  // a pre-attached photo as the background. Same pipeline as the button.
+  window.mhAutoGraphic = function(cardId, url, assetId, fmt){
+    var panel = panelFor(cardId);
+    if (!panel) return;
+    panel._mh = {url: url, cardId: cardId, fmt: fmt || 'feed_portrait', assetId: assetId || '', noPhoto: false};
+    mhGen(panel);
+  };
 })();
 </script>"""
 
@@ -17446,11 +17454,20 @@ function mhPlanGenerate(btn) {{
             "free_text": (["Caption", "Graphic"], "~ 15s"),
         }
 
+        # Session Update and Sponsor Post are no longer their own tiles —
+        # Free Text now interprets any such prompt (and adds photos) into a
+        # graphic, so a single "describe it" path covers them. The content
+        # types + their routes stay for deep links/back-compat; they're just
+        # not surfaced as separate Create cards.
+        _hidden_cts = {"session_update", "sponsor_activation"}
+
         tiles_html = ""
         # First implemented tile gets the "Start here" lane-yellow ribbon so
         # users have a clear primary path instead of six equal-weight options.
         primary_marked = False
         for ct, meta in REGISTRY.items():
+            if getattr(meta.type, "value", str(ct)) in _hidden_cts:
+                continue
             # Defensive: a stale endpoint name in the content-type
             # registry must NEVER 500 the whole /make page.
             try:
@@ -18832,24 +18849,61 @@ function copySpotlightCaption(btn, cardIdSafe) {{
                 f'<td class="muted">{_h(ts)}</td></tr>'
             )
         new_url = url_for("free_text_chat_new")
+        quick_url = url_for("free_text_quick_build")
+        quick_err = session.pop("free_text_quick_error", "")
+        quick_err_html = (
+            '<div class="mh-flash error" role="alert" style="margin:0 0 14px;padding:12px 16px;'
+            "border:1px solid rgba(255,107,107,0.30);border-left:3px solid var(--bad);"
+            f'background:var(--bad-bg);color:var(--ink);font-size:13px">{_h(quick_err)}</div>'
+            if quick_err
+            else ""
+        )
         body = f"""
-<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
-  <span class="mh-hero-eyebrow">Free text — chat</span>
-  <h1>Describe the moment.<br><em class="editorial">We brief it.</em></h1>
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-5);margin-bottom:var(--sp-4)">
+  <span class="mh-hero-eyebrow">Free text</span>
+  <h1>Describe it.<br><em class="editorial">Get a graphic.</em></h1>
   <p class="lede">
-  Talk to Claude. Describe what you want to post, answer the assistant's
-  questions, and approve the brief when it's right. The assistant
-  researches the web on its own &mdash; names, venues, PBs, sponsor info &mdash; so
-  the brief is grounded in evidence, not invented.
+  Type what you want &mdash; a shout-out, a sponsor thank-you, a session
+  update, a milestone, anything &mdash; and MediaHub interprets the prompt and
+  builds a branded graphic from it. Add your own photos and it places them in.
+  No forms, no templates: the prompt carries the context.
   </p>
-  <div class="mh-hero-actions">
-    <form method="post" action="{new_url}" style="display:inline">
-      <button type="submit" class="mh-cta-primary" style="border:0">Start a new chat &rarr;</button>
-    </form>
-  </div>
 </section>
 
 {_llm_unavailable_banner()}
+{quick_err_html}
+
+<div class="card" style="padding:20px 22px;margin-bottom:18px">
+  <form method="post" action="{quick_url}" enctype="multipart/form-data" data-loader-text="Building your graphic">
+    <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
+    <textarea id="ft-prompt" name="prompt" rows="4" required
+      placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
+      style="width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--panel);border-radius:8px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px">
+      <label class="btn secondary" style="font-size:13px;cursor:pointer;margin:0">
+        &#x1F4CE; Add photos
+        <input type="file" name="photos" accept="image/*" multiple style="display:none"
+          onchange="var n=this.files.length;var s=document.getElementById('ft-photo-count');if(s)s.textContent=n?(n+' photo'+(n===1?'':'s')+' attached'):'';">
+      </label>
+      <span id="ft-photo-count" class="dim" style="font-size:12px"></span>
+      <button type="submit" class="mh-cta-primary" style="border:0;margin-left:auto">Generate graphic &rarr;</button>
+    </div>
+    <p class="dim" style="font-size:12px;margin:10px 0 0 0">You'll land on a draft with the graphic rendered &mdash; edit the
+    caption, swap the photo, change format, approve, or export from there.</p>
+  </form>
+</div>
+
+<div class="card" style="padding:16px 20px;margin-bottom:18px">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="font-weight:600">Want to refine it together first?</div>
+      <p class="dim" style="font-size:13px;margin:4px 0 0 0">Chat it through &mdash; the assistant researches names, venues and PBs and proposes a brief you approve before generating.</p>
+    </div>
+    <form method="post" action="{new_url}" style="margin:0">
+      <button type="submit" class="btn secondary" style="border:0;white-space:nowrap">Start a chat &rarr;</button>
+    </form>
+  </div>
+</div>
 
 <div class="card">
   <h2>Past chats</h2>
@@ -18876,6 +18930,118 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 </p>
 """
         return _layout("Free text — chat", body, active="create")
+
+    def _quick_save_library_photo(f, profile_id: str):
+        """Save one uploaded photo into the org's media library so it shows up
+        in the per-graphic photo picker. Returns the saved MediaAsset or None."""
+        if not (_v8_ok and _v8_get_media_store is not None and profile_id):
+            return None
+        import uuid as _uuid
+
+        from mediahub.media_library.models import MediaAsset
+
+        upload_dir = UPLOADS_DIR / "media_library" / profile_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(f.filename or "upload.jpg").suffix.lower() or ".jpg"
+        dest = upload_dir / f"asset_{_uuid.uuid4().hex[:12]}{ext}"
+        f.save(str(dest))
+        store = _v8_get_media_store()
+        asset = MediaAsset(
+            id="",
+            filename=Path(f.filename or dest.name).name,
+            path=str(dest),
+            type="other",
+            description_raw="",
+            profile_id=profile_id,
+        )
+        return store.save(asset)
+
+    @app.route("/free-text/quick-build", methods=["POST"])
+    def free_text_quick_build():
+        """Single prompt → branded graphic.
+
+        The user describes what they want (optionally attaching photos); we
+        interpret it into a brief with one LLM call, save it as a draft pack,
+        and land on the draft with the graphic auto-rendering. This is the
+        ChatGPT-style "describe it and get a graphic" path that supersedes the
+        bespoke Session Update / Sponsor Post forms — the prompt itself carries
+        the context, whatever it is.
+        """
+        from mediahub.free_text_chat.agent import build_brief_from_prompt
+        from mediahub.ai_core import ProviderNotConfigured, ProviderError
+        from mediahub.club_platform.stub_pack_store import save_pack
+
+        prompt = (request.form.get("prompt") or "").strip()
+        if not prompt:
+            return redirect(url_for("free_text_chat_page"))
+        active_pid = _active_profile_id() or ""
+
+        # Uploaded photos → media library so they're available to the graphic
+        # picker; the first becomes the auto-rendered background.
+        uploaded_ids: list[str] = []
+        for f in request.files.getlist("photos"):
+            if not f or not f.filename:
+                continue
+            try:
+                a = _quick_save_library_photo(f, active_pid)
+                if a is not None:
+                    uploaded_ids.append(a.id)
+            except Exception:
+                app.logger.exception("free-text quick-build photo upload failed")
+        picked_ids = [i for i in request.form.getlist("library_asset_id") if i]
+
+        club_brand = _active_club_brand_for_llm()
+        try:
+            brief = build_brief_from_prompt(prompt, club_brand=club_brand)
+        except (ProviderNotConfigured, ProviderError) as e:
+            # Honest error — no fake graphic. Bounce back with the reason.
+            session["free_text_quick_error"] = str(e)
+            return redirect(url_for("free_text_chat_page"))
+
+        caption = "\n\n".join(
+            [p for p in [brief.get("headline", ""), brief.get("body", "")] if p]
+        ).strip()
+        card = {
+            "platform": brief.get("platform") or "Instagram",
+            "caption": caption,
+            "hashtags": brief.get("hashtags") or [],
+            "confidence": 0.9,
+            "notes": brief.get("visual_concept", "") or "",
+            "status": "queue",
+        }
+        form_data = {
+            "free_text": prompt,
+            "source": "quick",
+            "title": brief.get("title") or "",
+            "wants_reel": "1" if brief.get("wants_reel") else "",
+        }
+        if active_pid:
+            form_data["profile_id"] = active_pid
+
+        chosen = ""
+        all_ids = uploaded_ids + picked_ids
+        if all_ids and _v8_get_media_store is not None and active_pid:
+            try:
+                store = _v8_get_media_store()
+                resolved = [
+                    a
+                    for a in (store.get(aid) for aid in all_ids)
+                    if a is not None and a.profile_id == active_pid
+                ]
+                if resolved:
+                    form_data["library_asset_ids"] = ",".join(a.id for a in resolved)
+                    form_data["library_asset_paths"] = ",".join(a.path for a in resolved)
+                    form_data["attached_photo_path"] = resolved[0].path
+                    form_data["attached_photo_filename"] = resolved[0].filename
+                    chosen = resolved[0].id
+            except Exception:
+                app.logger.exception("free-text quick-build photo resolve failed")
+
+        saved = save_pack("free_text", form_data, [card], profile_id=active_pid or None)
+        target = url_for("stub_pack_view", pack_id=saved["pack_id"]) + "?autographic=1"
+        if chosen:
+            target += "&photo=" + chosen
+        return redirect(target)
 
     @app.route("/free-text/chat/new", methods=["GET", "POST"])
     def free_text_chat_new():
@@ -19431,6 +19597,19 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             footer,
             1,
         )
+        # Single-prompt flow lands here with ?autographic=1 — render the first
+        # card's graphic on load (with the attached photo as background if one
+        # was passed) so "describe it → get a graphic" needs no extra click.
+        auto_js = ""
+        if request.args.get("autographic") and _pack_cards:
+            _g0 = f"{_graphic_api_base}/0/create-graphic"
+            _photo = (request.args.get("photo") or "").strip()
+            auto_js = (
+                "<script>document.addEventListener('DOMContentLoaded',function(){"
+                "if(window.mhAutoGraphic){window.mhAutoGraphic("
+                f"{json.dumps(f'{pack_id}-0')},{json.dumps(_g0)},"
+                f"{json.dumps(_photo)},'feed_portrait');}}}});</script>"
+            )
         body = (
             header
             + spotlight_tools_html
@@ -19439,6 +19618,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             + spotlight_modal_html
             + _VISUAL_PANEL_JS
             + _DRAFT_REGEN_JS
+            + auto_js
         )
         return _layout(rec.get("title") or "Draft", body, active="create")
 
