@@ -326,6 +326,13 @@ Branch model: feature branches from `dev`. Merges to `main` may happen
 autonomously without human approval, gated only on green CI — `main` is a
 trunk that auto-deploys to Render production, so a red build must never be
 merged. (This replaces the former human-approval-before-`main` rule.)
+**Merge method: merge commits, not squash** (maintainer decision 2026-06-13;
+squash + rebase disabled repo-side so the merge button can only create a merge
+commit). PR commit bodies therefore land on `main` verbatim — which the
+roadmap bot relies on to read `roadmap: <ID> <status>` directives. The two
+self-merging bots (`roadmap-autoupdate.yml`, the `autotest` CI fixer in
+`gitops.py`) use `gh pr merge --merge`; the roadmap bot keeps its `[skip render]`
+marker on the merge-commit subject via `--subject`.
 The product is delivered to customers as a hosted web application — there is
 no customer-facing self-host or local-install path. This is a deliberate,
 decided commercial principle (hosted-only; no free or capped self-host tier) —

@@ -358,7 +358,7 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
         return "gh CLI not found — cannot enable CI-gated auto-merge"
     # --delete-branch tidies the loop-owned branch once the auto-merge lands, so
     # these throwaway branches don't accumulate on origin.
-    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch"],
+    m = subprocess.run(["gh", "pr", "merge", branch, "--auto", "--merge", "--delete-branch"],
                        cwd=str(REPO_ROOT), capture_output=True, text=True)
     if m.returncode != 0:
         err = (m.stderr or m.stdout or "").strip()
@@ -378,7 +378,7 @@ def _merge_to_main(branch: str, *, has_pr: bool, files: list[str] | None = None)
                         "Configure required status checks on main (plus AUTOTEST_GH_PAT "
                         "so bot-PR workflows actually run) and auto-merge arms normally.")
             direct = subprocess.run(
-                ["gh", "pr", "merge", branch, "--squash", "--delete-branch"],
+                ["gh", "pr", "merge", branch, "--merge", "--delete-branch"],
                 cwd=str(REPO_ROOT), capture_output=True, text=True)
             if direct.returncode == 0:
                 return "merged directly (PR was already clean — checks verified green)"
