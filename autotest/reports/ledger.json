@@ -5550,7 +5550,7 @@
         "Run axe-core; rule 'document-title' flags 1 node(s)"
       ],
       "screenshot": "",
-      "status": "fixing",
+      "status": "verified-fixed",
       "first_seen": "2026-06-03T04:28:48+00:00",
       "last_seen": "2026-06-13T14:11:28+00:00",
       "seen_count": 12,
@@ -5563,7 +5563,14 @@
       "first_pending_at": null,
       "absent_streak": 0,
       "auto_closed_at": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "verified_fixed": {
+        "commit": "48e913f",
+        "tests": "tests/test_autotest_a11y.py::test_a11y_audit_gated_to_html_content_types",
+        "note": "False positive. axe-core's document-title rule fired on the synthetic viewer Chromium renders for the non-HTML route /healthz/search; this is not a real WCAG document \u2014 the route serves JS/JSON, not an HTML page. Eliminated at source by the finder-precision fix (PR #443): the a11y audit is now gated to HTML responses. Loop-authored fix PR #433 closed as a false-positive fix.",
+        "verified_by": "elijahkendrick04 (operator approval) via Claude Code \u2014 finder-precision fix PR #443",
+        "at": "2026-06-13T19:39:44+00:00"
+      }
     },
     "3f6a64da8324": {
       "fingerprint": "3f6a64da8324",
@@ -5792,7 +5799,7 @@
         "Run axe-core; rule 'document-title' flags 1 node(s)"
       ],
       "screenshot": "",
-      "status": "fixing",
+      "status": "verified-fixed",
       "first_seen": "2026-06-10T20:40:41+00:00",
       "last_seen": "2026-06-13T14:11:28+00:00",
       "seen_count": 22,
@@ -5805,7 +5812,14 @@
       "first_pending_at": null,
       "absent_streak": 0,
       "auto_closed_at": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "verified_fixed": {
+        "commit": "48e913f",
+        "tests": "tests/test_autotest_a11y.py::test_a11y_audit_gated_to_html_content_types",
+        "note": "False positive. axe-core's document-title rule fired on the synthetic viewer Chromium renders for the non-HTML route /manifest.webmanifest; this is not a real WCAG document \u2014 the route serves JS/JSON, not an HTML page. Eliminated at source by the finder-precision fix (PR #443): the a11y audit is now gated to HTML responses. Loop-authored fix PR #434 closed as a false-positive fix.",
+        "verified_by": "elijahkendrick04 (operator approval) via Claude Code \u2014 finder-precision fix PR #443",
+        "at": "2026-06-13T19:39:44+00:00"
+      }
     },
     "bea9ae54f585": {
       "fingerprint": "bea9ae54f585",
@@ -5973,7 +5987,7 @@
         "Run axe-core; rule 'document-title' flags 1 node(s)"
       ],
       "screenshot": "",
-      "status": "fixing",
+      "status": "verified-fixed",
       "first_seen": "2026-06-10T20:40:41+00:00",
       "last_seen": "2026-06-13T14:11:28+00:00",
       "seen_count": 11,
@@ -5986,7 +6000,14 @@
       "first_pending_at": null,
       "absent_streak": 0,
       "auto_closed_at": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "verified_fixed": {
+        "commit": "48e913f",
+        "tests": "tests/test_autotest_a11y.py::test_a11y_audit_gated_to_html_content_types",
+        "note": "False positive. axe-core's document-title rule fired on the synthetic viewer Chromium renders for the non-HTML route /sw.js; this is not a real WCAG document \u2014 the route serves JS/JSON, not an HTML page. Eliminated at source by the finder-precision fix (PR #443): the a11y audit is now gated to HTML responses. Loop-authored fix PR #435 closed as a false-positive fix.",
+        "verified_by": "elijahkendrick04 (operator approval) via Claude Code \u2014 finder-precision fix PR #443",
+        "at": "2026-06-13T19:39:44+00:00"
+      }
     },
     "9bd4cc2d3544": {
       "fingerprint": "9bd4cc2d3544",
@@ -6184,7 +6205,7 @@
         "Run axe-core; rule 'document-title' flags 1 node(s)"
       ],
       "screenshot": "",
-      "status": "fixing",
+      "status": "verified-fixed",
       "first_seen": "2026-06-10T20:40:41+00:00",
       "last_seen": "2026-06-13T14:11:28+00:00",
       "seen_count": 11,
@@ -6197,7 +6218,14 @@
       "first_pending_at": null,
       "absent_streak": 0,
       "auto_closed_at": null,
-      "fix_attempts": 1
+      "fix_attempts": 1,
+      "verified_fixed": {
+        "commit": "48e913f",
+        "tests": "tests/test_autotest_a11y.py::test_a11y_audit_gated_to_html_content_types",
+        "note": "False positive. axe-core's document-title rule fired on the synthetic viewer Chromium renders for the non-HTML route /api/status; this is not a real WCAG document \u2014 the route serves JS/JSON, not an HTML page. Eliminated at source by the finder-precision fix (PR #443): the a11y audit is now gated to HTML responses. Loop-authored fix PR #436 closed as a false-positive fix.",
+        "verified_by": "elijahkendrick04 (operator approval) via Claude Code \u2014 finder-precision fix PR #443",
+        "at": "2026-06-13T19:39:44+00:00"
+      }
     },
     "dcfa5b232547": {
       "fingerprint": "dcfa5b232547",
