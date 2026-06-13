@@ -122,6 +122,17 @@ def test_ai_read_prompt_frames_page_text_as_untrusted():
     assert injection not in rec["system"]
 
 
+def test_ai_read_prompt_has_a_year_column():
+    """The extraction prompt must give a year of birth its own column so a
+    parenthesised '(04)' between the name and the club doesn't get filed into
+    team/affiliation (which would surface as the club)."""
+    rec: dict = {}
+    ai_read_page(_rendered_rr("anything"), generate=_gen("NONE", rec))
+    prompt = rec["prompt"]
+    assert "year" in prompt
+    assert "team/affiliation" in prompt  # explicit steer away from the club cols
+
+
 def test_ai_read_image_only_page():
     rec: dict = {}
     out = ai_read_page(_image_rr(), generate=_gen(_GOOD_CSV, rec))
@@ -141,8 +152,13 @@ def test_ai_read_empty_page_skips_call():
     rec: dict = {}
     # rendered page with no text and no screenshot → nothing to look at
     page = RenderedPage(
-        content=b"", final_url="https://x.test/r/", content_type="text/html",
-        tier="rendered", text="", screenshot=None, captures=[],
+        content=b"",
+        final_url="https://x.test/r/",
+        content_type="text/html",
+        tier="rendered",
+        text="",
+        screenshot=None,
+        captures=[],
     )
     rr = ReadResult(url="https://x.test/r/", page=page, tier="rendered", trigger="thin_body")
     assert ai_read_page(rr, generate=_gen(_GOOD_CSV, rec)) is None
