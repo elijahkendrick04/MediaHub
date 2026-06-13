@@ -7335,7 +7335,13 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
+    {# Pricing is a top-bar item only for signed-out visitors (prospects).
+       Once signed into a club profile it moves into Settings (the "Pricing &
+       plans" tile) so the signed-in chrome stays operations-focused, not
+       sales-focused. #}
+    {% if not signed_in %}
     <a href="{{ url_for('pricing_page') }}" class="{{ 'active' if active=='pricing' else '' }}">Pricing</a>
+    {% endif %}
     {% if signed_in %}
       <a href="{{ url_for('sign_in_page') }}" class="{{ 'active' if active=='signin' else '' }}" title="Switch organisation">Switch org</a>
       <a href="{{ url_for('sign_out') }}">Sign out</a>
@@ -15295,17 +15301,21 @@ Relay team broke club record"></textarea>
         "clubdata": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
         "privacy": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
         "billing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>',
+        "pricing": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
         "sponsors": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.7 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
         "account": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
         "status": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
         "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
     }
 
-    def _settings_card_specs(is_dev: bool) -> list[tuple[str, str, str, str]]:
+    def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
         """(title, description, icon_key, href) for the settings tiles.
 
         11 cards for everyone, a 12th (Developer) only when an operator is
-        signed in — matching the "11 headings, 12 for a developer" spec.
+        signed in — matching the "11 headings, 12 for a developer" spec. A
+        "Pricing & plans" tile is added when signed into a club profile,
+        because Pricing leaves the top bar for signed-in users and lives
+        here instead (grouped with Billing & plan).
         """
         cards: list[tuple[str, str, str, str]] = [
             (
@@ -15356,6 +15366,20 @@ Relay team broke club record"></textarea>
                 "billing",
                 url_for("billing_page"),
             ),
+        ]
+        # Pricing leaves the top bar once signed into a club profile — surface
+        # it here, right after Billing & plan, so signed-in users keep a
+        # one-click route to compare plans. Signed-out visitors use the top nav.
+        if signed_in:
+            cards.append(
+                (
+                    "Pricing & plans",
+                    "Compare plans and what each tier unlocks.",
+                    "pricing",
+                    url_for("pricing_page"),
+                )
+            )
+        cards += [
             (
                 "Sponsors",
                 "Manage sponsors and the sponsor-safe content they appear in.",
@@ -15389,8 +15413,9 @@ Relay team broke club record"></textarea>
     def _render_settings_page() -> str:
         """Render the Settings landing — a grid of heading cards."""
         is_dev = _auth.is_dev_operator()
+        signed_in = bool(_active_profile_id())
         tiles = ""
-        for title, desc, icon_key, href in _settings_card_specs(is_dev):
+        for title, desc, icon_key, href in _settings_card_specs(is_dev, signed_in):
             icon = _SETTINGS_ICONS.get(icon_key, "")
             tiles += (
                 f'<a href="{href}" class="mh-template">'
