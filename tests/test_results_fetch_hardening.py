@@ -194,7 +194,14 @@ def test_run_ai_read_sources_reads_provenance(app_mod):
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "input.bin").write_bytes(
         _zip_with_provenance(
-            [{"source_url": "https://results.example.org/r1", "model": "gemini", "tables": 2, "confidence": 0.81}]
+            [
+                {
+                    "source_url": "https://results.example.org/r1",
+                    "model": "gemini",
+                    "tables": 2,
+                    "confidence": 0.81,
+                }
+            ]
         )
     )
     out = wm._run_ai_read_sources(rid)
@@ -338,16 +345,31 @@ def test_review_shows_source_and_ai_read(app_mod):
     rid = "reviewrun001"
     rdir = wm.RUNS_DIR / rid
     rdir.mkdir(parents=True, exist_ok=True)
-    (rdir / "source_url.txt").write_text("https://results.swimming.org/champs/2026/", encoding="utf-8")
+    (rdir / "source_url.txt").write_text(
+        "https://results.swimming.org/champs/2026/", encoding="utf-8"
+    )
     (rdir / "input.bin").write_bytes(
         _zip_with_provenance(
-            [{"source_url": "https://results.swimming.org/champs/2026/r1", "model": "gemini", "tables": 1, "confidence": 0.74}]
+            [
+                {
+                    "source_url": "https://results.swimming.org/champs/2026/r1",
+                    "model": "gemini",
+                    "tables": 1,
+                    "confidence": 0.74,
+                }
+            ]
         )
     )
     (wm.RUNS_DIR / f"{rid}.json").write_text(
         json.dumps(
             {
-                "meet": {"name": "Spring Champs", "start_date": "2026-03-01", "end_date": "2026-03-02", "course": "SCM", "venue": "Pool"},
+                "meet": {
+                    "name": "Spring Champs",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-02",
+                    "course": "SCM",
+                    "venue": "Pool",
+                },
                 "cards": [],
                 "trust": {},
                 "parse_warnings": [],
