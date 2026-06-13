@@ -15308,9 +15308,7 @@ Relay team broke club record"></textarea>
         "dev": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
     }
 
-    def _settings_card_specs(
-        is_dev: bool, signed_in: bool
-    ) -> list[tuple[str, str, str, str]]:
+    def _settings_card_specs(is_dev: bool, signed_in: bool) -> list[tuple[str, str, str, str]]:
         """(title, description, icon_key, href) for the settings tiles.
 
         11 cards for everyone, a 12th (Developer) only when an operator is
