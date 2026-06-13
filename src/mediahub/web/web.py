@@ -9694,7 +9694,7 @@ def create_app() -> Flask:
     if (!/^https?:\\/\\//i.test(url)) { show(errEl, 'Enter a full URL starting with http:// or https://'); return; }
     btn.disabled = true; input.disabled = true; show(statusEl, 'Starting\\u2026');
     var fd = new FormData(); fd.append('url', url);
-    fetch('__POST_URL__', { method: 'POST', body: fd })
+    fetch('__POST_URL__', { method: 'POST', headers: { 'X-CSRF-Token': '__CSRF__' }, body: fd })
       .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
       .then(function(res){
         if (!res.ok || res.j.error) { throw new Error(res.j.error || 'Could not start the fetch.'); }
@@ -9722,6 +9722,7 @@ def create_app() -> Flask:
                 )
                 .replace("__POST_URL__", _post_url)
                 .replace("__STATUS_BASE__", _status_base)
+                .replace("__CSRF__", _csrf_token())
             )
 
         body = f"""
@@ -10855,7 +10856,7 @@ def create_app() -> Flask:
   }
   b.addEventListener('click',function(){
     b.disabled=true; show('Starting...');
-    fetch('__REFETCH_URL__',{method:'POST'})
+    fetch('__REFETCH_URL__',{method:'POST',headers:{'X-CSRF-Token':'__CSRF__'}})
       .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
       .then(function(res){ if(!res.ok||res.j.error){throw new Error(res.j.error||'Could not start the re-fetch.');} poll(res.j.job_id); })
       .catch(function(e){ b.disabled=false; show(e.message); });
@@ -10864,7 +10865,7 @@ def create_app() -> Flask:
 </script>
 """.replace("__REFETCH_URL__", url_for("run_refetch", run_id=run_id)).replace(
                     "__STATUS_BASE__", url_for("upload_from_url_status", job_id="JOBID")
-                )
+                ).replace("__CSRF__", _csrf_token())
                 _refetch_block = (
                     '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
                     '<button id="mh-refetch-btn" type="button" class="btn secondary">Re-fetch latest results &rarr;</button>'
