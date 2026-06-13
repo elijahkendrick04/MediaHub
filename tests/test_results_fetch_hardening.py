@@ -194,7 +194,14 @@ def test_run_ai_read_sources_reads_provenance(app_mod):
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "input.bin").write_bytes(
         _zip_with_provenance(
-            [{"source_url": "https://results.example.org/r1", "model": "gemini", "tables": 2, "confidence": 0.81}]
+            [
+                {
+                    "source_url": "https://results.example.org/r1",
+                    "model": "gemini",
+                    "tables": 2,
+                    "confidence": 0.81,
+                }
+            ]
         )
     )
     out = wm._run_ai_read_sources(rid)
@@ -227,6 +234,87 @@ def test_refetch_route_starts_new_job(app_mod, monkeypatch):
     assert re.fullmatch(r"[0-9a-f]{12}", r.get_json()["job_id"])
 
 
+# ---------------------------------------------------------------------------
+# CSRF: the paste-a-link + re-fetch POSTs are multipart/no-body and live
+# OUTSIDE /api/, so with CSRF enforced (the production posture) they must carry
+# the X-CSRF-Token header. Without it the before-request guard returns an HTML
+# 403 page that the JSON-expecting frontend chokes on with
+# "Unexpected token '<', "<h1>Reques"... is not valid JSON". The other tests
+# in this file run with CSRF off (TESTING default), so they never saw this.
+# ---------------------------------------------------------------------------
+
+_CSRF_TOK = "tok-regression-0123456789ab"
+
+
+def _enforce_csrf(app):
+    app.config["ENFORCE_CSRF"] = True
+
+
+def test_upload_page_injects_real_csrf_into_link_fetch(app_mod):
+    """The rendered 'paste a results link' card must carry a real token, not
+    the literal __CSRF__ placeholder, and must send it as X-CSRF-Token."""
+    app, wm = app_mod
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["_csrf"] = _CSRF_TOK
+    body = c.get("/upload").get_data(as_text=True)
+    assert "__CSRF__" not in body  # placeholder was substituted
+    assert "X-CSRF-Token" in body
+    assert _CSRF_TOK in body
+
+
+def test_from_url_blocked_without_csrf_but_works_with_header(app_mod, monkeypatch):
+    app, wm = app_mod
+    _enforce_csrf(app)
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: True)
+    from mediahub.results_fetch.crawl import CrawlResult
+
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site",
+        lambda url, **kw: CrawlResult(entry_url=url),
+    )
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["_csrf"] = _CSRF_TOK
+
+    # No token → blocked (the production failure the user hit).
+    blocked = c.post("/upload/from-url", data={"url": "https://results.swimming.org/x/"})
+    assert blocked.status_code == 403
+
+    # With the header the frontend now sends → JSON job id, fetch starts.
+    ok = c.post(
+        "/upload/from-url",
+        data={"url": "https://results.swimming.org/x/"},
+        headers={"X-CSRF-Token": _CSRF_TOK},
+    )
+    assert ok.status_code == 200
+    assert re.fullmatch(r"[0-9a-f]{12}", ok.get_json()["job_id"])
+
+
+def test_refetch_blocked_without_csrf_but_works_with_header(app_mod, monkeypatch):
+    app, wm = app_mod
+    _enforce_csrf(app)
+    monkeypatch.setattr("mediahub.web_research.safe_fetch.is_url_safe", lambda u: True)
+    from mediahub.results_fetch.crawl import CrawlResult
+
+    monkeypatch.setattr(
+        "mediahub.results_fetch.crawl.crawl_results_site",
+        lambda url, **kw: CrawlResult(entry_url=url),
+    )
+    rid = "haslink00003"
+    rdir = wm.RUNS_DIR / rid
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "source_url.txt").write_text("https://results.swimming.org/meet/", encoding="utf-8")
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["_csrf"] = _CSRF_TOK
+
+    assert c.post(f"/runs/{rid}/refetch").status_code == 403
+    ok = c.post(f"/runs/{rid}/refetch", headers={"X-CSRF-Token": _CSRF_TOK})
+    assert ok.status_code == 200
+    assert re.fullmatch(r"[0-9a-f]{12}", ok.get_json()["job_id"])
+
+
 def test_refetch_route_rejects_non_link_run(app_mod):
     app, wm = app_mod
     rid = "nolink000001"
@@ -257,16 +345,31 @@ def test_review_shows_source_and_ai_read(app_mod):
     rid = "reviewrun001"
     rdir = wm.RUNS_DIR / rid
     rdir.mkdir(parents=True, exist_ok=True)
-    (rdir / "source_url.txt").write_text("https://results.swimming.org/champs/2026/", encoding="utf-8")
+    (rdir / "source_url.txt").write_text(
+        "https://results.swimming.org/champs/2026/", encoding="utf-8"
+    )
     (rdir / "input.bin").write_bytes(
         _zip_with_provenance(
-            [{"source_url": "https://results.swimming.org/champs/2026/r1", "model": "gemini", "tables": 1, "confidence": 0.74}]
+            [
+                {
+                    "source_url": "https://results.swimming.org/champs/2026/r1",
+                    "model": "gemini",
+                    "tables": 1,
+                    "confidence": 0.74,
+                }
+            ]
         )
     )
     (wm.RUNS_DIR / f"{rid}.json").write_text(
         json.dumps(
             {
-                "meet": {"name": "Spring Champs", "start_date": "2026-03-01", "end_date": "2026-03-02", "course": "SCM", "venue": "Pool"},
+                "meet": {
+                    "name": "Spring Champs",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-02",
+                    "course": "SCM",
+                    "venue": "Pool",
+                },
                 "cards": [],
                 "trust": {},
                 "parse_warnings": [],
