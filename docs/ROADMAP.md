@@ -60,7 +60,7 @@ itself; say so and it gets rewritten.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `b7052ff57` · skills: add motion-craft + graphic-craft from HyperFrames (#437)
+**Last updated:** 2026-06-13 · `12cf95ffe` · Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, and the list items below
@@ -702,6 +702,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `12cf95ffe` | Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4 |
 | 2026-06-13 | `b7052ff57` | skills: add motion-craft + graphic-craft from HyperFrames (#437) |
 | 2026-06-12 | `3474910ad` | Remove claude-flow-dependent coding skills (no MCP/CLI access) |
 | 2026-06-12 | `73f198afb` | Password-lock developer login, fix gate-broken fonts, stop bot auto-merge, plain-English bot PRs (#4 |
@@ -710,7 +711,6 @@ list and the auto table below, not here.
 | 2026-06-12 | `49db59170` | docs(roadmap): 2026-06-12 daily scan — Swim England Sport:80/Rankings API note + changelog row |
 | 2026-06-12 | `31785c89e` | build(deps): bump the python-deps group with 36 updates |
 | 2026-06-12 | `538a906f9` | Make operator developer sign-in public and passwordless (#418) |
-| 2026-06-12 | `2f4302ea5` | Reapply "Make the home-page developer-login link clearly visible" |
 <!-- /ROADMAP:ACTIVITY -->
 
 ## The rules we build by
