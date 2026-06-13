@@ -776,6 +776,314 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     return btn, panel
 
 
+# --------------------------------------------------------------------------- #
+# U.3 — Explainability & confidence surfaces.
+#
+# The deterministic engine (detectors + ranker) decides *whether* a swim is a
+# PB / medal / record and *how content-worthy* it is. Those outputs —
+# ``confidence_label``, ``quality_band``, ``priority``, the ranker ``factors``
+# and the near-miss category — are never recomputed or re-judged here; U.3 only
+# makes them *read* as the trustworthy intelligence they already are. The
+# plain-English glosses below are fixed UI legends for those deterministic
+# enums (the same pattern U.2 used to humanise parse-note codes) — NOT an AI
+# surface and NOT a heuristic stand-in for one. The LLM-written "Why this card?"
+# prose stays the only judgement surface on the review path; if no provider is
+# configured it still says so honestly rather than fabricate.
+# --------------------------------------------------------------------------- #
+
+# What each deterministic confidence band means, in a volunteer's words.
+_CONFIDENCE_MEANING: dict[str, str] = {
+    "high": "We're confident in the facts on this card — the result line is "
+    "clear and the achievement is directly supported by the data.",
+    "medium": "The facts look right, but one input is softer (for example a "
+    "prior best we couldn't fully confirm). Worth a quick glance "
+    "before you post it.",
+    "low": "We're less sure here — the source data was ambiguous or "
+    "incomplete. Check it against the original results before approving.",
+}
+_CONFIDENCE_CLS: dict[str, str] = {"high": "good", "medium": "warn", "low": "bad"}
+
+
+def _confidence_chip(label: str, *, numeric: Optional[float] = None) -> str:
+    """A labelled, self-explaining confidence chip for a review card.
+
+    Replaces the bare ``conf: medium`` tag. Carries the plain-English meaning
+    in a ``title=`` tooltip so a first-time reviewer understands what the
+    engine is telling them: confidence is "how sure we are the facts are
+    right" — a separate axis from content-worthiness (the worthiness meter).
+    """
+    lab = (str(label or "medium")).strip().lower()
+    cls = _CONFIDENCE_CLS.get(lab, "warn")
+    meaning = _CONFIDENCE_MEANING.get(lab, _CONFIDENCE_MEANING["medium"])
+    pct = ""
+    if isinstance(numeric, (int, float)) and 0.0 < float(numeric) <= 1.0:
+        pct = f'&nbsp;<span class="mh-conf-chip-pct">{float(numeric) * 100:.0f}%</span>'
+    return (
+        f'<span class="mh-conf-chip {cls}" title="{_h(meaning)}" data-conf="{_h(lab)}">'
+        f'<span class="mh-conf-chip-dot" aria-hidden="true"></span>'
+        f"Confidence&nbsp;&middot;&nbsp;{_h(lab.capitalize())}{pct}</span>"
+    )
+
+
+# What each deterministic quality band means.
+_BAND_MEANING: dict[str, str] = {
+    "elite": "Elite — a standout moment (gold, a record, a huge PB). Lead with these.",
+    "strong": "Strong — a clear, postable achievement.",
+    "story": "Story — a result with a good angle worth telling.",
+    "nice": "Nice — a genuine positive, lower in the running order.",
+    "not_worthy": "Below the bar — kept for the record, not suggested for posting.",
+}
+_BAND_CLS: dict[str, str] = {
+    "elite": "warn",
+    "strong": "info",
+    "story": "",
+    "nice": "",
+    "not_worthy": "bad",
+}
+
+
+def _band_chip(band: str) -> str:
+    """The quality-band tag, with its meaning in a tooltip (was a bare tag)."""
+    b = (str(band or "nice")).strip().lower()
+    cls = _BAND_CLS.get(b, "")
+    meaning = _BAND_MEANING.get(b, "")
+    return (
+        f'<span class="tag {cls}" style="font-size:10px" title="{_h(meaning)}">'
+        f'{_h(b.upper().replace("_", " "))}</span>'
+    )
+
+
+def _worthiness_meter(priority: float) -> str:
+    """The content-worthiness (ranking) meter — a *different* axis from
+    confidence, labelled so the bare 0–1 score isn't read as a second
+    confidence number. The value comes straight from the deterministic ranker.
+    """
+    try:
+        p = max(0.0, min(1.0, float(priority)))
+    except (TypeError, ValueError):
+        p = 0.0
+    pct = int(round(p * 100))
+    return (
+        '<span class="mh-worth" title="Content-worthiness — the engine&#39;s ranking '
+        'of how postable this is, used to order the queue. Separate from confidence.">'
+        '<span class="mh-worth-label">Worth</span>'
+        '<span class="mh-worth-track">'
+        f'<span class="mh-worth-fill" style="width:{pct}%"></span></span>'
+        f'<span class="mh-worth-num">{pct}%</span></span>'
+    )
+
+
+def _factor_to_dict(f: Any) -> dict:
+    """A ranker factor may arrive as a ``RankFactor`` dataclass or a plain dict
+    (persisted run JSON). Normalise to a dict; non-factors become ``{}``."""
+    if hasattr(f, "to_dict"):
+        try:
+            f = f.to_dict()
+        except Exception:
+            pass
+    return f if isinstance(f, dict) else {}
+
+
+def _render_factor_breakdown(factors: Any) -> str:
+    """Plain-English "how the ranking added up", replacing the raw
+    name/value/weight debug table.
+
+    Each row leads with the ranker's own grounded ``plain_summary`` (falling
+    back to ``reason``) and shows how much that reason counted, as a bar
+    normalised to the strongest contributor. Every number is read verbatim
+    from the deterministic ranker — nothing here re-judges the result. The
+    multiplicative ``profile_priority`` factor is shown as a ×multiplier rather
+    than a contribution bar, mirroring how the ranker actually applies it.
+    """
+    rows: list[tuple[str, str, float, float, bool]] = []
+    for f in factors or []:
+        d = _factor_to_dict(f)
+        if not d:
+            continue
+        name = str(d.get("name") or "")
+        try:
+            val = float(d.get("value") or 0.0)
+            wt = float(d.get("weight") or 0.0)
+        except (TypeError, ValueError):
+            val, wt = 0.0, 0.0
+        summary = (str(d.get("plain_summary") or d.get("reason") or "")).strip()
+        is_priority = name == "profile_priority"
+        contrib = 0.0 if is_priority else val * wt
+        # Skip a factor that neither contributed nor carries a human summary,
+        # and a no-op club override (×1.00) — they add noise, not trust.
+        if is_priority and abs(val - 1.0) <= 0.01:
+            continue
+        if not is_priority and contrib <= 0 and not summary:
+            continue
+        rows.append((name, summary, contrib, val, is_priority))
+
+    if not rows:
+        return (
+            '<p class="muted" style="font-size:12px;margin:0">'
+            "No ranking factors were recorded for this card.</p>"
+        )
+
+    top = max((c for _, _, c, _, p in rows if not p), default=0.0)
+    items = ""
+    for name, summary, contrib, val, is_priority in rows:
+        label = _h(_humanise(name))
+        text = _h(summary) if summary else label
+        if is_priority:
+            meter = (
+                f'<span class="mh-factor-mult" title="Club priority multiplier '
+                f'(set in your profile)">&times;{val:.2f}</span>'
+            )
+        else:
+            w = int(round((contrib / top) * 100)) if top > 0 else 0
+            meter = (
+                f'<span class="mh-factor-track" title="How much this reason '
+                f'counted (contribution {contrib:.2f})">'
+                f'<span class="mh-factor-fill" style="width:{w}%"></span></span>'
+            )
+        items += (
+            f'<li class="mh-factor"><span class="mh-factor-name">{label}</span>'
+            f'<span class="mh-factor-why">{text}</span>{meter}</li>'
+        )
+    return f'<ul class="mh-factor-list">{items}</ul>'
+
+
+# Plain-English for the deterministic near-miss categories the explainer
+# assigns to swims that produced no card (legacy/swim_content_v5/explainer.py).
+# (label, blurb) — the genuine close calls first in _NEAR_MISS_ORDER below.
+_NEAR_MISS: dict[str, tuple[str, str]] = {
+    "almost_pb": (
+        "Almost a PB",
+        "Just off a personal best — close enough that we flagged it.",
+    ),
+    "possible_pb_uncertain": (
+        "Possible PB — unconfirmed",
+        "This might be a PB, but there's no prior best on file to prove it.",
+    ),
+    "possible_barrier_no_history": (
+        "Possible first — no history",
+        "Could be a first-time barrier, but we have no past times to confirm it.",
+    ),
+    "ambiguous_swimmer_match": (
+        "Swimmer unconfirmed",
+        "We couldn't be sure which swimmer this was, so we held it back " "rather than guess.",
+    ),
+    "good_placing_weak_field": (
+        "Good place, light field",
+        "A good finish, but the field was small — so it scored lower.",
+    ),
+    "relay_mention_only": (
+        "Relay — mention only",
+        "Part of a relay; noted, but not made into its own card.",
+    ),
+    "lower_priority": (
+        "Outranked",
+        "A real result — just outranked by stronger swims at this meet.",
+    ),
+}
+# Genuine close calls first, the plain "outranked" bucket last.
+_NEAR_MISS_ORDER: list[str] = [
+    "almost_pb",
+    "possible_pb_uncertain",
+    "possible_barrier_no_history",
+    "ambiguous_swimmer_match",
+    "good_placing_weak_field",
+    "relay_mention_only",
+    "lower_priority",
+]
+
+
+def _near_miss_label(category: str) -> tuple[str, str]:
+    """(label, blurb) in plain English for a deterministic near-miss category."""
+    return _NEAR_MISS.get((str(category or "")).strip().lower(), _NEAR_MISS["lower_priority"])
+
+
+def _near_miss_is_close_call(category: str) -> bool:
+    """A 'close call' is any near-miss except the plain 'outranked' bucket —
+    the ones genuinely worth a reviewer's glance."""
+    return (str(category or "")).strip().lower() not in ("", "lower_priority")
+
+
+def _render_explainability_key() -> str:
+    """A compact "how to read these cards" key, so the review surface reads as
+    the intelligence it is to a first-time volunteer. Every gloss describes the
+    deterministic engine's own outputs — it makes nothing up."""
+
+    def _row(term: str, body: str) -> str:
+        return (
+            f'<div class="mh-key-row"><span class="mh-key-term">{term}</span>'
+            f'<span class="mh-key-body">{body}</span></div>'
+        )
+
+    return (
+        '<details class="mh-explain-key">'
+        '<summary><span aria-hidden="true">&#9432;</span> How to read these cards</summary>'
+        '<div class="mh-key-grid">'
+        + _row(
+            "Band",
+            "How big the moment is — <b>Elite</b> (gold, a record, a huge PB) "
+            "down through <b>Strong</b>, <b>Story</b> and <b>Nice</b>. It sets "
+            "the running order.",
+        )
+        + _row(
+            "Confidence",
+            "How sure we are the <b>facts</b> are right — computed by our engine "
+            "and checked against the source line, never guessed. "
+            "<b>High</b> / <b>Medium</b> / <b>Low</b>.",
+        )
+        + _row(
+            "Worth",
+            "How <b>postable</b> the engine rates it — a separate ranking used to "
+            "order the queue. A high-worth card can still be Medium confidence, "
+            "and the other way round.",
+        )
+        + _row(
+            "Why this card?",
+            "Written by AI from the <b>verified</b> facts and the ranking factors "
+            "— never invented. If no AI is configured it tells you so, rather "
+            "than make something up.",
+        )
+        + _row(
+            "Why not",
+            "Swims that didn&rsquo;t make a card are kept under <b>Run detail "
+            "&amp; diagnostics</b> with the reason in plain English — so you can "
+            "see nothing good was dropped silently.",
+        )
+        + "</div></details>"
+    )
+
+
+def _render_near_miss_hint(n_not_generated: int, n_close_calls: int) -> str:
+    """A slim, trustworthy "why not" pointer under the decision list.
+
+    Reassures the reviewer that the swims which produced no card weren't
+    silently dropped — they're traced, in plain English, under the diagnostics
+    section — and surfaces how many were genuine close calls worth a glance.
+    Empty when every swim produced a card.
+    """
+    if n_not_generated <= 0:
+        return ""
+    swims = f"{n_not_generated} swim{'' if n_not_generated == 1 else 's'}"
+    if n_close_calls > 0:
+        calls = (
+            f"{n_close_calls} {'was a close call' if n_close_calls == 1 else 'were close calls'}"
+        )
+        body = (
+            f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
+            f"<b>{calls}</b> worth a glance."
+        )
+        pip = '<span class="mh-nm-pip" aria-hidden="true"></span>'
+    else:
+        body = (
+            f"We also looked at <b>{swims}</b> that didn&rsquo;t make a card &mdash; "
+            "none were close calls, but the reason for each is recorded."
+        )
+        pip = ""
+    return (
+        f'<div class="mh-nearmiss-hint">{pip}<span>{body}</span>'
+        '<a href="#mh-not-generated">See why &rarr;</a></div>'
+    )
+
+
 # V8: media generation engine
 try:
     from mediahub.media_library.store import (
@@ -5089,6 +5397,99 @@ a.card:hover, .card[data-interactive]:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.10em;
 }
+
+/* ---- U.3 — explainability & confidence surfaces -------------------------- */
+/* A self-explaining confidence chip (replaces the bare "conf: medium" tag).
+   Confidence = how sure we are the FACTS are right — a different axis from
+   the worthiness meter (the ranking). The title= carries the plain meaning. */
+.mh-conf-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--hairline); color: var(--ink-dim); cursor: help;
+}
+.mh-conf-chip .mh-conf-chip-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.9;
+}
+.mh-conf-chip.good { color: var(--good); border-color: rgba(94,227,154,0.35); background: var(--good-bg); }
+.mh-conf-chip.warn { color: var(--warn); border-color: rgba(255,180,84,0.35); background: var(--warn-bg); }
+.mh-conf-chip.bad  { color: var(--bad);  border-color: rgba(255,107,107,0.35); background: var(--bad-bg); }
+.mh-conf-chip-pct { font-family: var(--font-mono); opacity: 0.8; }
+
+/* The content-worthiness (ranking) meter — labelled so the bare 0–1 score
+   isn't misread as a second confidence number. */
+.mh-worth { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
+.mh-worth-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-muted);
+}
+.mh-worth-track {
+  width: 72px; height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.mh-worth-fill { display: block; height: 100%; background: var(--accent); }
+.mh-worth-num {
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-dim); min-width: 30px;
+}
+
+/* The plain-English ranking-factor breakdown (replaces the name/value/weight
+   debug table). Each row leads with the ranker's own grounded plain_summary
+   and shows how much that reason counted. */
+.mh-factor-list {
+  list-style: none; margin: 6px 0 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.mh-factor { display: grid; grid-template-columns: 104px 1fr 84px; gap: 12px; align-items: center; }
+.mh-factor-name {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted);
+}
+.mh-factor-why { font-size: 12.5px; color: var(--ink-dim); line-height: 1.35; }
+.mh-factor-track {
+  height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.mh-factor-fill { display: block; height: 100%; background: var(--lane); }
+.mh-factor-mult { font-family: var(--font-mono); font-size: 11px; color: var(--lane); text-align: right; }
+@media (max-width: 640px) {
+  .mh-factor { grid-template-columns: 1fr; gap: 3px; }
+  .mh-factor-track, .mh-factor-mult { max-width: 160px; }
+}
+
+/* "How to read these cards" key — makes the surface read as the intelligence
+   it is to a first-time volunteer. */
+.mh-explain-key {
+  margin: var(--sp-4) 0 0 0; border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); background: rgba(255,255,255,0.015);
+}
+.mh-explain-key > summary {
+  cursor: pointer; user-select: none; list-style: none; padding: 11px 16px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 7px;
+}
+.mh-explain-key > summary::-webkit-details-marker { display: none; }
+.mh-explain-key[open] > summary { border-bottom: 1px solid var(--hairline); }
+.mh-key-grid { padding: 13px 16px; display: flex; flex-direction: column; gap: 11px; }
+.mh-key-row { display: grid; grid-template-columns: 124px 1fr; gap: 14px; align-items: baseline; }
+.mh-key-term {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--lane);
+}
+.mh-key-body { font-size: 12.5px; color: var(--ink-dim); line-height: 1.45; }
+.mh-key-body b { color: var(--ink); font-weight: 600; }
+@media (max-width: 640px) { .mh-key-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* The "why not" near-miss discoverability hint under the decision list. */
+.mh-nearmiss-hint {
+  margin-top: var(--sp-4); padding: 10px 14px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.015);
+  font-size: 12.5px; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.mh-nearmiss-hint a { color: var(--lane); }
+.mh-nearmiss-hint .mh-nm-pip {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn); flex: none;
+}
+
 .mh-card-actions {
   margin-top: var(--sp-4); display: flex; gap: var(--sp-2); flex-wrap: wrap;
   padding-top: var(--sp-4); border-top: 1px solid var(--hairline);
@@ -11417,117 +11818,56 @@ def create_app() -> Flask:
   {('<div style="margin-top:10px"><span class="k">Sources</span>' + ctx_sources_html + "</div>") if ctx_sources_html else ""}
 </div>"""
 
-        # --- Top achievements panel
+        # The ranked achievements drive the review list, built below as
+        # ``ach_rows_html_wf`` (with its own empty/error states). An older
+        # ``top_achs`` / ``ach_rows_html`` render of the same cards was orphaned
+        # when the workflow list took over this surface — it built a string the
+        # page never inserted — so it's removed here (dead-code sweep), leaving
+        # one source of truth for the card render.
         ranked_achs = rr.get("ranked_achievements") or []
-        top_achs = ranked_achs[:10]
 
-        def band_cls(band):
-            return {
-                "elite": "warn",
-                "strong": "info",
-                "story": "",
-                "nice": "",
-                "not_worthy": "bad",
-            }.get(band, "")
-
-        ach_rows_html = ""
-        for _why_idx, ra in enumerate(top_achs):
-            a = ra.get("achievement", {})
-            band = ra.get("quality_band", "nice")
-            prio = ra.get("priority", 0.0)
-            rank = ra.get("rank", 0)
-            conf_label = a.get("confidence_label", "medium")
-            conf_cls = {"high": "good", "medium": "warn", "low": "bad"}.get(conf_label, "")
-            swimmer = _h(a.get("swimmer_name", ""))
-            event = _h(a.get("event", ""))
-            headline = _h(a.get("headline", ""))
-            atype = _h(_humanise(a.get("type", "")))
-            swim_id = _h(a.get("swim_id", ""))
-            post_type = _h(ra.get("suggested_post_type", ""))
-            prio_bar_pct = int(prio * 100)
-            _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
-
-            # Evidence list
-            ev_html = ""
-            for ev in (a.get("evidence") or [])[:3]:
-                ev_url = ev.get("source_url") or ""
-                ev_src = _h(ev.get("source_name", ""))
-                ev_stmt = _h(ev.get("statement", ""))
-                if ev_url:
-                    ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
-                else:
-                    ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
-
-            # Factor list
-            factors_html = ""
-            for f in (ra.get("factors") or [])[:6]:
-                fname = _h(f.get("name", ""))
-                fval = f.get("value", 0.0)
-                freason = _h(f.get("reason", ""))
-                factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
-
-            _why_uuid = (
-                str(a.get("swim_id", f"top-{rank}"))
-                .replace(":", "_")
-                .replace(",", "_")
-                .replace("/", "_")
-            )
-            why_html = _render_why_this_card(
-                ra, card_uuid=f"top-{_why_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
-            )
-            ach_rows_html += f"""
-<div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}">
-  <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
-    <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
-    <div style="flex:1">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        <span class="tag {band_cls(band)}" style="font-size:10px">{band.upper()}</span>
-        <span class="tag info" style="font-size:10px">{atype}</span>
-        <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
-        <span class="tag" style="font-size:10px">{post_type}</span>
-        <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
-        </div>
-        <span class="muted" style="font-size:11px">{prio:.2f}</span>
-      </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
-      <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
-      {why_html}
-      <details style="margin-top:8px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--accent);user-select:none">Expand factors &amp; evidence</summary>
-        <div style="margin-top:8px;font-size:12px">
-          <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
-          <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
-          <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
-          <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
-          <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
-        </div>
-      </details>
-    </div>
-  </div>
-</div>"""
-
-        if not ach_rows_html:
-            if recognition_error:
-                ach_rows_html = (
-                    f'<div class="empty">Recognition engine error: {_h(recognition_error)}</div>'
-                )
-            elif not rr:
-                ach_rows_html = '<div class="empty">No recognition report available. Re-upload the file to generate achievements.</div>'
-            else:
-                ach_rows_html = '<div class="empty">No achievements detected.</div>'
-
-        # --- Not generated panel
+        # --- Not generated panel (the "why not" surface).
+        # The deterministic detectors traced every swim; for the ones that
+        # produced no card we surface the engine's near-miss category in plain
+        # English, leading with the genuine close calls (almost-a-PB, possible
+        # PB we couldn't confirm, an ambiguous swimmer match) so a reviewer can
+        # trust that nothing good was silently dropped. The raw engine summary
+        # stays available, demoted to a tooltip + muted second line for support.
         swim_traces_raw = rr.get("swim_traces") or []
         no_ach_traces = [t for t in swim_traces_raw if t.get("achievement_count", 0) == 0]
+
+        def _nm_sort_key(t):
+            cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
+            try:
+                return _NEAR_MISS_ORDER.index(cat)
+            except ValueError:
+                return len(_NEAR_MISS_ORDER)
+
+        no_ach_sorted = sorted(no_ach_traces, key=_nm_sort_key)
+        _n_close_calls = sum(
+            1 for t in no_ach_traces if _near_miss_is_close_call(t.get("near_miss_category"))
+        )
         not_gen_rows = ""
-        for t in no_ach_traces[:30]:
+        for t in no_ach_sorted[:40]:
+            _cat = (t.get("near_miss_category") or "lower_priority").strip().lower()
+            _nm_label, _nm_blurb = _near_miss_label(_cat)
+            _nm_cls = "warn" if _near_miss_is_close_call(_cat) else ""
+            _raw = (t.get("summary") or "").strip()
+            _raw_line = (
+                f'<div class="muted" style="font-size:11px;margin-top:3px" '
+                f'title="{_h(_raw)}">{_h(_raw[:120])}</div>'
+                if _raw
+                else ""
+            )
             not_gen_rows += (
-                f'<tr data-swimmer="{t.get("swimmer_name", "")}" data-event="{t.get("event", "")}">'
+                f'<tr data-swimmer="{_h(t.get("swimmer_name", ""))}" '
+                f'data-event="{_h(t.get("event", ""))}" data-nearmiss="{_h(_cat)}">'
                 f"<td>{_h(t.get('swimmer_name', ''))}</td>"
                 f"<td>{_h(t.get('event', ''))}</td>"
                 f'<td style="font-family:monospace">{_h(t.get("time_str", ""))}</td>'
-                f'<td style="font-size:12px;color:var(--ink-muted)">{_h(t.get("summary", ""))}</td>'
+                f'<td><span class="tag {_nm_cls}" style="font-size:10px">{_h(_nm_label)}</span>'
+                f'<div style="font-size:12px;color:var(--ink-dim);margin-top:3px">{_h(_nm_blurb)}</div>'
+                f"{_raw_line}</td>"
                 f"</tr>"
             )
 
@@ -11834,8 +12174,10 @@ def create_app() -> Flask:
         else:
             workflow_summary_card = ""
 
-        # --- V7: add status pills to achievement rows
-        # Rebuild ach_rows_html with workflow status pills
+        # --- The review list: one card per ranked achievement, with the
+        # workflow status pill and the U.3 confidence / worthiness / "why this
+        # card" / factor-breakdown surfaces. This is the only card render that
+        # reaches the page (`#ach-list`).
         ach_rows_html_wf = ""
         for _why_idx, ra in enumerate(ranked_achs):
             a = ra.get("achievement", {})
@@ -11843,13 +12185,11 @@ def create_app() -> Flask:
             prio = ra.get("priority", 0.0)
             rank = ra.get("rank", 0)
             conf_label = a.get("confidence_label", "medium")
-            conf_cls = {"high": "good", "medium": "warn", "low": "bad"}.get(conf_label, "")
             swimmer = _h(a.get("swimmer_name", ""))
             event = _h(a.get("event", ""))
             headline = _h(a.get("headline", ""))
             atype = _h(_humanise(a.get("type", "")))
             post_type = _h(ra.get("suggested_post_type", ""))
-            prio_bar_pct = int(prio * 100)
             _trace_url = url_for("api_swim_trace", run_id=run_id, swim_id=a.get("swim_id", "x"))
 
             # V7: workflow state for this card
@@ -11861,14 +12201,6 @@ def create_app() -> Flask:
             if _wf_filter and wf_status != _wf_filter:
                 continue
 
-            band_cls = {
-                "elite": "warn",
-                "strong": "info",
-                "story": "",
-                "nice": "",
-                "not_worthy": "bad",
-            }.get(band, "")
-
             # Evidence list
             ev_html = ""
             for ev in (a.get("evidence") or [])[:3]:
@@ -11879,14 +12211,6 @@ def create_app() -> Flask:
                     ev_html += f'<li><a href="{_h(ev_url)}" target="_blank" rel="noopener">{ev_src}</a>: {ev_stmt}</li>'
                 else:
                     ev_html += f"<li><strong>{ev_src}</strong>: {ev_stmt}</li>"
-
-            # Factor list
-            factors_html = ""
-            for f in (ra.get("factors") or [])[:7]:
-                fname = _h(f.get("name", ""))
-                fval = f.get("value", 0.0)
-                freason = _h(f.get("reason", ""))
-                factors_html += f'<tr><td style="font-size:12px">{fname}</td><td style="font-size:12px">{fval:.3f}</td><td style="font-size:12px;color:var(--ink-muted)">{freason}</td></tr>'
 
             # Caption tone, graphics, motion + scheduling all move to the
             # Content builder (post-approval). Review stays pure triage:
@@ -11908,14 +12232,11 @@ def create_app() -> Flask:
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-        <span class="tag {band_cls}" style="font-size:10px">{band.upper()}</span>
+        {_band_chip(band)}
         <span class="tag info" style="font-size:10px">{atype}</span>
-        <span class="tag {conf_cls}" style="font-size:10px">conf: {conf_label}</span>
+        {_confidence_chip(conf_label, numeric=a.get("confidence"))}
         <span class="tag" style="font-size:10px">{post_type}</span>
-        <div style="flex:1;min-width:80px;max-width:160px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-          <div style="height:100%;width:{prio_bar_pct}%;background:var(--accent)"></div>
-        </div>
-        <span class="muted" style="font-size:11px">{prio:.2f}</span>
+        {_worthiness_meter(prio)}
       </div>
       <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
@@ -11926,11 +12247,11 @@ def create_app() -> Flask:
         {_render_wf_actions(run_id, card_id_raw, wf_status)}
       </div>
       <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">View ranking factors &amp; evidence</summary>
+        <summary style="cursor:pointer;font-size:12px;color:var(--ink-dim);user-select:none">How the ranking added up &amp; evidence</summary>
         <div style="margin-top:8px;font-size:12px">
-          <div style="margin-bottom:6px"><strong>Ranking factors:</strong></div>
-          <table style="font-size:12px;margin-bottom:10px"><thead><tr><th>Factor</th><th>Value</th><th>Reason</th></tr></thead><tbody>{factors_html}</tbody></table>
-          <div style="margin-bottom:4px"><strong>Evidence:</strong></div>
+          <div style="margin-bottom:6px"><strong>How the ranking added up:</strong></div>
+          {_render_factor_breakdown(ra.get("factors"))}
+          <div style="margin:12px 0 4px"><strong>Evidence:</strong></div>
           <ul style="margin:0;padding-left:18px">{ev_html or '<li class="muted">No evidence items</li>'}</ul>
           <div style="margin-top:8px"><a href="{_trace_url}" target="_blank" rel="noopener" style="font-size:12px">View full trace JSON &rarr;</a></div>
         </div>
@@ -12070,6 +12391,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {warn_html}
 
+{_render_explainability_key()}
+
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
@@ -12090,6 +12413,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </div>
   <div id="ach-list">{ach_rows_html_wf}</div>
 </div>
+
+{_render_near_miss_hint(len(no_ach_traces), _n_close_calls)}
 
 <!-- Run detail & diagnostics: the recognition read, meet context, PB audit and
      raw tables a volunteer rarely needs are demoted below the decision surface,
@@ -12131,12 +12456,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   </details>
 </div>
 
-<div class="card">
-  <details>
-    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements</span></summary>
-    <div style="margin-top:14px">
+<div class="card" id="mh-not-generated">
+  <details{" open" if _n_close_calls else ""}>
+    <summary style="cursor:pointer;font-size:15px;font-weight:700;color:var(--ink)">Not generated <span class="muted" style="font-weight:400;font-size:13px">&mdash; {len(no_ach_traces)} swims with no achievements{f", {_n_close_calls} close {'call' if _n_close_calls == 1 else 'calls'}" if _n_close_calls else ""}</span></summary>
+    <div style="margin-top:8px">
+      <p class="muted" style="font-size:12px;margin:0 0 12px">Every swim was traced by the recognition engine. These produced no card &mdash; the close calls are led out first, each with the reason in plain English so you can override if you disagree. Nothing here was silently dropped.</p>
       <table>
-        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not generated</th></tr></thead>
+        <thead><tr><th>Swimmer</th><th>Event</th><th>Time</th><th>Why not</th></tr></thead>
         <tbody>{not_gen_rows or '<tr><td colspan="4" class="muted">All swims produced achievements, or no trace data available.</td></tr>'}</tbody>
       </table>
     </div>
