@@ -18103,9 +18103,13 @@ function mhPlanGenerate(btn) {{
                 f'<span class="mh-template-fmt">{_h(fmt)}</span>' for fmt in formats
             )
             effort_html = f'<span class="mh-template-effort">{_h(effort)}</span>' if effort else ""
+            # Pointer-following glow-border (::after — free on .mh-template and
+            # .mh-template-primary) only on live tiles; never on a "Coming soon"
+            # tile, where a glow would falsely imply it's clickable.
+            glow_cls = " mh-glow-border" if (meta.is_implemented and href_ok) else ""
 
             tiles_html += (
-                f'<a {action} class="mh-template{disabled_cls}">'
+                f'<a {action} class="mh-template{glow_cls}{disabled_cls}">'
                 f'<div class="mh-template-icon">{meta.icon_svg}</div>'
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:var(--sp-1)">'
                 f'<h3 style="margin:0">{_h(meta.title)}</h3>'
@@ -28151,7 +28155,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             _delete_url = url_for("api_media_library_delete", asset_id=ad.get("id", ""))
             rows_html += f"""
 <tr>
-  <td><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;\" /></td>
+  <td><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span></td>
   <td>{ad.get("type", "")}</td>
   <td>{athlete_names}</td>
   <td>{ad.get("linked_venue") or ad.get("linked_event") or ""}</td>
