@@ -14799,19 +14799,37 @@ Relay team broke club record"></textarea>
         and dashboards that want the raw uptime numbers."""
         from mediahub.observability import uptime as _uptime
 
-        return jsonify(
-            {
-                "ok": True,
-                "version": APP_VERSION,
-                "latest_heartbeat": _uptime.latest_heartbeat(),
-                "windows": {
-                    "24h": _uptime.uptime_stats(window_hours=24),
-                    "7d": _uptime.uptime_stats(window_hours=24 * 7),
-                    "30d": _uptime.uptime_stats(window_hours=24 * 30),
-                },
-                "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
-            }
+        data = {
+            "ok": True,
+            "version": APP_VERSION,
+            "latest_heartbeat": _uptime.latest_heartbeat(),
+            "windows": {
+                "24h": _uptime.uptime_stats(window_hours=24),
+                "7d": _uptime.uptime_stats(window_hours=24 * 7),
+                "30d": _uptime.uptime_stats(window_hours=24 * 30),
+            },
+            "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
+        }
+
+        # When a browser requests this URL it gets an accessible HTML page
+        # with a <title> (satisfies WCAG / axe-core document-title rule).
+        # API clients that send Accept: application/json or */* get JSON.
+        best = request.accept_mimetypes.best_match(
+            ["application/json", "text/html"]
         )
+        if best == "text/html":
+            body = (
+                '<p class="dim" style="margin-bottom:20px">'
+                "Machine-readable status snapshot. "
+                f'See <a href="{url_for("status_page")}">/status</a>'
+                " for the live dashboard.</p>"
+                '<pre style="white-space:pre-wrap;word-break:break-all">'
+                + _h(json.dumps(data, indent=2))
+                + "</pre>"
+            )
+            return _layout("API Status", body, active="status")
+
+        return jsonify(data)
 
     # ---- /healthz/usage ------------------------------------------------
     #

@@ -89,6 +89,19 @@ class TestApiStatusJsonShape:
             assert "uptime_pct" in w
             assert "has_data" in w
 
+    def test_html_response_has_title(self, fresh_app):
+        """Regression: /api/status must include <title> when browser requests
+        HTML so axe-core document-title rule passes (WCAG accessibility)."""
+        c, _ = fresh_app
+        resp = c.get("/api/status", headers={"Accept": "text/html"})
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "<title>" in body
+        # Should contain MediaHub branding in the title.
+        assert "MediaHub" in body
+        # Should still expose the status data.
+        assert '"ok"' in body or "ok" in body
+
 
 class TestHealthzRecordsHeartbeat:
     def test_healthz_call_records_heartbeat_row(self, fresh_app):
