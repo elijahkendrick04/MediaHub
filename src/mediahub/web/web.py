@@ -7152,7 +7152,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                         _mime = str(_e.get("mime", "")).lower()
                         if not _mime.startswith("image/"):
                             continue
-                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"])
+                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"], bg=1)
                         if _mime in (
                             "image/png",
                             "image/svg+xml",
@@ -25900,8 +25900,18 @@ function mhSetupMode(mode) {{
         prof = _active_profile()
         if not prof:
             return ("", 404)
-        from mediahub.brand.logos import resolve_logo_path
+        from mediahub.brand.logos import resolve_logo_path, logo_bg_silhouette_path
 
+        # ?bg=1 serves the clean-alpha silhouette used by the signed-in logo
+        # wall (transparent for any logo, opaque backgrounds keyed out). It's
+        # cached and immutable per logo_id, so it's safe to cache hard.
+        if request.args.get("bg"):
+            sil = logo_bg_silhouette_path(prof.profile_id, logo_id)
+            if sil:
+                resp = send_from_directory(sil.parent, sil.name)
+                resp.headers["Cache-Control"] = "public, max-age=604800"
+                return resp
+            return ("", 404)
         path = resolve_logo_path(prof.profile_id, logo_id)
         if not path:
             return ("", 404)
