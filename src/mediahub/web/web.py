@@ -32,6 +32,7 @@ import logging
 import mimetypes
 import os
 import queue
+import random
 import re
 import sqlite3
 import threading
@@ -4902,20 +4903,47 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* Signed-in background watermark: the active org's logo(s), faint, behind all
-   content (main.wrap is z-index:1). Gentle drift unless reduced-motion. */
-.mh-bg-logos { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+/* Signed-in brand backdrop — a soft monochrome "logo wall" built from the
+   active org's uploaded logos (the .mh-bg-logo spans are generated in Python).
+   Each mark paints the logo's SILHOUETTE in one brand-derived tint via CSS
+   mask, so the field reads as a single cohesive branded texture instead of a
+   clash of full-colour marks. A radial vignette keeps the central reading
+   column calm and lets the gutters carry the texture; the whole field drifts
+   slowly as one parallax layer (off under reduced-motion). z-index:0 — behind
+   all content (main.wrap is z-index:1). */
+.mh-bg-logos {
+  position: fixed; inset: -6%; z-index: 0; pointer-events: none; overflow: hidden;
+  /* One tint for the whole wall: brand-derived when the org has a primary
+     colour (--mh-bg-brand set inline), else a neutral ink wash. color-mix
+     keeps it light enough to read on the near-black surface; the plain
+     --mh-bg-tint above is the fallback when color-mix is unsupported. */
+  --mh-bg-tint: var(--ink);
+  --mh-bg-tint: color-mix(in oklab, var(--mh-bg-brand, var(--ink)) 38%, var(--ink));
+  -webkit-mask-image: radial-gradient(120% 96% at 50% 42%,
+        transparent 0%, rgba(0,0,0,0.34) 46%, #000 80%);
+          mask-image: radial-gradient(120% 96% at 50% 42%,
+        transparent 0%, rgba(0,0,0,0.34) 46%, #000 80%);
+  will-change: transform;
+  animation: mh-bg-drift 52s ease-in-out infinite alternate;
+}
 .mh-bg-logo {
-  position: absolute; object-fit: contain; max-width: 40vw; height: auto;
-  filter: saturate(0.9);
-  animation: mh-bg-drift 30s ease-in-out infinite alternate;
+  position: absolute;
+  background-color: var(--mh-bg-tint);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scale(var(--s, 1));
 }
 @keyframes mh-bg-drift {
-  from { transform: translate3d(0, 0, 0) rotate(-1deg); }
-  to   { transform: translate3d(0, -22px, 0) rotate(1deg); }
+  from { transform: translate3d(-9px, 7px, 0) scale(1.03); }
+  to   { transform: translate3d(9px, -11px, 0) scale(1.03); }
+}
+@media (max-width: 720px) {
+  /* Thin the wall on small screens so it stays a whisper, not clutter. */
+  .mh-bg-logo:nth-child(2n) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mh-bg-logo { animation: none; }
+  .mh-bg-logos { animation: none; }
 }
 
 /* Card hover */
@@ -7106,56 +7134,94 @@ def _layout(title: str, body: str, active: str = "home") -> str:
                             signed_in_logo = _cap
                 except Exception:
                     signed_in_logo = ""
-                # The org's logos, surfaced as a faint background watermark on
-                # every page while signed in (the "team's logos seamlessly in
-                # the background" ask). Uploaded logos served first-party; the
-                # signed-in pid IS the active profile, so the active-profile
+                # The org's uploaded logos, surfaced as a soft monochrome
+                # "logo wall" behind every signed-in page (the "team's logos
+                # seamlessly in the background" ask — see the .mh-bg-logos CSS
+                # and the bg_logos_html builder below). Use them ALL, but prefer
+                # transparency-capable formats so the mask-tint reads as a clean
+                # silhouette; only fall back to opaque formats (e.g. JPEG, which
+                # mask to a solid block) if that's all the org uploaded. Served
+                # first-party — the signed-in pid IS the active profile, so the
                 # serve route resolves them.
                 try:
+                    _trans: list[str] = []
+                    _opaque: list[str] = []
                     for _e in getattr(_p, "brand_logos", None) or []:
-                        if (
-                            isinstance(_e, dict)
-                            and _e.get("logo_id")
-                            and str(_e.get("mime", "")).startswith("image/")
+                        if not (isinstance(_e, dict) and _e.get("logo_id")):
+                            continue
+                        _mime = str(_e.get("mime", "")).lower()
+                        if not _mime.startswith("image/"):
+                            continue
+                        _u = url_for("organisation_setup_logo_serve", logo_id=_e["logo_id"])
+                        if _mime in (
+                            "image/png",
+                            "image/svg+xml",
+                            "image/webp",
+                            "image/gif",
+                            "image/avif",
                         ):
-                            signed_in_bg_logos.append(
-                                url_for(
-                                    "organisation_setup_logo_serve",
-                                    logo_id=_e["logo_id"],
-                                )
-                            )
-                        if len(signed_in_bg_logos) >= 4:
-                            break
-                    if not signed_in_bg_logos and signed_in_logo:
-                        signed_in_bg_logos = [signed_in_logo]
+                            _trans.append(_u)
+                        else:
+                            _opaque.append(_u)
+                    # Cap for sanity (the wall samples ~24); keep all that fit.
+                    signed_in_bg_logos = (_trans or _opaque)[:32]
                 except Exception:
-                    signed_in_bg_logos = [signed_in_logo] if signed_in_logo else []
+                    signed_in_bg_logos = []
         except Exception:
             signed_in_name = ""
 
-    # Faint background watermark of the active org's logo(s) on every page
-    # while signed in. A handful of large, low-opacity marks scattered in the
-    # page margins, behind all content (z-index 0; main content is z-index 1).
+    # Soft monochrome "logo wall" behind every signed-in page, built from the
+    # org's uploaded logos. Each mark paints the logo's silhouette in one
+    # brand-derived tint (CSS mask + background-color, see .mh-bg-logo) so the
+    # field reads as a single cohesive branded texture, not a clash of marks.
+    # Positions are a deterministically-jittered grid seeded by the profile id,
+    # so every uploaded logo is used, repeats are spread out, and the
+    # arrangement is STABLE across page loads (no jarring re-shuffle).
     bg_logos_html = ""
     if signed_in_bg_logos:
-        _specs = [
-            # (top, left, size_px, opacity, drift_delay_s)
-            ("5%", "-3%", 230, 0.055, 0),
-            ("62%", "-5%", 300, 0.045, 3),
-            ("26%", "80%", 250, 0.05, 1.5),
-            ("76%", "70%", 200, 0.04, 4.5),
-            ("46%", "38%", 170, 0.03, 2.2),
-            ("-5%", "58%", 240, 0.05, 6),
-        ]
-        _marks = ""
-        for _i, (_t, _l, _sz, _op, _dl) in enumerate(_specs):
-            _src = signed_in_bg_logos[_i % len(signed_in_bg_logos)]
-            _marks += (
-                f'<img class="mh-bg-logo" src="{_h(_src)}" alt="" '
-                f'style="top:{_t};left:{_l};width:{_sz}px;opacity:{_op};'
-                f'animation-delay:{_dl}s" />'
+        _rng = random.Random("mh-bg:" + (signed_in_pid or "default"))
+        _pool = signed_in_bg_logos
+        _cols, _rows = 6, 4
+        _cells = _cols * _rows
+        # Repeat the pool to fill the field, then shuffle so identical logos
+        # don't line up in a visible grid pattern.
+        _bag = (_pool * (_cells // len(_pool) + 1))[:_cells]
+        _rng.shuffle(_bag)
+        # Depth tiers: (min_px, vw, max_px, base_opacity, blur_px).
+        _tiers = (
+            (120, 15.5, 210, 0.120, 0.0),  # near — crisp, largest, strongest
+            (88, 11.5, 158, 0.095, 0.0),  # mid
+            (60, 8.5, 116, 0.070, 1.0),  # far — small, faint, softened
+        )
+        _marks: list[str] = []
+        for _i in range(_cells):
+            _col, _row = _i % _cols, _i // _cols
+            _x = (_col + 0.5) / _cols * 100.0 + _rng.uniform(-6.5, 6.5)
+            _y = (_row + 0.5) / _rows * 100.0 + _rng.uniform(-9.0, 9.0)
+            _smin, _svw, _smax, _op, _blur = _rng.choices(_tiers, weights=(3, 4, 3))[0]
+            _op = round(_op * _rng.uniform(0.82, 1.12), 4)
+            _rot = round(_rng.uniform(-11.0, 11.0), 2)
+            _scl = round(_rng.uniform(0.92, 1.08), 3)
+            _blur_css = f"filter:blur({_blur}px);" if _blur else ""
+            _src = _h(_bag[_i])
+            _marks.append(
+                '<span class="mh-bg-logo" style="'
+                f"left:{_x:.2f}%;top:{_y:.2f}%;"
+                f"width:clamp({_smin}px,{_svw}vw,{_smax}px);"
+                f"height:clamp({_smin}px,{_svw}vw,{_smax}px);"
+                f"--r:{_rot}deg;--s:{_scl};opacity:{_op};{_blur_css}"
+                f"-webkit-mask-image:url('{_src}');mask-image:url('{_src}')"
+                '"></span>'
             )
-        bg_logos_html = f'<div class="mh-bg-logos" aria-hidden="true">{_marks}</div>'
+        _brand = (
+            signed_in_primary if re.match(r"^#[0-9A-Fa-f]{3,8}$", signed_in_primary or "") else ""
+        )
+        _brand_attr = f' style="--mh-bg-brand:{_brand}"' if _brand else ""
+        bg_logos_html = (
+            f'<div class="mh-bg-logos" aria-hidden="true"{_brand_attr}>'
+            + "".join(_marks)
+            + "</div>"
+        )
 
     return render_template_string(
         """
