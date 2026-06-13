@@ -15,6 +15,7 @@ No swim-vocabulary literals.
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 import re
 from typing import Any
@@ -23,7 +24,18 @@ from .patterns import PatternStore
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_CORPUS_DIR = pathlib.Path(__file__).parent.parent / "data" / "patterns_validation_corpus"
+
+def _default_corpus_dir() -> pathlib.Path:
+    """Writable corpus root, derived from DATA_DIR (never the read-only package
+    tree). Mirrors the app-wide convention: DATA_DIR defaults to src/mediahub
+    in dev, and runtime data lives under ``<DATA_DIR>/data/``. On the hosted
+    deployment DATA_DIR is the mounted disk, so this resolves to a writable
+    path instead of ``/app/src/mediahub/data`` (read-only → Permission denied).
+    """
+    env = os.environ.get("DATA_DIR")
+    base = pathlib.Path(env) if env else pathlib.Path(__file__).resolve().parents[1]
+    return base / "data" / "patterns_validation_corpus"
+
 
 # ---------------------------------------------------------------------------
 # Pattern proposal heuristics
@@ -146,7 +158,7 @@ def propose_patterns(
     List of pattern dicts that were persisted (provisional=True).
     """
     if corpus_dir is None:
-        corpus_dir = _DEFAULT_CORPUS_DIR
+        corpus_dir = _default_corpus_dir()
 
     corpus_texts = _load_corpus_texts(corpus_dir)
     candidates = _generalise(stream_section, max_candidates)
@@ -178,19 +190,27 @@ def save_corpus_section(
     text: str,
     corpus_dir: pathlib.Path | None = None,
     label: str = "section",
-) -> pathlib.Path:
+) -> pathlib.Path | None:
     """
     Save a successfully-parsed text section to the validation corpus for
     future hypothesis validation.
+
+    This is a best-effort learning side-effect, never a parse dependency: if
+    the corpus can't be written (read-only filesystem, full disk), it is logged
+    and skipped so the deterministic parse still returns its results.
     """
     if corpus_dir is None:
-        corpus_dir = _DEFAULT_CORPUS_DIR
-    corpus_dir.mkdir(parents=True, exist_ok=True)
+        corpus_dir = _default_corpus_dir()
 
     import time  # noqa: PLC0415
 
     filename = f"{label}_{int(time.time() * 1000)}.txt"
     dest = corpus_dir / filename
-    dest.write_text(text, encoding="utf-8")
+    try:
+        corpus_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        log.warning("Could not save corpus section to %s: %s", dest, exc)
+        return None
     log.debug("Saved corpus section to %s", dest)
     return dest

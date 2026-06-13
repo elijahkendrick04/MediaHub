@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
 import re
 import uuid
@@ -16,11 +17,17 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_PATTERNS_PATH = pathlib.Path(__file__).resolve().parents[3] / "data" / "patterns.jsonl"
-if not _DEFAULT_PATTERNS_PATH.exists():
-    _DEFAULT_PATTERNS_PATH = (
-        pathlib.Path(__file__).resolve().parent.parent / "data" / "patterns.jsonl"
-    )
+
+def _default_patterns_path() -> pathlib.Path:
+    """Writable patterns file, derived from DATA_DIR (never the read-only
+    package tree). DATA_DIR defaults to src/mediahub in dev and is the mounted
+    disk on the hosted deployment, so provisional patterns persist to a
+    writable location instead of ``/app/src/mediahub/data`` (read-only →
+    Permission denied on flush).
+    """
+    env = os.environ.get("DATA_DIR")
+    base = pathlib.Path(env) if env else pathlib.Path(__file__).resolve().parents[1]
+    return base / "data" / "patterns.jsonl"
 
 
 class PatternStore:
@@ -37,7 +44,7 @@ class PatternStore:
     """
 
     def __init__(self, path: pathlib.Path | str | None = None) -> None:
-        self._path = pathlib.Path(path) if path else _DEFAULT_PATTERNS_PATH
+        self._path = pathlib.Path(path) if path else _default_patterns_path()
         self._records: dict[str, dict] = {}
         self._compiled: dict[str, re.Pattern] = {}
         self._load()
@@ -70,11 +77,19 @@ class PatternStore:
                     log.warning("Malformed JSON in patterns.jsonl line %d: %s", line_no, exc)
 
     def flush(self) -> None:
-        """Persist current records back to disk."""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("w", encoding="utf-8") as fh:
-            for rec in self._records.values():
-                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        """Persist current records back to disk.
+
+        Best-effort: provisional-pattern learning must never abort the parse
+        that triggered it, so a write failure (read-only fs, full disk) is
+        logged and swallowed rather than propagated.
+        """
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with self._path.open("w", encoding="utf-8") as fh:
+                for rec in self._records.values():
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            log.warning("Could not flush patterns to %s: %s", self._path, exc)
 
     # ------------------------------------------------------------------
     # Query
