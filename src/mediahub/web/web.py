@@ -6033,6 +6033,7 @@ select:focus-visible {
 from mediahub.web.theme_tokens import (  # noqa: E402
     THEME_TOKENS_CSS as _MH_TT_CSS,
     THEME_COMPONENTS_CSS as _MH_TC_CSS,
+    THEME_MOTION_CSS as _MH_MOTION_CSS,
 )
 from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_RG_CSS  # noqa: E402
 
@@ -6047,7 +6048,12 @@ from mediahub.web.responsive_guardrails import RESPONSIVE_GUARDRAILS_CSS as _MH_
 _MH_AUDIENCE_ICON_CSS = (
     "\n.mh-audience-icon { color: var(--lane); }\n.mh-audience-icon svg { color: var(--lane); }\n"
 )
-BASE_CSS = _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_RG_CSS
+# Motion / effect kit rides AFTER the components layer (so it can elevate
+# existing component primitives) but BEFORE the guardrails, which must stay the
+# cascade's final layer (test_theme_tokens::test_guardrails_appended_last).
+BASE_CSS = (
+    _MH_TT_CSS + BASE_CSS + _MH_TC_CSS + _MH_AUDIENCE_ICON_CSS + _MH_MOTION_CSS + _MH_RG_CSS
+)
 
 
 def _render_markdown(text: str) -> str:
@@ -7307,6 +7313,11 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     });
   }
 </script>
+<!-- UI kit — first-party progressive-enhancement behaviours for the motion /
+     effect layer (theme-motion.css). Deferred: runs after parse, in order,
+     before DOMContentLoaded. Self-hosted (no CDN); a load failure leaves every
+     page fully usable (effects are decorative). -->
+<script defer src="{{ url_for('static', filename='js/ui-kit.js') }}"></script>
 </head>
 <body>
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
