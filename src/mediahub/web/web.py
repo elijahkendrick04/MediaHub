@@ -8399,8 +8399,9 @@ def create_app() -> Flask:
                 if "<form" in html_text.lower():
                     tok = _csrf_token()
                     injected = _FORM_TAG_RX.sub(
-                        lambda m: m.group(1)
-                        + f'<input type="hidden" name="csrf_token" value="{tok}">',
+                        lambda m: (
+                            m.group(1) + f'<input type="hidden" name="csrf_token" value="{tok}">'
+                        ),
                         html_text,
                     )
                     if injected != html_text:
@@ -13452,7 +13453,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Complaints</h2>
-  <p>Think we've handled personal data wrongly? <a href="{url_for('complaints_form')}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
+  <p>Think we've handled personal data wrongly? <a href="{url_for("complaints_form")}">Make a data-protection complaint</a> — we acknowledge within 30 days. You can also contact the ICO directly at any time.</p>
 </div>
 """
         body = _legal.privacy_html(
@@ -13577,7 +13578,7 @@ Relay team broke club record"></textarea>
 </section>
 <div class="card">
   {err_html}
-  <form method="post" action="{url_for('complaints_submit')}">
+  <form method="post" action="{url_for("complaints_submit")}">
     <label>Your name<br><input type="text" name="name" maxlength="200" required></label><br>
     <label>How can we reach you? (email or phone)<br><input type="text" name="contact" maxlength="300" required></label><br>
     <label>You are…<br>
@@ -13750,7 +13751,7 @@ Relay team broke club record"></textarea>
 <div class="card"><h2>Incident register</h2>
 <table><thead><tr><th>Ref</th><th>Opened</th><th>Title</th><th>Severity</th><th>Personal data</th><th>Status</th></tr></thead>
 <tbody>{inc_rows}</tbody></table>
-<form method="post" action="{url_for('admin_compliance_incident')}" style="margin-top:12px">
+<form method="post" action="{url_for("admin_compliance_incident")}" style="margin-top:12px">
   <input type="text" name="title" placeholder="Incident title" maxlength="300" required>
   <select name="severity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select>
   <label><input type="checkbox" name="personal_data" value="1"> personal data involved</label>
@@ -13832,7 +13833,7 @@ Relay team broke club record"></textarea>
 
 <div class="card">
   <h2>Lawful basis &amp; gating mode</h2>
-  <form method="post" action="{url_for('org_consent_settings')}">
+  <form method="post" action="{url_for("org_consent_settings")}">
     <label>Lawful basis for publication<br>
       <select name="lawful_basis_publication">
         <option value=""{_sel("", profile.lawful_basis_publication)}>— not recorded —</option>
@@ -13866,7 +13867,7 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Under-18 content controls</h2>
   <p class="muted">How identifiable under-18 athletes are in generated content (ICO Children's Code). New organisations start with the identity controls on.</p>
-  <form method="post" action="{url_for('org_child_policy_settings')}">
+  <form method="post" action="{url_for("org_child_policy_settings")}">
     <label><input type="checkbox" name="child_surname_initial" value="1"{" checked" if profile.child_surname_initial else ""}> Show under-18s as first name + initial ("Eira H.")</label><br>
     <label><input type="checkbox" name="child_suppress_age" value="1"{" checked" if profile.child_suppress_age else ""}> Don't show ages or age groups on content</label><br>
     <label><input type="checkbox" name="child_exclude_photos" value="1"{" checked" if profile.child_exclude_photos else ""}> Never use athlete photos on under-18 posts (text-led cards instead)</label><br>
@@ -13877,18 +13878,18 @@ Relay team broke club record"></textarea>
 <div class="card">
   <h2>Retention</h2>
   <p class="muted">How long this club's data lives before the nightly purge removes it. You can tighten the deployment-wide window, never extend it. Blank = use the deployment default. 0 = keep forever (deployment setting only).</p>
-  <form method="post" action="{url_for('org_retention_settings')}">
-    <label>Raw uploaded results files (days, default {_h(str(_ret_global('raw_uploads')))})<br>
-      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get('raw_uploads', '')))}"></label><br>
-    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global('runs')))})<br>
-      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get('runs', '')))}"></label><br>
+  <form method="post" action="{url_for("org_retention_settings")}">
+    <label>Raw uploaded results files (days, default {_h(str(_ret_global("raw_uploads")))})<br>
+      <input type="number" min="0" name="raw_uploads" value="{_h(str((profile.retention_overrides or {}).get("raw_uploads", "")))}"></label><br>
+    <label>Runs, cards &amp; packs (days, default {_h(str(_ret_global("runs")))})<br>
+      <input type="number" min="0" name="runs" value="{_h(str((profile.retention_overrides or {}).get("runs", "")))}"></label><br>
     <button class="btn" type="submit">Save retention</button>
   </form>
 </div>
 
 <div class="card">
   <h2>Record a consent decision</h2>
-  <form method="post" action="{url_for('org_consent_record')}">
+  <form method="post" action="{url_for("org_consent_record")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
     <label>Decision<br>
       <select name="status">
@@ -14076,7 +14077,7 @@ Relay team broke club record"></textarea>
 </section>
 <div class="card">
   <h2>Log a request</h2>
-  <form method="post" action="{url_for('org_dsr_open')}">
+  <form method="post" action="{url_for("org_dsr_open")}">
     <label>Athlete name<br><input type="text" name="athlete_name" maxlength="200" required></label><br>
     <label>Request type<br>
       <select name="request_type">
@@ -15841,9 +15842,7 @@ Relay team broke club record"></textarea>
         # --- Posture summary — the page's lead state. Make the safe default
         # legible and reassuring, and surface clearly when any type has been
         # opted into autonomy. Counts read straight off the resolved policy.
-        _levels = [
-            current_policy.get(ct.value, "approval_required") for ct in _CT_REGISTRY
-        ]
+        _levels = [current_policy.get(ct.value, "approval_required") for ct in _CT_REGISTRY]
         _n_types = len(_levels)
         _n_auto = sum(1 for v in _levels if v == "fully_autonomous")
         _n_draft = sum(1 for v in _levels if v == "draft_only")
@@ -15864,9 +15863,7 @@ Relay team broke club record"></textarea>
         else:
             _posture_accent = "var(--warn)"
             _posture_bg = "var(--warn-bg)"
-            _posture_title = (
-                f"{_n_auto} of {_n_types} content types may auto-publish"
-            )
+            _posture_title = f"{_n_auto} of {_n_types} content types may auto-publish"
             _posture_sub = (
                 f"{_n_auto} type{'s' if _n_auto != 1 else ''} can publish without a human "
                 "when every publish-gate guardrail passes; the other "
@@ -19133,7 +19130,9 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 {quick_err_html}
 
 <div class="card" style="padding:20px 22px;margin-bottom:18px">
-  <form method="post" action="{quick_url}" enctype="multipart/form-data" data-loader-text="Building your graphic">
+  <form method="post" action="{
+            quick_url
+        }" enctype="multipart/form-data" data-loader-text="Building your graphic">
     <label for="ft-prompt" style="font-weight:600;display:block;margin-bottom:6px">What do you want to make?</label>
     <textarea id="ft-prompt" name="prompt" rows="4" required
       placeholder="e.g. A bold thank-you post for our sponsor Riverside Physio after a great gala weekend — upbeat, club colours."
@@ -21674,7 +21673,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
 <div class="card" style="max-width:420px;margin:40px auto">
   <h2>Two-factor code</h2>
   <p class="muted">Enter the 6-digit code from your authenticator app.</p>
-  <form method="post" action="{url_for('login_2fa')}">
+  <form method="post" action="{url_for("login_2fa")}">
     <input type="text" name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
     <button class="btn" type="submit">Verify</button>
   </form>
@@ -21752,7 +21751,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
             body = f"""
 <div class="card" style="max-width:520px;margin:40px auto">
   <h2>Two-factor authentication is <span class="tag ok">on</span></h2>
-  <form method="post" action="{url_for('account_2fa')}">
+  <form method="post" action="{url_for("account_2fa")}">
     <input type="hidden" name="action" value="disable">
     <label>Current code to switch it off<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
     <button class="btn secondary" type="submit">Disable 2FA</button>
@@ -21769,7 +21768,7 @@ function copySpotlightCaption(btn, cardIdSafe) {{
   <p>Add this secret to your authenticator app (Aegis, Google Authenticator, 1Password…):</p>
   <p><code>{_h(secret)}</code></p>
   <p class="muted" style="word-break:break-all">{_h(uri)}</p>
-  <form method="post" action="{url_for('account_2fa')}">
+  <form method="post" action="{url_for("account_2fa")}">
     <input type="hidden" name="action" value="enable">
     <label>Enter the current 6-digit code to confirm<br><input type="text" name="totp" inputmode="numeric" maxlength="7" required></label>
     <button class="btn" type="submit">Enable 2FA</button>
