@@ -64,7 +64,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-13 · `5c55c9bdc` · docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render]
+**Last updated:** 2026-06-13 · `8e73d6d82` · Redesign signed-in logo background as a cohesive brand wall (#450)
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1215,6 +1215,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-13 | `8e73d6d82` | Redesign signed-in logo background as a cohesive brand wall (#450) |
 | 2026-06-13 | `5c55c9bdc` | docs(roadmap): reorder build-first; archive shipped work in ROADMAP_BUILT.md (#446) [skip render] |
 | 2026-06-13 | `9c5d5cc26` | refactor(web): drop browser-HTML negotiation on health/diagnostic endpoints (#445) |
 | 2026-06-13 | `3267dc9bc` | fix(autotest): only run axe-core a11y on HTML responses (#443) |
@@ -1225,6 +1226,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `ff783cbe0` | Update settings/status tests for the new card grid + public status view |
 | 2026-06-13 | `12cf95ffe` | Integrate awesome-generative-ai-apps review: club-data Q&A + long-form/email Turn-Into artefacts (#4 |
 | 2026-06-13 | `be612a31b` | Rename Buffer -> "auto scheduling" everywhere; restructure Settings into card grid |
-| 2026-06-13 | `b7052ff57` | skills: add motion-craft + graphic-craft from HyperFrames (#437) |
-| 2026-06-13 | `e4fa8e4e2` | Run delete stays in place; spotlight last-month; purge athlete_swims on delete; 90% autopublish; sig |
 <!-- /ROADMAP:ACTIVITY -->
