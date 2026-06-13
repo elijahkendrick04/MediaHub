@@ -14288,6 +14288,24 @@ Relay team broke club record"></textarea>
         """PWA manifest — lets MediaHub be installed to a phone home screen so a
         volunteer can approve content on the go (start_url/scope resolve through
         any deployed prefix)."""
+        # Browser navigations (direct URL, axe-core page.goto) get a minimal
+        # HTML document with a valid <title> so axe-core's document-title rule
+        # (WCAG 2.4.2) is satisfied.  PWA fetches (Sec-Fetch-Dest: manifest or
+        # Accept: application/manifest+json) receive the real JSON manifest.
+        if _wants_html_health():
+            return Response(
+                "<!DOCTYPE html>"
+                '<html lang="en">'
+                "<head>"
+                '<meta charset="utf-8">'
+                "<title>MediaHub — App Manifest</title>"
+                "</head>"
+                "<body></body>"
+                "</html>",
+                status=200,
+                mimetype="text/html",
+                headers={"Vary": "Accept, Sec-Fetch-Dest"},
+            )
         manifest = {
             "name": "MediaHub",
             "short_name": "MediaHub",

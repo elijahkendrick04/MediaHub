@@ -486,3 +486,56 @@ def test_fonts_css_wildcard_accept_returns_css(client):
     assert r.status_code == 200
     # Should be CSS or at minimum not HTML
     assert not r.content_type.startswith("text/html")
+
+
+# /manifest.webmanifest — document-title (axe-core WCAG 2.4.2)
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_browser_nav_has_title(client):
+    """Direct browser navigation to /manifest.webmanifest must return an HTML
+    document with a <title> element — regression for axe-core document-title
+    (WCAG 2.4.2).  A real browser navigation ranks text/html strictly above
+    */*;q=0.8."""
+    r = client.get(
+        "/manifest.webmanifest",
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+    )
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    body = r.data.decode()
+    assert "<title>" in body
+    assert "MediaHub" in body
+
+
+def test_manifest_sec_fetch_dest_document_has_title(client):
+    """Sec-Fetch-Dest: document (Chromium/Firefox page.goto) must trigger the
+    HTML path for /manifest.webmanifest even when Accept is absent."""
+    r = client.get("/manifest.webmanifest", headers={"Sec-Fetch-Dest": "document"})
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/html")
+    assert "<title>" in r.data.decode()
+
+
+def test_manifest_pwa_fetch_returns_json(client):
+    """PWA fetches (Accept: application/manifest+json, or Accept: */*) must
+    receive the real JSON manifest — not HTML — so the browser can install the
+    app and the existing test_pwa suite is not broken."""
+    r = client.get(
+        "/manifest.webmanifest",
+        headers={"Accept": "application/manifest+json,*/*;q=0.1"},
+    )
+    assert r.status_code == 200
+    assert r.mimetype == "application/manifest+json"
+    m = r.get_json(force=True)
+    assert m["name"] == "MediaHub"
+
+
+def test_manifest_wildcard_accept_returns_json(client):
+    """Accept: */* (curl / fetch default) must return JSON, not HTML, so
+    programmatic consumers and the existing PWA test suite are not broken."""
+    r = client.get("/manifest.webmanifest", headers={"Accept": "*/*"})
+    assert r.status_code == 200
+    assert not r.content_type.startswith("text/html")
