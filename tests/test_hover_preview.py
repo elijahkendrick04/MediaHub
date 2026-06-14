@@ -203,7 +203,10 @@ class TestMediaLibraryRows:
         app, tmp = hp_app
         aid = _seed_asset(tmp, athletes=["Eira Hughes"])
         body = _client(app).get("/media-library").get_data(as_text=True)
-        assert '<tr class="mh-hp">' in body, "asset row must be a preview host"
+        # Prefix match: the row leads with the mh-hp preview-host class but UI 1.9
+        # appends mh-asset-row + data-asset-id for multi-select. Don't re-tighten
+        # to the exact `mh-hp">` form — that drops the bulk-select hooks.
+        assert '<tr class="mh-hp' in body, "asset row must be a preview host"
         assert '<template class="mh-hp-tpl">' in body
         assert '<img class="mh-hp-img"' in body
         # the floating frame shows the SAME asset's full image
@@ -232,7 +235,7 @@ class TestMediaLibraryRows:
     def test_empty_library_has_no_preview_host(self, hp_app):
         app, _ = hp_app
         body = _client(app).get("/media-library").get_data(as_text=True)
-        assert '<tr class="mh-hp">' not in body
+        assert '<tr class="mh-hp' not in body
         # ...but the shared follower JS/CSS still ships (no JS error surface)
         assert ".mh-hover-preview" in body
 

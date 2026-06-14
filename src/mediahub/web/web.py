@@ -62,6 +62,11 @@ from markupsafe import escape as _h
 
 from mediahub.pipeline.pipeline_v4 import run_pipeline_v4, PipelineRunV4
 from .humanise import humanise as _humanise
+from .weekend_glance import (
+    build_weekend_glance as _build_weekend_glance,
+    render_weekend_glance_html as _render_weekend_glance_html,
+)
+from . import results_table as _rt
 from .club_profile import (
     ClubProfile,
     list_profiles,
@@ -76,6 +81,7 @@ from .bounded_cache import BoundedCache
 # billing only touches Stripe lazily behind billing_configured().
 from . import auth as _auth
 from . import billing as _billing
+from . import charts as _charts
 from . import legal as _legal
 from . import tenancy as _tenancy
 
@@ -995,7 +1001,9 @@ def _use_in_caption_html(run_id: str, swim_id: str, card_uuid: str) -> tuple[str
     return btn, panel
 
 
-def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title") -> str:
+def _reveal_lines(
+    lines: list[str], *, tag: str = "h2", cls: str = "mh-section-title", el_id: str = ""
+) -> str:
     """U.5 — render an editorial heading as stacked lines that reveal
     one-by-one on scroll (inspired by Opal, op.al).
 
@@ -1013,9 +1021,56 @@ def _reveal_lines(lines: list[str], *, tag: str = "h2", cls: str = "mh-section-t
     reduced-motion visitors see every line immediately (the ``.mh-js`` /
     ``prefers-reduced-motion`` gate in the CSS), so this is pure progressive
     enhancement — content is never hidden without JavaScript able to reveal it.
+
+    ``el_id`` (optional) stamps an ``id`` on the heading element so a section
+    can name itself via ``aria-labelledby`` (e.g. the UI 1.22 FAQ region);
+    when omitted the output is byte-identical to the original helper.
     """
     spans = "".join(f'<span class="mh-line">{ln}</span>' for ln in lines)
-    return f'<{tag} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+    id_attr = f' id="{el_id}"' if el_id else ""
+    return f'<{tag}{id_attr} class="{cls} mh-reveal-lines">{spans}</{tag}>'
+
+
+def _drag_hint(label: str = "Drag to explore") -> str:
+    """UI 1.27 — the "drag to explore" affordance shown beside a
+    ``.mh-drag-scroll`` gallery (Media Library filmstrip + landing
+    sample-output showcase).
+
+    It ships ``hidden``; ui-kit.js ``bindDragScroll`` reveals it only while
+    the row actually overflows (and hides it again after the first drag), so
+    the hint never promises a drag the row can't deliver. It is a pure cue:
+    the gallery scrolls with wheel / trackpad / touch / focused-arrow keys
+    even with no JS and no hint. The grip glyph is a static, first-party
+    inline SVG (no icon font, no CDN).
+    """
+    return (
+        '<p class="mh-ds-hint" hidden style="margin-top:var(--sp-3)">'
+        '<span class="mh-ds-hint__grip" aria-hidden="true">'
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+        'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" '
+        'stroke-linejoin="round"><path d="m9 6-4 4 4 4M15 6l4 4-4 4"/></svg>'
+        f"</span> {_h(label)}</p>"
+    )
+
+
+def _chart_card(eyebrow: str, title: str, chart_html: str) -> str:
+    """UI 1.6 — wrap a chart in a labelled panel (eyebrow + title) for the
+    landing sample-outputs grid and the in-app Review "Meet at a glance" card.
+
+    ``eyebrow`` and ``title`` are trusted static copy and may carry HTML
+    entities (``&middot;``, ``&amp;``), exactly like ``_reveal_lines`` — there
+    is no user data on this path, so they are not re-escaped. ``chart_html`` is
+    the already-rendered, already-escaped figure from ``web/charts.py``.
+    """
+    return (
+        '<div class="mh-chart-card">'
+        '<div class="mh-chart-card-head">'
+        f'<span class="mh-chart-card-eyebrow">{eyebrow}</span>'
+        f'<h3 class="mh-chart-card-title">{title}</h3>'
+        "</div>"
+        f"{chart_html}"
+        "</div>"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1112,6 +1167,74 @@ def _worthiness_meter(priority: float) -> str:
         '<span class="mh-worth-track">'
         f'<span class="mh-worth-fill mh-bar-fill" style="width:{pct}%"></span></span>'
         f'<span class="mh-worth-num">{pct}%</span></span>'
+    )
+
+
+def _avatar_initials(name: str) -> str:
+    """One- or two-letter initials for an athlete avatar chip.
+
+    First+last initial for a full name, the first two letters for a single
+    token, ``?`` for an empty name. Mirrors the sign-in card initials.
+    """
+    parts = [p for p in (name or "").strip().split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _athlete_avatar(
+    name: str,
+    *,
+    club: str = "",
+    stat: str = "",
+    focusable: bool = False,
+    size: int = 34,
+) -> str:
+    """An athlete avatar chip carrying a hover/focus Animated-Tooltip (the kit
+    ``.mh-tooltip``) that shows the athlete's name, club and a key stat.
+
+    Used on the review queue and the athlete-spotlight surfaces (UI2.2). The
+    tooltip is a decorative progressive enhancement: the chip is fully usable
+    with the effect absent (no-JS / reduced-motion), and every value shown is a
+    real, grounded fact already in the recognition report — never fabricated.
+
+    ``focusable=True`` makes the chip keyboard-reachable and exposes the same
+    name/club/stat to assistive tech via ``aria-label`` (use for standalone
+    placements). ``focusable=False`` keeps it decorative + ``aria-hidden`` (use
+    when the chip sits inside another link/control, or the same facts are
+    already visible as text beside it).
+    """
+    nm = (name or "").strip()
+    club = (club or "").strip()
+    stat = (stat or "").strip()
+    initials = _h(_avatar_initials(nm))
+
+    # Meta line: "Club · stat", dropping either empty half cleanly.
+    meta_inner = ""
+    if club:
+        meta_inner += f'<span class="mh-tooltip__club">{_h(club)}</span>'
+    if club and stat:
+        meta_inner += '<span class="mh-tooltip__sep" aria-hidden="true"> · </span>'
+    if stat:
+        meta_inner += f'<span class="mh-tooltip__stat">{_h(stat)}</span>'
+    meta_html = f'<span class="mh-tooltip__meta">{meta_inner}</span>' if meta_inner else ""
+
+    if focusable:
+        # Standalone, keyboard-reachable: AT gets the whole summary from the
+        # avatar's aria-label; the visual pop is a decorative duplicate.
+        aria = _h(" · ".join(p for p in (nm, club, stat) if p) or (nm or "Athlete"))
+        avatar_attrs = f'tabindex="0" role="img" aria-label="{aria}"'
+    else:
+        avatar_attrs = 'aria-hidden="true"'
+
+    return (
+        f'<span class="mh-tooltip" style="--mh-tip-size:{int(size)}px">'
+        f'<span class="mh-tooltip__avatar" {avatar_attrs}>{initials}</span>'
+        f'<span class="mh-tooltip__pop" role="tooltip" aria-hidden="true">'
+        f'<span class="mh-tooltip__name">{_h(nm)}</span>{meta_html}'
+        f"</span></span>"
     )
 
 
@@ -2181,6 +2304,53 @@ def _iso_age_secs(iso_str: Optional[str]) -> Optional[float]:
         return None
 
 
+def _cadence_activity_counts(profile_id: str, end):
+    """Per-day content activity for one organisation over the heatmap window.
+
+    Returns ``(generated, posted)`` — two ``{YYYY-MM-DD: count}`` dicts scoped
+    to ``profile_id``: ``generated`` is pipeline runs created that day (the
+    run history that grounds UI 1.17), ``posted`` is successful publish
+    attempts that day (the posting log). ISO-8601 timestamps sort lexically,
+    so a ``>= start`` prefix compare bounds the scan to the rendered year and
+    ``substr(...,1,10)`` buckets by date in-engine. Fail-soft: any DB trouble
+    yields empty dicts so the Activity page never 500s over its decoration.
+    """
+    generated: dict[str, int] = {}
+    posted: dict[str, int] = {}
+    if not profile_id:
+        return generated, posted
+    start_iso = _cadence_window_start(end).isoformat()
+    try:
+        conn = _db()
+        try:
+            for r in conn.execute(
+                "SELECT substr(created_at, 1, 10) AS d, COUNT(*) AS n FROM runs "
+                "WHERE profile_id = ? AND created_at >= ? GROUP BY d",
+                (profile_id, start_iso),
+            ).fetchall():
+                if r["d"]:
+                    generated[r["d"]] = int(r["n"] or 0)
+            # The posting_attempts table only exists once the posting log has
+            # been touched; tolerate its absence on publish-free deployments.
+            try:
+                for r in conn.execute(
+                    "SELECT substr(attempted_at, 1, 10) AS d, COUNT(*) AS n "
+                    "FROM posting_attempts "
+                    "WHERE profile_id = ? AND status = 'ok' AND attempted_at >= ? "
+                    "GROUP BY d",
+                    (profile_id, start_iso),
+                ).fetchall():
+                    if r["d"]:
+                        posted[r["d"]] = int(r["n"] or 0)
+            except sqlite3.Error:
+                pass
+        finally:
+            conn.close()
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning("cadence: activity counts unavailable: %s", e)
+    return generated, posted
+
+
 def _persist_run_progress(
     run_id: str, status: str, log_list: list, error: Optional[str] = None
 ) -> None:
@@ -2744,7 +2914,7 @@ def _in_progress_page(run_id: str, return_url_endpoint: str = "review") -> str:
     return f"""
 <div style="text-align:center;padding:64px 24px">
   <div class="mh-spinner" style="margin:0 auto 24px"></div>
-  <h1 style="margin-bottom:10px">Still processing your run</h1>
+  <h1 class="mh-scramble" style="margin-bottom:10px">Still processing your run</h1>
   <p class="dim" style="max-width:480px;margin:0 auto 24px">
     The pipeline is reading the file, finding your athletes, and drafting
     captions. This usually takes 20&ndash;60 seconds. We&rsquo;ll auto-refresh
@@ -4600,6 +4770,29 @@ def _start_run(
                     notify_pack_ready(run_id)
                 except Exception:
                     pass
+                # In-app notifications inbox (UI 1.14) — always-on, no-config:
+                # record the "pack ready" milestone against the owning org so it
+                # lands in the bell dropdown even with no push channel set up.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_pack_ready(profile_id, run_id, count=len(run.cards))
+                except Exception:
+                    pass
+            else:
+                # The pipeline reported a terminal error (rather than raising) —
+                # surface it in the inbox so the operator isn't left guessing.
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        profile_id,
+                        "Run couldn't be processed",
+                        str(run.error),
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             import traceback
 
@@ -4609,6 +4802,17 @@ def _start_run(
             conn.execute("UPDATE runs SET status='error', error=? WHERE id=?", (str(e), run_id))
             conn.commit()
             conn.close()
+            try:
+                from mediahub.notify import inbox as _inbox
+
+                _inbox.record_error(
+                    profile_id,
+                    "Run couldn't be processed",
+                    str(e),
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -5131,11 +5335,13 @@ html { background: var(--bg-deep); }
 body {
   font-family: var(--font-body);
   background:
-    /* One subtle radial lift at top centre — stadium-light fall-off */
-    radial-gradient(1400px 600px at 50% -10%, rgba(245,242,232,0.04), transparent 70%),
+    /* One subtle radial lift at top centre — stadium-light fall-off.
+       Light mode swaps the cream tint for a faint ink tint so the lift
+       and the grid lattice stay visible on the paper page. */
+    radial-gradient(1400px 600px at 50% -10%, light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)), transparent 70%),
     /* Faint 40px grid lattice — pit-wall / scoreboard substrate */
-    linear-gradient(rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
-    linear-gradient(90deg, rgba(245,242,232,0.022) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, light-dark(rgba(20,23,31,0.03), rgba(245,242,232,0.022)) 1px, transparent 1px) 0 0 / 40px 40px,
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
@@ -5149,14 +5355,63 @@ body {
   font-variant-numeric: oldstyle-nums;
 }
 a {
-  color: var(--lane);
+  /* Dark: pure lane-yellow (unchanged). Light: a dark-olive brand tone
+     (--mh-link) — lane-yellow text is illegible on the paper page. */
+  color: light-dark(var(--mh-link), var(--lane));
   text-decoration: none;
   transition: color var(--transition);
   text-underline-offset: 0.18em;
   text-decoration-thickness: 1px;
 }
-a:hover { color: var(--lane-h); text-decoration: underline; text-decoration-color: var(--lane); }
+a:hover { color: light-dark(var(--mh-link-hover), var(--lane-h)); text-decoration: underline; text-decoration-color: light-dark(var(--mh-link), var(--lane)); }
 ::selection { background: var(--lane); color: var(--lane-ink); }
+
+/* UI 1.23 — Light/dark theme toggle (a compact Light · System · Dark
+   segmented control in the masthead). The control is pure chrome; the
+   active segment is driven by the data-theme attribute the boot script
+   writes onto <html> from localStorage. Every colour flows through the
+   light-dark() token layer, so the control itself re-themes. */
+/* The toggle is a JS control (it persists + forces the mode), so hide
+   it when JS is unavailable — those visitors still get the OS-default
+   theme via color-scheme. Matches the .mh-js progressive-enhancement
+   pattern used elsewhere. */
+html:not(.mh-js) .mh-theme-toggle { display: none; }
+.mh-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--chrome);
+  border-radius: var(--radius-pill);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
+  flex-shrink: 0;
+}
+.mh-theme-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 24px;
+  padding: 0; margin: 0; border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  transition: color var(--transition), background var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+.mh-theme-toggle button svg { width: 15px; height: 15px; display: block; }
+.mh-theme-toggle button:hover { color: var(--ink); }
+.mh-theme-toggle button:focus-visible { outline: 2px solid var(--mh-focus); outline-offset: 2px; }
+/* Active segment = the one matching the current data-theme (or System
+   before the boot script / for no-JS visitors). */
+html[data-theme="light"]  .mh-theme-toggle button[data-theme-value="light"],
+html[data-theme="dark"]   .mh-theme-toggle button[data-theme-value="dark"],
+html[data-theme="system"] .mh-theme-toggle button[data-theme-value="system"],
+html:not([data-theme])    .mh-theme-toggle button[data-theme-value="system"] {
+  background: var(--lane);
+  color: var(--lane-ink);
+}
 
 /* TOPNAV — pit-wall masthead: condensed wordmark + mono control panel */
 header.topnav {
@@ -5166,8 +5421,9 @@ header.topnav {
   padding: 0 var(--sp-7);
   height: 64px;
   border-bottom: 1px solid var(--hairline);
-  background: rgba(10,11,17,0.92);
-  /* No blur — glass is banned by every audit. Solid pit-wall instead. */
+  background: light-dark(rgba(248,246,239,0.92), rgba(10,11,17,0.92));
+  /* No blur — glass is banned by every audit. Solid pit-wall (dark) /
+     solid paper (light) instead. */
   position: sticky;
   top: 0;
   z-index: 100;
@@ -5278,6 +5534,131 @@ header.topnav nav a.live::before {
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
+/* === UI 1.14 — Notifications inbox (bell + unread badge + dropdown) ===
+   Masthead-consistent: mono labels, --chrome rule, --lane accent. The panel
+   is position:fixed and JS-anchored under the bell so the scrollable /
+   hamburger nav can never clip it. */
+.mh-notif {
+  position: relative;
+  display: inline-flex; align-items: center; align-self: center;
+  flex-shrink: 0; margin-left: 6px;
+}
+.mh-notif-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  background: transparent;
+  border: 1px solid var(--chrome);
+  border-radius: 2px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+}
+.mh-notif-btn:hover,
+.mh-notif-btn[aria-expanded="true"] { border-color: var(--lane); color: var(--ink); }
+.mh-notif-btn svg { width: 17px; height: 17px; display: block; }
+.mh-notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; line-height: 1;
+  color: #0A0B11;
+  background: var(--lane);
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 10px var(--lane-glow);
+  pointer-events: none;
+}
+.mh-notif-badge[hidden] { display: none; }
+.mh-notif-panel {
+  position: fixed; top: 0; right: 0;   /* JS sets the real top/right */
+  width: 360px; max-width: calc(100vw - 24px);
+  max-height: min(70vh, 480px);
+  display: flex; flex-direction: column;
+  background: var(--surface, var(--panel, #14171F));
+  border: 1px solid var(--chrome);
+  border-radius: 6px;
+  box-shadow: 0 18px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
+  z-index: 1200;
+  overflow: hidden;
+  animation: mh-notif-in 0.16s ease-out;
+}
+.mh-notif-panel[hidden] { display: none; }
+@keyframes mh-notif-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mh-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--chrome);
+  flex-shrink: 0;
+}
+.mh-notif-h-title {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink);
+}
+.mh-notif-readall {
+  background: transparent; border: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer; padding: 2px 4px;
+  transition: color var(--transition);
+}
+.mh-notif-readall:hover { color: var(--lane); }
+.mh-notif-readall:disabled { opacity: 0.35; cursor: default; }
+.mh-notif-list { overflow-y: auto; flex: 1; }
+.mh-notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: transparent; border: 0;
+  border-bottom: 1px solid rgba(245,242,232,0.07);
+  cursor: pointer; color: var(--ink); font: inherit;
+  transition: background var(--transition);
+}
+.mh-notif-item:hover { background: rgba(245,242,232,0.04); }
+.mh-notif-item.is-unread { background: rgba(212,255,58,0.05); }
+.mh-notif-item.is-unread:hover { background: rgba(212,255,58,0.09); }
+.mh-notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; background: var(--ink-faint);
+}
+.mh-notif-item[data-level="success"] .mh-notif-dot { background: var(--good); box-shadow: 0 0 8px rgba(94,227,154,0.5); }
+.mh-notif-item[data-level="warning"] .mh-notif-dot { background: var(--warn); }
+.mh-notif-item[data-level="error"]   .mh-notif-dot { background: var(--bad);  box-shadow: 0 0 8px rgba(255,107,107,0.5); }
+.mh-notif-item.is-read .mh-notif-dot { background: var(--ink-faint); box-shadow: none; }
+.mh-notif-text { min-width: 0; flex: 1; }
+.mh-notif-t {
+  display: block;
+  font-size: 13px; font-weight: 600; line-height: 1.3;
+  color: var(--ink); overflow-wrap: anywhere;
+}
+.mh-notif-item.is-read .mh-notif-t { color: var(--ink-muted); font-weight: 500; }
+.mh-notif-m {
+  display: block; margin-top: 2px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--ink-muted); overflow-wrap: anywhere;
+}
+.mh-notif-time {
+  display: block; margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.mh-notif-empty {
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 34px 20px 38px; text-align: center;
+}
+.mh-notif-panel.is-empty .mh-notif-empty { display: flex; }
+.mh-notif-panel.is-empty .mh-notif-list { display: none; }
+.mh-notif-empty svg { width: 26px; height: 26px; color: var(--ink-faint); opacity: 0.7; }
+.mh-notif-empty-t { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.mh-notif-empty-s { font-size: 11.5px; color: var(--ink-faint); max-width: 220px; line-height: 1.4; }
 
 /* MAIN */
 main.wrap { max-width: 1200px; margin: 0 auto; padding: 36px 28px 96px; }
@@ -5604,7 +5985,7 @@ p:last-child { margin-bottom: 0; }
 }
 .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--chrome); }
 .btn.secondary:hover {
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   color: var(--ink);
   border-color: var(--lane);
   box-shadow: none;
@@ -5691,7 +6072,7 @@ table tbody tr:hover { background: rgba(255,255,255,0.03); }
   font-size: 10px; font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   color: var(--ink-dim);
   border: 1px solid var(--hairline);
   white-space: nowrap;
@@ -5765,7 +6146,7 @@ label.mh-choice input { margin: 0; }
   text-transform: uppercase;
 }
 input[type=text], input[type=file], input[type=email], input[type=password], input[type=url], input[type=number], textarea, select {
-  background: rgba(245,242,232,0.025); color: var(--ink);
+  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)); color: var(--ink);
   border: 1px solid var(--chrome);
   border-radius: var(--radius-sm); padding: 11px 14px;
   /* 44px touch-target floor for every text/file/email/number field. */
@@ -5780,7 +6161,7 @@ input[type=text]:hover, input[type=email]:hover, textarea:hover, select:hover {
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus, input[type=url]:focus, input[type=number]:focus, textarea:focus, select:focus {
   outline: none; border-color: var(--lane);
   box-shadow: 0 0 0 2px rgba(212,255,58,0.18);
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
 }
 input[type=checkbox], input[type=radio] {
   /* Bump native checkbox/radio from the browser's ~13px default so it
@@ -5822,7 +6203,7 @@ input[type=color] {
      on phone / tablet. Width stays compact so the hex input next to it
      dominates the row. */
   height: 44px; min-width: 44px; padding: 2px; cursor: pointer;
-  background: rgba(245,242,232,0.04); border-color: var(--chrome);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04)); border-color: var(--chrome);
 }
 /* Pair the bumped checkbox with a 44px-tall click target on the wrapping
    label. Covers /organisation/setup's `palette_use_fourth` row plus the
@@ -5895,7 +6276,8 @@ label.mh-choice, label:has(> input[type=checkbox]), label:has(> input[type=radio
 
 /* PROGRESS LOG */
 .progress-log {
-  background: rgba(0,0,0,0.3); color: #9EB3C8;
+  background: light-dark(rgba(20,23,31,0.05), rgba(0,0,0,0.3));
+  color: light-dark(var(--mh-on-surface-variant), #9EB3C8);
   border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12px; white-space: pre-wrap; max-height: 360px; overflow-y: auto; line-height: 1.7;
@@ -5993,7 +6375,9 @@ a.card:hover, .card[data-interactive]:hover {
 /* Loading overlay */
 #mh-loader {
   position: fixed; inset: 0;
-  background: rgba(11,18,32,0.78);
+  /* Light: a translucent paper scrim so the (now dark) loader text
+     stays readable; dark: the original deep-ink scrim. */
+  background: light-dark(rgba(245,243,237,0.82), rgba(11,18,32,0.78));
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   z-index: 9999;
   display: none; align-items: center; justify-content: center;
@@ -6251,15 +6635,15 @@ a.card:hover, .card[data-interactive]:hover {
   font-weight: 600;
   padding: 0 4px;
   border-radius: 4px;
-  background: rgba(245, 242, 232, 0.06);   /* faint --ink wash */
+  background: light-dark(rgba(20, 23, 31, 0.07), rgba(245, 242, 232, 0.06));   /* faint --ink wash */
   /* clone the pill across wrapped lines and keep the line box tight */
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 /* Athlete — the person: the brightest neutral pill (the hero of the card). */
-.mh-fact--athlete { background: rgba(245, 242, 232, 0.08); }
+.mh-fact--athlete { background: light-dark(rgba(20, 23, 31, 0.09), rgba(245, 242, 232, 0.08)); }
 /* Event — the race: a quieter neutral pill. */
-.mh-fact--event { background: rgba(245, 242, 232, 0.045); }
+.mh-fact--event { background: light-dark(rgba(20, 23, 31, 0.055), rgba(245, 242, 232, 0.045)); }
 /* Time — the data: monospace + tabular figures with a faint gold edge. */
 .mh-fact--time {
   font-family: var(--font-mono);
@@ -6650,7 +7034,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   transition: opacity var(--transition);
 }
 .mh-step:hover {
-  background: rgba(245,242,232,0.025);
+  background: light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025));
   border-color: var(--hairline);
 }
 .mh-step:hover::before { opacity: 1; }
@@ -6712,7 +7096,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   content: '';
   position: absolute; inset: 0;
   background:
-    linear-gradient(rgba(245,242,232,0.025) 1px, transparent 1px) 0 0 / 100% 64px,
+    linear-gradient(light-dark(rgba(20,23,31,0.035), rgba(245,242,232,0.025)) 1px, transparent 1px) 0 0 / 100% 64px,
     linear-gradient(90deg, rgba(245,242,232,0.018) 1px, transparent 1px) 0 0 / 64px 100%;
   pointer-events: none;
   mask-image: radial-gradient(ellipse 80% 70% at 30% 50%, black 30%, transparent 75%);
@@ -6869,7 +7253,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
   border-color: var(--chrome);
 }
 .mh-cta-secondary:hover {
-  background: rgba(245,242,232,0.04);
+  background: light-dark(rgba(20,23,31,0.05), rgba(245,242,232,0.04));
   border-color: var(--lane);
   color: var(--ink);
   transform: translateY(-1px);
@@ -6879,7 +7263,7 @@ input[type=text], input[type=file], textarea, select { max-width: 100%; }
    settles the hover lift (so the button feels responsive to the click),
    and a visible focus ring keeps them keyboard-navigable. */
 .mh-cta-primary:active { transform: translateY(0); background: var(--lane-deep); box-shadow: none; }
-.mh-cta-secondary:active { transform: translateY(0); background: rgba(245,242,232,0.07); }
+.mh-cta-secondary:active { transform: translateY(0); background: light-dark(rgba(20,23,31,0.08), rgba(245,242,232,0.07)); }
 .mh-cta-primary:focus-visible,
 .mh-cta-secondary:focus-visible { outline: 2px solid var(--lane); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
@@ -7536,6 +7920,12 @@ from mediahub.web.pipeline_diagram import (  # noqa: E402
     PIPELINE_DIAGRAM_CSS as _MH_PL_CSS,
     pipeline_diagram_section_html as _pipeline_diagram_section_html,
 )
+from mediahub.web.cadence_heatmap import (  # noqa: E402
+    CADENCE_HEATMAP_CSS as _MH_CAD_CSS,
+    cadence_panel_html as _cadence_panel_html,
+    window_start as _cadence_window_start,
+)
+from mediahub.web import code_highlight as _code_hl  # noqa: E402
 
 # I4 fix — persona cards ("Built for the people who already post the
 # results"). The inline SVGs use stroke="currentColor", so the icon glyph
@@ -7559,6 +7949,7 @@ BASE_CSS = (
     + _MH_AUDIENCE_ICON_CSS
     + _MH_MOTION_CSS
     + _MH_PL_CSS
+    + _MH_CAD_CSS
     + _MH_RG_CSS
 )
 
@@ -8971,6 +9362,24 @@ def _layout(
 <meta name="color-scheme" content="dark light" />
 <meta name="theme-color" content="#0A0B11" />
 <meta name="format-detection" content="telephone=no" />
+<script>
+  /* UI 1.23 — theme boot. Runs BEFORE any CSS paints so the chosen
+     light/dark mode is applied on first frame (no flash). Reads the
+     persisted preference (light | dark | system; default System =
+     follow the OS, dark-first). For an explicit choice we force the
+     mode by writing color-scheme onto <html> (an inline style beats
+     the stylesheet's OS-aware default); System leaves it to the CSS.
+     Every visible colour resolves through light-dark() against this. */
+  (function(){
+    try {
+      var pref = localStorage.getItem('mh-theme');
+      if (pref !== 'light' && pref !== 'dark') pref = 'system';
+      var el = document.documentElement;
+      el.setAttribute('data-theme', pref);
+      if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
+    } catch (e) {}
+  })();
+</script>
 <title>{{ title }} &mdash; MediaHub</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}" />
 <link rel="manifest" href="{{ url_for('web_manifest') }}" />
@@ -9060,6 +9469,7 @@ def _layout(
     <a href="{{ url_for('make_page') }}" class="{{ 'active' if active=='create' else '' }}">Create</a>
     <a href="{{ url_for('template_gallery') }}" class="{{ 'active' if active=='templates' else '' }}">Templates</a>
     <a href="{{ url_for('media_library_page') }}" class="{{ 'active' if active=='media' else '' }}">Media library</a>
+    <a href="{{ url_for('season_timeline_page') }}" class="{{ 'active' if active=='season' else '' }}">Season</a>
     {% if research_enabled %}<a href="{{ url_for('web_research_console') }}" class="{{ 'active' if active=='research' else '' }}">Research</a>{% endif %}
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if active=='settings' else '' }}">Settings</a>
     {# Pricing is a top-bar item only for signed-out visitors (prospects).
@@ -9084,11 +9494,60 @@ def _layout(
       <a href="{{ url_for('login_page') }}">Log in</a>
       <a href="{{ url_for('developer_login') }}" title="Operator sign-in (unrestricted)">Developer</a>
     {% endif %}
+    <div class="mh-theme-toggle" role="radiogroup" aria-label="Colour theme">
+      <button type="button" role="radio" data-theme-value="light" aria-checked="false" aria-label="Light theme" title="Light theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+      <button type="button" role="radio" data-theme-value="system" aria-checked="false" aria-label="System theme (follow device)" title="System theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      </button>
+      <button type="button" role="radio" data-theme-value="dark" aria-checked="false" aria-label="Dark theme" title="Dark theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+      </button>
+    </div>
     <a id="backend-pill" href="{{ health_url }}" target="_blank" rel="noopener"
        title="Backend status (click for full health JSON)">
       <span id="backend-pill-dot"></span>
       <span id="backend-pill-text">checking&hellip;</span>
     </a>
+    {% if signed_in %}
+    {# UI 1.14 — Notifications inbox. Bell + unread badge + dropdown listing
+       render-complete, pack-ready and error events for the active org, backed
+       by the notify-layer inbox store and polled on the same light cadence as
+       the health pill. The dropdown panel is JS-positioned (fixed) so the
+       scrollable / hamburger nav can never clip it. #}
+    <div id="mh-notif" class="mh-notif">
+      <button id="mh-notif-btn" class="mh-notif-btn" type="button"
+              aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"
+              aria-controls="mh-notif-panel"
+              data-list-url="{{ url_for('api_notifications') }}"
+              data-readall-url="{{ url_for('api_notifications_read_all') }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="mh-notif-badge" class="mh-notif-badge" hidden>0</span>
+      </button>
+      <div id="mh-notif-panel" class="mh-notif-panel" role="dialog"
+           aria-label="Notifications" hidden>
+        <div class="mh-notif-head">
+          <span class="mh-notif-h-title">Notifications</span>
+          <button id="mh-notif-readall" class="mh-notif-readall" type="button">Mark all read</button>
+        </div>
+        <div id="mh-notif-list" class="mh-notif-list" role="list" aria-live="polite"></div>
+        <div id="mh-notif-empty" class="mh-notif-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="mh-notif-empty-t">You're all caught up</span>
+          <span class="mh-notif-empty-s">Render, pack, and error updates show up here.</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% if signed_in and signed_in_name %}
     <a id="active-org-chip"
        href="{{ url_for('organisation_setup') }}"
@@ -9157,6 +9616,8 @@ def _layout(
       <a href="{{ url_for('dpa_page') }}">DPA</a>
       <span class="mh-footer-sep">/</span>
       <a href="{{ url_for('research_page') }}">Roadmap</a>
+      <span class="mh-footer-sep">/</span>
+      <a href="{{ url_for('api_docs_page') }}">API</a>
     </div>
     <div class="mh-footer-meta" style="margin-top:6px;opacity:0.75">
       {{ provider_identity }}
@@ -9214,6 +9675,57 @@ def _layout(
     Settings
   </a>
 </nav>
+{# UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style). Press ? on any
+   page to open it; lists the navigation + general shortcuts, and reveals the
+   review-flow quick keys when a review surface is on the page. Vanilla JS
+   (bindShortcuts) reuses MH.openModal for the focus-trap. Navigation rows are
+   real url_for() links, so the keyboard map is read straight back off the DOM —
+   one source of truth, and the rows still work as a click menu with no JS. #}
+<div class="mh-kbd-overlay" id="mh-shortcuts-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="mh-shortcuts-title" aria-hidden="true">
+  <div class="mh-kbd-overlay-panel" role="document">
+    <button type="button" class="mh-kbd-overlay-close" data-mh-modal-close
+            aria-label="Close keyboard shortcuts">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+    </button>
+    <h3 id="mh-shortcuts-title">Keyboard shortcuts</h3>
+    <section data-mh-shortcuts-group="nav">
+      <h4>Navigation</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>h</kbd></span>
+        <a class="desc" data-mh-go="h" href="{{ url_for('home') }}">Go to Home</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>p</kbd></span>
+        <a class="desc" data-mh-go="p" href="{{ url_for('plan_page') }}">Go to Plan</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>c</kbd></span>
+        <a class="desc" data-mh-go="c" href="{{ url_for('make_page') }}">Go to Create</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>m</kbd></span>
+        <a class="desc" data-mh-go="m" href="{{ url_for('media_library_page') }}">Go to Media library</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>a</kbd></span>
+        <a class="desc" data-mh-go="a" href="{{ url_for('activity_page') }}">Go to Activity</a>
+        <span class="keys"><kbd>g</kbd> <span class="mh-kbd-then">then</span> <kbd>s</kbd></span>
+        <a class="desc" data-mh-go="s" href="{{ url_for('settings_page') }}">Go to Settings</a>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="review" hidden>
+      <h4>Review &amp; approve</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>j</kbd></span><span class="desc">Focus next card</span>
+        <span class="keys"><kbd>k</kbd></span><span class="desc">Focus previous card</span>
+        <span class="keys"><kbd>a</kbd></span><span class="desc">Approve the focused card</span>
+        <span class="keys"><kbd>u</kbd></span><span class="desc">Send the focused card back to the queue</span>
+      </div>
+    </section>
+    <section data-mh-shortcuts-group="general">
+      <h4>General</h4>
+      <div class="mh-kbd-table">
+        <span class="keys"><kbd>?</kbd></span><span class="desc">Open or close this help</span>
+        <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close this help</span>
+      </div>
+    </section>
+    <div class="mh-kbd-overlay-foot">Shortcuts pause while you're typing in a field.</div>
+  </div>
+</div>
 {% if dock %}
 <!-- U.13 — Floating mobile action dock. A bottom-centre thumb-reachable
      capsule for the review/approve flow on mobile (Create / Library /
@@ -9272,6 +9784,156 @@ def _layout(
 })();
 </script>
 <script>
+/* UI 1.14 — Notifications inbox. Polls /api/notifications on the same light
+   cadence as the health pill, paints the unread badge, and renders the bell
+   dropdown. The panel is position:fixed and anchored under the bell in JS so
+   the scrollable / hamburger nav can never clip it. All notification text is
+   written with textContent (never innerHTML), so a caption or error string can
+   never inject markup. Self-contained — no dependency on the MH framework. */
+(function(){
+  var btn = document.getElementById('mh-notif-btn');
+  if (!btn) return;  // signed out — no bell rendered
+  var panel   = document.getElementById('mh-notif-panel');
+  var list    = document.getElementById('mh-notif-list');
+  var badge   = document.getElementById('mh-notif-badge');
+  var readAll = document.getElementById('mh-notif-readall');
+  var LIST_URL    = btn.getAttribute('data-list-url');
+  var READALL_URL = btn.getAttribute('data-readall-url');
+  var POLL_MS = 30000;
+  var open = false;
+  var lastUnread = 0;
+
+  function ago(iso){
+    var t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 45)   return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+    try { return new Date(t).toLocaleDateString(); } catch (e) { return ''; }
+  }
+
+  function paintBadge(n){
+    lastUnread = n;
+    if (n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.hidden = false;
+      btn.setAttribute('aria-label', 'Notifications (' + n + ' unread)');
+    } else {
+      badge.hidden = true;
+      btn.setAttribute('aria-label', 'Notifications');
+    }
+    if (readAll) readAll.disabled = (n === 0);
+  }
+
+  function el(tag, cls, text){
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render(items){
+    list.textContent = '';
+    if (!items || !items.length){ panel.classList.add('is-empty'); return; }
+    panel.classList.remove('is-empty');
+    items.forEach(function(it){
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mh-notif-item ' + (it.read ? 'is-read' : 'is-unread');
+      row.setAttribute('role', 'listitem');
+      row.setAttribute('data-level', it.level || 'info');
+      row.setAttribute('data-id', it.id);
+      if (it.link) row.setAttribute('data-link', it.link);
+      row.appendChild(el('span', 'mh-notif-dot'));
+      var body = el('span', 'mh-notif-text');
+      body.appendChild(el('span', 'mh-notif-t', it.title || ''));
+      if (it.body) body.appendChild(el('span', 'mh-notif-m', it.body));
+      body.appendChild(el('span', 'mh-notif-time', ago(it.created_at)));
+      row.appendChild(body);
+      row.addEventListener('click', function(){ onItem(it); });
+      list.appendChild(row);
+    });
+  }
+
+  function poll(){
+    if (document.hidden && !open) return;
+    fetch(LIST_URL, {cache:'no-store', headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) return;
+        paintBadge(d.unread || 0);
+        if (open) render(d.items || []);
+      })
+      .catch(function(){ /* offline — leave the last good state */ });
+  }
+
+  function safeLink(u){
+    /* Only ever follow an in-app path ("/review/…") — never an absolute /
+       cross-origin ("//host") or javascript: URL, even though links are
+       server-built today. Defence-in-depth: the text flows through a DB. */
+    if (!u || typeof u !== 'string') return '';
+    return (u.charAt(0) === '/' && u.charAt(1) !== '/') ? u : '';
+  }
+
+  function onItem(it){
+    if (!it.read){
+      fetch(LIST_URL + '/' + encodeURIComponent(it.id) + '/read',
+            {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (d && typeof d.unread === 'number') paintBadge(d.unread); })
+        .catch(function(){});
+    }
+    var dest = safeLink(it.link);
+    if (dest){ window.location.href = dest; return; }
+    poll();
+  }
+
+  function position(){
+    var r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom + 8) + 'px';
+    panel.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  }
+
+  function setOpen(v){
+    open = v;
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v){
+      panel.hidden = false;
+      position();
+      poll();
+      window.addEventListener('resize', position, {passive:true});
+      window.addEventListener('scroll', position, {passive:true, capture:true});
+    } else {
+      panel.hidden = true;
+      window.removeEventListener('resize', position, {passive:true});
+      window.removeEventListener('scroll', position, {passive:true, capture:true});
+    }
+  }
+
+  btn.addEventListener('click', function(e){ e.stopPropagation(); setOpen(!open); });
+  panel.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){ if (open) setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && open){ setOpen(false); btn.focus(); }
+  });
+  if (readAll){
+    readAll.addEventListener('click', function(e){
+      e.stopPropagation();
+      fetch(READALL_URL, {method:'POST', headers:{'Accept':'application/json'}})
+        .then(function(r){ return r.json(); })
+        .then(function(){ paintBadge(0); poll(); })
+        .catch(function(){});
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) poll(); });
+
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+<script>
 /* UI 1.5 — live local clock for the HUD readout. Pure client-side: ticks the
    visitor's local time + a UTC reference every second, with a short timezone
    label. Independent of the network so the clock keeps running even when
@@ -9304,6 +9966,73 @@ def _layout(
     }
   }
   tick(); setInterval(tick, 1000);
+})();
+</script>
+<script>
+/* UI 1.23 — theme-toggle behaviour. The <head> boot script already
+   applied the saved preference before first paint; this wires the
+   masthead control: reflects the active choice, persists clicks to
+   localStorage, forces (light/dark) or clears (system) color-scheme on
+   <html>, and keeps the mobile browser theme-colour in sync with the
+   resolved page colour. Keyboard: arrow keys move between segments
+   (the WAI-ARIA radiogroup pattern, with roving tabindex). */
+(function(){
+  var group = document.querySelector('.mh-theme-toggle');
+  if (!group) return;
+  var buttons = Array.prototype.slice.call(group.querySelectorAll('button[data-theme-value]'));
+  if (!buttons.length) return;
+
+  function syncMeta(){
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta || !document.body) return;
+    var c = getComputedStyle(document.body).backgroundColor;
+    if (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') meta.setAttribute('content', c);
+  }
+  function current(){
+    var p = document.documentElement.getAttribute('data-theme');
+    return (p === 'light' || p === 'dark') ? p : 'system';
+  }
+  function reflect(){
+    var pref = current();
+    buttons.forEach(function(b){
+      var on = b.getAttribute('data-theme-value') === pref;
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
+    });
+  }
+  function apply(pref, focusIt){
+    if (pref !== 'light' && pref !== 'dark') pref = 'system';
+    var el = document.documentElement;
+    el.setAttribute('data-theme', pref);
+    if (pref === 'light' || pref === 'dark') el.style.colorScheme = pref;
+    else el.style.removeProperty('color-scheme');
+    try { localStorage.setItem('mh-theme', pref); } catch (e) {}
+    reflect();
+    requestAnimationFrame(syncMeta);
+    if (focusIt){
+      var active = group.querySelector('button[aria-checked="true"]');
+      if (active) active.focus();
+    }
+  }
+  buttons.forEach(function(b, i){
+    b.addEventListener('click', function(){ apply(b.getAttribute('data-theme-value'), false); });
+    b.addEventListener('keydown', function(e){
+      var dir = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1
+              : (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   ? -1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      var next = buttons[(i + dir + buttons.length) % buttons.length];
+      apply(next.getAttribute('data-theme-value'), true);
+    });
+  });
+  try {
+    var mq = window.matchMedia('(prefers-color-scheme: light)');
+    var onOS = function(){ if (current() === 'system') requestAnimationFrame(syncMeta); };
+    if (mq.addEventListener) mq.addEventListener('change', onOS);
+    else if (mq.addListener) mq.addListener(onOS);
+  } catch (e) {}
+  reflect();
+  syncMeta();
 })();
 </script>
 <script>
@@ -9897,7 +10626,14 @@ def _layout(
       function(grp){
         Array.prototype.forEach.call(grp.children, function(ln){ lineItems.push(ln); });
       });
-    var reveals = Array.prototype.slice.call(blockReveals).concat(lineItems);
+    // UI 1.6 — animated results/data charts ride this same observer: each
+    // .mh-chart[data-mh-animate] gets .is-in as it scrolls into view, which
+    // drives the pure-CSS bar-grow / area line-draw and the data-mh-count
+    // value count-up inside it (revealEl already fires counters on reveal).
+    var chartEls = document.querySelectorAll('.mh-chart[data-mh-animate]');
+    var reveals = Array.prototype.slice.call(blockReveals)
+      .concat(lineItems)
+      .concat(Array.prototype.slice.call(chartEls));
     var counters = document.querySelectorAll('[data-mh-count]');
     function revealEl(el) {
       el.classList.add('is-in');
@@ -10385,6 +11121,127 @@ def _layout(
   else document.addEventListener('DOMContentLoaded', bindBeforeAfter);
   MH.bindBeforeAfter = bindBeforeAfter;
 
+  // === Testimonial / social-proof carousel (UI 1.19) ===
+  // Club/coach quote cards advanced by arrow controls, position dots and a
+  // gentle autoplay. The viewport is a native CSS scroll-snap row that works
+  // on its own with no JS (swipe / scroll / focus + arrow keys), so content is
+  // never trapped behind script. This initialiser progressively enhances it:
+  // it reveals the JS-only controls (`is-ready`, so no-JS visitors never see
+  // dead buttons), re-centres the active card on each control, keeps the dots
+  // in sync with manual swipes via an IntersectionObserver, announces the slide
+  // through a polite live region, and runs autoplay ONLY when motion is allowed
+  // — paused on hover/focus and while the tab is hidden, never started under
+  // prefers-reduced-motion. No carousel library. Inspired by Sketch.
+  function bindTestimonials() {
+    document.querySelectorAll('[data-mh-testi]').forEach(function(root){
+      if (root.getAttribute('data-mh-testi-bound')) return;
+      root.setAttribute('data-mh-testi-bound', '1');
+      var viewport = root.querySelector('.mh-testi-viewport');
+      var cards = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-card'));
+      var dots = Array.prototype.slice.call(root.querySelectorAll('.mh-testi-dot'));
+      var prevBtn = root.querySelector('[data-mh-testi-prev]');
+      var nextBtn = root.querySelector('[data-mh-testi-next]');
+      var status = root.querySelector('[data-mh-testi-status]');
+      var n = cards.length;
+      if (!viewport || n === 0) return;
+      // Reveal the JS-only controls now that they are wired (arrows + dots are
+      // CSS-hidden until this class lands).
+      root.classList.add('is-ready');
+
+      var idx = 0;
+      var interval = parseInt(root.getAttribute('data-mh-testi-interval') || '6500', 10);
+      if (!(interval > 0)) interval = 6500;
+
+      function setActive(i) {
+        idx = i;
+        for (var d = 0; d < dots.length; d++) {
+          var on = d === i;
+          dots[d].classList.toggle('is-active', on);
+          if (on) dots[d].setAttribute('aria-current', 'true');
+          else dots[d].removeAttribute('aria-current');
+        }
+        if (status) status.textContent = 'Testimonial ' + (i + 1) + ' of ' + n;
+      }
+
+      function scrollToCard(i, smooth) {
+        var card = cards[i];
+        if (!card) return;
+        // Centre the card in the viewport (matches scroll-snap-align: center),
+        // clamped to the scrollable range.
+        var target = card.offsetLeft - (viewport.clientWidth - card.offsetWidth) / 2;
+        var max = viewport.scrollWidth - viewport.clientWidth;
+        target = Math.max(0, Math.min(target, max));
+        var behavior = (smooth && !prefersReduced) ? 'smooth' : 'auto';
+        if (viewport.scrollTo) viewport.scrollTo({left: target, behavior: behavior});
+        else viewport.scrollLeft = target;
+      }
+
+      function go(i, smooth) {
+        i = (i % n + n) % n;
+        setActive(i);
+        scrollToCard(i, smooth);
+      }
+
+      // --- Autoplay (motion-allowed only) ---
+      var timer = null;
+      function stop() { if (timer) { clearInterval(timer); timer = null; } }
+      function play() {
+        stop();
+        if (prefersReduced || n <= 1) return;
+        timer = setInterval(function(){
+          var next = idx + 1;
+          if (next >= n) go(0, false);     // instant rewind, not a long pan
+          else go(next, true);
+        }, interval);
+      }
+      function restart() { stop(); play(); }
+
+      // --- Controls ---
+      if (prevBtn) prevBtn.addEventListener('click', function(){ go(idx - 1, true); restart(); });
+      if (nextBtn) nextBtn.addEventListener('click', function(){ go(idx + 1, true); restart(); });
+      dots.forEach(function(dot, di){
+        dot.addEventListener('click', function(){ go(di, true); restart(); });
+      });
+      viewport.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowLeft') { e.preventDefault(); go(idx - 1, true); restart(); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx + 1, true); restart(); }
+      });
+
+      // Keep the dots honest when the visitor swipes/scrolls the viewport
+      // directly: whichever card is most visible becomes active.
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function(entries){
+          var best = null;
+          entries.forEach(function(en){
+            if (en.isIntersecting && (!best || en.intersectionRatio > best.intersectionRatio)) {
+              best = en;
+            }
+          });
+          if (best) {
+            var i = cards.indexOf(best.target);
+            if (i >= 0 && i !== idx) setActive(i);
+          }
+        }, {root: viewport, threshold: [0.5, 0.75, 1]});
+        cards.forEach(function(c){ io.observe(c); });
+      }
+
+      // Pause while the visitor is reading, or the tab is backgrounded.
+      root.addEventListener('mouseenter', stop);
+      root.addEventListener('mouseleave', play);
+      root.addEventListener('focusin', stop);
+      root.addEventListener('focusout', play);
+      document.addEventListener('visibilitychange', function(){
+        if (document.hidden) stop(); else play();
+      });
+
+      setActive(0);
+      play();
+    });
+  }
+  if (document.readyState !== 'loading') bindTestimonials();
+  else document.addEventListener('DOMContentLoaded', bindTestimonials);
+  MH.bindTestimonials = bindTestimonials;
+
   // === Global per-card workflow control (Approve / Reject / Re-queue) ===
   // Any button with data-mh-wf="approved|rejected|queue" + data-mh-run-id +
   // data-mh-card-id triggers a POST to /api/workflow and optimistically
@@ -10678,6 +11535,133 @@ def _layout(
   if (document.readyState !== 'loading') bindCyclePlaceholders();
   else document.addEventListener('DOMContentLoaded', bindCyclePlaceholders);
   MH.bindCyclePlaceholders = bindCyclePlaceholders;
+
+  // === UI 1.28 — Global keyboard-shortcuts overlay (GitHub-style) =============
+  // Press '?' on any page to open #mh-shortcuts-overlay. 'g' then a key jumps to
+  // a primary destination — the rows are server-rendered url_for() links, so the
+  // navigation map is read straight back off the DOM (one source of truth). On a
+  // review surface (.ach-row present) j/k move the focus ring and a/u approve or
+  // re-queue the focused card. This is a FUNCTIONAL surface, so — unlike the
+  // decorative motion layers — it must NOT early-return under reduced motion;
+  // only the CSS entrance animation is suppressed there (and the focus-ring
+  // scroll falls back to an instant jump). Reuses MH.openModal for the
+  // focus-trap + Esc/Tab/backdrop close when it is available.
+  function bindShortcuts() {
+    var overlay = document.getElementById('mh-shortcuts-overlay');
+    if (!overlay || overlay.dataset.mhShortcuts === '1') return;
+    overlay.dataset.mhShortcuts = '1';
+
+    // Build the go-to map from the server-rendered links (url_for is the source).
+    var navMap = {};
+    overlay.querySelectorAll('[data-mh-go]').forEach(function(a){
+      var k = (a.getAttribute('data-mh-go') || '').toLowerCase();
+      var href = a.getAttribute('href');
+      if (k && href) navMap[k] = href;
+    });
+
+    // Reveal the review group + arm its keys only when a review surface is here.
+    var reviewActive = !!document.querySelector('.ach-row');
+    var reviewGroup = overlay.querySelector('[data-mh-shortcuts-group="review"]');
+    if (reviewActive && reviewGroup) reviewGroup.hidden = false;
+
+    function isTyping(e) {
+      var t = e.target;
+      if (!t) return false;
+      var tag = (t.tagName || '').toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    }
+
+    // ----- open / close (reuse the house focus-trap when present) -----
+    var closeFn = null;
+    function isOpen() { return overlay.classList.contains('is-open'); }
+    function openOverlay() {
+      if (isOpen()) return;
+      if (window.MH && typeof MH.openModal === 'function') {
+        closeFn = MH.openModal(overlay, { onClose: function(){ closeFn = null; } });
+      } else {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+    function closeOverlay() {
+      if (!isOpen()) return;
+      if (closeFn) { var fn = closeFn; closeFn = null; fn(); return; }
+      overlay.classList.remove('is-open');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    function toggleOverlay() { if (isOpen()) closeOverlay(); else openOverlay(); }
+    // Backdrop + close-button wiring for the no-MH.openModal fallback only
+    // (when openModal owns the modal it already wires these).
+    overlay.addEventListener('click', function(e){ if (e.target === overlay && !closeFn) closeOverlay(); });
+    overlay.querySelectorAll('[data-mh-modal-close]').forEach(function(b){
+      b.addEventListener('click', function(){ if (!closeFn) closeOverlay(); });
+    });
+
+    // ----- review focus ring + approve / re-queue -----
+    function cards() {
+      return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
+        .filter(function(el){ return el.offsetParent !== null; });
+    }
+    var focusIdx = -1;
+    function setFocus(idx) {
+      var list = cards();
+      if (!list.length) return;
+      if (idx < 0) idx = 0;
+      if (idx >= list.length) idx = list.length - 1;
+      list.forEach(function(c){ c.classList.remove('mh-kbd-focus'); });
+      var el = list[idx];
+      el.classList.add('mh-kbd-focus');
+      el.scrollIntoView({ block: 'center', behavior: prefersReduced ? 'auto' : 'smooth' });
+      focusIdx = idx;
+    }
+    function clickWf(state) {
+      var list = cards();
+      if (focusIdx < 0 || focusIdx >= list.length) return;
+      var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
+      if (btn) btn.click();
+    }
+
+    // ----- the one global key handler -----
+    var gPending = false, gTimer = null;
+    function clearG() { gPending = false; if (gTimer) { clearTimeout(gTimer); gTimer = null; } }
+
+    document.addEventListener('keydown', function(e){
+      if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // While the help is open only '?'/Esc act (Esc is owned by MH.openModal).
+      if (isOpen()) {
+        if (e.key === '?') { e.preventDefault(); closeOverlay(); }
+        return;
+      }
+
+      // 'g' then <key> — GitHub-style go-to navigation.
+      if (gPending) {
+        var dest = navMap[(e.key || '').toLowerCase()];
+        clearG();
+        if (dest) { e.preventDefault(); window.location.href = dest; return; }
+        // not a nav key -> fall through, let the key act normally below
+      }
+
+      if (e.key === '?') { e.preventDefault(); openOverlay(); return; }
+      if (e.key === 'g' || e.key === 'G') { gPending = true; gTimer = setTimeout(clearG, 1200); return; }
+
+      if (reviewActive) {
+        switch (e.key) {
+          case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
+          case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
+          case 'a': case 'A': if (focusIdx >= 0) { e.preventDefault(); clickWf('approved'); } break;
+          case 'u': case 'U': if (focusIdx >= 0) { e.preventDefault(); clickWf('queue'); } break;
+        }
+      }
+    });
+
+    MH.openShortcuts = openOverlay;
+    MH.closeShortcuts = closeOverlay;
+    MH.toggleShortcuts = toggleOverlay;
+  }
+  if (document.readyState !== 'loading') bindShortcuts();
+  else document.addEventListener('DOMContentLoaded', bindShortcuts);
+  MH.bindShortcuts = bindShortcuts;
 })();
 </script>
 {% if dock %}
@@ -11270,6 +12254,260 @@ def _flash_toast(message: str, kind: str = "success") -> None:
         pass
 
 
+# --------------------------------------------------------------------------- #
+# UI 1.9 — Multi-select + bulk actions (Media library + review queue).
+#
+# "Pure HTML form multi-select with progressive JS enhancement": the bulk
+# endpoints are content-negotiated so the SAME route serves a no-JS HTML form
+# POST (redirect + flash) and a fetch() AJAX call (per-item JSON results). The
+# two helpers below are the shared request-shape glue; the CSS/JS constants are
+# the shared front-end. Each surface keeps its own action semantics (the review
+# queue updates workflow state in place; the library removes deleted rows).
+# --------------------------------------------------------------------------- #
+
+
+def _req_wants_json(req) -> bool:
+    """True when a request should get a JSON response, not an HTML redirect.
+
+    A fetch() bulk call sends a JSON body (or an explicit Accept/X-Requested-With
+    header); a classic ``<form method=post>`` submission sends url-encoded form
+    data with the browser's default ``Accept: text/html`` and gets redirected.
+    """
+    ctype = (req.headers.get("Content-Type", "") or "").split(";")[0].strip()
+    if ctype == "application/json":
+        return True
+    if "application/json" in (req.headers.get("Accept", "") or ""):
+        return True
+    return req.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _bulk_ids_from_request(req, *keys: str) -> list[str]:
+    """Collect a de-duplicated, order-preserving id list from a bulk request.
+
+    Accepts either a JSON body (``{"ids": [...]}`` under any of ``keys``) or a
+    classic multi-select form (repeated ``<input name=ids>`` fields), so the
+    progressive-enhancement fetch() and the no-JS form POST share one route.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value) -> None:
+        if value is None:
+            return
+        s = str(value).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    body = req.get_json(silent=True) if getattr(req, "is_json", False) else None
+    if isinstance(body, dict):
+        for k in keys:
+            v = body.get(k)
+            if isinstance(v, (list, tuple)):
+                for item in v:
+                    _add(item)
+            elif v is not None:
+                _add(v)
+    # Form fields (no-JS path). getlist() returns [] when the field is absent.
+    try:
+        for k in keys:
+            for item in req.form.getlist(k):
+                _add(item)
+    except Exception:  # noqa: BLE001 — a malformed body must never 500 the route
+        pass
+    return out
+
+
+# Shared styling for the UI 1.9 bulk-action bar + selection checkboxes. Injected
+# inline per surface (CSP allows `style-src 'unsafe-inline'`); kept self-contained
+# so neither surface has to touch the shared BASE_CSS cascade. The bar is hidden
+# only when JS is present AND nothing is selected (`html.mh-js .is-empty`), so a
+# no-JS visitor always sees the controls.
+_BULK_ACTIONS_CSS = """
+.mh-bulkbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3);
+  background:var(--panel);border:1px solid var(--chrome);border-radius:10px;
+  position:sticky;top:8px;z-index:6}
+html.mh-js .mh-bulkbar.is-empty{display:none}
+.mh-bulkbar-all{display:inline-flex;align-items:center;gap:8px;font-size:13px;
+  color:var(--ink-dim);cursor:pointer;user-select:none}
+.mh-bulkbar-count{font-size:13px;font-weight:600;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.mh-bulkbar-actions{display:inline-flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.mh-bulkbar .btn{font-size:12px;padding:5px 12px;min-height:0}
+.mh-row-check,.mh-check-all{width:18px;height:18px;accent-color:var(--lane);
+  cursor:pointer;margin:0;vertical-align:middle}
+.mh-row-check-wrap{display:inline-flex;align-items:flex-start;padding-top:2px;
+  cursor:pointer}
+td.mh-bulk-cell,th.mh-bulk-cell{width:34px;text-align:center;vertical-align:middle}
+.ach-row.is-selected{background:rgba(212,255,58,0.05);border-radius:8px}
+@media (max-width:640px){.mh-bulkbar{position:static}
+  .mh-bulkbar-actions{margin-left:0;width:100%}}
+"""
+
+
+# Shared progressive-enhancement JS for every UI 1.9 bulk bar. A plain (non
+# f-string) constant — its braces stay literal when interpolated into a page
+# f-string. It auto-wires any element carrying `data-mh-bulkbar` (value picks the
+# per-surface behaviour) from its data-* config, so no per-page inline config is
+# needed. Destructive/mutating actions go over JSON (CSRF-exempt, per-item
+# results); the Export action is left as a native form submit so the browser
+# downloads the file. Falls back to the no-JS form POST whenever JS is absent.
+_BULK_ACTIONS_JS = r"""
+(function(){
+  function init(bar){
+    var form = document.getElementById(bar.getAttribute('data-form'));
+    if (!form) return;
+    var kind = bar.getAttribute('data-mh-bulkbar') || '';
+    var checkCls = bar.getAttribute('data-check') || 'mh-row-check';
+    var rowSel = bar.getAttribute('data-row') || '';
+    var countEl = document.getElementById(bar.getAttribute('data-count') || '');
+    var allEl = document.getElementById(bar.getAttribute('data-select-all') || '');
+    var toast = function(m, t, ms){ if (window.MH && MH.toast) MH.toast(m, t || 'info', ms); };
+    function boxes(){
+      return Array.prototype.slice.call(form.querySelectorAll('.' + checkCls));
+    }
+    function rowOf(c){ return rowSel ? c.closest(rowSel) : null; }
+    function isVisible(c){ var r = rowOf(c); return r ? r.offsetParent !== null : c.offsetParent !== null; }
+    function visible(){ return boxes().filter(isVisible); }
+    function selected(){ return boxes().filter(function(c){ return c.checked && isVisible(c); }); }
+    function refresh(){
+      var sel = selected();
+      var n = sel.length;
+      if (countEl) countEl.textContent = n + ' selected';
+      bar.classList.toggle('is-empty', n === 0);
+      boxes().forEach(function(c){ var r = rowOf(c); if (r) r.classList.toggle('is-selected', c.checked); });
+      if (allEl){
+        var vis = visible();
+        var on = vis.filter(function(c){ return c.checked; }).length;
+        allEl.checked = vis.length > 0 && on === vis.length;
+        allEl.indeterminate = on > 0 && on < vis.length;
+      }
+    }
+    form.addEventListener('change', function(e){
+      if (e.target && e.target.classList && e.target.classList.contains(checkCls)) refresh();
+    });
+    if (allEl){
+      allEl.addEventListener('change', function(){
+        var on = allEl.checked;
+        visible().forEach(function(c){ c.checked = on; });
+        refresh();
+      });
+    }
+    function applyReviewDom(ids, status){
+      var labelMap = {'queue':'In queue','approved':'Approved','rejected':'Rejected','edited':'Edited'};
+      ids.forEach(function(cid){
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(cid) : cid;
+        document.querySelectorAll('[data-mh-wf-target="' + esc + '"]').forEach(function(el){
+          el.dataset.mhWfState = status;
+          var lbl = el.querySelector('[data-mh-wf-label]');
+          if (lbl) lbl.textContent = labelMap[status] || status;
+        });
+        document.querySelectorAll('[data-mh-card-id="' + esc + '"][data-mh-wf]').forEach(function(b){
+          var on = b.getAttribute('data-mh-wf') === status;
+          if (b.classList.contains('mh-wf-approve')){
+            b.classList.toggle('is-on', on);
+            b.classList.toggle('secondary', !on);
+            b.textContent = on ? 'Approved ✓' : 'Approve';
+            if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
+          } else if (on){
+            b.setAttribute('aria-pressed', 'true'); b.style.opacity = '0.55'; b.style.cursor = 'default';
+          } else {
+            b.removeAttribute('aria-pressed'); b.style.opacity = ''; b.style.cursor = '';
+          }
+        });
+        var row = document.querySelector('.ach-row [name="card_ids"][value="' + (window.CSS && CSS.escape ? CSS.escape(cid) : cid) + '"]');
+        var card = row ? row.closest('.ach-row') : null;
+        if (card) card.dataset.status = status;
+      });
+      if (window.mhRecountReview) window.mhRecountReview();
+      if (window.mhDockSync) window.mhDockSync();
+    }
+    function afterMedia(action, body, ids){
+      if (action === 'delete'){
+        var gone = (body && body.deleted) || ids;
+        gone.forEach(function(id){
+          var box = form.querySelector('.' + checkCls + '[value="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+          var row = box ? box.closest(rowSel || 'tr') : null;
+          if (row && row.parentNode) row.parentNode.removeChild(row);
+        });
+        var left = form.querySelectorAll(rowSel || 'tr.mh-asset-row').length;
+        document.querySelectorAll('[data-mh-asset-count]').forEach(function(el){
+          el.textContent = ('000' + left).slice(-3);
+        });
+        var n = (body && typeof body.n_ok === 'number') ? body.n_ok : gone.length;
+        toast('Deleted ' + n + ' photo' + (n === 1 ? '' : 's') + '.', 'success', 2500);
+        refresh();
+      } else if (action === 'approve'){
+        var n2 = (body && typeof body.n_ok === 'number') ? body.n_ok : ids.length;
+        var sk = (body && body.n_skipped) || 0;
+        var msg = 'Approved ' + n2 + ' photo' + (n2 === 1 ? '' : 's') + '.';
+        if (sk) msg += ' ' + sk + ' skipped (safeguarding).';
+        toast(msg, n2 ? 'success' : 'info', 3000);
+        selected().forEach(function(c){ c.checked = false; });
+        refresh();
+      }
+    }
+    function afterReview(action, body, ids){
+      var status = action === 'approve' ? 'approved' : (action === 'reject' ? 'rejected' : action);
+      var okIds = (body && body.results ? body.results.filter(function(r){ return r.ok; }).map(function(r){ return r.id; }) : ids);
+      applyReviewDom(okIds, status);
+      var nb = (body && body.n_blocked) || 0;
+      var verb = action === 'approve' ? 'Approved' : 'Rejected';
+      var msg = verb + ' ' + okIds.length + ' card' + (okIds.length === 1 ? '' : 's') + '.';
+      if (nb) msg += ' ' + nb + ' blocked by the consent gate.';
+      toast(msg, okIds.length ? 'success' : 'info', 3500);
+      selected().forEach(function(c){ c.checked = false; });
+      refresh();
+    }
+    Array.prototype.slice.call(form.querySelectorAll('[data-mh-bulk]')).forEach(function(btn){
+      var action = btn.getAttribute('data-mh-bulk');
+      if (action === 'export') return;  // native submit → file download
+      btn.addEventListener('click', function(e){
+        e.preventDefault();
+        var ids = selected().map(function(c){ return c.value; });
+        if (!ids.length){ toast('Select at least one first.', 'info'); return; }
+        var conf = btn.getAttribute('data-confirm');
+        if (conf){
+          conf = conf.replace('{n}', ids.length);
+          if (!window.confirm(conf)) return;
+        }
+        var url = btn.getAttribute('formaction');
+        var payload = {ids: ids};
+        if (btn.value) payload.status = btn.value;
+        var orig = btn.style.opacity;
+        btn.disabled = true; btn.style.opacity = '0.6';
+        fetch((window._API_BASE || '') + url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+          body: JSON.stringify(payload)
+        }).then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+          .then(function(o){
+            btn.disabled = false; btn.style.opacity = orig;
+            if (!o.ok || !o.body || o.body.ok === false){
+              var m = (o.body && (o.body.reason || o.body.error || o.body.message)) || 'failed';
+              toast('Bulk action failed: ' + m, 'error', 4000);
+              return;
+            }
+            if (kind === 'media') afterMedia(action, o.body, ids);
+            else if (kind === 'review') afterReview(action, o.body, ids);
+          }).catch(function(err){
+            btn.disabled = false; btn.style.opacity = orig;
+            toast('Bulk action failed: ' + ((err && err.message) || err), 'error', 4000);
+          });
+      });
+    });
+    refresh();
+  }
+  function boot(){
+    Array.prototype.slice.call(document.querySelectorAll('[data-mh-bulkbar]')).forEach(init);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+"""
+
+
 # Module-level JS for the palette confirmation form (rendered inside an
 # f-string). Lifted out so we don't have to double every `{` for f-string
 # escaping every time the form is rendered.
@@ -11680,6 +12918,9 @@ def create_app() -> Flask:
             # passwordless: one click on /developer grants the operator session.
             "developer_login",
             "developer_login_post",
+            # UI 1.11 — the public Developer/API reference (code-example docs).
+            # A docs page, like the legal pages above: readable before sign-up.
+            "api_docs_page",
             # Phase C operator commercial console (PC.4/PC.6) — operator-only
             # (redirects non-operator sessions to the developer sign-in) and
             # org-independent, so it bypasses the org gate exactly like the
@@ -12600,6 +13841,74 @@ def create_app() -> Flask:
             "</section>"
         )
 
+        # --- UI 1.27 — sample-output drag gallery. A mouse-draggable
+        # horizontal carousel of the real first-party sample SVGs (the same
+        # four outputs the UI 1.3 inline headline names), full size, captioned.
+        # Substrate is a plain overflow-x scroll-snap row, so it scrolls with
+        # wheel / trackpad / touch / focused-arrow keys even with no JS;
+        # ui-kit.js bindDragScroll adds click-drag panning + the grab cursor.
+        def _output_card(filename: str, eyebrow: str, title: str, sub: str, alt: str) -> str:
+            src = url_for("static", filename="samples/" + filename)
+            return (
+                '<figure class="mh-ds-card mh-ds-card--output">'
+                '<div class="mh-ds-card-media">'
+                f'<img src="{src}" width="144" height="200" '
+                f'loading="lazy" decoding="async" alt="{_h(alt)}" />'
+                "</div>"
+                '<figcaption class="mh-ds-card-cap">'
+                f'<span class="eyebrow">{_h(eyebrow)}</span>'
+                f'<span class="title">{_h(title)}</span>'
+                f'<span class="sub">{_h(sub)}</span>'
+                "</figcaption>"
+                "</figure>"
+            )
+
+        gallery_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal"><span class="label">Sample outputs</span></div>'
+            + _reveal_lines(
+                [
+                    "Drag through what one",
+                    'results sheet <em class="editorial">becomes.</em>',
+                ]
+            )
+            + '<div class="mh-ds-gallery-wrap mh-reveal">'
+            + '<div class="mh-drag-scroll" tabindex="0" role="group" '
+            'aria-label="Sample MediaHub outputs — drag or scroll to browse">'
+            + _output_card(
+                "results-sheet.svg",
+                "Source",
+                "Results sheet",
+                "Event 14 · 100m freestyle",
+                "Event 14, 100m freestyle finishing times",
+            )
+            + _output_card(
+                "story-card.svg",
+                "Story · 9:16",
+                "Personal best",
+                "Tom Davies · 52.41 · −0.74s",
+                "Tom Davies, personal best, 52.41",
+            )
+            + _output_card(
+                "feed-graphic.svg",
+                "Feed · 4:5",
+                "Podium graphic",
+                "Top three · county finals",
+                "Top three, county finals podium",
+            )
+            + _output_card(
+                "reel.svg",
+                "Reel · 15s",
+                "Match-day reel",
+                "Riverside SC · branded cut",
+                "Match-day highlights, 15-second cut",
+            )
+            + "</div>"
+            + _drag_hint("Drag to explore")
+            + "</div>"
+            "</section>"
+        )
+
         # --- Made for — three audience cards. Shown to everyone since the
         # product story doesn't change between fresh visitors and pinned
         # tenants; this is the "who it's for" reassurance block.
@@ -12633,6 +13942,154 @@ def create_app() -> Flask:
             "</div>"
             "</div>"
             "</section>"
+        )
+
+        # --- UI 1.19 · Testimonial / social-proof carousel ------------------
+        # Club/coach quote cards with avatar initials, flanked by arrow
+        # controls and advanced on a gentle autoplay. Pure CSS/JS, no carousel
+        # library: the viewport is a native scroll-snap row that works on its
+        # own (swipe / scroll / keyboard), progressively enhanced by
+        # `bindTestimonials` with arrows, position dots, a polite live-region
+        # slide announcement, and autoplay that pauses on hover/focus and when
+        # the tab is hidden — and never starts under prefers-reduced-motion.
+        # Inspired by Sketch (sketch.com).
+        #
+        # HONESTY (this is why the copy is framed the way it is): MediaHub is
+        # pre-launch with no paying clubs yet, and the landing already promises
+        # "we don't invent results". So these are presented as *illustrative* —
+        # the voices of the volunteer / coach / committee roles the engine is
+        # built for, on the same fictional sample clubs ("Riverside SC") used
+        # elsewhere on this page — never passed off as real customer
+        # endorsements. The avatar shows the (sample) club's initials, the
+        # attribution is the role, and the note under the carousel says so
+        # plainly. Swap in real, attributed quotes post-launch.
+        _testimonials = [
+            {
+                "quote": "Sunday used to mean three hours rebuilding the same "
+                "graphics by hand. Now I drop the results file in, read the "
+                "drafts over coffee, and approve the ones that are right — the "
+                "committee sees content the same weekend.",
+                "initials": "RS",
+                "role": "Club secretary",
+                "org": "Riverside SC",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "It surfaces the swims that matter — the lifetime "
+                "bests, the near-misses on a qualifying time — before I've "
+                "finished my notes. I still decide what gets posted; it just "
+                "stops me missing the moment.",
+                "initials": "KA",
+                "role": "Head coach",
+                "org": "Kingsmead Aquatics",
+                "sport": "Swimming",
+            },
+            {
+                "quote": "Every post lands in our colours and our voice without "
+                "me touching a template. As a volunteer with a dissertation to "
+                "write, getting the weekend back is the whole point.",
+                "initials": "US",
+                "role": "Social secretary",
+                "org": "University Swim Society",
+                "sport": "University",
+            },
+            {
+                "quote": "The bit I trusted least about 'AI' — making things up "
+                "— is the bit it refuses to do. If the time isn't in the file, "
+                "the caption doesn't claim one. That is why I will put my name "
+                "to what it drafts.",
+                "initials": "HR",
+                "role": "Comms volunteer",
+                "org": "Harbourside Rowing",
+                "sport": "Rowing",
+            },
+            {
+                "quote": "One results sheet in, a weekend of stories, feed "
+                "posts and a reel out — all waiting for a yes. Nothing goes "
+                "live until someone clicks approve, which is exactly how our "
+                "club wants it.",
+                "initials": "PN",
+                "role": "Team manager",
+                "org": "Parkside Netball",
+                "sport": "Netball",
+            },
+        ]
+        _n_testi = len(_testimonials)
+        # These are static, developer-authored literals (no user input on this
+        # path), so they are inlined raw exactly like the bento / audience /
+        # promise copy above — no _h() escaping. Any future caller feeding
+        # dynamic text here MUST switch to _h().
+        _testi_cards = ""
+        for _i, _t in enumerate(_testimonials):
+            _testi_cards += (
+                '<figure class="mh-testi-card" role="group" '
+                'aria-roledescription="slide" '
+                f'aria-label="Testimonial {_i + 1} of {_n_testi}">'
+                f'<blockquote class="mh-testi-quote">{_t["quote"]}</blockquote>'
+                '<figcaption class="mh-testi-by">'
+                '<span class="mh-testi-avatar" aria-hidden="true">'
+                f'{_t["initials"]}</span>'
+                '<span class="mh-testi-id">'
+                f'<b class="mh-testi-name">{_t["role"]}</b>'
+                f'<span class="mh-testi-org">{_t["org"]}'
+                '<span class="sep">·</span>'
+                f'{_t["sport"]}</span>'
+                "</span>"
+                "</figcaption>"
+                "</figure>"
+            )
+        _testi_dots = ""
+        for _i in range(_n_testi):
+            _active = " is-active" if _i == 0 else ""
+            _cur = ' aria-current="true"' if _i == 0 else ""
+            _testi_dots += (
+                f'<button type="button" class="mh-testi-dot{_active}" '
+                f'data-mh-testi-to="{_i}" '
+                f'aria-label="Show testimonial {_i + 1}"{_cur}></button>'
+            )
+        _arrow_prev_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>'
+        )
+        _arrow_next_svg = (
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>'
+        )
+        testimonials_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">In their words</span></div>'
+            + _reveal_lines(["The weekend it", 'hands <em class="editorial">back</em>.'])
+            + '<div class="mh-testi mh-reveal" data-mh-testi '
+            'data-mh-testi-interval="6500" role="group" '
+            'aria-roledescription="carousel" '
+            'aria-label="What clubs and coaches say (illustrative)">'
+            + '<div class="mh-testi-rail">'
+            + '<button type="button" class="mh-testi-arrow prev" '
+            'data-mh-testi-prev aria-label="Previous testimonial">'
+            + _arrow_prev_svg
+            + "</button>"
+            + '<div class="mh-testi-viewport" tabindex="0">'
+            + _testi_cards
+            + "</div>"
+            + '<button type="button" class="mh-testi-arrow next" '
+            'data-mh-testi-next aria-label="Next testimonial">'
+            + _arrow_next_svg
+            + "</button>"
+            + "</div>"  # .mh-testi-rail
+            + '<div class="mh-testi-dots" role="group" '
+            'aria-label="Choose a testimonial">'
+            + _testi_dots
+            + "</div>"
+            + '<p class="mh-sr-only" data-mh-testi-status aria-live="polite">'
+            f"Testimonial 1 of {_n_testi}</p>"
+            + "</div>"  # .mh-testi
+            + '<p class="mh-testi-note">Illustrative — these voice the '
+            "volunteers, coaches and committee members MediaHub is built for. "
+            "We are pre-launch, so they are representative of the workflow, "
+            "not paid endorsements.</p>" + "</section>"
         )
 
         # --- Promise / what we don't do. Lane-yellow left-stripe trust
@@ -12812,6 +14269,148 @@ def create_app() -> Flask:
             ("mh-ch-start", "Get started"),
         ]
 
+        # --- UI 1.22 — FAQ accordion (Limitless / status-page inspired). ---
+        # Expandable Q&A that answers the objections a club raises before it
+        # trusts the engine. Built from native <details>/<summary> — NO
+        # JavaScript — so every row is keyboard- and screen-reader-operable
+        # even with JS disabled; the open/close motion is a pure CSS
+        # grid-template-rows transition with a +/- marker (reduced-motion
+        # gated in the stylesheet). Answers are static, trusted product copy,
+        # but routed through _h() so the pattern stays escape-safe. Sits after
+        # the "what we don't do" promise panel and before the final CTA.
+        faq_items = [
+            (
+                "Does anything post to our socials automatically?",
+                "No. MediaHub is an intelligence layer, not an auto-poster. "
+                "Every caption, graphic and reel stops at a review queue you "
+                "control — nothing leaves this deployment without an explicit "
+                "approval click.",
+            ),
+            (
+                "Will it ever invent a time or a result?",
+                "Never. Every claim on a card is grounded in the result line "
+                "you uploaded. If the file does not contain a time, the caption "
+                "does not claim one; ambiguous rows are flagged for your review "
+                "rather than guessed.",
+            ),
+            (
+                "What files can we upload?",
+                "Swim meet result PDFs, spreadsheets (XLS, XLSX, CSV) and "
+                "exported result files (HY3, SDIF, SportSystems), plus entry "
+                "lists and heat sheets. The engine parses the file into "
+                "structured results before it writes a single word.",
+            ),
+            (
+                "How does it learn our club brand?",
+                "It reads your club website, social profiles and brand "
+                "guidelines once, then locks your palette, fonts, logo and tone "
+                "onto every card. Set up once, reuse forever — and your data is "
+                "never used to re-train a shared model.",
+            ),
+            (
+                "What can it produce from one upload?",
+                "Posting-ready story cards, feed graphics, athlete spotlights, "
+                "meet recaps and branded motion reels — every name, time and "
+                "place sized for the formats your club actually posts.",
+            ),
+            (
+                "Which sports does it work for?",
+                "Swimming is the first wedge, but the engine is sport-agnostic "
+                "by design: athletics, rugby, netball, rowing and more run "
+                "through the same ingest, detect, rank, brand and generate "
+                "pipeline.",
+            ),
+            (
+                "Is our athlete data kept private?",
+                "Yes. Athlete and result data stays on the deployment you "
+                "control and is never sold; content featuring minors never "
+                "auto-publishes. You can audit exactly what is stored on the "
+                "privacy page.",
+            ),
+        ]
+        faq_rows = "".join(
+            (
+                '<details class="mh-faq-item">'
+                '<summary class="mh-faq-q">'
+                f'<span class="mh-faq-q-text">{_h(q)}</span>'
+                '<span class="mh-faq-icon" aria-hidden="true"></span>'
+                "</summary>"
+                '<div class="mh-faq-a"><div class="mh-faq-a-inner">'
+                f"<p>{_h(a)}</p>"
+                "</div></div>"
+                "</details>"
+            )
+            for q, a in faq_items
+        )
+        faq_html = (
+            '<section class="mh-section mh-faq" aria-labelledby="mh-faq-h">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">Common questions</span></div>'
+            + _reveal_lines(
+                ["The questions clubs", 'ask us <em class="editorial">first</em>.'],
+                cls="mh-faq-title",
+                el_id="mh-faq-h",
+            )
+            + f'<div class="mh-faq-list mh-reveal-group">{faq_rows}</div>'
+            + "</section>"
+        )
+
+        # --- UI 1.6 · Animated results/data charts (Mixpanel-inspired).
+        # The sample-outputs surface gets two first-party, build-on-scroll
+        # charts drawn by web/charts.py — a podium bar chart and a season
+        # area trend — so a visitor sees the *data intelligence*, not just the
+        # graphics, before they upload. The figures carry honest SAMPLE data
+        # (clearly captioned as such); the same renderers draw real run data on
+        # the in-app Review page. Pure HTML/SVG + CSS custom props, no SDK; the
+        # cards ride the U.5 reveal-group and the bars/line build on scroll.
+        charts_html = (
+            '<section class="mh-section">'
+            '<div class="mh-section-eyebrow-strip mh-reveal">'
+            '<span class="label">The meet, read by the engine</span></div>'
+            + _reveal_lines(
+                [
+                    "Every swim becomes",
+                    'a <em class="editorial">number</em> that moves.',
+                ]
+            )
+            + '<div class="mh-charts-grid mh-reveal-group">'
+            # Podium bar chart — top 3 of a final, by club points (count-up).
+            + _chart_card(
+                "Podium",
+                "100m Freestyle &middot; final",
+                _charts.bar_chart(
+                    [
+                        {"label": "Chen", "value": 9, "tone": "gold"},
+                        {"label": "Thompson", "value": 7, "tone": "silver"},
+                        {"label": "Roberts", "value": 6, "tone": "bronze"},
+                    ],
+                    caption="Sample meet · club points, top three",
+                    chart_id="home-podium",
+                ),
+            )
+            # Cohort/area trend — personal bests detected per month, a season.
+            + _chart_card(
+                "Season trend",
+                "Personal bests per month",
+                _charts.area_chart(
+                    [
+                        {"label": "Sep", "value": 3},
+                        {"label": "Oct", "value": 6},
+                        {"label": "Nov", "value": 5},
+                        {"label": "Dec", "value": 8},
+                        {"label": "Jan", "value": 7},
+                        {"label": "Feb", "value": 11},
+                        {"label": "Mar", "value": 9},
+                        {"label": "Apr", "value": 14},
+                    ],
+                    caption="Sample season · PBs detected per month",
+                    chart_id="home-pbs",
+                ),
+            )
+            + "</div>"
+            "</section>"
+        )
+
         return _layout(
             "Home",
             '<div class="mh-fx mh-spotlight">'
@@ -12822,10 +14421,14 @@ def create_app() -> Flask:
             + steps_html
             + before_after_html
             + bento_html
+            + gallery_html
             + moment_ticker_html
             + frames_html
+            + charts_html
             + audience_html
+            + testimonials_html
             + promise_html
+            + faq_html
             + final_cta_html,
             active="home",
             chapters=home_chapters,
@@ -13196,6 +14799,20 @@ def create_app() -> Flask:
             summary_html += f'<div class="stat bad"><div class="l">Failed</div><div class="v" data-mh-count="{unfiltered_counts.get("error", 0)}">{unfiltered_counts.get("error", 0):,}</div></div>'
         summary_html += "</div>"
 
+        # UI 1.17 — content-cadence heatmap. A GitHub-style year grid of this
+        # org's generate/post consistency, rendered server-side as inline SVG
+        # from run history + the posting log. Fail-soft: any trouble drops the
+        # panel rather than breaking the rest of the page.
+        cadence_html = ""
+        try:
+            end_day = datetime.now(timezone.utc).date()
+            _gen, _post = _cadence_activity_counts(prof.profile_id, end_day)
+            if _gen or _post:
+                cadence_html = _cadence_panel_html(_gen, _post, end=end_day)
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("activity: cadence heatmap failed: %s", e)
+            cadence_html = ""
+
         # Toolbar — search input + status segment filter.
         # Filter buttons use ?status= for server-side filtering plus the
         # client-side text search filters in-place. Counts are unfiltered
@@ -13286,6 +14903,7 @@ def create_app() -> Flask:
             "</div>"
             "</section>"
             f"{summary_html}"
+            f"{cadence_html}"
             f"{failure_callout}"
             f"{toolbar_html}"
             '<div class="card"><table class="mh-table-stack">'
@@ -13298,6 +14916,207 @@ def create_app() -> Flask:
             f"{filter_js}"
         )
         return _layout("Activity", body, active="activity")
+
+    # ---- SEASON TIMELINE — meet history as a vertical, scroll-traced view ----
+    # UI2.3 — a read-only "season story" lens on the SAME run history the
+    # Activity log lists, rendered with the kit's `.mh-timeline` node list and
+    # the scroll-driven `.mh-tracing-beam` (ui-kit.js writes `--mh-progress`
+    # as you scroll; the rail fills top->bottom). Distinct from /activity (an
+    # ops table with search / delete / schedule columns): this is the
+    # celebratory, chronological view a club shares round the committee. Both
+    # read the same `runs` rows, scoped to the active org (multi-tenant).
+    @app.route("/season")
+    def season_timeline_page():
+        prof = _active_profile()
+        if prof is None:
+            return redirect(url_for("organisation_setup"))
+
+        # Fail-soft, org-scoped DB read (WHERE profile_id = ? is the tenant
+        # isolation boundary). A missing / locked data.db must not 500 the
+        # page — fall through to a recovery hero instead.
+        rows = []
+        db_failed = False
+        try:
+            conn = _db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, created_at, finished_at, status, profile_id, "
+                    "meet_name, our_swims, n_achievements, error, file_name "
+                    "FROM runs WHERE profile_id = ? "
+                    "ORDER BY created_at DESC LIMIT 200",
+                    (prof.profile_id,),
+                ).fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.warning("season: runs DB unreachable: %s", e)
+            db_failed = True
+
+        eyebrow = '<span class="mh-hero-eyebrow">Season timeline</span>'
+
+        # ---- Empty / recovery states -----------------------------------
+        if not rows:
+            if db_failed:
+                body = (
+                    '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                    f"{eyebrow}"
+                    '<h1>Couldn&rsquo;t load your <em class="editorial">season</em>.</h1>'
+                    '<p class="lede">The runs database wasn&rsquo;t readable on this '
+                    "deployment, so the timeline is empty even if meets were processed "
+                    "earlier. Try refreshing &mdash; if it keeps happening, ask your "
+                    "operator to check the data volume.</p>"
+                    '<div class="mh-hero-actions">'
+                    f'<a class="mh-cta-primary" href="{url_for("season_timeline_page")}">Refresh &rarr;</a>'
+                    f'<a class="mh-cta-secondary" href="{url_for("home")}">Back to home</a>'
+                    "</div></section>"
+                )
+                return _layout("Season timeline", body, active="season")
+            body = (
+                '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                f"{eyebrow}"
+                f'<h1>Your season starts here, <em class="editorial">{_h(prof.display_name)}</em>.</h1>'
+                '<p class="lede">Process your first meet and it lands on this timeline '
+                "&mdash; every meet a node on the season, with the swims matched and the "
+                "moments detected, and a beam that traces the season as you scroll.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{url_for("make_page")}">Create your first piece &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("activity_page")}">Open activity</a>'
+                "</div></section>"
+            )
+            return _layout("Season timeline", body, active="season")
+
+        # ---- Build the timeline ----------------------------------------
+        from datetime import datetime as _dt
+
+        def _parse(iso):
+            if not iso:
+                return None
+            try:
+                return _dt.fromisoformat(str(iso).replace("Z", "").replace("T", " ")[:19])
+            except Exception:
+                return None
+
+        n_meets = len(rows)
+        total_swims = 0
+        total_moments = 0
+        cur_month = None
+        items_html = ""
+        for r in rows:
+            dt = _parse(r["created_at"])
+            month_label = dt.strftime("%B %Y") if dt else "Undated"
+            if month_label != cur_month:
+                cur_month = month_label
+                items_html += (
+                    '<div class="mh-timeline__head">'
+                    f'<span class="mh-tl-month">{_h(month_label)}</span></div>'
+                )
+
+            if dt:
+                day_html = _h(f"{dt.strftime('%a')} {dt.day} {dt.strftime('%b')}")
+                iso_attr = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                full_title = dt.strftime("%A %d %B %Y, %H:%M UTC")
+            else:
+                day_html, iso_attr, full_title = "&mdash;", "", "Date unknown"
+
+            status = r["status"] or ""
+            badge = {"done": "good", "running": "info", "queued": "info", "error": "bad"}.get(
+                status, ""
+            )
+            swims = int(r["our_swims"] or 0)
+            moments = int((r["n_achievements"] if "n_achievements" in r.keys() else 0) or 0)
+            total_swims += swims
+            total_moments += moments
+            title = r["meet_name"] or r["file_name"] or r["id"]
+            review_href = url_for("review", run_id=r["id"])
+
+            stat_bits = [f"{swims:,} {'swim' if swims == 1 else 'swims'} matched"]
+            if moments:
+                stat_bits.append(f"{moments:,} {'moment' if moments == 1 else 'moments'} detected")
+            stats_html = '<span class="sep">&middot;</span>'.join(
+                f"<span>{_h(b)}</span>" for b in stat_bits
+            )
+
+            item = (
+                '<div class="mh-timeline__item">'
+                '<article class="card mh-tl-card">'
+                '<div class="mh-tl-top">'
+                f'<time class="mh-tl-date" datetime="{_h(iso_attr)}" title="{_h(full_title)}">{day_html}</time>'
+                f'<span class="tag {badge}">{_h(status)}</span>'
+                "</div>"
+                f'<h3 class="mh-tl-title"><a href="{review_href}">{_h(title)}</a></h3>'
+                f'<div class="strap mh-tl-stats">{stats_html}</div>'
+            )
+            if status == "error" and r["error"]:
+                err = str(r["error"])
+                err = err[:400] + ("…" if len(err) > 400 else "")
+                item += (
+                    '<details style="margin-top:8px">'
+                    '<summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--bad)">'
+                    "Why did this run fail?</summary>"
+                    '<pre style="margin:8px 0 0;padding:10px 12px;background:rgba(0,0,0,0.25);'
+                    'border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word">'
+                    f"{_h(err)}</pre></details>"
+                )
+            item += "</article></div>"
+            items_html += item
+
+        # Page-scoped presentation. Kept inline (not in the shared kit CSS) so
+        # the feature is self-contained and parallel-safe; tokens keep it on
+        # brand. The rail-offset centres the 2px beam on the 9px timeline node
+        # dots (dots sit 5px in from the timeline's left edge -> centre ~9px).
+        season_css = (
+            "<style>"
+            ".mh-season-tl{max-width:760px}"
+            ".mh-season-tl .mh-tracing-beam__rail{left:8px}"
+            ".mh-season-tl .mh-timeline__head{margin:var(--sp-5) 0 var(--sp-3)}"
+            ".mh-season-tl .mh-timeline__head:first-child{margin-top:0}"
+            ".mh-season-tl .mh-tl-month{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}"
+            ".mh-season-tl .mh-tl-card{padding:var(--sp-4) var(--sp-5)}"
+            ".mh-season-tl .mh-tl-top{display:flex;align-items:center;justify-content:space-between;"
+            "gap:var(--sp-3);margin-bottom:6px}"
+            ".mh-season-tl .mh-tl-date{font-family:var(--font-mono);font-size:var(--fs-sm);"
+            "color:var(--ink-muted);letter-spacing:.04em;white-space:nowrap}"
+            ".mh-season-tl .mh-tl-title{margin:0 0 8px;font-size:var(--fs-lg);line-height:1.2}"
+            ".mh-season-tl .mh-tl-title a{color:var(--ink);text-decoration:none}"
+            ".mh-season-tl .mh-tl-title a:hover{color:var(--mh-primary)}"
+            ".mh-season-tl .mh-tl-stats{font-size:var(--fs-sm)}"
+            "</style>"
+        )
+
+        # Season totals — count up on scroll-in via the shared motion system.
+        summary_html = (
+            '<div class="mh-activity-summary mh-reveal">'
+            f'<div class="stat live"><div class="l">Meets</div>'
+            f'<div class="v" data-mh-count="{n_meets}">{n_meets:,}</div></div>'
+            f'<div class="stat"><div class="l">Swims matched</div>'
+            f'<div class="v" data-mh-count="{total_swims}">{total_swims:,}</div></div>'
+            f'<div class="stat medal"><div class="l">Moments detected</div>'
+            f'<div class="v" data-mh-count="{total_moments}">{total_moments:,}</div></div>'
+            "</div>"
+        )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            f"{eyebrow}"
+            f'<h1>{_h(prof.display_name)}&rsquo;s <em class="editorial">season</em></h1>'
+            '<div class="strap" style="margin-top:var(--sp-3)">'
+            f"<span>{n_meets:,} {'meet' if n_meets == 1 else 'meets'}</span>"
+            '<span class="sep">&middot;</span>'
+            f'<span><a href="{url_for("activity_page")}">View as activity log &rarr;</a></span>'
+            "</div></section>"
+        )
+
+        timeline_html = (
+            '<div class="mh-tracing-beam mh-season-tl">'
+            '<span class="mh-tracing-beam__rail" aria-hidden="true"></span>'
+            '<div class="mh-timeline">'
+            f"{items_html}"
+            "</div></div>"
+        )
+
+        body = season_css + hero + summary_html + timeline_html
+        return _layout("Season timeline", body, active="season")
 
     # ---- UPLOAD --------------------------------------------------------
     @app.route("/upload", methods=["GET", "POST"])
@@ -13529,7 +15348,7 @@ def create_app() -> Flask:
 <div class="mh-fx mh-aurora" style="overflow:hidden;border-radius:var(--radius-lg);margin-bottom:var(--sp-4)">
 <section class="mh-hero" data-lane="01" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6)">
   <span class="mh-hero-eyebrow">Upload meet file</span>
-  <h1>Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
+  <h1 class="mh-scramble">Drop the results.<br><em class="editorial">We'll do the rest.</em></h1>
   <p class="lede">Hytek Meet Manager <code>.hy3</code> or <code>.zip</code> export, or a Sportsystems PDF. You'll pick your club, upload your logo, and add photos on the next step.</p>
 </section>
 </div>
@@ -14428,12 +16247,12 @@ def create_app() -> Flask:
         body = f"""
 <section class="mh-hero" data-lane="--" style="padding-top:var(--sp-9);padding-bottom:var(--sp-7);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Pipeline running</span>
-  <h1>Processing run</h1>
+  <h1 class="mh-scramble">Processing run</h1>
   <p class="lede">We're parsing, ranking and drafting. Usually 20&ndash;60 seconds. This page will redirect you to the review queue the moment it's ready.</p>
 </section>
 
 <div class="card">
-  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
+  <div class="strap live" style="margin-bottom:var(--sp-3)"><span id="mh-current-stage" class="mh-scramble">Starting&hellip;</span><span class="sep">·</span><span id="mh-step-count">0 steps</span></div>
   <div class="mh-progress-bar indeterminate"><span></span></div>
   <div class="mh-steploader" id="mh-steps" style="margin-top:var(--sp-4)"></div>
 
@@ -14469,6 +16288,15 @@ def create_app() -> Flask:
   var lede = document.querySelector('.lede');
   var reviewLink = document.getElementById('review-link');
   var retryLink = document.getElementById('retry-link');
+
+  // UI 1.21 — decode each new "engine is generating…" stage label in. The
+  // helper falls back to a plain text swap if the UI kit hasn't loaded, and
+  // scrambleTo itself no-ops when the label is unchanged between polls.
+  function setStage(txt) {{
+    if (!stage) return;
+    if (window.MH && MH.scrambleTo) MH.scrambleTo(stage, txt);
+    else stage.textContent = txt;
+  }}
 
   function fillBar(colour) {{
     if (!bar) return;
@@ -14541,7 +16369,7 @@ def create_app() -> Flask:
       return;
     }}
     // queued / running — keep the indeterminate bar moving.
-    if (stage) stage.textContent = log[log.length - 1] || 'Starting…';
+    setStage(log[log.length - 1] || 'Starting…');
     if (bar) bar.classList.add('indeterminate');
     if (waited > SOFT_CAP_MS && lede) {{
       lede.textContent = "Still working — large meets and personal-best lookups can take a few minutes. This page redirects automatically the moment it's ready.";
@@ -14860,6 +16688,18 @@ def create_app() -> Flask:
             ]
         )
 
+        # --- UI 1.30 "Weekend at a glance" digest (deterministic; no new LLM
+        # call — surfaces the recognition report the pipeline already produced).
+        # Fail-soft: a summary panel must never 500 the review page, so any
+        # surprise in the run shape collapses to no panel rather than an error.
+        try:
+            weekend_glance_html = _render_weekend_glance_html(_build_weekend_glance(data))
+        except Exception:
+            # The builder is written to be total, but a summary panel must never
+            # be the thing that 500s the review page — degrade to no panel.
+            log.exception("weekend-glance: render failed for run %s", run_id)
+            weekend_glance_html = ""
+
         # --- Meet context card
         mctx = rr.get("meet_context") or {}
         ctx_sources = mctx.get("research_sources") or []
@@ -14900,6 +16740,62 @@ def create_app() -> Flask:
         # page never inserted — so it's removed here (dead-code sweep), leaving
         # one source of truth for the card render.
         ranked_achs = rr.get("ranked_achievements") or []
+
+        # --- UI 1.6 · Animated results/data charts from this run's real data.
+        # Two first-party build-on-scroll figures (web/charts.py): a quality-band
+        # bar chart (how many Elite / Strong / Story moments the deterministic
+        # detectors found) and a content-worthiness area curve (the ranker's
+        # priority score across the top ranked achievements, strongest first).
+        # Presentation-only over already-computed engine output — no new
+        # judgement, no AI, nothing invented. Each chart renders only when it has
+        # real data to draw; with neither, the whole card is omitted.
+        _band_bars = []
+        if n_elite:
+            _band_bars.append({"label": "Elite", "value": n_elite, "tone": "gold"})
+        if n_strong:
+            _band_bars.append({"label": "Strong", "value": n_strong, "tone": "lane"})
+        if n_story:
+            _band_bars.append({"label": "Story", "value": n_story, "tone": "info"})
+        _band_chart_html = ""
+        if _band_bars:
+            _band_chart_html = _chart_card(
+                "Detected &amp; ranked",
+                "Moments by quality band",
+                _charts.bar_chart(
+                    _band_bars,
+                    caption="What the detectors found in this meet",
+                    chart_id=f"run-bands-{run_id}",
+                ),
+            )
+        # Content-worthiness curve — the ranker's priority for each of the top
+        # ranked achievements, strongest first (x = rank, implicit; left = best).
+        _worth_pts = [
+            {"label": "", "value": float(ra.get("priority", 0.0) or 0.0)} for ra in ranked_achs[:12]
+        ]
+        _worth_chart_html = ""
+        if len(_worth_pts) >= 2:
+            _worth_chart_html = _chart_card(
+                "Ranked by the engine",
+                "Content-worthiness by rank",
+                _charts.area_chart(
+                    _worth_pts,
+                    caption="Ranker priority · strongest first",
+                    chart_id=f"run-worth-{run_id}",
+                ),
+            )
+        if _band_chart_html or _worth_chart_html:
+            meet_charts_html = (
+                '<div class="card">'
+                '<h2 style="margin-bottom:var(--sp-2)">Meet at a glance</h2>'
+                '<p class="muted" style="margin-bottom:var(--sp-4);font-size:13px">'
+                "Counts and rankings drawn straight from this run — no estimates.</p>"
+                '<div class="mh-charts-grid">'
+                + _band_chart_html
+                + _worth_chart_html
+                + "</div></div>"
+            )
+        else:
+            meet_charts_html = ""
 
         # --- Not generated panel (the "why not" surface).
         # The deterministic detectors traced every swim; for the ones that
@@ -15139,6 +17035,35 @@ def create_app() -> Flask:
         bands_set = ["elite", "strong", "story", "nice", "not_worthy"]
         post_types_set = sorted(set(ra.get("suggested_post_type", "") for ra in ranked_achs))
 
+        # UI2.2: per-swimmer aggregate for the athlete-avatar tooltip — how many
+        # ranked moments this swimmer earned in *this* meet and their best band.
+        # Every figure is read straight from the recognition report (grounded,
+        # never fabricated); hovering any of a swimmer's rows surfaces their haul.
+        _BAND_RANK = {"elite": 4, "strong": 3, "story": 2, "nice": 1, "not_worthy": 0}
+        _sw_agg: dict[str, dict] = {}
+        for _ra in ranked_achs:
+            _aa = _ra.get("achievement", {}) or {}
+            _key = _aa.get("swimmer_name", "") or _aa.get("swimmer_id", "")
+            if not _key:
+                continue
+            _band = _ra.get("quality_band") or "nice"
+            _rec = _sw_agg.setdefault(_key, {"count": 0, "band": "nice"})
+            _rec["count"] += 1
+            if _BAND_RANK.get(_band, 0) > _BAND_RANK.get(_rec["band"], 0):
+                _rec["band"] = _band
+        _run_club = (data.get("profile_display") or data.get("club_filter") or "").strip()
+
+        def _athlete_stat(swimmer_name: str) -> str:
+            agg = _sw_agg.get(swimmer_name) or {}
+            n = agg.get("count", 0)
+            if not n:
+                return ""
+            s = f'{n} moment{"s" if n != 1 else ""}'
+            best = agg.get("band") or ""
+            if best:
+                s += f" · best {best}"
+            return s
+
         def opts(items, label):
             o = f'<option value="">All {label}</option>'
             for item in items:
@@ -15321,9 +17246,22 @@ def create_app() -> Flask:
                 ra, card_uuid=f"wf-{card_uuid}", run_id=run_id, ach_index=_why_idx, lazy=True
             )
 
+            # UI2.2: athlete avatar + hover tooltip (name · club · meet haul).
+            # Decorative here — the row already shows the name/event/band as
+            # text — so the chip stays aria-hidden and out of the tab order.
+            _sw_key = a.get("swimmer_name", "") or a.get("swimmer_id", "")
+            _row_avatar = _athlete_avatar(
+                a.get("swimmer_name", ""),
+                club=_run_club,
+                stat=_athlete_stat(_sw_key),
+                focusable=False,
+                size=30,
+            )
+
             ach_rows_html_wf += f"""
 <div class="ach-row" data-type="{a.get("type", "")}" data-conf="{conf_label}" data-swimmer="{a.get("swimmer_name", "")}" data-event="{a.get("event", "")}" data-band="{band}" data-post="{ra.get("suggested_post_type", "")}" data-status="{wf_status}">
   <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)">
+    <label class="mh-row-check-wrap" title="Select card"><input type="checkbox" class="mh-row-check" name="card_ids" value="{_h(card_id_raw)}" aria-label="Select this card"></label>
     <div style="min-width:28px;text-align:center;color:var(--ink-muted);font-size:13px;padding-top:2px">#{rank}</div>
     <div style="flex:1">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -15333,7 +17271,10 @@ def create_app() -> Flask:
         <span class="tag" style="font-size:10px">{post_type}</span>
         {_worthiness_meter(prio)}
       </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:2px">{swimmer} &middot; {event}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        {_row_avatar}
+        <div style="font-size:13px;font-weight:600">{swimmer} &middot; {event}</div>
+      </div>
       <div style="font-size:13px;color:var(--ink-dim)">{headline}</div>
       {why_html}
       <!-- Approve / Reject triage. Captions, graphics, motion + scheduling
@@ -15533,6 +17474,8 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
 
 {_render_explainability_key()}
 
+{weekend_glance_html}
+
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px">
     <h2 style="margin:0">Top achievements</h2>
@@ -15551,8 +17494,28 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
             style="margin-left:auto;font-size:12px;padding:6px 12px"
             title="Show or hide every card's reasoning at once">Expand all reasoning</button>
   </div>
-  <div id="ach-list">{ach_rows_html_wf}</div>
+  <form id="mh-review-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-rv-bulkbar" role="group" aria-label="Bulk card actions"
+         data-mh-bulkbar="review" data-form="mh-review-bulk" data-count="mh-rv-count"
+         data-select-all="mh-rv-all" data-check="mh-row-check" data-row=".ach-row">
+      <label class="mh-bulkbar-all"><input type="checkbox" id="mh-rv-all" class="mh-check-all" aria-label="Select all shown cards"> Select all shown</label>
+      <span class="mh-bulkbar-count" id="mh-rv-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn" data-mh-bulk="approve" name="op" value="approved"
+                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="reject" name="op" value="rejected"
+                formaction="{url_for('api_cards_bulk_status', run_id=run_id)}"
+                data-confirm="Reject {{n}} selected card(s)? They move out of the queue; you can re-queue them later.">Reject</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for('api_cards_bulk_export', run_id=run_id)}">Export</button>
+      </div>
+    </div>
+    <div id="ach-list">{ach_rows_html_wf}</div>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
 
 {_render_near_miss_hint(len(no_ach_traces), _n_close_calls)}
 
@@ -15564,10 +17527,13 @@ details.why-card[open] > summary .why-peek {{ display: none; }}
   <span style="flex:1;height:1px;background:var(--hairline)"></span>
 </div>
 
+{meet_charts_html}
+
 <div class="card">
   <h2>Recognition summary</h2>
   <div class="stat-block">{rec_stats_html}</div>
   <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-3);flex-wrap:wrap">
+    <a class="btn secondary" href="{url_for("run_results_table", run_id=run_id)}">Browse all results &rarr;</a>
     <a class="btn secondary" href="{_export_url}">Download export</a>
   </div>
   <details style="margin-top:var(--sp-4)">
@@ -15765,80 +17731,12 @@ function copyWhyCard(btn, taId) {{
 
 </script>
 
-<!-- Phase 6 — keyboard navigation + bulk approve + help overlay -->
-<div class="mh-kbd-overlay" id="mh-kbd-overlay" role="dialog" aria-modal="true" aria-labelledby="mh-kbd-title" aria-hidden="true">
-  <div class="mh-kbd-overlay-panel">
-    <h3 id="mh-kbd-title">Keyboard shortcuts</h3>
-    <div class="mh-kbd-table">
-      <span class="keys"><kbd>J</kbd></span><span class="desc">Focus next card</span>
-      <span class="keys"><kbd>K</kbd></span><span class="desc">Focus previous card</span>
-      <span class="keys"><kbd>A</kbd></span><span class="desc">Approve the focused card</span>
-      <span class="keys"><kbd>U</kbd></span><span class="desc">Send focused card back to queue</span>
-      <span class="keys"><kbd>?</kbd></span><span class="desc">Toggle this help</span>
-      <span class="keys"><kbd>Esc</kbd></span><span class="desc">Close help</span>
-    </div>
-    <div style="margin-top:var(--sp-5);text-align:right">
-      <button type="button" class="btn secondary" data-mh-kbd-close>Got it</button>
-    </div>
-  </div>
-</div>
-
+<!-- Phase 6 — bulk approve + expand-all reasoning. (Keyboard navigation and the
+     '?' help overlay are now provided globally by the UI 1.28 shortcuts engine
+     in _layout, which detects this review surface via its .ach-row cards — so
+     the review page no longer ships its own '?' handler or modal.) -->
 <script>
 (function(){{
-  // ----- Keyboard navigation across .ach-row cards -----
-  function cards() {{
-    return Array.prototype.slice.call(document.querySelectorAll('.ach-row'))
-      .filter(function(el){{ return el.offsetParent !== null; }});
-  }}
-  var focusIdx = -1;
-  function setFocus(idx) {{
-    var list = cards();
-    if (!list.length) return;
-    if (idx < 0) idx = 0;
-    if (idx >= list.length) idx = list.length - 1;
-    list.forEach(function(c){{ c.classList.remove('mh-kbd-focus'); }});
-    var el = list[idx];
-    el.classList.add('mh-kbd-focus');
-    el.scrollIntoView({{block: 'center', behavior: 'smooth'}});
-    focusIdx = idx;
-  }}
-  function clickWf(state) {{
-    var list = cards();
-    if (focusIdx < 0 || focusIdx >= list.length) return;
-    var btn = list[focusIdx].querySelector('[data-mh-wf="' + state + '"]');
-    if (btn) btn.click();
-  }}
-  function isTyping(e) {{
-    var t = e.target;
-    if (!t) return false;
-    var tag = (t.tagName || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
-  }}
-  var overlay = document.getElementById('mh-kbd-overlay');
-  function toggleHelp(force) {{
-    if (!overlay) return;
-    var open = force !== undefined ? force : !overlay.classList.contains('is-open');
-    overlay.classList.toggle('is-open', open);
-    overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
-  }}
-  if (overlay) {{
-    overlay.addEventListener('click', function(e){{ if (e.target === overlay) toggleHelp(false); }});
-    overlay.querySelectorAll('[data-mh-kbd-close]').forEach(function(b){{
-      b.addEventListener('click', function(){{ toggleHelp(false); }});
-    }});
-  }}
-  document.addEventListener('keydown', function(e){{
-    if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    switch (e.key) {{
-      case 'j': case 'J': e.preventDefault(); setFocus(focusIdx + 1); break;
-      case 'k': case 'K': e.preventDefault(); setFocus(focusIdx - 1); break;
-      case 'a': case 'A': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('approved'); }} break;
-      case 'u': case 'U': if (focusIdx >= 0) {{ e.preventDefault(); clickWf('queue'); }} break;
-      case '?': e.preventDefault(); toggleHelp(); break;
-      case 'Escape': toggleHelp(false); break;
-    }}
-  }});
-
   // ----- Bulk approve -----
   var bulkBtn = document.getElementById('mh-bulk-approve');
   if (bulkBtn) {{
@@ -15893,6 +17791,294 @@ function copyWhyCard(btn, taId) {{
             else None
         )
         return _layout("Recognition", body, active="home", dock=_review_dock)
+
+    @app.route("/runs/<run_id>/results")
+    def run_results_table(run_id):
+        """UI 1.12 — Wope-style sortable/filterable parsed-results table.
+
+        A flat, scannable grid of every individual swim in the run, each with a
+        per-athlete progress sparkline and a PB/improvement delta badge. Sort
+        and filter are server-side (this route re-renders from query params); the
+        sparklines are drawn client-side on ``<canvas>`` from an embedded series
+        payload, so the page stays fully usable without JavaScript.
+        """
+        data = _load_run(run_id)
+        if not _can_access_run(run_id, data, _active_profile_id()):
+            data = None
+        if not data:
+            return _recovery_page(
+                "Run not found",
+                "This run isn't on disk. It may have been deleted from /privacy, or the URL might be from a different deployment.",
+                eyebrow="Results table",
+                primary_cta=("Open activity", url_for("activity_page")),
+                secondary_cta=("Back to home", url_for("home")),
+            )
+
+        meet = data.get("meet") or {}
+        _review_url = url_for("review", run_id=run_id)
+
+        # Cross-meet history per athlete — read-only registry lookups (resolve by
+        # name, then that athlete's full swim log). Best-effort: a missing/empty
+        # registry just means no prior history yet (the current swim still shows
+        # as the latest point and the badge reads "first on record").
+        pid = _active_profile_id() or (data.get("profile_id") or "")
+        history: dict[str, list[dict]] = {}
+        if pid:
+            try:
+                from mediahub.athletes import athlete_swims as _ath_swims
+                from mediahub.athletes import resolve as _ath_resolve
+
+                swimmers = meet.get("swimmers") or {}
+                for res in meet.get("results") or []:
+                    sk = res.get("swimmer_key") or ""
+                    if not sk or sk in history:
+                        continue
+                    sw = swimmers.get(sk) or {}
+                    name = (
+                        f"{(sw.get('first_name') or '').strip()} "
+                        f"{(sw.get('last_name') or '').strip()}"
+                    ).strip()
+                    rec = _ath_resolve(pid, name) if name else None
+                    history[sk] = _ath_swims(pid, rec.athlete_id) if rec else []
+            except Exception:
+                history = {}
+
+        rows = _rt.build_rows(meet, history, run_id)
+
+        # Empty run (no individual results at all) — honest empty state.
+        if not rows:
+            empty_body = (
+                '<section class="mh-hero" data-lane="--" style="padding-top:var(--sp-8);padding-bottom:var(--sp-7)">'
+                '<span class="mh-hero-eyebrow">Results table</span>'
+                "<h1>No parsed results on this run</h1>"
+                '<p class="lede">This run has no individual swim results to tabulate &mdash; '
+                "it may have parsed only relays, or failed before extracting results.</p>"
+                '<div class="mh-hero-actions">'
+                f'<a class="mh-cta-primary" href="{_review_url}">Back to review &rarr;</a>'
+                f'<a class="mh-cta-secondary" href="{url_for("upload")}">Upload another file</a>'
+                "</div></section>"
+            )
+            return _layout("Results table", empty_body, active="create")
+
+        # ---- server-side sort + filter from query params ----
+        sort, order = _rt.normalise_sort(request.args.get("sort"), request.args.get("order"))
+        f_event = (request.args.get("event") or "").strip()
+        f_q = (request.args.get("q") or "").strip()
+        f_pb = (request.args.get("pb") or "") in ("1", "on", "true")
+        filtered = _rt.filter_rows(rows, event=f_event, query=f_q, pb_only=f_pb)
+        visible = _rt.sort_rows(filtered, sort, order)
+
+        # ---- summary stats (over ALL rows, not the filtered view) ----
+        n_swims = len(rows)
+        n_athletes = len({r.swimmer_key for r in rows if r.swimmer_key})
+        n_pb = sum(1 for r in rows if r.delta.kind == "pb")
+        n_impr = sum(1 for r in rows if r.delta.kind == "improvement")
+
+        # ---- sortable column headers (server-side; toggle asc/desc) ----
+        def _sort_href(col: str) -> str:
+            new_order = "desc" if (sort == col and order == "asc") else "asc"
+            return url_for(
+                "run_results_table",
+                run_id=run_id,
+                sort=col,
+                order=new_order,
+                event=f_event or None,
+                q=f_q or None,
+                pb="1" if f_pb else None,
+            )
+
+        def _th(col: str, label: str) -> str:
+            arrow = ""
+            aria = ""
+            if sort == col:
+                arrow = (
+                    ' <span aria-hidden="true">▲</span>'
+                    if order == "asc"
+                    else ' <span aria-hidden="true">▼</span>'
+                )
+                aria = ' aria-sort="ascending"' if order == "asc" else ' aria-sort="descending"'
+            return (
+                f'<th{aria}><a href="{_sort_href(col)}" '
+                'style="color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:4px">'
+                f"{label}{arrow}</a></th>"
+            )
+
+        # ---- rows + sparkline payload ----
+        _DELTA_TAG = {
+            "pb": "medal",
+            "improvement": "good",
+            "matched": "info",
+            "first": "",
+            "slower": "bad",
+            "none": "",
+        }
+        spark_payload: dict[str, dict] = {}
+        body_rows = ""
+        for i, r in enumerate(visible):
+            if r.delta.kind == "none" or not r.delta.label:
+                delta_html = '<span class="muted" style="font-size:12px">—</span>'
+            else:
+                cls = _DELTA_TAG.get(r.delta.kind, "")
+                delta_html = f'<span class="tag {cls}" title="{_h(r.delta.title)}">{_h(r.delta.label)}</span>'
+
+            if len(r.series_cs) >= 2:
+                sid = f"s{i}"
+                spark_payload[sid] = _rt.sparkline_series(r)
+                _trend = (
+                    f" ({r.delta.label})"
+                    if r.delta.kind in ("pb", "improvement", "matched")
+                    else ""
+                )
+                aria = _h(f"Progress over {len(r.series_cs)} swims, latest {r.time_str}{_trend}")
+                spark_html = (
+                    f'<canvas class="mh-spark" data-spark="{sid}" role="img" '
+                    f'aria-label="{aria}" width="104" height="28" '
+                    'style="width:104px;height:28px;display:block"></canvas>'
+                )
+            elif len(r.series_cs) == 1:
+                spark_html = '<span class="muted" style="font-size:11px" title="No earlier swim on record yet">1 swim</span>'
+            else:
+                spark_html = '<span class="muted" style="font-size:12px">—</span>'
+
+            gender_html = (
+                f' <span class="muted" style="font-size:11px">{_h(r.gender)}</span>'
+                if r.gender
+                else ""
+            )
+            if r.is_dq:
+                time_cell = f'<span class="tag bad" title="{_h(r.status.upper())}">{_h(r.status.upper() or "DQ")}</span>'
+            else:
+                time_cell = _h(r.time_str)
+            body_rows += (
+                "<tr>"
+                f'<td class="mono" style="color:var(--ink-dim)">{r.place if r.place is not None else "—"}</td>'
+                f"<td><strong>{_h(r.swimmer_name)}</strong></td>"
+                f"<td>{_h(r.event_label)}{gender_html}</td>"
+                f'<td class="muted">{_h(r.age_band or "—")}</td>'
+                f'<td class="mono" style="white-space:nowrap">{time_cell}</td>'
+                f"<td>{delta_html}</td>"
+                f"<td>{spark_html}</td>"
+                "</tr>"
+            )
+
+        # ---- event filter dropdown ----
+        ev_opts = '<option value="">All events</option>'
+        for ek, elabel in _rt.event_options(rows):
+            sel = " selected" if ek == f_event else ""
+            ev_opts += f'<option value="{_h(ek)}"{sel}>{_h(elabel)}</option>'
+
+        any_filter = bool(f_event or f_q or f_pb)
+        clear_link = (
+            f'<a class="btn ghost" style="font-size:13px" '
+            f'href="{url_for("run_results_table", run_id=run_id, sort=sort, order=order)}">Clear filters</a>'
+            if any_filter
+            else ""
+        )
+        count_line = f"Showing <strong>{len(visible)}</strong> of {n_swims} swims" + (
+            " (filtered)" if any_filter else ""
+        )
+        no_match_row = (
+            '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">'
+            "No swims match these filters.</td></tr>"
+        )
+        spark_json = json.dumps(spark_payload)
+
+        body = f"""
+<section class="mh-hero" data-lane="" style="padding-top:var(--sp-8);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
+  <span class="mh-hero-eyebrow">Results table</span>
+  <h1>{_h(meet.get("name") or "(unknown meet)")}</h1>
+  <div class="strap" style="margin-top:var(--sp-3)">
+    <span>{_h(meet.get("start_date") or "?")} – {_h(meet.get("end_date") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("course") or "?")}</span><span class="sep">·</span>
+    <span>{_h(meet.get("venue") or "venue unknown")}</span>
+  </div>
+  <div class="mh-hero-actions" style="margin-top:var(--sp-4)">
+    <a class="mh-cta-secondary" href="{_review_url}">&larr; Back to review</a>
+  </div>
+</section>
+
+<div class="stat-block" style="margin-bottom:var(--sp-5)">
+  <div class="stat"><div class="l">Swims</div><div class="v">{n_swims}</div></div>
+  <div class="stat"><div class="l">Athletes</div><div class="v">{n_athletes}</div></div>
+  <div class="stat"><div class="l">Personal bests</div><div class="v" style="color:var(--medal)">{n_pb}</div></div>
+  <div class="stat"><div class="l">Improvements</div><div class="v" style="color:var(--good)">{n_impr}</div></div>
+</div>
+
+<div class="card">
+  <form method="get" class="filters-bar" data-no-loader="1" style="margin-bottom:0">
+    <input type="hidden" name="sort" value="{_h(sort)}">
+    <input type="hidden" name="order" value="{_h(order)}">
+    <input type="search" name="q" value="{_h(f_q)}" placeholder="Search swimmer…"
+           style="min-width:180px" aria-label="Search swimmer name">
+    <select name="event" aria-label="Filter by event">{ev_opts}</select>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-dim)">
+      <input type="checkbox" name="pb" value="1"{" checked" if f_pb else ""} style="width:auto">
+      PBs &amp; improvements only
+    </label>
+    <button class="btn secondary" type="submit" style="font-size:13px">Apply</button>
+    {clear_link}
+    <span class="muted" style="font-size:12px;align-self:center;margin-left:auto">{count_line}</span>
+  </form>
+</div>
+
+<div class="card" style="margin-top:var(--sp-4)">
+  <table class="mh-table">
+    <thead><tr>
+      {_th("place", "#")}
+      {_th("name", "Swimmer")}
+      {_th("event", "Event")}
+      {_th("age", "Age")}
+      {_th("time", "Time")}
+      {_th("delta", "Δ vs PB")}
+      <th>Progress</th>
+    </tr></thead>
+    <tbody>{body_rows or no_match_row}</tbody>
+  </table>
+  <p class="muted" style="font-size:11px;margin:12px 2px 0">
+    Sparkline shows this athlete's time for the event over time &mdash; higher is faster.
+    Delta badges compare each swim to the athlete's prior best <em>on record</em>.
+  </p>
+</div>
+
+<script>
+(function(){{
+  var DATA = {spark_json};
+  function cssColor(name, fb){{
+    try {{
+      var el=document.createElement('span');
+      el.style.cssText='color:var('+name+');position:absolute;visibility:hidden';
+      document.body.appendChild(el);
+      var c=getComputedStyle(el).color; document.body.removeChild(el);
+      return c||fb;
+    }} catch(e){{ return fb; }}
+  }}
+  var ACCENT=cssColor('--lane','#D4FF3A'), MEDAL=cssColor('--medal','#F4D58D');
+  function draw(cv){{
+    var s=DATA[cv.getAttribute('data-spark')];
+    if(!s||!s.t||s.t.length<2) return;
+    var dpr=window.devicePixelRatio||1;
+    var w=cv.clientWidth||104, h=cv.clientHeight||28, pad=3;
+    cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+    var ctx=cv.getContext('2d'); if(!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var t=s.t, n=t.length, mn=Math.min.apply(null,t), mx=Math.max.apply(null,t), span=(mx-mn)||1;
+    function X(i){{ return pad + (w-2*pad)*(n===1?0.5:i/(n-1)); }}
+    function Y(v){{ return pad + (h-2*pad)*((v-mn)/span); }}
+    ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.strokeStyle=ACCENT;
+    ctx.beginPath();
+    for(var i=0;i<n;i++){{ var px=X(i), py=Y(t[i]); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }}
+    ctx.stroke();
+    var ci=(s.cur>=0&&s.cur<n)?s.cur:n-1;
+    ctx.fillStyle=(s.kind==='pb'||s.kind==='matched')?MEDAL:ACCENT;
+    ctx.beginPath(); ctx.arc(X(ci),Y(t[ci]),2.4,0,6.2832); ctx.fill();
+  }}
+  function drawAll(){{ var c=document.querySelectorAll('canvas.mh-spark'); for(var i=0;i<c.length;i++) draw(c[i]); }}
+  drawAll();
+  var rt; window.addEventListener('resize', function(){{ clearTimeout(rt); rt=setTimeout(drawAll,150); }});
+}})();
+</script>
+"""
+        return _layout(f"Results — {meet.get('name') or run_id}", body, active="create")
 
     # ---- V5 API ROUTES -------------------------------------------------
     @app.route("/api/runs/<run_id>/recognition")
@@ -17069,6 +19255,342 @@ Relay team broke club record"></textarea>
             f'<div class="card">{html}</div>'
         )
         return _layout("Research", body, active="research")
+
+    # ---- DEVELOPER / API REFERENCE (UI 1.11) ---------------------------
+    @app.route("/developer/api")
+    def api_docs_page():
+        """Public Developer/API reference.
+
+        Documents the real HTTP + JSON endpoints the app exposes, each with a
+        tabbed cURL / Python / JavaScript code-example switcher. Highlighting is
+        rendered server-side by ``code_highlight.py`` (no Prism, no CDN); the
+        language tabs are pure CSS and the copy button is JS-enhanced (UI 1.11).
+        """
+        return _layout("Developer API", _render_api_docs_body(), active="")
+
+    def _render_api_docs_body() -> str:
+        # Concrete base URL for the examples (the deployment the docs render on).
+        base = (request.host_url or "").rstrip("/") or "https://your-mediahub.example"
+
+        def _sub(text: str) -> str:
+            return text.replace("__BASE__", base)
+
+        def _switcher(slug: str, curl: str, python: str, js: str) -> str:
+            return _code_hl.code_switcher(
+                [
+                    ("cURL", "bash", _sub(curl)),
+                    ("Python", "python", _sub(python)),
+                    ("JavaScript", "javascript", _sub(js)),
+                ],
+                group_id=f"ep-{slug}",
+            )
+
+        def _endpoint(
+            method: str,
+            path: str,
+            anchor: str,
+            summary_html: str,
+            *,
+            params=None,
+            curl: str,
+            python: str,
+            js: str,
+            response: str = "",
+            note_html: str = "",
+        ) -> str:
+            sig = (
+                '<div class="mh-api-sig">'
+                f'<span class="mh-method mh-method-{method.lower()}">{_h(method)}</span>'
+                f"<code>{_h(path)}</code></div>"
+            )
+            params_html = ""
+            if params:
+                rows = "".join(
+                    f"<tr><td><code>{_h(name)}</code></td><td>{_h(req)}</td>"
+                    f"<td>{desc}</td></tr>"
+                    for name, req, desc in params
+                )
+                params_html = (
+                    '<table class="mh-api-params"><thead><tr>'
+                    "<th>Parameter</th><th>Required</th><th>Description</th>"
+                    f"</tr></thead><tbody>{rows}</tbody></table>"
+                )
+            resp_html = (
+                _code_hl.code_block(_sub(response), "json", label="Response") if response else ""
+            )
+            return (
+                f'<section class="card mh-api-endpoint" id="{_h(anchor)}">'
+                f"{sig}"
+                f'<p class="dim">{summary_html}</p>'
+                f"{params_html}"
+                f"{_switcher(anchor, curl, python, js)}"
+                f"{resp_html}"
+                f"{note_html}"
+                "</section>"
+            )
+
+        hero = (
+            '<section class="mh-hero" data-lane="" '
+            'style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">'
+            '<span class="mh-hero-eyebrow">Developer</span>'
+            '<h1>API <em class="editorial">reference</em></h1>'
+            '<p class="lede">Drive MediaHub from your own scripts: poll a run, pull the '
+            "generated cards, export a content pack, or render a reel &mdash; over plain "
+            "HTTP and JSON.</p>"
+            "</section>"
+        )
+
+        intro = (
+            '<section class="card">'
+            "<h2>Overview</h2>"
+            "<p>MediaHub exposes a small HTTP&nbsp;+&nbsp;JSON API &mdash; the same endpoints "
+            "the web app uses to take a run from upload to export. Call them to poll a "
+            "pipeline, pull generated cards, export a content pack, or render a reel.</p>"
+            '<ul class="mh-api-facts">'
+            f"<li><strong>Base URL</strong> &mdash; <code>{_h(base)}</code></li>"
+            "<li><strong>Responses</strong> &mdash; JSON (<code>application/json</code>), except "
+            "media routes, which stream the file (e.g. <code>video/mp4</code>).</li>"
+            "<li><strong>Errors</strong> &mdash; a JSON body with an <code>error</code> key and a "
+            "matching HTTP status (<code>404</code> unknown/forbidden run, <code>202</code> still "
+            "processing).</li>"
+            "</ul>"
+            "</section>"
+        )
+
+        auth = (
+            '<section class="card">'
+            "<h2>Authentication</h2>"
+            "<p>Most endpoints are scoped to your signed-in organisation and authenticate with "
+            "the <strong>session cookie</strong> the app sets when you log in &mdash; send it with "
+            'each request (<code>credentials: "include"</code> in the browser, or a '
+            "<code>Cookie:</code> header from a script). A request for a run that is not yours "
+            "returns <code>404</code> &mdash; never another organisation's data.</p>"
+            "<p><code>/health</code> is the one public endpoint; it needs no session. There is no "
+            "public API-key programme yet &mdash; if you need machine-to-machine access, get in "
+            "touch.</p>"
+            "</section>"
+        )
+
+        quickstart = (
+            '<section class="card" id="quickstart">'
+            "<h2>Quickstart</h2>"
+            '<p class="dim">Poll a run until the recognition&nbsp;+&nbsp;content pipeline '
+            "finishes, then pull the cards it produced.</p>"
+            + _switcher(
+                "quickstart",
+                "# 1. Poll the run until the pipeline finishes…\n"
+                'RUN_ID="run_8f2c1a"\n'
+                'curl -s "__BASE__/api/runs/$RUN_ID/status"\n\n'
+                "# 2. …then pull the generated content cards.\n"
+                'curl -s "__BASE__/api/runs/$RUN_ID/cards"\n',
+                "import time\n"
+                "import requests\n\n"
+                'BASE = "__BASE__"\n'
+                'run_id = "run_8f2c1a"\n\n'
+                "# Poll until the recognition + content pipeline is done.\n"
+                "while True:\n"
+                '    status = requests.get(f"{BASE}/api/runs/{run_id}/status").json()\n'
+                '    if status["status"] in ("done", "error"):\n'
+                "        break\n"
+                "    time.sleep(4)\n\n"
+                'cards = requests.get(f"{BASE}/api/runs/{run_id}/cards").json()\n'
+                'print(f"{len(cards)} cards ready")\n',
+                'const BASE = "__BASE__";\n'
+                'const runId = "run_8f2c1a";\n\n'
+                "// Poll until the pipeline finishes, then fetch the cards.\n"
+                "let status;\n"
+                "do {\n"
+                "  const res = await fetch(`${BASE}/api/runs/${runId}/status`, {\n"
+                '    credentials: "include",\n'
+                "  });\n"
+                "  status = await res.json();\n"
+                '  if (status.status === "running") await new Promise((r) => setTimeout(r, 4000));\n'
+                '} while (status.status !== "done" && status.status !== "error");\n\n'
+                "const cards = await fetch(`${BASE}/api/runs/${runId}/cards`, {\n"
+                '  credentials: "include",\n'
+                "}).then((r) => r.json());\n"
+                "console.log(`${cards.length} cards ready`);\n",
+            )
+            + "</section>"
+        )
+
+        endpoints = [
+            _endpoint(
+                "GET",
+                "/health",
+                "health",
+                "Deployment health and dependency checks. Public &mdash; no session "
+                "required. Returns <code>200</code> when healthy, <code>503</code> when a "
+                "dependency is down.",
+                curl='curl -s "__BASE__/health"\n',
+                python=(
+                    "import requests\n\n"
+                    'health = requests.get("__BASE__/health")\n'
+                    'print(health.status_code, health.json()["ok"])\n'
+                ),
+                js=(
+                    'const res = await fetch("__BASE__/health");\n'
+                    "const health = await res.json();\n"
+                    "console.log(res.status, health.ok);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "ok": true,\n'
+                    '  "checks": {\n'
+                    '    "database": {"ok": true},\n'
+                    '    "data_dir": {"ok": true},\n'
+                    '    "llm_provider": {"ok": true}\n'
+                    "  }\n"
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/status",
+                "run-status",
+                "Poll a run's pipeline status. <code>status</code> is one of "
+                "<code>queued</code>, <code>running</code>, <code>done</code>, "
+                "<code>error</code> or <code>unknown</code>; <code>log</code> streams the "
+                "human-readable progress lines.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/status"\n',
+                python=(
+                    "import requests\n\n"
+                    'status = requests.get("__BASE__/api/runs/run_8f2c1a/status").json()\n'
+                    'print(status["status"], status.get("n_achievements"))\n'
+                ),
+                js=(
+                    'const status = await fetch("__BASE__/api/runs/run_8f2c1a/status", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(status.status, status.n_achievements);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "status": "done",\n'
+                    '  "error": null,\n'
+                    '  "log": [\n'
+                    '    "Parsing results file…",\n'
+                    '    "Detecting achievements…",\n'
+                    '    "Ranking content opportunities…"\n'
+                    "  ],\n"
+                    '  "n_achievements": 12\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/cards",
+                "run-cards",
+                "The generated content cards, ranked by content-worthiness. While the run is "
+                "still processing this returns <code>202</code> with "
+                '<code>{"error": "in_progress", "retry_after": 4}</code> &mdash; retry after '
+                "the given delay.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/cards"\n',
+                python=(
+                    "import requests\n\n"
+                    'cards = requests.get("__BASE__/api/runs/run_8f2c1a/cards").json()\n'
+                    "for card in cards:\n"
+                    '    print(card["post_angle"], round(card["confidence"], 2))\n'
+                ),
+                js=(
+                    'const cards = await fetch("__BASE__/api/runs/run_8f2c1a/cards", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "cards.forEach((c) => console.log(c.post_angle, c.confidence));\n"
+                ),
+                response=(
+                    "[\n"
+                    "  {\n"
+                    '    "id": "ind_0",\n'
+                    '    "post_angle": "personal_best",\n'
+                    '    "confidence": 0.92,\n'
+                    '    "caption": "A new PB for Ava in the 100m Freestyle.",\n'
+                    '    "graphic_text": {\n'
+                    '      "headline_line1": "AVA CARTER",\n'
+                    '      "headline_line2": "100M FREE PB"\n'
+                    "    }\n"
+                    "  }\n"
+                    "]\n"
+                ),
+            ),
+            _endpoint(
+                "GET",
+                "/api/runs/{run_id}/export",
+                "run-export",
+                "The full run document &mdash; parsed results, recognition decisions, ranked "
+                "cards, and the trust report &mdash; as one JSON object. Use it to archive a "
+                "pack or feed a downstream system.",
+                curl='curl -s "__BASE__/api/runs/run_8f2c1a/export" -o pack.json\n',
+                python=(
+                    "import requests\n\n"
+                    'pack = requests.get("__BASE__/api/runs/run_8f2c1a/export").json()\n'
+                    'print(pack["recognition_report"]["n_achievements"], len(pack["cards"]))\n'
+                ),
+                js=(
+                    'const pack = await fetch("__BASE__/api/runs/run_8f2c1a/export", {\n'
+                    '  credentials: "include",\n'
+                    "}).then((r) => r.json());\n"
+                    "console.log(pack.cards.length);\n"
+                ),
+                response=(
+                    "{\n"
+                    '  "recognition_report": {"n_achievements": 12},\n'
+                    '  "cards": [{"id": "ind_0", "post_angle": "personal_best", "confidence": 0.92}],\n'
+                    '  "trust": {"grounded": true}\n'
+                    "}\n"
+                ),
+            ),
+            _endpoint(
+                "POST",
+                "/api/runs/{run_id}/reel",
+                "run-reel",
+                "Render the meet reel from the top-ranked cards and stream it back as an MP4 "
+                "(<code>Content-Type: video/mp4</code>). Cache hits return in under 30s; cold "
+                "renders take 30&ndash;90s on the worker.",
+                params=[
+                    (
+                        "format",
+                        "no",
+                        "<code>story</code> (default), <code>portrait</code>, "
+                        "<code>square</code> or <code>landscape</code>.",
+                    ),
+                    (
+                        "n",
+                        "no",
+                        "How many top cards to include &mdash; 1&ndash;5 (default 3).",
+                    ),
+                ],
+                curl=(
+                    'curl -X POST "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3" \\\n'
+                    "  -o reel.mp4\n"
+                ),
+                python=(
+                    "import requests\n\n"
+                    "reel = requests.post(\n"
+                    '    "__BASE__/api/runs/run_8f2c1a/reel",\n'
+                    '    params={"format": "story", "n": 3},\n'
+                    ")\n"
+                    'with open("reel.mp4", "wb") as fh:\n'
+                    "    fh.write(reel.content)\n"
+                ),
+                js=(
+                    "const res = await fetch(\n"
+                    '  "__BASE__/api/runs/run_8f2c1a/reel?format=story&n=3",\n'
+                    '  { method: "POST", credentials: "include" },\n'
+                    ");\n"
+                    "const blob = await res.blob(); // video/mp4\n"
+                ),
+                note_html=(
+                    '<p class="dim" style="margin-top:var(--sp-3)">The matching '
+                    "<code>POST /api/runs/{run_id}/card/{card_id}/motion</code> route renders a "
+                    "single story card with the same <code>format</code> options.</p>"
+                ),
+            ),
+        ]
+
+        endpoints_html = '<h2 style="margin-top:var(--sp-7)">Endpoints</h2>' + "".join(endpoints)
+
+        return hero + intro + auth + quickstart + endpoints_html
 
     # ---- PRIVACY -------------------------------------------------------
     @app.route("/privacy")
@@ -18740,6 +21262,74 @@ Relay team broke club record"></textarea>
                 "recent_gaps": _uptime.recent_gaps(window_hours=24 * 30, limit=10),
             }
         )
+
+    # ---- Notifications inbox (UI 1.14) ---------------------------------
+    #
+    # The bell-icon dropdown in the app chrome: render-complete, pack-ready,
+    # and error events for the active organisation, backed by the notify-layer
+    # inbox store (mediahub.notify.inbox). Polled by the header on a light
+    # cadence; org-scoped via _active_profile_id() so one club never sees
+    # another's events. Deep links are built here (in request context) with
+    # url_for, not persisted, so they always match the live routing.
+    def _notification_link(item: dict) -> str:
+        explicit = (item.get("click_url") or "").strip()
+        if explicit:
+            return explicit
+        rid = (item.get("run_id") or "").strip()
+        if not rid:
+            return ""
+        # A finished render lives on the content-pack page; everything else
+        # (pack-ready / error) points at the review page for that run.
+        endpoint = "content_pack" if item.get("kind") == "render_complete" else "review"
+        try:
+            return url_for(endpoint, run_id=rid)
+        except Exception:
+            return ""
+
+    @app.route("/api/notifications", methods=["GET"])
+    def api_notifications():
+        """List the active org's notifications plus its unread count.
+
+        Signed-out (no active org) returns an empty, zero-unread payload so the
+        header poll is harmless on public pages rather than a 403 the client
+        has to special-case.
+        """
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"ok": True, "unread": 0, "items": []})
+        unread_only = (request.args.get("unread") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            limit = int(request.args.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        from mediahub.notify import inbox as _inbox
+
+        items = _inbox.list_for(pid, limit=limit, unread_only=unread_only)
+        for it in items:
+            it["link"] = _notification_link(it)
+        return jsonify({"ok": True, "unread": _inbox.unread_count(pid), "items": items})
+
+    @app.route("/api/notifications/<notif_id>/read", methods=["POST"])
+    def api_notifications_read(notif_id: str):
+        """Mark one notification read for the active org (tenant-scoped)."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        changed = _inbox.mark_read(pid, notif_id)
+        return jsonify({"ok": True, "changed": changed, "unread": _inbox.unread_count(pid)})
+
+    @app.route("/api/notifications/read-all", methods=["POST"])
+    def api_notifications_read_all():
+        """Mark every unread notification read for the active org."""
+        pid = _active_profile_id()
+        if not pid:
+            return jsonify({"error": "No organisation active."}), 403
+        from mediahub.notify import inbox as _inbox
+
+        n = _inbox.mark_all_read(pid)
+        return jsonify({"ok": True, "marked": n, "unread": 0})
 
     # ---- /healthz/usage ------------------------------------------------
     #
@@ -22215,16 +24805,35 @@ function mhPlanGenerate(btn) {{
                     swimmers = []
                 if swimmers:
                     _review_url = url_for("review", run_id=run_id_param)
+                    # UI2.2: the run's club for the athlete-avatar tooltips.
+                    _sp_club = (
+                        run_data.get("profile_display") or run_data.get("club_filter") or ""
+                    ).strip()
                     swimmers_html = f'<div style="margin-top:20px"><h2>Swimmers in this meet <span class="muted" style="font-weight:400;font-size:13px">({len(swimmers)})</span></h2>'
                     swimmers_html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px">'
                     for sw in swimmers:
                         sp_url = url_for(
                             "spotlight_view", run_id=run_id_param, swimmer_key=sw["swimmer_key"]
                         )
+                        _n_ach = sw["n_achievements"]
+                        _ach_label = f'{_n_ach} achievement{"s" if _n_ach != 1 else ""}'
+                        # Decorative chip (it lives inside the card link, so it
+                        # stays aria-hidden / out of the tab order); the link's
+                        # own text carries the same name + count for AT.
+                        _sw_avatar = _athlete_avatar(
+                            sw["swimmer_name"],
+                            club=_sp_club,
+                            stat=_ach_label,
+                            focusable=False,
+                            size=38,
+                        )
                         swimmers_html += f"""
-<a href="{sp_url}" style="display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
-  <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
-  <div style="font-size:12px;color:var(--ink-dim)">{sw["n_achievements"]} achievement{"s" if sw["n_achievements"] != 1 else ""}</div>
+<a href="{sp_url}" style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius-sm);text-decoration:none;transition:border-color 150ms">
+  {_sw_avatar}
+  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+    <div style="font-size:14px;font-weight:600;color:var(--ink)">{_h(sw["swimmer_name"])}</div>
+    <div style="font-size:12px;color:var(--ink-dim)">{_ach_label}</div>
+  </div>
 </a>"""
                     swimmers_html += "</div></div>"
                 else:
@@ -22423,10 +25032,32 @@ function mhPlanGenerate(btn) {{
             for t, m in _SP_TONE_META.items()
         )
 
+        # UI2.2: the hero athlete avatar + tooltip. Standalone, so it's
+        # keyboard-reachable (focusable) and exposes the same grounded summary
+        # to assistive tech via aria-label. Club + haul come from the run and
+        # the spotlight pack's band counts — all real figures, never invented.
+        _hero_club = (run_data.get("profile_display") or run_data.get("club_filter") or "").strip()
+        _hero_n = pack["n_achievements"]
+        _hero_stat = f'{_hero_n} moment{"s" if _hero_n != 1 else ""}'
+        if pack["n_elite"]:
+            _hero_stat = f'{pack["n_elite"]} elite · {_hero_stat}'
+        elif pack["n_strong"]:
+            _hero_stat = f'{pack["n_strong"]} strong · {_hero_stat}'
+        _hero_avatar = _athlete_avatar(
+            pack["swimmer_name"],
+            club=_hero_club,
+            stat=_hero_stat,
+            focusable=True,
+            size=52,
+        )
+
         body = f"""
 <section class="mh-hero" data-lane="" style="padding-top:var(--sp-7);padding-bottom:var(--sp-6);margin-bottom:var(--sp-5)">
   <span class="mh-hero-eyebrow">Athlete spotlight</span>
-  <h1>{_h(pack["swimmer_name"])}</h1>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    {_hero_avatar}
+    <h1 style="margin:0">{_h(pack["swimmer_name"])}</h1>
+  </div>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(pack["meet_name"])}</span><span class="sep">/</span>
     <a href="{_back_url}" style="color:var(--ink-muted);text-decoration:none">&larr; Swimmer list</a><span class="sep">/</span>
@@ -30432,6 +33063,163 @@ function mhSetupMode(mode) {{
 
         return jsonify({"error": "unknown action"}), 400
 
+    @app.route("/api/runs/<run_id>/cards/bulk-status", methods=["POST"])
+    def api_cards_bulk_status(run_id):
+        """UI 1.9 — apply one workflow status to many cards at once.
+
+        Content-negotiated: a fetch() JSON call gets a per-card result list back;
+        a no-JS HTML form POST is redirected to /review with a flash summary.
+        Each card is gated independently, so the consent gate (minors / opted-out
+        athletes) can block a single approval without aborting the whole batch —
+        the same rule the single-card route enforces.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ws = _get_wf_store()
+        if ws is None:
+            return jsonify({"error": "workflow not available"}), 503
+
+        wants_json = _req_wants_json(request)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            payload = {}
+        # Coerce to str before .strip(): a fuzzed/AJAX body may send a non-string
+        # (number, list) under "status" — that must be a clean 400, not a 500.
+        status_str = str(
+            payload.get("status") or request.form.get("status") or request.form.get("op") or ""
+        ).strip()
+        try:
+            status = CardStatus(status_str)
+        except (ValueError, NameError):
+            if wants_json:
+                return jsonify({"error": f"invalid status: {status_str}"}), 400
+            _flash_toast("Couldn't apply that bulk action — unknown status.", "error")
+            return redirect(url_for("review", run_id=run_id))
+
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if wants_json:
+                return (
+                    jsonify(
+                        {"error": "no_selection", "results": [], "summary": ws.summary(run_id)}
+                    ),
+                    400,
+                )
+            _flash_toast("Select at least one card first.", "info")
+            return redirect(url_for("review", run_id=run_id))
+
+        need_consent = status in (CardStatus.APPROVED, CardStatus.POSTED)
+        if need_consent:
+            from mediahub.compliance.gate import (
+                consent_block_reason_for_card,
+                find_card_in_run,
+            )
+        owner_pid = _run_owner_profile_id(run_id) or _active_profile_id() or ""
+        results: list[dict] = []
+        n_ok = 0
+        n_blocked = 0
+        for cid in ids:
+            if need_consent:
+                card = find_card_in_run(run_data or {}, cid)
+                reason = consent_block_reason_for_card((run_data or {}).get("profile_id", ""), card)
+                if reason:
+                    log.info("consent gate blocked bulk approval run=%s card=%s", run_id, cid)
+                    results.append(
+                        {"id": cid, "ok": False, "error": "consent_blocked", "reason": reason}
+                    )
+                    n_blocked += 1
+                    continue
+            ws.set_status(run_id, cid, status)
+            if status in (CardStatus.APPROVED, CardStatus.REJECTED, CardStatus.QUEUE):
+                _action = {
+                    CardStatus.APPROVED: "approved",
+                    CardStatus.REJECTED: "rejected",
+                    CardStatus.QUEUE: "requeued",
+                }[status]
+                _phase_w_after_status_change(owner_pid, run_id, cid, _action)
+            results.append({"id": cid, "ok": True, "status": status.value})
+            n_ok += 1
+        summary = ws.summary(run_id)
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": status.value,
+                    "results": results,
+                    "summary": summary,
+                    "n_ok": n_ok,
+                    "n_blocked": n_blocked,
+                }
+            )
+        verb = {"approved": "Approved", "rejected": "Rejected", "queue": "Re-queued"}.get(
+            status.value, status.value.capitalize()
+        )
+        msg = f"{verb} {n_ok} card{'' if n_ok == 1 else 's'}."
+        if n_blocked:
+            msg += f" {n_blocked} blocked by the consent gate."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("review", run_id=run_id))
+
+    @app.route("/api/runs/<run_id>/cards/bulk-export", methods=["POST"])
+    def api_cards_bulk_export(run_id):
+        """UI 1.9 — download the selected cards as one JSON file.
+
+        Scoped sibling of the per-run /export (which dumps the whole run): a
+        reviewer ticks the achievements they want and gets just those, with each
+        card's live workflow status folded in. Always a native attachment
+        download, so it works with or without JS.
+        """
+        run_data = _load_run(run_id)
+        if not _can_access_run(run_id, run_data, _active_profile_id()):
+            return jsonify({"error": "run not found"}), 404
+        ids = _bulk_ids_from_request(request, "ids", "card_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one card to export.", "info")
+            return redirect(url_for("review", run_id=run_id))
+        wanted = set(ids)
+        rr = (run_data or {}).get("recognition_report") or {}
+        ranked = rr.get("ranked_achievements") or []
+        ws = _get_wf_store()
+        wf_states = ws.load(run_id) if ws else {}
+        selected: list[dict] = []
+        for ra in ranked:
+            ach = ra.get("achievement") or {}
+            cid = ach.get("swim_id") or ra.get("id")
+            if cid in wanted:
+                st = wf_states.get(cid)
+                selected.append(
+                    {
+                        "card_id": cid,
+                        "status": (st.status.value if st else "queue"),
+                        "rank": ra.get("rank"),
+                        "quality_band": ra.get("quality_band"),
+                        "suggested_post_type": ra.get("suggested_post_type"),
+                        "achievement": ach,
+                        "factors": ra.get("factors"),
+                    }
+                )
+        export = {
+            "run_id": run_id,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "profile_id": (run_data or {}).get("profile_id", ""),
+            "requested": len(wanted),
+            "exported": len(selected),
+            "cards": selected,
+        }
+        fname = (
+            "mediahub-cards-"
+            + (re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id)[:40] or "export")
+            + ".json"
+        )
+        return Response(
+            json.dumps(export, indent=2, default=str),
+            mimetype="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     # ---- Emoji reactions (UI 1.25) -------------------------------------
     @app.route("/api/runs/<run_id>/card/<card_id>/reactions", methods=["POST"])
     def api_card_reaction_toggle(run_id, card_id):
@@ -31965,6 +34753,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
             log.warning("media-library: store.list(%s) failed: %s", profile_id, e)
             store_failed = True
         rows_html = ""
+        gallery_items = ""  # UI 1.27 — drag-scroll filmstrip cards
         for a in assets[:200]:
             ad = a.to_dict() if hasattr(a, "to_dict") else a
             athlete_names = ", ".join(ad.get("linked_athlete_names") or [])
@@ -31986,11 +34775,27 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
                 f'<span class="mh-hp-cap"><b>{_h(_hp_type)}</b>{_hp_subject_html}</span>'
                 "</template>"
             )
+            # UI 1.27 — one filmstrip card per asset for the drag-scroll
+            # gallery above the table. Same escaped, parsed-metadata caption
+            # as the row; the photo loads lazily so a 200-asset strip costs
+            # nothing up front beyond what's on screen.
+            gallery_items += (
+                '<figure class="mh-ds-card">'
+                '<div class="mh-ds-card-media">'
+                f'<img src="{_file_url}" loading="lazy" decoding="async" alt="" />'
+                "</div>"
+                '<figcaption class="mh-ds-card-cap">'
+                f'<span class="eyebrow">{_h(_hp_type)}</span>'
+                + (f'<span class="sub">{_h(_hp_subject)}</span>' if _hp_subject else "")
+                + "</figcaption>"
+                "</figure>"
+            )
             # HTML-escape every parsed-metadata cell: descriptions/links are
             # user-supplied + AI-parsed, so an unescaped name/venue was a
             # stored-XSS vector. (Same _h() rule the rest of the app follows.)
             rows_html += f"""
-<tr class="mh-hp">
+<tr class="mh-hp mh-asset-row" data-asset-id="{_h(ad.get("id", ""))}">
+  <td class="mh-bulk-cell"><input type="checkbox" class="mh-row-check" name="asset_ids" value="{_h(ad.get("id", ""))}" aria-label="Select photo"></td>
   <td><span class=\"mh-lens\" style=\"display:inline-block;border-radius:4px;overflow:hidden;line-height:0\"><img src=\"{_file_url}\" style=\"max-height:60px;border-radius:4px;display:block\" /></span>{_hp_tpl}</td>
   <td>{_h(ad.get("type", ""))}</td>
   <td>{_h(athlete_names)}</td>
@@ -31999,10 +34804,9 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <td><code>{_h(ad.get("id", "")[:12])}</code></td>
   <td style="white-space:nowrap">
     <a class="btn ghost" href="{_cutout_url}" style="font-size:11px;padding:3px 9px;margin-right:6px" title="See exactly what background removal knocks out">Cut-out</a>
-    <form method="post" action="{_delete_url}" style="display:inline"
-          onsubmit="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">
-      <button class="btn danger" type="submit" style="font-size:11px;padding:3px 9px">Delete</button>
-    </form>
+    <button class="btn danger" type="submit" formaction="{_delete_url}" formnovalidate
+            style="font-size:11px;padding:3px 9px"
+            onclick="return confirm('Delete this photo from the library? Graphics already rendered keep their copy; the photo just stops being available for new ones.')">Delete</button>
   </td>
 </tr>"""
         body = f"""
@@ -32011,7 +34815,7 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
   <h1>Library</h1>
   <div class="strap" style="margin-top:var(--sp-3)">
     <span>{_h(profile_id)}</span><span class="sep">·</span>
-    <span>{len(assets):03d} {"asset" if len(assets) == 1 else "assets"}</span>
+    <span><span data-mh-asset-count>{len(assets):03d}</span> {"asset" if len(assets) == 1 else "assets"}</span>
   </div>
 </section>
 
@@ -32038,26 +34842,60 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
     <div style="margin-top:var(--sp-4)"><button type="submit" class="btn">Upload photo &rarr;</button></div>
   </form>
 </div>
-
+{
+            (
+                '<div class="card">'
+                '<div class="strap" style="margin-bottom:var(--sp-3)">Browse &middot; drag to scroll</div>'
+                '<div class="mh-ds-gallery-wrap">'
+                '<div class="mh-drag-scroll" tabindex="0" role="group" '
+                'aria-label="Media library photos — drag or scroll to browse">'
+                + gallery_items
+                + "</div>"
+                + _drag_hint("Drag to explore")
+                + "</div></div>"
+            )
+            if gallery_items
+            else ""
+        }
 <div class="card">
-  <div class="strap" style="margin-bottom:var(--sp-3)">{len(assets):03d} {
+  <div class="strap" style="margin-bottom:var(--sp-3)"><span data-mh-asset-count>{len(assets):03d}</span> {
             "asset" if len(assets) == 1 else "assets"
         } in library</div>
-  <table style="width:100%">
-    <thead><tr><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
-    <tbody>{
+  <form id="mh-ml-bulk" method="post">
+    <div class="mh-bulkbar is-empty" id="mh-ml-bulkbar" role="group" aria-label="Bulk photo actions"
+         data-mh-bulkbar="media" data-form="mh-ml-bulk" data-count="mh-ml-count"
+         data-select-all="mh-ml-all" data-check="mh-row-check" data-row=".mh-asset-row">
+      <span class="mh-bulkbar-count" id="mh-ml-count">0 selected</span>
+      <div class="mh-bulkbar-actions">
+        <button type="submit" class="btn secondary" data-mh-bulk="approve"
+                formaction="{url_for('api_media_library_bulk_approve')}"
+                data-confirm="Mark {{n}} selected photo(s) as approved?">Approve</button>
+        <button type="submit" class="btn secondary" data-mh-bulk="export"
+                formaction="{url_for('api_media_library_bulk_export')}">Export ZIP</button>
+        <button type="submit" class="btn danger" data-mh-bulk="delete"
+                formaction="{url_for('api_media_library_bulk_delete')}"
+                data-confirm="Delete {{n}} selected photo(s)? Graphics already rendered keep their copy.">Delete</button>
+      </div>
+    </div>
+    <table style="width:100%">
+      <thead><tr><th class="mh-bulk-cell"><input type="checkbox" id="mh-ml-all" class="mh-check-all" aria-label="Select all photos" title="Select all"></th><th>Preview</th><th>Type</th><th>Athlete</th><th>Venue / Event</th><th>Permission</th><th>ID</th><th></th></tr></thead>
+      <tbody>{
             rows_html
             or (
-                '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
+                '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">'
                 "Couldn&rsquo;t load library assets &mdash; the store wasn&rsquo;t readable. "
                 "Uploads above still work; if this persists, ask your operator to check the data volume."
                 "</td></tr>"
                 if store_failed
-                else '<tr><td colspan="7" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
+                else '<tr><td colspan="8" style="text-align:center;padding:var(--sp-7);color:var(--ink-muted)">No assets uploaded yet. Drop a photo above to get started.</td></tr>'
             )
         }</tbody>
-  </table>
+    </table>
+  </form>
 </div>
+
+<style>{_BULK_ACTIONS_CSS}</style>
+<script>{_BULK_ACTIONS_JS}</script>
 """
         return _layout("Media library", body, active="media")
 
@@ -32186,6 +35024,176 @@ window.mhSortPackSection = function(btn, key, defaultDir) {{
         if wants_json:
             return jsonify({"ok": True, "deleted": asset_id})
         return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-delete", methods=["POST"])
+    def api_media_library_bulk_delete():
+        """UI 1.9 — delete many library assets at once (record + files on disk).
+
+        Mirrors the single-asset delete, profile-scoped per id so one org can't
+        reach another's photos even if ids leak. Content-negotiated: fetch() gets
+        a per-id result list; a no-JS form POST is redirected with a flash.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            for _p in (a.path, getattr(a, "cutout_path", None)):
+                if not _p:
+                    continue
+                try:
+                    Path(_p).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            store.delete(aid)
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "deleted": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                }
+            )
+        _flash_toast(
+            f"Deleted {n_ok} photo{'' if n_ok == 1 else 's'}.",
+            "success" if n_ok else "info",
+        )
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-approve", methods=["POST"])
+    def api_media_library_bulk_approve():
+        """UI 1.9 — mark many library assets approved at once.
+
+        Sets ``approval_status='approved'`` (the deterministic photo selector
+        weights approved shots highest). Safeguarding: an asset with a hard
+        permission block (``do_not_use`` / ``needs_parental_consent``) or one
+        flagged not ``safe_for_minors`` is SKIPPED, never silently promoted —
+        resolving that block is a deliberate human call, not a bulk one.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        wants_json = _req_wants_json(request)
+        if not ids:
+            if wants_json:
+                return jsonify({"error": "no_selection", "results": []}), 400
+            _flash_toast("Select at least one photo first.", "info")
+            return redirect(url_for("media_library_page"))
+        results: list[dict] = []
+        n_ok = 0
+        n_skipped = 0
+        for aid in ids:
+            a = store.get(aid)
+            if not a:
+                results.append({"id": aid, "ok": False, "error": "not_found"})
+                continue
+            if not _session_can_access_profile(a.profile_id):
+                results.append({"id": aid, "ok": False, "error": "forbidden"})
+                continue
+            if a.permission_status in ("do_not_use", "needs_parental_consent") or not getattr(
+                a, "safe_for_minors", True
+            ):
+                results.append({"id": aid, "ok": False, "error": "safeguarding_block"})
+                n_skipped += 1
+                continue
+            store.update_fields(aid, {"approval_status": "approved"})
+            results.append({"id": aid, "ok": True})
+            n_ok += 1
+        if wants_json:
+            return jsonify(
+                {
+                    "ok": True,
+                    "approved": [r["id"] for r in results if r["ok"]],
+                    "results": results,
+                    "n_ok": n_ok,
+                    "n_skipped": n_skipped,
+                }
+            )
+        msg = f"Approved {n_ok} photo{'' if n_ok == 1 else 's'}."
+        if n_skipped:
+            msg += f" {n_skipped} skipped (safeguarding)."
+        _flash_toast(msg, "success" if n_ok else "info")
+        return redirect(url_for("media_library_page"))
+
+    @app.route("/api/media-library/bulk-export", methods=["POST"])
+    def api_media_library_bulk_export():
+        """UI 1.9 — download the selected library photos as one ZIP.
+
+        Streams the original files (profile-scoped per id; assets from another
+        org or with a missing file are simply skipped). Always a native
+        attachment download, so it works with or without JS.
+        """
+        if not _v8_ok:
+            return jsonify({"error": "v8_unavailable"}), 503
+        import io as _io
+        import zipfile as _zip
+
+        store = _v8_get_media_store()
+        ids = _bulk_ids_from_request(request, "ids", "asset_ids")
+        if not ids:
+            if _req_wants_json(request):
+                return jsonify({"error": "no_selection"}), 400
+            _flash_toast("Select at least one photo to export.", "info")
+            return redirect(url_for("media_library_page"))
+        buf = _io.BytesIO()
+        used: set[str] = set()
+        n = 0
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for aid in ids:
+                a = store.get(aid)
+                if not a or not _session_can_access_profile(a.profile_id):
+                    continue
+                src = a.path
+                if not src or not Path(src).exists():
+                    continue
+                base = (
+                    re.sub(r"[^A-Za-z0-9_.-]+", "_", (a.filename or Path(src).name or aid)) or aid
+                )
+                name = base
+                i = 1
+                while name in used:
+                    stem, dot, ext = base.rpartition(".")
+                    name = f"{stem}_{i}.{ext}" if dot else f"{base}_{i}"
+                    i += 1
+                used.add(name)
+                try:
+                    zf.write(src, arcname=name)
+                    n += 1
+                except Exception:
+                    continue
+        if n == 0:
+            if _req_wants_json(request):
+                return jsonify({"error": "nothing_to_export"}), 404
+            _flash_toast("None of the selected photos could be exported.", "error")
+            return redirect(url_for("media_library_page"))
+        pid = _active_profile_id() or "library"
+        fname = (
+            "mediahub-photos-" + (re.sub(r"[^A-Za-z0-9_.-]+", "_", pid)[:40] or "library") + ".zip"
+        )
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     @app.route("/api/media-library/cutout/<asset_id>")
     def api_media_library_cutout(asset_id: str):
@@ -35160,6 +38168,19 @@ voice, and queues them for one-click approval.</p>
                     raise RuntimeError("mp4 missing after render")
                 job["status"] = "done"
                 job["video_url"] = file_url
+                # Render-complete milestone in the in-app inbox (UI 1.14). The
+                # async reel render is the "kick it off and walk away" flow, so
+                # this is the notification a user actually wants when they come
+                # back. Scoped to the org that owns the job; a no-op when signed
+                # out (empty owner_pid).
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_render_complete(
+                        job.get("owner_pid") or "", run_id=run_id, label="reel"
+                    )
+                except Exception:
+                    pass
             except _RenderBusy:
                 job["status"] = "error"
                 job["error"] = "renderer_busy"
@@ -35171,6 +38192,17 @@ voice, and queues them for one-click approval.</p>
                 job["status"] = "error"
                 job["error"] = str(_payload.get("detail") or e)
                 job["user_message"] = str(_payload.get("user_message") or "")
+                try:
+                    from mediahub.notify import inbox as _inbox
+
+                    _inbox.record_error(
+                        job.get("owner_pid") or "",
+                        "Reel render failed",
+                        job["user_message"] or job["error"],
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
             _variant_job_save(job)
 
         threading.Thread(target=_worker, name=f"reel-{job_id[:8]}", daemon=True).start()
