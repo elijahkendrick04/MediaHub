@@ -322,7 +322,15 @@
 
 /* Words fade/rise in one-by-one when the block scrolls into view. The JS
    wraps each word in <span class="mh-word" style="--i:N"> and flips
-   .is-in; with no JS the text is simply visible. */
+   .is-in; with no JS the text is simply visible.
+
+   Two triggers share this one effect:
+     • scroll headings   — ui-kit.js splitWords()+observe(): reveals on view;
+     • caption type-on    — ui-kit.js MH.typeOn(): fires immediately (already
+       in view) on a *read-only* generated-caption preview, for the "AI is
+       writing" moment (roadmap UI2.7). The editable caption is never typed —
+       it stays plain. typeOn sets --mh-stagger so a long caption's reveal
+       stays time-bounded; headings leave it unset and keep the 55ms default. */
 .mh-js .mh-text-generate .mh-word {
   display: inline-block;
   opacity: 0;
@@ -330,8 +338,11 @@
   transform: translateY(0.18em);
 }
 .mh-js .mh-text-generate.is-in .mh-word {
-  animation: mh-word-in 560ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 55ms);
+  /* `both`: hold the from-state through the per-word delay (so later words stay
+     hidden until their turn) AND retain the to-state after (so the revealed
+     word stays visible — `backwards` alone would snap it back to opacity:0). */
+  animation: mh-word-in 560ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * var(--mh-stagger, 55ms));
 }
 @keyframes mh-word-in {
   to { opacity: 1; filter: blur(0); transform: translateY(0); }
