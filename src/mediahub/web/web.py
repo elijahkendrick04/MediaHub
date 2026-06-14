@@ -7896,7 +7896,7 @@ def _stub_card_to_graphic_item(stub_type: str, card: dict, form_data: dict) -> d
     }
 
 
-def _layout(title: str, body: str, active: str = "home") -> str:
+def _layout(title: str, body: str, active: str = "home", dock: dict | None = None) -> str:
     # Compute whether the current request has an active organisation pinned
     # so the nav can render Sign-in vs Sign-out + Organisation-name correctly.
     try:
@@ -8107,7 +8107,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   }
 </script>
 </head>
-<body>
+<body class="{{ 'mh-has-dock' if dock else '' }}">
 <a class="mh-skip-link" href="#mh-main">Skip to content</a>
 {{ bg_logos_html | safe }}
 <div id="mh-loader" aria-live="polite" aria-busy="true">
@@ -8266,6 +8266,29 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     Settings
   </a>
 </nav>
+{% if dock %}
+<!-- U.13 — Floating mobile action dock. A bottom-centre thumb-reachable
+     capsule for the review/approve flow on mobile (Create / Library /
+     Approve). Replaces the generic bottom-tab bar here (the body.mh-has-dock
+     class hides it) so the two never stack; hidden on desktop. The "Approve"
+     pill acts on the queued card nearest the viewport centre — see the dock
+     script below. Inspired by Duties (duties.xyz); supports U.4. -->
+<nav class="mh-action-dock" aria-label="Quick review actions" data-builder-url="{{ dock.builder }}">
+  <a href="{{ url_for('make_page') }}" aria-label="Create — start a new content pack">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Create
+  </a>
+  <a href="{{ url_for('media_library_page') }}" aria-label="Open the media library">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
+    Library
+  </a>
+  <button type="button" class="mh-dock-primary" data-mh-dock-approve aria-label="Approve the highlighted card">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+    <span data-mh-dock-label>Approve</span>
+    <span class="mh-dock-count" data-mh-dock-count aria-hidden="true">{{ dock.queue|default(0) }}</span>
+  </button>
+</nav>
+{% endif %}
 <script>
 (function(){
   var HEALTH_URL = {{ health_url|tojson }};
@@ -9230,6 +9253,9 @@ def _layout(title: str, body: str, active: str = "home") -> str:
     // progress bar width/percent, Queue/Approved/Rejected tallies) from the
     // current card states so they live-update without a page reload.
     mhRecountReview();
+    // U.13: keep the floating mobile dock's count + highlight in sync (no-op
+    // when the dock isn't on the page).
+    if (window.mhDockSync) window.mhDockSync();
     var origLabel = btn.textContent;
     btn.disabled = true; btn.style.opacity = '0.7';
     window.mhWorkflowSet(runId, cardId, status).then(function(){
@@ -9242,6 +9268,122 @@ def _layout(title: str, body: str, active: str = "home") -> str:
   });
 })();
 </script>
+{% if dock %}
+<script>
+/* === U.13 — Floating mobile action dock (review/approve) ===
+   The dock (.mh-action-dock) is a thumb-reachable capsule shown on mobile
+   while reviewing a pack. Create / Library are plain links; the primary
+   "Approve" pill acts on the queued .ach-row card nearest the viewport
+   centre (marked .mh-dock-target), approves it via that card's existing
+   workflow button — so all the optimistic-update + API + recount logic above
+   is reused — then advances to the next queued card. When the queue empties
+   it switches to "Open builder". Feature-detected: a clean no-op on any page
+   that didn't render a dock (and the highlight only paints on mobile). */
+(function(){
+  var dock = document.querySelector('.mh-action-dock');
+  if (!dock) return;
+  var primary = dock.querySelector('[data-mh-dock-approve]');
+  var labelEl = dock.querySelector('[data-mh-dock-label]');
+  var countEl = dock.querySelector('[data-mh-dock-count]');
+  var builder = dock.getAttribute('data-builder-url') || '';
+  var mql = window.matchMedia('(max-width: 720px)');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function queued(){
+    return Array.prototype.slice.call(
+      document.querySelectorAll('.ach-row[data-status="queue"]')
+    ).filter(function(el){ return el.offsetParent !== null; });
+  }
+  function clearTarget(){
+    Array.prototype.slice.call(document.querySelectorAll('.ach-row.mh-dock-target'))
+      .forEach(function(el){ el.classList.remove('mh-dock-target'); });
+  }
+  function setTarget(node){ clearTarget(); if (node) node.classList.add('mh-dock-target'); }
+  // The queued card nearest the vertical centre of the viewport.
+  function nearestQueued(){
+    var list = queued();
+    if (!list.length) return null;
+    var mid = window.innerHeight / 2, best = null, bestD = Infinity;
+    list.forEach(function(el){
+      var r = el.getBoundingClientRect();
+      var d = Math.abs((r.top + r.height / 2) - mid);
+      if (d < bestD) { bestD = d; best = el; }
+    });
+    return best;
+  }
+  function firstQueuedFollowing(node){
+    var list = queued();
+    for (var i = 0; i < list.length; i++){
+      if (node && (node.compareDocumentPosition(list[i]) & Node.DOCUMENT_POSITION_FOLLOWING)) return list[i];
+    }
+    return list[0] || null;  // wrap to the first remaining queued card
+  }
+  function scrollToCard(node){
+    if (node) node.scrollIntoView({block: 'center', behavior: reduce.matches ? 'auto' : 'smooth'});
+  }
+
+  // Keep count + label + done-state + highlight in step with the live pile.
+  // Exposed as window.mhDockSync so the global workflow handler calls it after
+  // every approve / re-queue.
+  function sync(){
+    var n = queued().length;
+    if (countEl) countEl.textContent = n;
+    dock.classList.toggle('is-done', n === 0);
+    if (labelEl) labelEl.textContent = n === 0 ? 'Open builder' : 'Approve';
+    if (primary) primary.setAttribute('aria-label',
+      n === 0 ? 'All cards reviewed — open the content builder'
+              : ('Approve the highlighted card (' + n + ' left in the queue)'));
+    if (mql.matches && n > 0){
+      var cur = document.querySelector('.ach-row.mh-dock-target');
+      if (!cur || cur.getAttribute('data-status') !== 'queue' || cur.offsetParent === null) {
+        setTarget(nearestQueued());
+      }
+    } else {
+      clearTarget();
+    }
+  }
+  window.mhDockSync = sync;
+
+  if (primary){
+    primary.addEventListener('click', function(){
+      if (dock.classList.contains('is-done')){
+        if (builder) window.location.assign(builder);
+        return;
+      }
+      var target = document.querySelector('.ach-row.mh-dock-target') || nearestQueued();
+      if (!target){ sync(); return; }
+      var btn = target.querySelector('[data-mh-wf="approved"]');
+      if (btn) btn.click();  // reuse the global optimistic update + API call + recount
+      // The click flips this row to 'approved' synchronously; the next queued
+      // card becomes the target so the thumb stays put for the next approval.
+      var next = firstQueuedFollowing(target);
+      if (next && next !== target){ setTarget(next); scrollToCard(next); }
+      sync();
+    });
+  }
+
+  // Follow the user's scroll so the highlight tracks the card in view.
+  var ticking = false;
+  function onScroll(){
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(function(){
+      ticking = false;
+      if (mql.matches && !dock.classList.contains('is-done')){
+        var near = nearestQueued();
+        if (near && near !== document.querySelector('.ach-row.mh-dock-target')) setTarget(near);
+      }
+    });
+  }
+  window.addEventListener('scroll', onScroll, {passive: true});
+  window.addEventListener('resize', onScroll, {passive: true});
+  if (mql.addEventListener) mql.addEventListener('change', sync);
+
+  if (document.readyState !== 'loading') sync();
+  else document.addEventListener('DOMContentLoaded', sync);
+})();
+</script>
+{% endif %}
 <script>
 /* === Phase 1.6 Stage E: "Looks right" cascade handler ===
    Any <a> tagged with data-mh-cascade intercepts the click, POSTs to
@@ -9419,6 +9561,7 @@ def _layout(title: str, body: str, active: str = "home") -> str:
         css=BASE_CSS,
         body=body,
         active=active,
+        dock=dock,
         health_url=url_for("healthz"),
         research_enabled=_research_console_enabled(),
         signed_in=bool(signed_in_pid),
@@ -13919,7 +14062,17 @@ function copyWhyCard(btn, taId) {{
 }})();
 </script>
 """
-        return _layout("Recognition", body, active="home")
+        # U.13: floating mobile action dock for the review/approve flow — only
+        # when there's actually a pack to review (cards present or workflow
+        # state on file). Its "Approve" pill advances through the queue; when
+        # empty it links to the content builder. `queue` is the initial count
+        # (mirrors the page's Queue stat); the dock script keeps it live.
+        _review_dock = (
+            {"builder": _pack_url, "queue": _wf_n_queue or len(ranked_achs)}
+            if (_wf_summary or ranked_achs)
+            else None
+        )
+        return _layout("Recognition", body, active="home", dock=_review_dock)
 
     # ---- V5 API ROUTES -------------------------------------------------
     @app.route("/api/runs/<run_id>/recognition")
