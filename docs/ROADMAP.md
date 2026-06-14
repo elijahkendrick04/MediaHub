@@ -77,7 +77,7 @@ Every task carries a badge: 🔵 in progress · ⚠️ stuck · ❌ not started.
 ## Status (auto-updated)
 
 <!-- ROADMAP:LAST_UPDATED -->
-**Last updated:** 2026-06-14 · `8892126a5` · Merge pull request #477 from elijahkendrick04/claude/keen-mendel-szs10h
+**Last updated:** 2026-06-14 · `e66555e50` · Merge pull request #485 from elijahkendrick04/claude/stoic-goodall-k2hyz2
 <!-- /ROADMAP:LAST_UPDATED -->
 
 The stamp above, the activity table in the Changelog, the Production-findings
@@ -1395,6 +1395,7 @@ list and the auto table below, not here.
 <!-- ROADMAP:ACTIVITY -->
 | Date | Commit | Summary |
 |---|---|---|
+| 2026-06-14 | `b2ef8a46c` | UI 1.1-1.5: design-polish ideas from godly.website review batch 2 — top of Phase U |
 | 2026-06-13 | `d82f5b630` | U.5-U.16: design-polish ideas from godly.website review — top of Phase U |
 | 2026-06-13 | `1bfbe9d6a` | Fix year-of-birth leaking into the club field (club picker showed '(04)') |
 | 2026-06-13 | `9d9ec1512` | Make explainability & confidence read as intelligence (U.3) |
@@ -1402,6 +1403,4 @@ list and the auto table below, not here.
 | 2026-06-13 | `c32f7da7e` | Fix 'Permission denied: /app/src/mediahub/data' aborting results parse |
 | 2026-06-13 | `36da3aa97` | Make results-from-a-link fetches content-negotiate (fix '<!DOCTYPE' JSON error) |
 | 2026-06-13 | `07dd7a12a` | Switch merge method to merge commits (drop squash) across the self-merging bots |
-| 2026-06-13 | `c6586282a` | Apply ruff-format to results-from-a-link CSRF fix |
-| 2026-06-13 | `58ccb2c74` | Fix CSRF block breaking results-from-a-link with 'Unexpected token <' error |
 <!-- /ROADMAP:ACTIVITY -->
